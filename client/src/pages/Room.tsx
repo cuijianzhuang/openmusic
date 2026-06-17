@@ -347,8 +347,45 @@ export default function Room() {
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
                   placeholder="搜索歌曲、歌手..."
-                  className="w-full bg-netease-card border border-netease-border rounded-xl sm:rounded-2xl pl-10 sm:pl-12 pr-4 py-3 sm:py-3.5 text-sm sm:text-base text-white placeholder:text-netease-muted/50 focus:outline-none focus:border-netease-red/50 transition-colors"
+                  className={`w-full bg-netease-card border border-netease-border rounded-xl sm:rounded-2xl pl-10 sm:pl-12 py-3 sm:py-3.5 text-sm sm:text-base text-white placeholder:text-netease-muted/50 focus:outline-none focus:border-netease-red/50 transition-colors ${
+                    searchableCount > 0 ? 'pr-[6.75rem] sm:pr-[7.25rem]' : 'pr-4'
+                  }`}
                 />
+                {searchableCount > 0 && (
+                  <div className="absolute right-2.5 sm:right-3 top-1/2 -translate-y-1/2 flex items-center gap-1.5 pointer-events-none">
+                    <span
+                      className={`text-[11px] sm:text-xs whitespace-nowrap transition-colors ${
+                        dedupeCrossSource ? 'text-white/80' : 'text-netease-muted'
+                      }`}
+                    >
+                      去重
+                    </span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={dedupeCrossSource}
+                      aria-label="跨平台去重"
+                      title="跨平台去重：歌名与歌手相同视为同一首"
+                      onClick={() => {
+                        const next = !dedupeCrossSource;
+                        setDedupeCrossSource(next);
+                        if (searchedKeyword.trim()) {
+                          doSearch(searchedKeyword, next);
+                        }
+                      }}
+                      className={`pointer-events-auto relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-netease-red/50 ${
+                        dedupeCrossSource ? 'bg-netease-red' : 'bg-white/15'
+                      }`}
+                    >
+                      <span
+                        aria-hidden
+                        className={`pointer-events-none absolute top-0.5 left-0.5 inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200 ease-in-out ${
+                          dedupeCrossSource ? 'translate-x-4' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                )}
               </div>
               <button
                 type="button"
@@ -362,26 +399,9 @@ export default function Room() {
             </div>
 
             {searchableCount > 0 && (
-              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-netease-muted mb-2 sm:mb-4 px-1">
-                <p>
-                  同时搜索 {sources.filter((s) => s.supportsSearch).map((s) => s.shortName).join('、')}
-                </p>
-                <label className="inline-flex items-center gap-1.5 cursor-pointer select-none hover:text-white/70 transition-colors">
-                  <input
-                    type="checkbox"
-                    checked={dedupeCrossSource}
-                    onChange={(e) => {
-                      const next = e.target.checked;
-                      setDedupeCrossSource(next);
-                      if (searchedKeyword.trim()) {
-                        doSearch(searchedKeyword, next);
-                      }
-                    }}
-                    className="w-3.5 h-3.5 rounded border-netease-border bg-netease-card text-netease-red focus:ring-netease-red/40 focus:ring-offset-0"
-                  />
-                  <span>跨平台去重</span>
-                </label>
-              </div>
+              <p className="text-xs text-netease-muted mb-2 sm:mb-4 px-1">
+                同时搜索 {sources.filter((s) => s.supportsSearch).map((s) => s.shortName).join('、')}
+              </p>
             )}
 
             <div className="lg:flex-1 lg:min-h-0 lg:overflow-y-auto">
