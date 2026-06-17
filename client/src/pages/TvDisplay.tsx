@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Loader2, Music2 } from 'lucide-react';
+import { Loader2, Music2, Maximize } from 'lucide-react';
 import { useRoomStore } from '../stores/roomStore';
 import { useAudioStore } from '../stores/audioStore';
 import { useSocket } from '../hooks/useSocket';
@@ -26,6 +26,32 @@ export default function TvDisplay() {
   const [joinError, setJoinError] = useState('');
   const [lyrics, setLyrics] = useState<LyricLine[]>([]);
   const [bgLoaded, setBgLoaded] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const syncFullscreen = () => {
+      setIsFullscreen(Boolean(document.fullscreenElement));
+    };
+    document.addEventListener('fullscreenchange', syncFullscreen);
+    document.addEventListener('webkitfullscreenchange', syncFullscreen);
+    return () => {
+      document.removeEventListener('fullscreenchange', syncFullscreen);
+      document.removeEventListener('webkitfullscreenchange', syncFullscreen);
+    };
+  }, []);
+
+  const enterFullscreen = async () => {
+    const el = containerRef.current;
+    if (!el) return;
+    try {
+      const request = el.requestFullscreen
+        ?? (el as HTMLElement & { webkitRequestFullscreen?: () => Promise<void> }).webkitRequestFullscreen;
+      await request?.call(el);
+    } catch {
+      // 部分电视浏览器不支持或需用户手势
+    }
+  };
 
   const current = room?.current;
   const isPlaying = room?.isPlaying ?? false;
@@ -157,9 +183,20 @@ export default function TvDisplay() {
   }
 
   return (
-    <>
+    <div ref={containerRef} className="h-full w-full bg-[#080808]">
       <AudioEngine tvMode />
+      {!isFullscreen && room && !joinError && (
+        <button
+          type="button"
+          onClick={enterFullscreen}
+          className="fixed top-4 right-4 z-[55] w-10 h-10 flex items-center justify-center rounded-xl bg-black/40 border border-white/10 text-white/70 hover:text-white hover:bg-black/60 transition-colors"
+          title="全屏"
+          aria-label="全屏"
+        >
+          <Maximize className="w-5 h-5" />
+        </button>
+      )}
       {content}
-    </>
+    </div>
   );
 }
