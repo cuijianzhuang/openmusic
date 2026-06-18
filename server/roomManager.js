@@ -1,10 +1,12 @@
 import { customAlphabet } from 'nanoid';
-import { fetchRandomSong } from './wqwlkjApi.js';
+import { fetchRandomSong } from './cyapi.js';
 
 const generateRoomId = customAlphabet('ABCDEFGHJKLMNPQRSTUVWXYZ23456789', 6);
 const generateId = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz', 12);
 
 const ROOM_EMPTY_TTL_MS = 10 * 60 * 1000;
+const MAX_RANDOM_HISTORY = 200;
+const MAX_RANDOM_PREFETCH_ATTEMPTS = 20;
 
 const rooms = new Map();
 
@@ -41,6 +43,9 @@ function createEmptyRoom(roomId) {
     jumpRequests: [],
     skipRequests: [],
     messages: [],
+    randomPlayedKeys: new Set(),
+    nextRandom: null,
+    nextRandomPromise: null,
     createdAt: Date.now(),
     destroyTimer: null,
   };
@@ -167,12 +172,81 @@ export function removeFromQueue(roomId, socketId, queueId) {
   return { room: serializeRoom(room) };
 }
 
+function trimRandomHistory(room) {
+  if (room.randomPlayedKeys.size <= MAX_RANDOM_HISTORY) return;
+  const excess = room.randomPlayedKeys.size - MAX_RANDOM_HISTORY;
+  const iter = room.randomPlayedKeys.values();
+  for (let i = 0; i < excess; i++) {
+    const key = iter.next().value;
+    if (key) room.randomPlayedKeys.delete(key);
+  }
+}
+
+function recordRandomPlayed(room, song) {
+  room.randomPlayedKeys.add(songIdentity(song.source, song.id));
+  trimRandomHistory(room);
+}
+
+function getRandomExcludeKeys(room) {
+  const exclude = new Set(room.randomPlayedKeys);
+  if (room.current?.requestedBy === '随机推荐') {
+    exclude.add(songIdentity(room.current.source, room.current.id));
+  }
+  if (room.nextRandom) {
+    exclude.add(songIdentity(room.nextRandom.source, room.nextRandom.id));
+  }
+  return exclude;
+}
+
+function clearNextRandom(room) {
+  room.nextRandom = null;
+  room.nextRandomPromise = null;
+}
+
+async function ensureNextRandom(room) {
+  if (room.queue.length > 0) {
+    clearNextRandom(room);
+    return;
+  }
+  if (room.nextRandom || room.nextRandomPromise) return;
+
+  room.nextRandomPromise = (async () => {
+    try {
+      for (let i = 0; i < MAX_RANDOM_PREFETCH_ATTEMPTS && room.queue.length === 0; i++) {
+        const song = await fetchRandomSong(() => getRandomExcludeKeys(room));
+        if (!song) break;
+
+        const key = songIdentity(song.source, song.id);
+        if (room.randomPlayedKeys.has(key)) continue;
+
+        room.nextRandom = song;
+        break;
+      }
+    } finally {
+      room.nextRandomPromise = null;
+    }
+  })();
+
+  await room.nextRandomPromise;
+}
+
 async function playNext(room) {
   room.skipRequests = [];
 
   if (room.queue.length === 0) {
-    const random = await fetchRandomSong();
+    let random = room.nextRandom;
+    room.nextRandom = null;
+
+    if (random && room.randomPlayedKeys.has(songIdentity(random.source, random.id))) {
+      random = null;
+    }
+
+    if (!random) {
+      random = await fetchRandomSong(() => getRandomExcludeKeys(room));
+    }
+
     if (random) {
+      recordRandomPlayed(room, random);
       room.current = {
         queueId: `random-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         ...random,
@@ -182,9 +256,11 @@ async function playNext(room) {
       room.isPlaying = true;
       room.currentTime = 0;
       room.startedAt = Date.now();
+      void ensureNextRandom(room);
       return;
     }
 
+    clearNextRandom(room);
     room.current = null;
     room.isPlaying = false;
     room.currentTime = 0;
@@ -192,6 +268,7 @@ async function playNext(room) {
     return;
   }
 
+  clearNextRandom(room);
   room.current = room.queue.shift();
   room.isPlaying = true;
   room.currentTime = 0;

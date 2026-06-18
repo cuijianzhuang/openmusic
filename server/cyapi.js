@@ -25,6 +25,80 @@ export function kugouMusicEndpoint() {
   return `${CYAPI_BASE}/kugou_music.php`;
 }
 
+export function wyrpEndpoint() {
+  return `${CYAPI_BASE}/wyrp.php`;
+}
+
+const MAX_RANDOM_RETRIES = 20;
+
+/** 随机推荐是否可播放：歌名须含中文，排除纯英文/日文/韩文 */
+function shouldPlayRandomSong(name) {
+  const trimmed = String(name || '').trim();
+  if (!trimmed) return false;
+
+  if (!/[\u4e00-\u9fff\u3400-\u4dbf]/.test(trimmed)) return false;
+  if (/[\u3040-\u309f\u30a0-\u30ff]/.test(trimmed)) return false;
+  if (/[\uac00-\ud7af\u1100-\u11ff]/.test(trimmed)) return false;
+
+  return true;
+}
+
+function extractNeteaseIdFromLink(link) {
+  const match = String(link || '').match(/[?&]id=(\d+)/);
+  return match ? match[1] : '';
+}
+
+async function fetchRandomSongOnce() {
+  try {
+    const params = new URLSearchParams();
+    if (CYAPI_KEY) params.set('apikey', CYAPI_KEY);
+    const query = params.toString();
+    const targetUrl = query ? `${wyrpEndpoint()}?${query}` : wyrpEndpoint();
+
+    const response = await fetch(targetUrl);
+    if (!response.ok) return null;
+
+    const json = await response.json();
+    if (!json.song || !json.url) return null;
+
+    const id = extractNeteaseIdFromLink(json.link);
+    if (!id) return null;
+
+    return {
+      id,
+      source: 'netease',
+      name: json.song || '未知歌曲',
+      artist: json.singer || '未知歌手',
+      album: '',
+      pic: json.pic || '',
+      url: json.url,
+    };
+  } catch (err) {
+    console.error('Random song API error:', err.message);
+    return null;
+  }
+}
+
+function randomSongKey(song) {
+  return `netease:${song.id}`;
+}
+
+function resolveExcludeKeys(excludeKeys) {
+  return typeof excludeKeys === 'function' ? excludeKeys() : excludeKeys;
+}
+
+/** 队列为空时随机推荐（迟言 wyrp 网易云热评） */
+export async function fetchRandomSong(excludeKeys = new Set()) {
+  for (let i = 0; i < MAX_RANDOM_RETRIES; i++) {
+    const song = await fetchRandomSongOnce();
+    if (!song) continue;
+    if (!shouldPlayRandomSong(song.name)) continue;
+    if (resolveExcludeKeys(excludeKeys).has(randomSongKey(song))) continue;
+    return song;
+  }
+  return null;
+}
+
 function withApiKey(params) {
   const search = new URLSearchParams(params);
   search.set('apikey', CYAPI_KEY);

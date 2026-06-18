@@ -4,10 +4,10 @@ import { Loader2, Music2, Maximize } from 'lucide-react';
 import { useRoomStore } from '../stores/roomStore';
 import { useAudioStore } from '../stores/audioStore';
 import { useSocket } from '../hooks/useSocket';
-import { useTrackDuration } from '../hooks/useTrackDuration';
+import { useTrackDuration, clampPlaybackTime } from '../hooks/useTrackDuration';
 import {
   getLyrics, parseLrc, formatDuration, getCoverUrl,
-  getDurationFromLrc, getTrackKey,
+  getLrcFallbackDurationMs, getTrackKey,
 } from '../api/music';
 import type { LyricLine } from '../types';
 import Lyrics from '../components/Lyrics';
@@ -57,7 +57,8 @@ export default function TvDisplay() {
   const isPlaying = room?.isPlaying ?? false;
   const currentTime = room?.currentTime ?? 0;
   const duration = useTrackDuration(current ?? null);
-  const progress = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
+  const displayTime = clampPlaybackTime(currentTime, duration);
+  const progress = duration > 0 ? Math.min(100, (displayTime / duration) * 100) : 0;
 
   useEffect(() => {
     if (!roomId) return;
@@ -91,7 +92,7 @@ export default function TvDisplay() {
         const lines = parseLrc(lrc);
         setLyrics(lines);
         if (!current.duration) {
-          const ms = getDurationFromLrc(lrc, current.duration);
+          const ms = getLrcFallbackDurationMs(lrc);
           if (ms) setLrcDuration(getTrackKey(current), ms);
         }
       })
@@ -156,13 +157,13 @@ export default function TvDisplay() {
               requestedBy={current.requestedBy}
               size="large"
             />
-            <Lyrics lines={lyrics} currentTime={currentTime} variant="side" size="large" />
+            <Lyrics lines={lyrics} currentTime={displayTime} variant="side" size="large" />
           </div>
         </div>
 
         <footer className="relative z-10 px-8 pb-8 pt-3 flex-shrink-0">
           <div className="mb-2 flex justify-between text-xs lg:text-sm text-white/50">
-            <span>{formatDuration(currentTime)}</span>
+            <span>{formatDuration(displayTime)}</span>
             <span className="flex items-center gap-2">
               {!isPlaying && <span className="text-amber-400/80">已暂停</span>}
               {duration > 0 ? formatDuration(duration) : '--:--'}

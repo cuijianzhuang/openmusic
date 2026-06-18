@@ -32,9 +32,9 @@ docker run -d --name meting -p 3000:3000 ghcr.io/mikus-loli/meting-api:latest
 
 建议在 Meting 管理后台 (`/admin`，默认 `admin` / `admin123`) 配置网易云 Cookie。
 
-2. **迟言 API Key**（可选，QQ 搜索 + 酷狗）
+2. **迟言 API Key**（可选，QQ 搜索 + 酷狗 + 队列为空随机推荐）
 
-在 [迟言 API](https://cyapi.top/) 注册获取 `apikey`。不配置时仅网易可用。
+在 [迟言 API](https://cyapi.top/) 注册获取 `apikey`。不配置时仅网易可用；队列为空时也无法自动随机播歌（需手动点歌或配置迟言）。
 
 ### 方式一：Node 直接托管
 
@@ -44,6 +44,7 @@ cd openmusic
 
 npm run install:all
 npm run build          # 构建前端 → client/dist
+# 或 npm run package:build  # 一键打包部署目录 + release/openmusic-build.zip
 
 cp server/.env.example server/.env
 # 编辑 server/.env，至少配置 METING_API_URL 和 METING_API_AUTH
@@ -56,9 +57,17 @@ npm start              # 默认 http://服务器IP:4000
 ```bash
 npm run install:all
 npm run build          # 构建前端 → client/dist
+# 或 npm run package:build
 ```
 
 将 `server/`、`client/dist/`、`deploy/` 上传到服务器，详细步骤见 [deploy/DEPLOY-BAOTA.md](deploy/DEPLOY-BAOTA.md)。
+
+### 打包命令
+
+| 命令 | 说明 |
+|------|------|
+| `npm run build` | 仅构建前端，产物在 `client/dist` |
+| `npm run package:build` | 构建前端并组装 `release/openmusic/`，输出 `release/openmusic-build.zip` |
 
 ### Nginx 反向代理
 
@@ -88,7 +97,9 @@ location /socket.io/ {
 | `CLIENT_URL` | | 前端地址（CORS），如 `https://your-domain.com` |
 | `METING_API_URL` | ✅ | Meting-API 地址，如 `http://127.0.0.1:3000` |
 | `METING_API_AUTH` | 推荐 | Meting 的 `auth` 令牌 |
-| `CYAPI_KEY` | 可选 | 迟言 `apikey`；QQ 搜索 + 酷狗 |
+| `CYAPI_BASE` | | 迟言 API 根地址，默认 `https://cyapi.top/API` |
+| `CYAPI_KEY` | 可选 | 迟言 `apikey`；QQ 搜索、酷狗、队列为空随机推荐 |
+| `VMY_LRC_URL` | | 歌词备用接口（按歌名），默认 `https://api.52vmy.cn/api/music/lrc` |
 
 **最小配置（仅网易云）：**
 
@@ -139,6 +150,9 @@ npm run dev
 
 - **多平台搜索**：网易 / QQ / 酷狗并行搜索，结果交替展示
 - **播放队列**：点歌入队、插队申请、切歌申请（房主审批）
+- **随机推荐**：队列为空时自动播放网易云热评随机曲（迟言 `wyrp.php`），同房间不重复随机，并后台预取下一首
+- **智能时长**：接口元数据 → 音频文件时长 → 歌词末行 + 20 秒；播放到有效时长自动切歌，进度不超过歌曲长度
+- **预加载**：房主端预解析下一首播放地址，队列前几首提前缓冲
 - **多端同步**：播放 / 暂停 / 进度 / 歌词全房间实时同步
 - **房间社交**：在线用户列表、文字聊天、房间分享
 - **电视模式**：`/tv/:roomId` 大屏展示封面与歌词（只读）

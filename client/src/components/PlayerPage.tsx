@@ -8,8 +8,8 @@ import { useAudioStore } from '../stores/audioStore';
 
 import { useSocket } from '../hooks/useSocket';
 
-import { getLyrics, parseLrc, formatDuration, getCoverUrl, getDurationFromLrc, getTrackKey } from '../api/music';
-import { useTrackDuration } from '../hooks/useTrackDuration';
+import { getLyrics, parseLrc, formatDuration, getCoverUrl, getLrcFallbackDurationMs, getTrackKey } from '../api/music';
+import { useTrackDuration, clampPlaybackTime } from '../hooks/useTrackDuration';
 
 import type { LyricLine } from '../types';
 
@@ -57,8 +57,8 @@ export default function PlayerPage({ onClose }: Props) {
   const currentTime = room?.currentTime ?? 0;
 
   const duration = useTrackDuration(current ?? null);
-
-  const progress = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
+  const displayTime = clampPlaybackTime(currentTime, duration);
+  const progress = duration > 0 ? Math.min(100, (displayTime / duration) * 100) : 0;
 
   const hasPendingSkip = room?.skipRequests?.some((r) => r.requestedBy === mySocketId) ?? false;
 
@@ -123,7 +123,7 @@ export default function PlayerPage({ onClose }: Props) {
         const lines = parseLrc(lrc);
         setLyrics(lines);
         if (!current.duration) {
-          const ms = getDurationFromLrc(lrc, current.duration);
+          const ms = getLrcFallbackDurationMs(lrc);
           if (ms) setLrcDuration(getTrackKey(current), ms);
         }
       })
@@ -212,7 +212,7 @@ export default function PlayerPage({ onClose }: Props) {
 
             lines={lyrics}
 
-            currentTime={currentTime}
+            currentTime={displayTime}
 
             onSeek={isOwner ? handleSeek : undefined}
 
@@ -232,7 +232,7 @@ export default function PlayerPage({ onClose }: Props) {
 
         <div className="mb-1.5 sm:mb-2 flex justify-between text-xs sm:text-sm 2xl:text-xl text-white/50">
 
-          <span>{formatDuration(currentTime)}</span>
+          <span>{formatDuration(displayTime)}</span>
 
           <span>{duration > 0 ? formatDuration(duration) : '--:--'}</span>
 

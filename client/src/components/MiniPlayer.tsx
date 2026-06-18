@@ -5,7 +5,7 @@ import { useAudioStore } from '../stores/audioStore';
 import { useSocket } from '../hooks/useSocket';
 
 import { formatDuration, getCoverUrl } from '../api/music';
-import { useTrackDuration } from '../hooks/useTrackDuration';
+import { useTrackDuration, clampPlaybackTime } from '../hooks/useTrackDuration';
 
 import SourceBadge from './SourceBadge';
 
@@ -79,7 +79,8 @@ export default function MiniPlayer({ onExpand }: Props) {
   const { current, isPlaying, currentTime } = room;
   const duration = useTrackDuration(current);
 
-  const progress = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
+  const displayTime = clampPlaybackTime(currentTime, duration);
+  const progress = duration > 0 ? Math.min(100, (displayTime / duration) * 100) : 0;
 
 
 
@@ -159,7 +160,7 @@ export default function MiniPlayer({ onExpand }: Props) {
 
         <span className="text-[10px] text-netease-muted hidden sm:block">
 
-          {formatDuration(currentTime)}
+          {formatDuration(displayTime)}
 
           {duration > 0 && ` / ${formatDuration(duration)}`}
 

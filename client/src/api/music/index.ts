@@ -119,16 +119,17 @@ export function filterDisplayLyrics(lines: import('../../types').LyricLine[]): i
 /** 歌词结束后常见纯音乐尾奏预留（秒） */
 const LRC_TAIL_PADDING_SEC = 20;
 
-/** 从 LRC 推算时长（毫秒）；可与接口元数据取较大值作为加载前估算 */
-export function getDurationFromLrc(lrc: string, metadataMs?: number): number | undefined {
+/** 从 LRC 推算备选时长（毫秒）：歌词末行 + 20 秒尾奏 */
+export function getLrcFallbackDurationMs(lrc: string): number | undefined {
   const lines = parseLrc(lrc);
-  const fromMeta = metadataMs && metadataMs > 0 ? metadataMs : undefined;
+  if (lines.length === 0) return undefined;
+  return Math.round((lines[lines.length - 1].time + LRC_TAIL_PADDING_SEC) * 1000);
+}
 
-  if (lines.length === 0) return fromMeta;
-
-  const fromLrc = Math.round((lines[lines.length - 1].time + LRC_TAIL_PADDING_SEC) * 1000);
-  if (fromMeta) return Math.max(fromLrc, fromMeta);
-  return fromLrc;
+/** 解析播放时长：元数据优先，无元数据时用歌词+20 秒 */
+export function getDurationFromLrc(lrc: string, metadataMs?: number): number | undefined {
+  if (metadataMs && metadataMs > 0) return metadataMs;
+  return getLrcFallbackDurationMs(lrc);
 }
 
 export function getTrackKey(song: { queueId?: string; id: string; source?: MusicSource }): string {
