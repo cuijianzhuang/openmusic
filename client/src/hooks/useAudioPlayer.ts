@@ -3,6 +3,7 @@ import { useRoomStore } from '../stores/roomStore';
 import { useAudioStore } from '../stores/audioStore';
 import { useSocket } from '../hooks/useSocket';
 import { getLyrics, getLrcFallbackDurationMs, getTrackKey } from '../api/music';
+import { snapSmoothPlaybackTime } from '../hooks/useSmoothPlaybackTime';
 import { resolveTrackDurationSeconds } from '../hooks/useTrackDuration';
 import type { QueueItem } from '../types';
 import { getSharedAudio } from '../lib/audioElement';
@@ -61,6 +62,8 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
   const readyTrackKey = useRef<string | null>(null);
   const loadGeneration = useRef(0);
   const skippingRef = useRef(false);
+  const justSkippedRef = useRef(false);
+  const prevQueueIdRef = useRef<string | null>(null);
   const syncing = useRef(false);
   const errorRetries = useRef(0);
   const lastSyncAt = useRef(0);
@@ -71,11 +74,17 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
 
   const requestSkip = useCallback(() => {
     if (skippingRef.current) return;
-    const { isOwner } = useRoomStore.getState();
+    const { isOwner, room: live } = useRoomStore.getState();
     if (!isOwner) return;
 
     skippingRef.current = true;
+    justSkippedRef.current = true;
+    readyTrackKey.current = null;
     audioRef.current?.pause();
+    snapSmoothPlaybackTime(0);
+    if (live) {
+      useRoomStore.getState().setRoom({ ...live, currentTime: 0 });
+    }
     skipSong().finally(() => {
       skippingRef.current = false;
     });
@@ -128,9 +137,10 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
       });
 
       audio.addEventListener('timeupdate', () => {
-        if (syncing.current || !audioRef.current) return;
+        if (syncing.current || skippingRef.current || !audioRef.current) return;
         const { isOwner, room: liveRoom } = useRoomStore.getState();
         if (!isOwner || !liveRoom?.isPlaying || !liveRoom.current) return;
+        if (useAudioStore.getState().trackLoading) return;
         if (readyTrackKey.current !== trackKeyOf(liveRoom.current)) return;
 
         const effectiveDur = getEffectiveDurationSec(liveRoom.current);
@@ -192,6 +202,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
       audio.load();
       lastTrackKey.current = null;
       readyTrackKey.current = null;
+      prevQueueIdRef.current = null;
       errorRetries.current = 0;
       setTrackLoading(false);
       setLrcDuration(null, null);
@@ -201,6 +212,12 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
 
     const trackKey = trackKeyOf(current);
     const shouldDriveAudio = isOwner || tvMode;
+
+    if (prevQueueIdRef.current && prevQueueIdRef.current !== current.queueId) {
+      justSkippedRef.current = true;
+      snapSmoothPlaybackTime(0);
+    }
+    prevQueueIdRef.current = current.queueId;
 
     if (!shouldDriveAudio) {
       setTrackLoading(false);
@@ -214,6 +231,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
         if (needsLoad) {
           audio.pause();
           audio.currentTime = 0;
+          snapSmoothPlaybackTime(0);
           readyTrackKey.current = null;
           errorRetries.current = 0;
           lastTrackKey.current = trackKey;
@@ -267,9 +285,13 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
         if (!liveRoom?.current || trackKeyOf(liveRoom.current) !== trackKey) return;
 
         syncing.current = true;
-        const startAt = Math.max(0, liveRoom.currentTime || 0);
+        const startAt = justSkippedRef.current
+          ? 0
+          : Math.max(0, liveRoom.currentTime || 0);
+        justSkippedRef.current = false;
         const dur = audio.duration;
         audio.currentTime = capSeekTime(startAt, liveRoom.current, dur);
+        snapSmoothPlaybackTime(audio.currentTime);
 
         if (liveRoom.isPlaying) {
           const result = await playAudio(audio);
@@ -338,13 +360,18 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
   }, [room, togglePlay]);
 
   const handleSeek = useCallback((time: number) => {
-    const current = useRoomStore.getState().room?.current ?? null;
+    const live = useRoomStore.getState().room;
+    const current = live?.current ?? null;
     seek(time);
     if (audioRef.current && readyTrackKey.current) {
       syncing.current = true;
       const dur = audioRef.current.duration;
       const target = capSeekTime(time, current, dur);
       audioRef.current.currentTime = target;
+      snapSmoothPlaybackTime(target);
+      if (live) {
+        useRoomStore.getState().setRoom({ ...live, currentTime: target });
+      }
       syncTime(target);
       lastSyncAt.current = Date.now();
       setTimeout(() => { syncing.current = false; }, 300);
@@ -402,7 +429,6 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
   }, []);
 
   const handleSkip = useCallback(() => {
-    readyTrackKey.current = null;
     requestSkip();
   }, [requestSkip]);
 

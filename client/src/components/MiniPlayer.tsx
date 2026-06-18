@@ -37,7 +37,12 @@ export default function MiniPlayer({ onExpand }: Props) {
   const mySocketId = useRoomStore((s) => s.mySocketId);
   const hasPendingSkip = room?.skipRequests?.some((r) => r.requestedBy === mySocketId) ?? false;
 
-
+  const current = room?.current ?? null;
+  const isPlaying = room?.isPlaying ?? false;
+  const currentTime = useSmoothPlaybackTime();
+  const duration = useTrackDuration(current);
+  const displayTime = clampPlaybackTime(currentTime, duration);
+  const progress = duration > 0 ? Math.min(100, (displayTime / duration) * 100) : 0;
 
   const handlePlayPause = () => {
     if (!room) return;
@@ -73,18 +78,7 @@ export default function MiniPlayer({ onExpand }: Props) {
 
 
 
-  if (!room?.current) return null;
-
-
-
-  const { current, isPlaying } = room;
-  const currentTime = useSmoothPlaybackTime();
-  const duration = useTrackDuration(current);
-
-  const displayTime = clampPlaybackTime(currentTime, duration);
-  const progress = duration > 0 ? Math.min(100, (displayTime / duration) * 100) : 0;
-
-
+  if (!current) return null;
 
   return (
 

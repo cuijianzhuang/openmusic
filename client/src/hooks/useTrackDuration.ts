@@ -12,7 +12,7 @@ interface DurationSources {
   mediaTrackKey: string | null;
 }
 
-/** 播放/展示用时长（秒）：接口元数据优先，音频文件次之，歌词+20 兜底 */
+/** 切歌/seek 上限用时长（秒）：接口元数据优先，音频文件次之，歌词+20 兜底 */
 export function resolveTrackDurationSeconds(
   song: TrackSong | null | undefined,
   sources: DurationSources,
@@ -34,6 +34,28 @@ export function resolveTrackDurationSeconds(
   return 0;
 }
 
+/** 进度条/歌词展示用时长（秒）：已加载音频优先，与 currentTime 同源 */
+export function resolveDisplayDurationSeconds(
+  song: TrackSong | null | undefined,
+  sources: DurationSources,
+): number {
+  if (!song) return 0;
+
+  const key = getTrackKey(song as Pick<QueueItem, 'queueId' | 'id' | 'source'>);
+
+  if (sources.mediaTrackKey === key && sources.mediaDurationMs && sources.mediaDurationMs > 0) {
+    return sources.mediaDurationMs / 1000;
+  }
+
+  if (song.duration && song.duration > 0) return song.duration / 1000;
+
+  if (sources.lrcTrackKey === key && sources.lrcDurationMs && sources.lrcDurationMs > 0) {
+    return sources.lrcDurationMs / 1000;
+  }
+
+  return 0;
+}
+
 export function clampPlaybackTime(currentTime: number, duration: number): number {
   if (duration <= 0) return currentTime;
   return Math.min(currentTime, duration);
@@ -45,7 +67,7 @@ export function useTrackDuration(song: TrackSong | null | undefined): number {
   const mediaDurationMs = useAudioStore((s) => s.mediaDurationMs);
   const mediaTrackKey = useAudioStore((s) => s.mediaTrackKey);
 
-  return resolveTrackDurationSeconds(song, {
+  return resolveDisplayDurationSeconds(song, {
     lrcDurationMs,
     lrcTrackKey,
     mediaDurationMs,

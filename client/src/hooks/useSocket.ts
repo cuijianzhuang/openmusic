@@ -8,6 +8,7 @@ import { useAudioStore } from '../stores/audioStore';
 import type { ChatMessage, RoomState, Song } from '../types';
 
 import { stopSharedAudio, getSharedAudio } from '../lib/audioElement';
+import { getTrackKey } from '../api/music';
 
 
 
@@ -63,6 +64,8 @@ export function useSocket() {
         && room.isPlaying
         && room.current
         && prevRoom?.current?.queueId === room.current.queueId
+        && !useAudioStore.getState().trackLoading
+        && useAudioStore.getState().mediaTrackKey === getTrackKey(room.current)
       ) {
         const audio = getSharedAudio();
         if (audio.src && isFinite(audio.currentTime) && audio.currentTime > 0) {
@@ -80,13 +83,24 @@ export function useSocket() {
 
 
     const onPlaybackTick = (state: { currentTime: number; isPlaying: boolean }) => {
-
-      const current = useRoomStore.getState().room;
-
+      const { room: current, mySocketId } = useRoomStore.getState();
       if (!current) return;
 
-      setRoom({ ...current, currentTime: state.currentTime, isPlaying: state.isPlaying });
+      const isOwner = Boolean(mySocketId && current.ownerId === mySocketId);
+      let currentTime = state.currentTime;
 
+      if (isOwner && state.isPlaying && current.current) {
+        const { trackLoading, mediaTrackKey } = useAudioStore.getState();
+        const expectedKey = getTrackKey(current.current);
+        if (!trackLoading && mediaTrackKey === expectedKey) {
+          const audio = getSharedAudio();
+          if (audio.src && isFinite(audio.currentTime) && audio.currentTime > 0) {
+            currentTime = audio.currentTime;
+          }
+        }
+      }
+
+      setRoom({ ...current, currentTime, isPlaying: state.isPlaying });
     };
 
 
@@ -207,6 +221,7 @@ export function useSocket() {
     stopSharedAudio();
     useAudioStore.getState().setTrackLoading(false);
     useAudioStore.getState().setNeedsAudioUnlock(false);
+    useAudioStore.getState().setSmoothPlaybackTime(0);
     resetSession();
 
     return new Promise((resolve) => {

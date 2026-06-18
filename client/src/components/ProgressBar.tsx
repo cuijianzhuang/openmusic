@@ -70,7 +70,7 @@ export default function ProgressBar({
       onPointerDown={handlePointerDown}
     >
       <div
-        className={`h-full rounded-full relative ${fillClassName} ${dragging.current ? '' : 'transition-all duration-300'}`}
+        className={`h-full rounded-full relative ${fillClassName}`}
         style={{ width: `${displayProgress}%` }}
       >
         {showThumb && (
