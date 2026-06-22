@@ -12,7 +12,57 @@ interface DurationSources {
   mediaTrackKey: string | null;
 }
 
-/** 切歌/seek 上限用时长（秒）：接口元数据优先，音频文件次之，歌词+20 兜底 */
+const MIN_TRUSTED_MEDIA_DURATION_SEC = 5;
+const TINY_MEDIA_DURATION_RATIO = 0.05;
+
+function metadataDurationSeconds(song: TrackSong | null | undefined): number {
+  const durationMs = Number(song?.duration || 0);
+  return Number.isFinite(durationMs) && durationMs > 0 ? durationMs / 1000 : 0;
+}
+
+function lrcDurationSeconds(sources: DurationSources, key: string): number {
+  if (sources.lrcTrackKey !== key || !sources.lrcDurationMs || sources.lrcDurationMs <= 0) return 0;
+  return sources.lrcDurationMs / 1000;
+}
+
+export function resolveReferenceDurationSeconds(
+  song: TrackSong | null | undefined,
+  sources: DurationSources,
+): number {
+  if (!song) return 0;
+  const key = getTrackKey(song as Pick<QueueItem, 'queueId' | 'id' | 'source'>);
+  return metadataDurationSeconds(song) || lrcDurationSeconds(sources, key);
+}
+
+export function isTrustedMediaDurationSeconds(
+  mediaDurationSec: number | null | undefined,
+  referenceDurationSec = 0,
+): boolean {
+  if (!mediaDurationSec || !Number.isFinite(mediaDurationSec) || mediaDurationSec <= 0) return false;
+  if (mediaDurationSec < MIN_TRUSTED_MEDIA_DURATION_SEC) return false;
+  if (
+    referenceDurationSec >= MIN_TRUSTED_MEDIA_DURATION_SEC
+    && mediaDurationSec < referenceDurationSec * TINY_MEDIA_DURATION_RATIO
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function trustedStoredMediaDurationSeconds(
+  song: TrackSong | null | undefined,
+  sources: DurationSources,
+  key: string,
+): number {
+  const mediaSec = sources.mediaTrackKey === key && sources.mediaDurationMs
+    ? sources.mediaDurationMs / 1000
+    : 0;
+  return isTrustedMediaDurationSeconds(mediaSec, resolveReferenceDurationSeconds(song, sources))
+    ? mediaSec
+    : 0;
+}
+
+/** Seek/end cap duration: metadata first, trusted media next, lyrics as fallback. */
 export function resolveTrackDurationSeconds(
   song: TrackSong | null | undefined,
   sources: DurationSources,
@@ -20,21 +70,16 @@ export function resolveTrackDurationSeconds(
   if (!song) return 0;
 
   const key = getTrackKey(song as Pick<QueueItem, 'queueId' | 'id' | 'source'>);
+  const referenceDur = resolveReferenceDurationSeconds(song, sources);
+  if (referenceDur > 0) return referenceDur;
 
-  if (song.duration && song.duration > 0) return song.duration / 1000;
-
-  if (sources.mediaTrackKey === key && sources.mediaDurationMs && sources.mediaDurationMs > 0) {
-    return sources.mediaDurationMs / 1000;
-  }
-
-  if (sources.lrcTrackKey === key && sources.lrcDurationMs && sources.lrcDurationMs > 0) {
-    return sources.lrcDurationMs / 1000;
-  }
+  const mediaDur = trustedStoredMediaDurationSeconds(song, sources, key);
+  if (mediaDur > 0) return mediaDur;
 
   return 0;
 }
 
-/** 进度条/歌词展示用时长（秒）：已加载音频优先，与 currentTime 同源 */
+/** Display duration for progress/lyrics: trusted media first, then metadata/lyrics. */
 export function resolveDisplayDurationSeconds(
   song: TrackSong | null | undefined,
   sources: DurationSources,
@@ -42,21 +87,16 @@ export function resolveDisplayDurationSeconds(
   if (!song) return 0;
 
   const key = getTrackKey(song as Pick<QueueItem, 'queueId' | 'id' | 'source'>);
+  const mediaDur = trustedStoredMediaDurationSeconds(song, sources, key);
+  if (mediaDur > 0) return mediaDur;
 
-  if (sources.mediaTrackKey === key && sources.mediaDurationMs && sources.mediaDurationMs > 0) {
-    return sources.mediaDurationMs / 1000;
-  }
-
-  if (song.duration && song.duration > 0) return song.duration / 1000;
-
-  if (sources.lrcTrackKey === key && sources.lrcDurationMs && sources.lrcDurationMs > 0) {
-    return sources.lrcDurationMs / 1000;
-  }
+  const referenceDur = resolveReferenceDurationSeconds(song, sources);
+  if (referenceDur > 0) return referenceDur;
 
   return 0;
 }
 
-/** 自动切歌判定用时长（秒）：与进度条一致优先真实音频，取各来源最短值 */
+/** Auto-skip/sync cap: use the shortest trusted source only. */
 export function resolveAutoSkipThresholdSeconds(
   song: TrackSong | null | undefined,
   sources: DurationSources,
@@ -65,10 +105,9 @@ export function resolveAutoSkipThresholdSeconds(
   if (!song) return 0;
 
   const key = getTrackKey(song as Pick<QueueItem, 'queueId' | 'id' | 'source'>);
-  const fileDur = fileDurationSec && fileDurationSec > 0 ? fileDurationSec : 0;
-  const storedMedia = sources.mediaTrackKey === key && sources.mediaDurationMs
-    ? sources.mediaDurationMs / 1000
-    : 0;
+  const referenceDur = resolveReferenceDurationSeconds(song, sources);
+  const fileDur = isTrustedMediaDurationSeconds(fileDurationSec, referenceDur) ? fileDurationSec! : 0;
+  const storedMedia = trustedStoredMediaDurationSeconds(song, sources, key);
   const displayDur = resolveDisplayDurationSeconds(song, sources);
 
   const candidates = [fileDur, storedMedia, displayDur].filter((d) => d > 0);

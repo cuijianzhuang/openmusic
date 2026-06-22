@@ -1,15 +1,31 @@
 import type { PlaybackState } from '../types';
 
+type CachedPlaybackState = PlaybackState & {
+  receivedAtMs: number;
+  basePositionSec: number;
+};
+
 const clientState = {
-  server: null as PlaybackState | null,
+  server: null as CachedPlaybackState | null,
   localVersion: 0,
 };
 
-/** 从服务端快照计算当前播放时间（秒） */
+function nowMs(): number {
+  return typeof performance !== 'undefined' ? performance.now() : Date.now();
+}
+
+function statePositionSeconds(state: PlaybackState): number {
+  const position = Number(state.positionSec ?? state.currentTime ?? 0);
+  return Number.isFinite(position) && position > 0 ? position : 0;
+}
+
 export function getPlaybackTime(state: PlaybackState | null | undefined): number {
   if (!state) return 0;
-  if (state.status !== 'playing') return state.currentTime;
-  return (Date.now() - state.startedAt) / 1000;
+  const cached = state as Partial<CachedPlaybackState>;
+  const base = cached.basePositionSec ?? statePositionSeconds(state);
+  if (state.status !== 'playing') return base;
+  const receivedAt = cached.receivedAtMs ?? nowMs();
+  return Math.max(0, base + (nowMs() - receivedAt) / 1000);
 }
 
 export function getClientPlaybackState(): PlaybackState | null {
@@ -20,10 +36,14 @@ export function getClientPlaybackVersion(): number {
   return clientState.localVersion;
 }
 
-/** 应用服务端状态快照；旧版本丢弃 */
 export function applyPlaybackState(state: PlaybackState): boolean {
   if (state.version < clientState.localVersion) return false;
-  clientState.server = state;
+  clientState.server = {
+    ...state,
+    positionSec: statePositionSeconds(state),
+    basePositionSec: statePositionSeconds(state),
+    receivedAtMs: nowMs(),
+  };
   clientState.localVersion = state.version;
   return true;
 }
@@ -33,7 +53,6 @@ export function resetPlaybackStateCache(): void {
   clientState.localVersion = 0;
 }
 
-/** 从房间数据构造初始播放状态（加入房间时） */
 export function playbackStateFromRoom(
   roomId: string,
   trackId: string,
@@ -42,13 +61,16 @@ export function playbackStateFromRoom(
   version = 0,
 ): PlaybackState {
   const now = Date.now();
+  const positionSec = Math.max(0, Number(currentTime) || 0);
   return {
     roomId,
     version,
     trackId,
     status: isPlaying ? 'playing' : 'paused',
-    startedAt: isPlaying ? now - currentTime * 1000 : 0,
-    currentTime,
+    positionSec,
+    serverNowMs: now,
+    startedAt: isPlaying ? now - positionSec * 1000 : 0,
+    currentTime: positionSec,
     updatedAt: now,
   };
 }

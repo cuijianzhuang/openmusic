@@ -80,6 +80,8 @@ export interface PlaybackState {
   version: number;
   trackId: string;
   status: 'playing' | 'paused';
+  positionSec: number;
+  serverNowMs: number;
   startedAt: number;
   currentTime: number;
   updatedAt: number;

@@ -7,7 +7,6 @@ import { useSocket } from '../hooks/useSocket';
 import { formatDuration, getCoverUrl } from '../api/music';
 import { useTrackDuration, clampPlaybackTime } from '../hooks/useTrackDuration';
 import { useSmoothPlaybackTime } from '../hooks/useSmoothPlaybackTime';
-import { getSharedAudio } from '../lib/audioElement';
 
 import SourceBadge from './SourceBadge';
 
@@ -32,6 +31,7 @@ export default function MiniPlayer({ onExpand }: Props) {
   const trackLoading = useAudioStore((s) => s.trackLoading);
   const setTrackLoading = useAudioStore((s) => s.setTrackLoading);
   const seekPlayback = useAudioStore((s) => s.seekPlayback);
+  const localPlayback = useAudioStore((s) => s.localPlayback);
   const { togglePlay, skipSong, requestSkip } = useSocket();
 
   const [skipError, setSkipError] = useState('');
@@ -50,11 +50,10 @@ export default function MiniPlayer({ onExpand }: Props) {
     if (!room) return;
     const next = !room.isPlaying;
     if (!next) {
-      getSharedAudio().pause();
-      useRoomStore.getState().setRoom({ ...room, isPlaying: false });
+      localPlayback?.(false);
     }
     togglePlay(next);
-    if (next) useAudioStore.getState().retryPlayback?.(true);
+    if (next) localPlayback?.(true);
   };
 
   const handleSeek = (time: number) => seekPlayback?.(time);

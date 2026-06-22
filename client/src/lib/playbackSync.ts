@@ -7,12 +7,11 @@ import {
   type PlayResult,
 } from './audioUnlock';
 
-/** 小于此值视为已对齐，不做任何校正 */
 const DRIFT_LOCK_SEC = 0.05;
-/** 小误差：playbackRate 微调，不 seek */
 const MICRO_DRIFT_SEC = 0.3;
-/** 切 tab 回来后一段时间内禁止 seek，避免可见瞬间跳进度 */
 const VISIBILITY_GRACE_MS = 8000;
+const RESUME_SOFT_DRIFT_SEC = 0.5;
+const RESUME_HARD_DRIFT_SEC = 2;
 
 let visibilityResumeAt = 0;
 
@@ -28,13 +27,15 @@ function isDocumentHidden(): boolean {
   return typeof document !== 'undefined' && document.hidden;
 }
 
+function tunePlaybackRate(audio: HTMLAudioElement, diff: number): void {
+  audio.playbackRate = diff > 0 ? 1.03 : 0.97;
+}
+
 export interface ApplySyncOptions {
   song: QueueItem;
   capTime: (time: number, mediaDur: number) => number;
   tvMode?: boolean;
-  /** 用户拖动进度条等场景 */
   forceTime?: number;
-  /** 切歌后强制归零 */
   forceZero?: boolean;
 }
 
@@ -50,16 +51,11 @@ function resolveTargetTime(
   return options.capTime(Math.max(0, t), mediaDur);
 }
 
-/**
- * Leader-Follower 同步：房主写、听众读，低频对齐。
- * 小误差不动或 playbackRate 微调，大误差才 seek。
- */
 export async function applyFollowerSync(
   audio: HTMLAudioElement,
   options: ApplySyncOptions,
 ): Promise<PlayResult | 'paused' | 'idle'> {
   if (!audio.src) return 'idle';
-  // 后台标签页：完全不碰音频，避免切走时卡顿/变速
   if (isDocumentHidden()) return 'idle';
 
   const state = getClientPlaybackState();
@@ -89,14 +85,8 @@ export async function applyFollowerSync(
     return 'played';
   }
 
-  // 后台标签页或切回宽限期内：只微调速率，禁止 seek
-  if (inVisibilityGrace()) {
-    audio.playbackRate = diff > 0 ? 0.99 : 1.01;
-    return 'played';
-  }
-
-  if (Math.abs(diff) < MICRO_DRIFT_SEC) {
-    audio.playbackRate = diff > 0 ? 0.99 : 1.01;
+  if (inVisibilityGrace() || Math.abs(diff) < MICRO_DRIFT_SEC) {
+    tunePlaybackRate(audio, diff);
     return 'played';
   }
 
@@ -106,10 +96,6 @@ export async function applyFollowerSync(
   return 'played';
 }
 
-/**
- * 切回标签页：仅在浏览器把音频暂停时 resume，不 seek。
- * 若音频仍在播放则完全不动，实现无感切 tab。
- */
 export async function applyVisibilityResume(
   audio: HTMLAudioElement,
   options: ApplySyncOptions,
@@ -117,29 +103,41 @@ export async function applyVisibilityResume(
   if (!audio.src || isDocumentHidden()) return 'idle';
 
   const state = getClientPlaybackState();
+  const target = resolveTargetTime(audio, options);
   const isPlaying = state?.status === 'playing';
+
   if (!isPlaying) {
     audio.playbackRate = 1;
     if (!audio.paused) audio.pause();
+    if (Math.abs(audio.currentTime - target) > DRIFT_LOCK_SEC) {
+      audio.currentTime = target;
+      snapSmoothPlaybackTime(target);
+    }
     return 'paused';
   }
 
-  if (!audio.paused) {
+  if (audio.paused) {
+    const initial = await tryPlayWithAutoplayFallback(audio, Boolean(options.tvMode));
+    const result = await assessPlaybackResult(audio, initial);
+    if (result !== 'played') return result;
+  }
+
+  const diff = target - audio.currentTime;
+  const absDiff = Math.abs(diff);
+
+  if (absDiff < RESUME_SOFT_DRIFT_SEC) {
     audio.playbackRate = 1;
     return 'played';
   }
 
-  const initial = await tryPlayWithAutoplayFallback(audio, Boolean(options.tvMode));
-  const result = await assessPlaybackResult(audio, initial);
-  if (result !== 'played') return result;
-
-  const target = resolveTargetTime(audio, options);
-  const diff = target - audio.currentTime;
-  if (Math.abs(diff) < DRIFT_LOCK_SEC) {
-    audio.playbackRate = 1;
-  } else {
-    audio.playbackRate = diff > 0 ? 0.99 : 1.01;
+  if (absDiff < RESUME_HARD_DRIFT_SEC) {
+    tunePlaybackRate(audio, diff);
+    return 'played';
   }
+
+  audio.playbackRate = 1;
+  audio.currentTime = target;
+  snapSmoothPlaybackTime(target);
   return 'played';
 }
 

@@ -4,7 +4,11 @@ import { useAudioStore } from '../stores/audioStore';
 import { useSocket } from '../hooks/useSocket';
 import { getTrackKey } from '../api/music';
 import { snapSmoothPlaybackTime } from '../hooks/useSmoothPlaybackTime';
-import { resolveAutoSkipThresholdSeconds } from '../hooks/useTrackDuration';
+import {
+  isTrustedMediaDurationSeconds,
+  resolveAutoSkipThresholdSeconds,
+  resolveReferenceDurationSeconds,
+} from '../hooks/useTrackDuration';
 import type { QueueItem } from '../types';
 import { getAudioController } from '../lib/audioController';
 import {
@@ -55,21 +59,26 @@ function trackKeyOf(song: Pick<QueueItem, 'queueId' | 'id' | 'source'>) {
   return getTrackKey(song);
 }
 
-function capSeekTime(time: number, song: QueueItem | null | undefined, mediaDur: number): number {
-  const fileDur = isFinite(mediaDur) && mediaDur > 0 ? mediaDur : 0;
+function durationSources() {
   const { lrcDurationMs, lrcTrackKey, mediaDurationMs, mediaTrackKey } = useAudioStore.getState();
+  return { lrcDurationMs, lrcTrackKey, mediaDurationMs, mediaTrackKey };
+}
+
+function capSeekTime(time: number, song: QueueItem | null | undefined, mediaDur: number): number {
+  const sources = durationSources();
+  const referenceDur = song ? resolveReferenceDurationSeconds(song, sources) : 0;
+  const fileDur = isTrustedMediaDurationSeconds(mediaDur, referenceDur) ? mediaDur : 0;
   const capBase = song
-    ? resolveAutoSkipThresholdSeconds(song, { lrcDurationMs, lrcTrackKey, mediaDurationMs, mediaTrackKey }, fileDur)
+    ? resolveAutoSkipThresholdSeconds(song, sources, fileDur)
     : fileDur;
-  const cap = capBase > 0
-    ? capBase - 0.25
-    : (fileDur > 0 ? fileDur - 0.25 : time);
+  const cap = capBase > 0 ? capBase - 0.25 : time;
   return Math.max(0, Math.min(time, cap));
 }
 
-function syncMediaDuration(audio: HTMLAudioElement, trackKey: string) {
+function syncMediaDuration(audio: HTMLAudioElement, song: QueueItem, trackKey: string) {
   const dur = audio.duration;
-  if (!isFinite(dur) || dur <= 0) return;
+  const referenceDur = resolveReferenceDurationSeconds(song, durationSources());
+  if (!isTrustedMediaDurationSeconds(dur, referenceDur)) return;
   useAudioStore.getState().setMediaDuration(trackKey, Math.round(dur * 1000));
 }
 
@@ -88,6 +97,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
   const setLrcDuration = useAudioStore((s) => s.setLrcDuration);
   const setMediaDuration = useAudioStore((s) => s.setMediaDuration);
   const setSeekPlayback = useAudioStore((s) => s.setSeekPlayback);
+  const setLocalPlayback = useAudioStore((s) => s.setLocalPlayback);
   const setNeedsAudioUnlock = useAudioStore((s) => s.setNeedsAudioUnlock);
   const needsAudioUnlock = useAudioStore((s) => s.needsAudioUnlock);
   const setRetryPlayback = useAudioStore((s) => s.setRetryPlayback);
@@ -290,7 +300,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
         if (!runtime) return;
         const live = useRoomStore.getState().room?.current;
         if (!live || runtime.lastTrackKey.current !== trackKeyOf(live)) return;
-        syncMediaDuration(audio, runtime.lastTrackKey.current);
+        syncMediaDuration(audio, live, runtime.lastTrackKey.current);
       });
 
       audio.addEventListener('loadeddata', () => {
@@ -298,7 +308,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
         if (!runtime) return;
         const live = useRoomStore.getState().room?.current;
         if (!live || runtime.lastTrackKey.current !== trackKeyOf(live)) return;
-        syncMediaDuration(audio, runtime.lastTrackKey.current);
+        syncMediaDuration(audio, live, runtime.lastTrackKey.current);
       });
 
       audio.addEventListener('durationchange', () => {
@@ -306,7 +316,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
         if (!runtime) return;
         const live = useRoomStore.getState().room?.current;
         if (!live || runtime.lastTrackKey.current !== trackKeyOf(live)) return;
-        syncMediaDuration(audio, runtime.lastTrackKey.current);
+        syncMediaDuration(audio, live, runtime.lastTrackKey.current);
       });
     }
 
@@ -446,7 +456,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
         if (gen !== loadGeneration.current) return;
 
         rememberSongUrl(trackKey, url);
-        syncMediaDuration(controller.audio, trackKey);
+        syncMediaDuration(controller.audio, current, trackKey);
         readyTrackKey.current = trackKey;
 
         const liveAfterLoad = useRoomStore.getState().room;
@@ -582,6 +592,17 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     togglePlay(!room.isPlaying);
   }, [room, togglePlay]);
 
+  const handleLocalPlayback = useCallback((isPlaying: boolean) => {
+    const live = useRoomStore.getState().room;
+    const audio = controller.audio;
+    if (!isPlaying) {
+      audio.pause();
+      if (live) useRoomStore.getState().setRoom({ ...live, isPlaying: false });
+      return;
+    }
+    useAudioStore.getState().retryPlayback?.(true);
+  }, [controller]);
+
   const handleSeek = useCallback((time: number) => {
     const live = useRoomStore.getState().room;
     seek(time);
@@ -597,6 +618,11 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     setSeekPlayback(handleSeek);
     return () => setSeekPlayback(null);
   }, [handleSeek, setSeekPlayback]);
+
+  useEffect(() => {
+    setLocalPlayback(handleLocalPlayback);
+    return () => setLocalPlayback(null);
+  }, [handleLocalPlayback, setLocalPlayback]);
 
   useEffect(() => {
     setRetryPlayback(retryPlayback);

@@ -196,14 +196,18 @@ function bumpPlaybackState(room) {
 export function buildPlaybackState(room) {
   if (!room) return null;
   repairPlaybackClock(room);
+  const now = Date.now();
+  const positionSec = getPlaybackTime(room);
   return {
     roomId: room.id,
     version: room.playbackVersion || 0,
     trackId: room.current?.queueId || '',
     status: room.isPlaying ? 'playing' : 'paused',
+    positionSec,
+    serverNowMs: now,
     startedAt: room.isPlaying && room.startedAt ? room.startedAt : 0,
-    currentTime: getPlaybackTime(room),
-    updatedAt: room.playbackUpdatedAt || Date.now(),
+    currentTime: positionSec,
+    updatedAt: room.playbackUpdatedAt || now,
   };
 }
 

@@ -1,15 +1,13 @@
 import { getSongUrl, getTrackKey } from '../api/music';
 import type { QueueItem } from '../types';
-import { configureInlineAudio, isMobileDevice } from './audioUnlock';
+import { isMobileDevice } from './audioUnlock';
 
 const MAX_URL_CACHE = 24;
-const MAX_BUFFER = 2;
 const DEFAULT_PREFETCH_COUNT = 2;
 const URL_CACHE_STORAGE_KEY = 'openmusic:song-url-cache';
 
 const urlCache = loadUrlCacheFromStorage();
 const pendingFetches = new Map<string, Promise<string | null>>();
-const bufferAudios = new Map<string, HTMLAudioElement>();
 
 function loadUrlCacheFromStorage(): Map<string, string> {
   try {
@@ -40,34 +38,8 @@ function trimUrlCache() {
     const oldest = urlCache.keys().next().value;
     if (!oldest) break;
     urlCache.delete(oldest);
-    releaseBuffer(oldest);
   }
   persistUrlCacheToStorage();
-}
-
-function releaseBuffer(trackKey: string) {
-  const audio = bufferAudios.get(trackKey);
-  if (!audio) return;
-  audio.pause();
-  audio.removeAttribute('src');
-  audio.load();
-  bufferAudios.delete(trackKey);
-}
-
-function bufferAudio(trackKey: string, url: string) {
-  if (bufferAudios.has(trackKey)) return;
-
-  while (bufferAudios.size >= MAX_BUFFER) {
-    const oldest = bufferAudios.keys().next().value;
-    if (!oldest) break;
-    releaseBuffer(oldest);
-  }
-
-  const audio = new Audio();
-  configureInlineAudio(audio);
-  audio.src = url;
-  audio.load();
-  bufferAudios.set(trackKey, audio);
 }
 
 async function fetchSongUrl(
@@ -129,21 +101,12 @@ export function prefetchCurrentSong(song: QueueItem | null | undefined) {
 
 export function prefetchQueueSongs(
   queue: QueueItem[],
-  options: { count?: number; buffer?: boolean } = {},
+  options: { count?: number } = {},
 ) {
   const count = options.count ?? DEFAULT_PREFETCH_COUNT;
-  const shouldBuffer = (options.buffer ?? true) && !isMobileDevice();
   const targets = queue.slice(0, isMobileDevice() ? 1 : count);
-  const keepKeys = new Set(targets.map(trackKeyOf));
-
-  for (const key of bufferAudios.keys()) {
-    if (!keepKeys.has(key)) releaseBuffer(key);
-  }
 
   for (const song of targets) {
-    const key = trackKeyOf(song);
-    void fetchSongUrl(song).then((url) => {
-      if (url && shouldBuffer) bufferAudio(key, url);
-    });
+    void fetchSongUrl(song);
   }
 }
