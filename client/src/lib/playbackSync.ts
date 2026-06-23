@@ -1,32 +1,35 @@
 import type { QueueItem } from '../types';
 import { snapSmoothPlaybackTime } from '../hooks/useSmoothPlaybackTime';
+import { resolveTrackDurationSeconds } from '../hooks/useTrackDuration';
+import { useAudioStore } from '../stores/audioStore';
 import { getClientPlaybackState, getPlaybackTime } from './playbackState';
 import { isAudioBuffering } from './audioBuffering';
-import {
-  SyncState,
-  allowsHardCorrection,
-  getSyncState,
-  isForceCorrection,
-  markForceHardCorrection,
-  markHardCorrection,
-  requiresSoftSyncOnly,
-  shouldSkipRoutineSync as shouldSkipBySyncState,
-} from './syncStateMachine';
-import {
-  applyCurrentDriftRate,
-  applyDriftCorrection,
-  resetDriftController,
-} from './driftController';
+import { shouldSkipRoutineSync as shouldSkipByBufferingState } from './syncStateMachine';
+import { resetDriftController } from './driftController';
 import {
   assessPlaybackResult,
   tryPlayWithAutoplayFallback,
   type PlayResult,
 } from './audioUnlock';
 
-const DRIFT_LOCK_SEC = 0.05;
-const HARD_DRIFT_SEC = 0.8;
-const POST_BUFFER_SEEK_SEC = 1.5;
-const VISIBILITY_EXTREME_SEEK_SEC = 2;
+/**
+ * 离散事件同步（非连续 drift 控制）：
+ * - NORMAL（距结束 >3s）：不追赶，避免听感扰动
+ * - FINAL（距结束 ≤3s）：playbackRate=1，diff>0 时仅一次性 seek 提前对齐
+ */
+const FINAL_WINDOW_SEC = 3;
+
+let finalSyncTrackId: string | null = null;
+let finalSyncDone = false;
+
+function durationSources() {
+  const { lrcDurationMs, lrcTrackKey, mediaDurationMs, mediaTrackKey } = useAudioStore.getState();
+  return { lrcDurationMs, lrcTrackKey, mediaDurationMs, mediaTrackKey };
+}
+
+function isExplicitForce(options: ApplySyncOptions): boolean {
+  return options.forceZero === true || options.forceTime !== undefined;
+}
 
 export interface ApplySyncOptions {
   song: QueueItem;
@@ -34,7 +37,7 @@ export interface ApplySyncOptions {
   tvMode?: boolean;
   forceTime?: number;
   forceZero?: boolean;
-  /** 服务端 playback_state / 切歌边界：绕过 recovery 状态机，仍受 cooldown（大偏差可 override） */
+  /** 服务端 playback_state 更新；NORMAL 段不追赶，FINAL 段走收尾规则 */
   forceCorrection?: boolean;
 }
 
@@ -50,77 +53,92 @@ function resolveTargetTime(
   return options.capTime(Math.max(0, t), mediaDur);
 }
 
-function shouldSkipRoutineSync(
-  audio: HTMLAudioElement,
-  options: ApplySyncOptions,
-): boolean {
-  const force = isForceCorrection(options);
-  if (shouldSkipBySyncState(force)) return true;
-  if (force) return false;
-  return isAudioBuffering(audio);
+function getRemainingTimeSec(song: QueueItem, positionSec: number): number {
+  const durationSec = resolveTrackDurationSeconds(song, durationSources());
+  if (durationSec <= 0) return Number.POSITIVE_INFINITY;
+  return Math.max(0, durationSec - positionSec);
 }
 
-function applyVisibilitySoftSync(audio: HTMLAudioElement): 'played' {
-  applyCurrentDriftRate(audio);
-  return 'played';
-}
-
-function applySoftDriftOnly(audio: HTMLAudioElement, target: number): 'played' {
-  applyDriftCorrection(audio, target - audio.currentTime);
-  return 'played';
-}
-
-function hardSeek(
-  audio: HTMLAudioElement,
-  target: number,
-  options: ApplySyncOptions,
-): void {
-  if (isForceCorrection(options)) {
-    markForceHardCorrection();
-  } else {
-    markHardCorrection();
+function ensureFinalSyncTrack(trackId: string): void {
+  if (finalSyncTrackId !== trackId) {
+    finalSyncTrackId = trackId;
+    finalSyncDone = false;
   }
+}
+
+function lockPlaybackRate(audio: HTMLAudioElement): void {
   resetDriftController(audio);
+}
+
+function explicitHardSeek(audio: HTMLAudioElement, target: number): void {
+  lockPlaybackRate(audio);
   audio.currentTime = target;
   snapSmoothPlaybackTime(target);
 }
 
-function applySoftSyncForState(audio: HTMLAudioElement, target: number): 'played' {
-  if (getSyncState() === SyncState.VISIBILITY_RECOVER) {
-    return applyVisibilitySoftSync(audio);
-  }
-  return applySoftDriftOnly(audio, target);
+function shouldSkipRoutineSync(
+  audio: HTMLAudioElement,
+  options: ApplySyncOptions,
+): boolean {
+  if (isExplicitForce(options)) return false;
+  if (shouldSkipByBufferingState(false)) return true;
+  return isAudioBuffering(audio);
 }
 
-function applyRoutineDriftSync(
+/** NORMAL / FINAL 离散追赶（不含 seek/切歌等显式 force） */
+function applyDiscretePhaseSync(
   audio: HTMLAudioElement,
   target: number,
   options: ApplySyncOptions,
 ): 'played' {
-  const diff = target - audio.currentTime;
-  const absDiff = Math.abs(diff);
-  const force = isForceCorrection(options);
+  lockPlaybackRate(audio);
 
-  if (allowsHardCorrection(force, absDiff) && absDiff >= HARD_DRIFT_SEC) {
-    hardSeek(audio, target, options);
+  const trackId = getClientPlaybackState()?.trackId || options.song.queueId;
+  ensureFinalSyncTrack(trackId);
+
+  const remaining = getRemainingTimeSec(options.song, target);
+  if (remaining > FINAL_WINDOW_SEC) {
     return 'played';
   }
 
-  applyDriftCorrection(audio, diff);
+  if (finalSyncDone) {
+    return 'played';
+  }
+
+  const diff = target - audio.currentTime;
+  if (diff > 0) {
+    audio.currentTime = target;
+    snapSmoothPlaybackTime(target);
+    finalSyncDone = true;
+  }
+
   return 'played';
 }
 
-function maybeHardSeek(
+async function applyExplicitForceSync(
   audio: HTMLAudioElement,
-  target: number,
   options: ApplySyncOptions,
-  thresholdSec: number,
-): boolean {
-  const absDiff = Math.abs(target - audio.currentTime);
-  if (!allowsHardCorrection(isForceCorrection(options), absDiff)) return false;
-  if (absDiff < thresholdSec) return false;
-  hardSeek(audio, target, options);
-  return true;
+): Promise<PlayResult | 'paused' | 'idle'> {
+  const state = getClientPlaybackState();
+  const target = resolveTargetTime(audio, options);
+  const isPlaying = state?.status === 'playing';
+
+  if (!isPlaying) {
+    lockPlaybackRate(audio);
+    if (!audio.paused) audio.pause();
+    explicitHardSeek(audio, target);
+    return 'paused';
+  }
+
+  explicitHardSeek(audio, target);
+
+  if (audio.paused) {
+    const initial = await tryPlayWithAutoplayFallback(audio, Boolean(options.tvMode));
+    const result = await assessPlaybackResult(audio, initial);
+    if (result !== 'played') return result;
+  }
+
+  return 'played';
 }
 
 export async function applyFollowerSync(
@@ -129,6 +147,10 @@ export async function applyFollowerSync(
 ): Promise<PlayResult | 'paused' | 'idle'> {
   if (!audio.src) return 'idle';
 
+  if (isExplicitForce(options)) {
+    return applyExplicitForceSync(audio, options);
+  }
+
   if (shouldSkipRoutineSync(audio, options)) {
     return 'played';
   }
@@ -136,23 +158,11 @@ export async function applyFollowerSync(
   const state = getClientPlaybackState();
   const isPlaying = state?.status === 'playing';
   const target = resolveTargetTime(audio, options);
-  const force = isForceCorrection(options);
 
   if (!isPlaying) {
-    resetDriftController(audio);
+    lockPlaybackRate(audio);
     if (!audio.paused) audio.pause();
-    const absDiff = Math.abs(audio.currentTime - target);
-    if (allowsHardCorrection(force, absDiff) && absDiff > DRIFT_LOCK_SEC) {
-      hardSeek(audio, target, options);
-    }
     return 'paused';
-  }
-
-  const diffBeforePlay = target - audio.currentTime;
-  const absDiffBefore = Math.abs(diffBeforePlay);
-  const threshold = force ? DRIFT_LOCK_SEC : HARD_DRIFT_SEC;
-  if (allowsHardCorrection(force, absDiffBefore) && absDiffBefore >= threshold) {
-    hardSeek(audio, target, options);
   }
 
   if (audio.paused) {
@@ -165,57 +175,14 @@ export async function applyFollowerSync(
     return 'played';
   }
 
-  if (requiresSoftSyncOnly(force)) {
-    return applySoftSyncForState(audio, target);
-  }
-
-  return applyRoutineDriftSync(audio, target, options);
+  return applyDiscretePhaseSync(audio, target, options);
 }
 
 export async function applyVisibilityResume(
   audio: HTMLAudioElement,
   options: ApplySyncOptions,
 ): Promise<PlayResult | 'paused' | 'idle'> {
-  if (!audio.src) return 'idle';
-
-  const state = getClientPlaybackState();
-  const target = resolveTargetTime(audio, options);
-  const isPlaying = state?.status === 'playing';
-  const force = isForceCorrection(options);
-
-  if (!isPlaying) {
-    resetDriftController(audio);
-    if (!audio.paused) audio.pause();
-    const absDiff = Math.abs(audio.currentTime - target);
-    if (allowsHardCorrection(force, absDiff) && absDiff > DRIFT_LOCK_SEC) {
-      hardSeek(audio, target, options);
-    }
-    return 'paused';
-  }
-
-  const absDiffBefore = Math.abs(target - audio.currentTime);
-
-  if (absDiffBefore > VISIBILITY_EXTREME_SEEK_SEC) {
-    if (allowsHardCorrection(force, absDiffBefore)) {
-      hardSeek(audio, target, options);
-    }
-  } else if (force) {
-    maybeHardSeek(audio, target, options, DRIFT_LOCK_SEC);
-  } else if (allowsHardCorrection(false, absDiffBefore)) {
-    maybeHardSeek(audio, target, options, HARD_DRIFT_SEC);
-  }
-
-  if (audio.paused) {
-    const initial = await tryPlayWithAutoplayFallback(audio, Boolean(options.tvMode));
-    const result = await assessPlaybackResult(audio, initial);
-    if (result !== 'played') return result;
-  }
-
-  if (requiresSoftSyncOnly(force)) {
-    return applySoftSyncForState(audio, target);
-  }
-
-  return applyRoutineDriftSync(audio, target, options);
+  return applyFollowerSync(audio, options);
 }
 
 export function resetPlaybackRate(audio: HTMLAudioElement): void {
@@ -227,24 +194,18 @@ export async function applyPostBufferSync(
   options: ApplySyncOptions,
 ): Promise<void> {
   if (!audio.src || audio.paused || audio.ended) return;
-
-  const state = getClientPlaybackState();
-  if (state?.status !== 'playing') return;
+  if (getClientPlaybackState()?.status !== 'playing') return;
+  if (isExplicitForce(options)) {
+    await applyExplicitForceSync(audio, options);
+    return;
+  }
+  if (shouldSkipRoutineSync(audio, options)) return;
 
   const target = resolveTargetTime(audio, options);
-  const diff = target - audio.currentTime;
-  const absDiff = Math.abs(diff);
-  const force = isForceCorrection(options);
+  applyDiscretePhaseSync(audio, target, options);
+}
 
-  if (requiresSoftSyncOnly(force)) {
-    applySoftSyncForState(audio, target);
-    return;
-  }
-
-  if (absDiff > POST_BUFFER_SEEK_SEC && allowsHardCorrection(force, absDiff)) {
-    hardSeek(audio, target, options);
-    return;
-  }
-
-  applyDriftCorrection(audio, diff);
+export function resetPhaseSync(): void {
+  finalSyncTrackId = null;
+  finalSyncDone = false;
 }

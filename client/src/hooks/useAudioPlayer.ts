@@ -576,7 +576,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     applySync(forceZero ? { forceZero: true } : { forceCorrection: true });
   }, [playbackVersion, trackLoading, applySync]);
 
-  // 低频漂移校准：playbackRate 收敛后复位，大误差才 seek
+  // 离散同步：NORMAL 不追赶，FINAL（≤3s）一次性对齐；6s 仅检查是否进入 FINAL
   useEffect(() => {
     if (tvMode) return;
 

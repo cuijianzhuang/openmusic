@@ -9,6 +9,7 @@ import type { ChatMention, ChatReplyRef, ChatMessage, FavoriteSong, PlaybackStat
 
 import { stopSharedAudio } from '../lib/audioElement';
 import { resetDriftController } from '../lib/driftController';
+import { resetPhaseSync } from '../lib/playbackSync';
 import { resetSyncStateMachine } from '../lib/syncStateMachine';
 import { prefetchCurrentSong } from '../lib/songPreloadCache';
 import { resetPlaybackStateCache } from '../lib/playbackState';
@@ -203,6 +204,7 @@ if (socketListenersAttached) return;
       lastJoinSession = null;
       stopSharedAudio();
       resetSyncStateMachine();
+      resetPhaseSync();
       resetDriftController();
       resetPlaybackScheduling();
       resetPlaybackStateCache();
@@ -326,6 +328,7 @@ if (!connected.current && !socketConnectRequested) {
     lastJoinSession = null;
     stopSharedAudio();
     resetSyncStateMachine();
+    resetPhaseSync();
     resetDriftController();
     resetPlaybackScheduling();
     resetPlaybackStateCache();
