@@ -824,12 +824,14 @@ io.on('connection', (socket) => {
     // 无当前歌曲且队列为空时，加入后会异步拉取随机歌曲，先告知客户端"加载中"，
     // 避免播放条在随机歌曲到达前直接消失。
     const roomPayload = markRandomLoading(id) || joinedRoom;
+    const joinInternal = getRoomInternal(id);
+    const playbackState = joinInternal ? buildPlaybackState(joinInternal) : null;
 
     io.to(id).emit('room_update', roomPayload);
-    broadcastPlaybackState(id);
     callback?.({
       success: true,
       room: roomPayload,
+      playbackState,
       socketId: userId,
       connectionId: socket.id,
       clientId: userId,

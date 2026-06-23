@@ -4,8 +4,10 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import './index.css';
 import { installOpenMusicDebug } from './lib/debugTools';
+import { installVisibilitySync } from './lib/visibilitySync';
 
 installOpenMusicDebug();
+installVisibilitySync();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

@@ -8,6 +8,8 @@ import { useAudioStore } from '../stores/audioStore';
 import type { ChatMention, ChatReplyRef, ChatMessage, FavoriteSong, PlaybackState, RoomState, Song } from '../types';
 
 import { stopSharedAudio } from '../lib/audioElement';
+import { resetDriftController } from '../lib/driftController';
+import { resetSyncStateMachine } from '../lib/syncStateMachine';
 import { prefetchCurrentSong } from '../lib/songPreloadCache';
 import { resetPlaybackStateCache } from '../lib/playbackState';
 import {
@@ -85,6 +87,14 @@ function joinPayload(session: JoinSession) {
   };
 }
 
+function applyJoinSnapshot(room: RoomState, playbackState?: PlaybackState) {
+  if (playbackState) {
+    schedulePlaybackState(playbackState);
+  } else {
+    seedPlaybackFromRoom(room);
+  }
+}
+
 function rejoinLastRoom() {
   const session = lastJoinSession;
   const currentRoom = useRoomStore.getState().room;
@@ -99,6 +109,7 @@ function rejoinLastRoom() {
       res: {
         success: boolean;
         room?: RoomState;
+        playbackState?: PlaybackState;
         socketId?: string;
         connectionId?: string;
         clientId?: string;
@@ -110,7 +121,7 @@ function rejoinLastRoom() {
       if (err || !res?.success || !res.room) return;
 
       useRoomStore.getState().setRoom(res.room);
-      seedPlaybackFromRoom(res.room);
+      applyJoinSnapshot(res.room, res.playbackState);
       rememberClientIdentity(res.clientId || res.socketId, res.clientToken);
       if (res.socketId) {
         useRoomStore.getState().setConnectionInfo(res.socketId, Boolean(res.isOwner), res.connectionId || null);
@@ -191,6 +202,8 @@ if (socketListenersAttached) return;
       joinGeneration += 1;
       lastJoinSession = null;
       stopSharedAudio();
+      resetSyncStateMachine();
+      resetDriftController();
       resetPlaybackScheduling();
       resetPlaybackStateCache();
       useAudioStore.getState().setPlaybackVersion(0);
@@ -274,6 +287,7 @@ if (!connected.current && !socketConnectRequested) {
         error?: string;
         needsPassword?: boolean;
         room?: RoomState;
+        playbackState?: PlaybackState;
         socketId?: string;
         connectionId?: string;
         clientId?: string;
@@ -285,7 +299,7 @@ if (!connected.current && !socketConnectRequested) {
             if (generation !== joinGeneration) return res;
             lastJoinSession = session;
             setRoom(res.room);
-            seedPlaybackFromRoom(res.room);
+            applyJoinSnapshot(res.room, res.playbackState);
             rememberClientIdentity(res.clientId || res.socketId, res.clientToken);
 
             if (res.socketId) {
@@ -311,6 +325,8 @@ if (!connected.current && !socketConnectRequested) {
     joinGeneration += 1;
     lastJoinSession = null;
     stopSharedAudio();
+    resetSyncStateMachine();
+    resetDriftController();
     resetPlaybackScheduling();
     resetPlaybackStateCache();
     useAudioStore.getState().setPlaybackVersion(0);

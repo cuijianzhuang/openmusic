@@ -229,6 +229,8 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
     startedAt: null,
     playbackVersion: 0,
     playbackUpdatedAt: Date.now(),
+    playbackDriftAnchored: false,
+    playbackDriftAnchorCooldownUntil: 0,
     users: new Map(),
     ownerConnectionId: null,
     jumpRequests: [],
@@ -1024,11 +1026,12 @@ export function setPlaying(roomId, socketId, isPlaying, connectionId = null) {
 
   room.isPlaying = isPlaying;
   if (isPlaying) {
-    room.startedAt = Date.now() - room.currentTime * 1000;
+    const now = Date.now();
+    const currentTime = calculatePlaybackTime(room, now);
+    room.currentTime = currentTime;
+    room.startedAt = now - currentTime * 1000;
   } else {
-    room.currentTime = room.startedAt
-      ? (Date.now() - room.startedAt) / 1000
-      : room.currentTime;
+    room.currentTime = calculatePlaybackTime(room);
     room.startedAt = null;
   }
   bumpPlaybackState(room);
@@ -1203,10 +1206,50 @@ export function getPlaybackTime(room) {
   if (room.isPlaying && room.current && !room.startedAt) {
     room.startedAt = Date.now() - (room.currentTime || 0) * 1000;
   }
-  if (room.isPlaying && room.startedAt) {
-    return (Date.now() - room.startedAt) / 1000;
+  return calculatePlaybackTime(room);
+}
+
+const PLAYBACK_DRIFT_ANCHOR_ENTER_SEC = 3.5;
+const PLAYBACK_DRIFT_ANCHOR_EXIT_SEC = 2.5;
+const PLAYBACK_DRIFT_ANCHOR_COOLDOWN_MS = 5000;
+
+function applyPlaybackDriftAnchor(room, serverTime, now = Date.now()) {
+  if (room.playbackDriftAnchorCooldownUntil && now < room.playbackDriftAnchorCooldownUntil) {
+    if (room.playbackDriftAnchored) {
+      room.currentTime = serverTime;
+    }
+    return;
   }
-  return room.currentTime;
+
+  const stored = room.currentTime || 0;
+  const diff = Math.abs(serverTime - stored);
+  let toggled = false;
+
+  if (!room.playbackDriftAnchored && diff > PLAYBACK_DRIFT_ANCHOR_ENTER_SEC) {
+    room.playbackDriftAnchored = true;
+    toggled = true;
+  } else if (room.playbackDriftAnchored && diff < PLAYBACK_DRIFT_ANCHOR_EXIT_SEC) {
+    room.playbackDriftAnchored = false;
+    toggled = true;
+  }
+
+  if (toggled) {
+    room.playbackDriftAnchorCooldownUntil = now + PLAYBACK_DRIFT_ANCHOR_COOLDOWN_MS;
+  }
+
+  if (room.playbackDriftAnchored) {
+    room.currentTime = serverTime;
+  }
+}
+
+function calculatePlaybackTime(room, now = Date.now()) {
+  if (!room?.current) return 0;
+  if (room.isPlaying && room.startedAt) {
+    const serverTime = (now - room.startedAt) / 1000;
+    applyPlaybackDriftAnchor(room, serverTime, now);
+    return serverTime;
+  }
+  return room.currentTime || 0;
 }
 
 function serializeRoomSummary(room) {
@@ -1226,7 +1269,8 @@ function serializeRoomSummary(room) {
 
 function repairPlaybackClock(room) {
   if (room.isPlaying && room.current && !room.startedAt) {
-    room.startedAt = Date.now() - (room.currentTime || 0) * 1000;
+    const now = Date.now();
+    room.startedAt = now - (room.currentTime || 0) * 1000;
   }
 }
 
