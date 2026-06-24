@@ -221,13 +221,9 @@ export async function checkRoom(id: string): Promise<RoomCheckResult> {
 }
 
 export async function getHotSongs(limit = 15): Promise<HotSongItem[]> {
-  try {
-    const res = await fetchWithTimeout(`/api/music/hot?limit=${limit}`);
-    if (!res.ok) return [];
-    return res.json();
-  } catch {
-    return [];
-  }
+  const res = await fetchWithTimeout(`/api/music/hot?limit=${limit}`);
+  if (!res.ok) throw new Error('获取热榜失败');
+  return res.json();
 }
 
 export async function getAvailableSources(): Promise<MusicProviderMeta[]> {

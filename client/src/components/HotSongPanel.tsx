@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Flame, Plus, Loader2, TrendingUp } from 'lucide-react';
 import type { HotSongItem, SearchResult } from '../types';
 import { getHotSongs, getCoverUrl, songKey } from '../api/music';
@@ -43,21 +43,29 @@ export default function HotSongPanel({ addingId, onAdd, refreshKey = 0, compact 
   const [songs, setSongs] = useState<HotSongItem[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const loadHot = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true);
-    try {
-      const data = await getHotSongs(compact ? 8 : 15);
-      setSongs(data);
-    } finally {
-      if (!silent) setLoading(false);
-    }
-  }, [compact]);
-
   useEffect(() => {
-    loadHot();
-    const timer = window.setInterval(() => loadHot(true), 30000);
-    return () => window.clearInterval(timer);
-  }, [loadHot, refreshKey]);
+    let cancelled = false;
+
+    const loadHot = async (silent = false) => {
+      if (!silent) setLoading(true);
+      try {
+        const data = await getHotSongs(compact ? 8 : 15);
+        if (cancelled) return;
+        setSongs(data);
+      } catch {
+        // 接口失败：保留现有数据，跳过本次更新
+      } finally {
+        if (!cancelled && !silent) setLoading(false);
+      }
+    };
+
+    void loadHot();
+    const timer = window.setInterval(() => void loadHot(true), 30000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [compact, refreshKey]);
 
   const handleAdd = (song: HotSongItem) => {
     onAdd({
