@@ -44,12 +44,18 @@ function trimUrlCache() {
 
 async function fetchSongUrl(
   song: Pick<QueueItem, 'queueId' | 'id' | 'source' | 'url'>,
+  options: { refresh?: boolean } = {},
 ): Promise<string | null> {
   const key = trackKeyOf(song);
-  const cached = urlCache.get(key);
-  if (cached) return cached;
+  if (options.refresh) {
+    urlCache.delete(key);
+  } else {
+    const cached = urlCache.get(key);
+    if (cached) return cached;
+  }
 
-  const pending = pendingFetches.get(key);
+  const pendingKey = options.refresh ? `${key}:refresh` : key;
+  const pending = pendingFetches.get(pendingKey);
   if (pending) return pending;
 
   const promise = (async () => {
@@ -60,7 +66,7 @@ async function fetchSongUrl(
           url = await getSongUrl({
             id: song.id,
             source: song.source || 'netease',
-            url: song.url,
+            url: options.refresh ? undefined : song.url,
           });
           break;
         } catch {
@@ -74,11 +80,11 @@ async function fetchSongUrl(
     } catch {
       return null;
     } finally {
-      pendingFetches.delete(key);
+      pendingFetches.delete(pendingKey);
     }
   })();
 
-  pendingFetches.set(key, promise);
+  pendingFetches.set(pendingKey, promise);
   return promise;
 }
 
@@ -87,8 +93,11 @@ export function rememberSongUrl(trackKey: string, url: string) {
   trimUrlCache();
 }
 
-export async function resolveSongUrl(song: QueueItem): Promise<string> {
-  const url = await fetchSongUrl(song);
+export async function resolveSongUrl(
+  song: QueueItem,
+  options: { refresh?: boolean } = {},
+): Promise<string> {
+  const url = await fetchSongUrl(song, options);
   if (!url) throw new Error('empty url');
   return url;
 }

@@ -69,7 +69,7 @@ export default function VinylPlayer({ coverUrl, isPlaying, className = '', size 
 
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="w-[62%] h-[62%] rounded-full overflow-hidden ring-2 ring-black/50 shadow-inner">
-              <img src={coverUrl} alt="" className="w-full h-full object-cover" draggable={false} />
+              <img src={coverUrl} alt="" className="w-full h-full object-cover" draggable={false} loading="eager" decoding="async" />
             </div>
             <div className="absolute w-[4%] h-[4%] rounded-full bg-[#111] ring-1 ring-white/10 z-10" />
           </div>

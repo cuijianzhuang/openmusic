@@ -130,13 +130,12 @@ export default function MiniPlayer({ onExpand }: Props) {
         <button onClick={onExpand} className="flex items-center gap-2 sm:gap-2.5 flex-shrink-0 max-w-[38%] sm:max-w-[32%] min-w-0 text-left">
 
           <img
-
-            src={getCoverUrl(current)}
-
+            src={getCoverUrl(current, 'thumb')}
             alt=""
-
             className="w-10 h-10 sm:w-11 sm:h-11 rounded-lg object-cover flex-shrink-0"
-
+            loading="eager"
+            decoding="async"
+            fetchPriority="high"
           />
 
           <div className="min-w-0 hidden sm:block">

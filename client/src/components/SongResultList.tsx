@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Plus, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
 import type { SearchResult } from '../types';
-import { getCoverUrl, songKey } from '../api/music';
+import { songKey } from '../api/music';
+import SongCover from './SongCover';
 import SourceBadge from './SourceBadge';
 import FavoriteButton from './FavoriteButton';
 
@@ -43,13 +44,9 @@ export default function SongResultList({
               onDoubleClick={() => onAdd(song)}
               title="双击点歌"
             >
-              <img
-                src={getCoverUrl(song)}
-                alt=""
+              <SongCover
+                song={song}
                 className="h-12 w-12 flex-shrink-0 rounded-lg bg-netease-card object-cover"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect fill="%23333" width="48" height="48"/><text x="24" y="28" text-anchor="middle" fill="%23666" font-size="16">♪</text></svg>';
-                }}
               />
               <div className="min-w-0 flex-1 space-y-0.5">
                 <p className="truncate text-sm font-medium">{song.name}</p>

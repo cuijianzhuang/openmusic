@@ -4,10 +4,12 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import './index.css';
 import { installOpenMusicDebug } from './lib/debugTools';
+import { initQQFaces } from './lib/qface';
 import { installVisibilitySync } from './lib/visibilitySync';
 
 installOpenMusicDebug();
 installVisibilitySync();
+initQQFaces();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

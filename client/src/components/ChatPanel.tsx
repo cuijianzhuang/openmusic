@@ -6,10 +6,10 @@ import { useSocket } from '../hooks/useSocket';
 import type { ChatMessage, ChatReplyRef, RoomUser } from '../types';
 import {
   getInitialQQFaces,
-  loadQQFaces,
+  hasFullQQFaces,
   parseQQFaceTokens,
-  preloadQQFaceImages,
   qqFaceToken,
+  subscribeQQFaces,
   type QFaceItem,
 } from '../lib/qface';
 
@@ -32,7 +32,7 @@ export default function ChatPanel() {
   const [showMentionPicker, setShowMentionPicker] = useState(false);
   const [mentionIndex, setMentionIndex] = useState(0);
   const [qqFaces, setQQFaces] = useState<QFaceItem[]>(() => getInitialQQFaces());
-  const [loadingFaces, setLoadingFaces] = useState(false);
+  const [loadingFaces, setLoadingFaces] = useState(() => !hasFullQQFaces());
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLDivElement>(null);
@@ -122,22 +122,10 @@ export default function ChatPanel() {
     return () => document.removeEventListener('pointerdown', handlePointerDown);
   }, [showEmoji]);
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoadingFaces(true);
-    loadQQFaces()
-      .then((faces) => {
-        if (cancelled) return;
-        setQQFaces(faces);
-        preloadQQFaceImages(faces);
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingFaces(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  useEffect(() => subscribeQQFaces((faces) => {
+    setQQFaces(faces);
+    setLoadingFaces(!hasFullQQFaces());
+  }), []);
 
   if (!room) return null;
 

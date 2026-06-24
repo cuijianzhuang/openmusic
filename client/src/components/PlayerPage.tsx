@@ -109,7 +109,7 @@ export default function PlayerPage({ onClose }: Props) {
 
 
 
-  const coverUrl = getCoverUrl(current);
+  const coverUrl = getCoverUrl(current, 'medium');
 
 
 
@@ -129,7 +129,7 @@ export default function PlayerPage({ onClose }: Props) {
         aria-hidden
       />
 
-      <img src={coverUrl} alt="" className="hidden" onLoad={() => setBgLoaded(true)} />
+      <img src={coverUrl} alt="" className="hidden" onLoad={() => setBgLoaded(true)} loading="eager" decoding="async" />
 
       {/* 全屏毛玻璃 */}
       <div

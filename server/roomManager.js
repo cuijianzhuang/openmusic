@@ -21,6 +21,7 @@ const AUTO_ADVANCE_GRACE_SEC = 0.15;
 const LRC_TAIL_PADDING_SEC = 20;
 
 const rooms = new Map();
+const ensurePlaybackInflight = new Map();
 
 function hashPassword(password) {
   const salt = randomBytes(16);
@@ -888,6 +889,11 @@ async function playNextUnlocked(room, options = {}) {
     return;
   }
 
+  // 队列为空时先等待预取，避免切歌/自然结束因 nextRandom 尚未就绪而反复进入 loading
+  if (room.nextRandomPromise) {
+    await room.nextRandomPromise;
+  }
+
   let random = room.nextRandom;
   room.nextRandom = null;
 
@@ -895,7 +901,10 @@ async function playNextUnlocked(room, options = {}) {
     random = null;
   }
 
-  if (!random && allowFetchRandom) {
+  const shouldFetchRandom = !random && (allowFetchRandom || room.queue.length === 0);
+  if (shouldFetchRandom) {
+    room.randomLoading = true;
+    bumpPlaybackState(room);
     random = await fetchRandomSong(() => getRandomExcludeKeys(room));
   }
 
@@ -913,7 +922,6 @@ async function playNextUnlocked(room, options = {}) {
       requestedBy: '随机推荐',
       addedAt: Date.now(),
     });
-    void ensureNextRandom(room);
     return;
   }
 
@@ -930,7 +938,7 @@ async function playNext(room, options = {}) {
   return withPlaybackLock(room, () => playNextUnlocked(room, options));
 }
 
-export async function ensurePlayback(roomId) {
+async function runEnsurePlayback(roomId) {
   const room = rooms.get(roomId);
   if (!room) return null;
   if (room.current) {
@@ -938,16 +946,29 @@ export async function ensurePlayback(roomId) {
     return serializeRoom(room);
   }
 
-  room.randomLoading = true;
+  if (!room.randomLoading) room.randomLoading = true;
   try {
     await withPlaybackLock(room, async () => {
       if (!room.current) await playNextUnlocked(room, { allowFetchRandom: true });
     });
   } finally {
-    room.randomLoading = false;
+    if (room.current) room.randomLoading = false;
   }
   persistRoom(room);
   return serializeRoom(room);
+}
+
+export async function ensurePlayback(roomId) {
+  const inflight = ensurePlaybackInflight.get(roomId);
+  if (inflight) return inflight;
+
+  const task = runEnsurePlayback(roomId);
+  ensurePlaybackInflight.set(roomId, task);
+  try {
+    return await task;
+  } finally {
+    ensurePlaybackInflight.delete(roomId);
+  }
 }
 
 /** 标记房间正在拉取随机歌曲（用于加入后立即向客户端反馈"加载中"） */

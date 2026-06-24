@@ -1,5 +1,6 @@
 const QFACE_BASE_URL = 'https://koishi.js.org/QFace/';
 const QFACE_INDEX_URL = `${QFACE_BASE_URL}assets/qq_emoji/_index.json`;
+const QFACE_STORAGE_KEY = 'openmusic_qq_faces_v1';
 
 export interface QFaceItem {
   id: string;
@@ -35,9 +36,40 @@ const POPULAR_QQ_FACES: QFaceItem[] = [
 ];
 
 const QQ_FACE_TOKEN_RE = /\[qqface:([^\]]+)\]/g;
-let cachedFaces: QFaceItem[] | null = null;
-let pendingFaces: Promise<QFaceItem[]> | null = null;
+const LOAD_RETRY_DELAYS_MS = [0, 600, 1800, 5000, 12000];
+const BACKGROUND_RETRY_MS = 20000;
+const FETCH_TIMEOUT_MS = 15000;
+
 const preloadedImageUrls = new Set<string>();
+const faceSubscribers = new Set<(faces: QFaceItem[]) => void>();
+
+let fullFacesCache: QFaceItem[] | null = readStoredFaces();
+let pendingFaces: Promise<QFaceItem[]> | null = null;
+let backgroundRetryTimer: ReturnType<typeof setInterval> | null = null;
+
+function readStoredFaces(): QFaceItem[] | null {
+  try {
+    const raw = localStorage.getItem(QFACE_STORAGE_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw) as QFaceItem[];
+    if (!Array.isArray(data) || data.length <= POPULAR_QQ_FACES.length) return null;
+    return data.filter((face) => face?.id && face?.text && face?.url);
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredFaces(faces: QFaceItem[]): void {
+  try {
+    localStorage.setItem(QFACE_STORAGE_KEY, JSON.stringify(faces));
+  } catch {
+    // localStorage may be unavailable.
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function toAbsoluteUrl(path: string): string {
   return new URL(path, QFACE_BASE_URL).toString();
@@ -58,12 +90,92 @@ function toQFaceItem(item: QFaceIndexItem): QFaceItem | null {
   };
 }
 
+function getDisplayFaces(): QFaceItem[] {
+  return fullFacesCache || POPULAR_QQ_FACES;
+}
+
+function notifyFaceSubscribers(): void {
+  const faces = getDisplayFaces();
+  faceSubscribers.forEach((callback) => callback(faces));
+}
+
+function stopBackgroundRetry(): void {
+  if (backgroundRetryTimer === null) return;
+  clearInterval(backgroundRetryTimer);
+  backgroundRetryTimer = null;
+}
+
+function startBackgroundRetry(): void {
+  if (backgroundRetryTimer !== null || fullFacesCache) return;
+
+  backgroundRetryTimer = setInterval(() => {
+    if (fullFacesCache) {
+      stopBackgroundRetry();
+      return;
+    }
+    void fetchAndCacheFaces().catch(() => {});
+  }, BACKGROUND_RETRY_MS);
+}
+
+async function fetchQQFaceIndex(): Promise<QFaceItem[]> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+  try {
+    const res = await fetch(QFACE_INDEX_URL, { signal: controller.signal });
+    if (!res.ok) throw new Error('QFace index failed');
+    const data = (await res.json()) as QFaceIndexItem[];
+    const faces = data.map(toQFaceItem).filter((face): face is QFaceItem => Boolean(face));
+    if (faces.length <= POPULAR_QQ_FACES.length) throw new Error('QFace index incomplete');
+    return faces;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchAndCacheFaces(): Promise<QFaceItem[]> {
+  const faces = await fetchQQFaceIndex();
+  fullFacesCache = faces;
+  writeStoredFaces(faces);
+  preloadQQFaceImages(faces);
+  notifyFaceSubscribers();
+  stopBackgroundRetry();
+  return faces;
+}
+
+async function loadWithRetries(): Promise<QFaceItem[]> {
+  let lastError: unknown;
+
+  for (const delay of LOAD_RETRY_DELAYS_MS) {
+    if (fullFacesCache) return fullFacesCache;
+    if (delay > 0) await sleep(delay);
+    try {
+      return await fetchAndCacheFaces();
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  startBackgroundRetry();
+  throw lastError;
+}
+
 export function qqFaceToken(id: string): string {
   return `[qqface:${id}]`;
 }
 
+export function hasFullQQFaces(): boolean {
+  return fullFacesCache !== null;
+}
+
 export function getInitialQQFaces(): QFaceItem[] {
-  return cachedFaces || POPULAR_QQ_FACES;
+  return getDisplayFaces();
+}
+
+export function subscribeQQFaces(callback: (faces: QFaceItem[]) => void): () => void {
+  faceSubscribers.add(callback);
+  callback(getDisplayFaces());
+  return () => faceSubscribers.delete(callback);
 }
 
 export function preloadQQFaceImages(faces: QFaceItem[]): void {
@@ -100,22 +212,23 @@ export function parseQQFaceTokens(text: string): Array<string | { type: 'qqface'
 }
 
 export async function loadQQFaces(): Promise<QFaceItem[]> {
-  if (cachedFaces) return cachedFaces;
+  if (fullFacesCache) return fullFacesCache;
   if (pendingFaces) return pendingFaces;
 
-  pendingFaces = (async () => {
-    const res = await fetch(QFACE_INDEX_URL);
-    if (!res.ok) throw new Error('QFace index failed');
-    const data = (await res.json()) as QFaceIndexItem[];
-    const faces = data.map(toQFaceItem).filter((face): face is QFaceItem => Boolean(face));
-    cachedFaces = faces.length ? faces : POPULAR_QQ_FACES;
-    return cachedFaces;
-  })().catch(() => {
-    cachedFaces = POPULAR_QQ_FACES;
-    return cachedFaces;
-  }).finally(() => {
-    pendingFaces = null;
-  });
+  pendingFaces = loadWithRetries()
+    .catch(() => getDisplayFaces())
+    .finally(() => {
+      pendingFaces = null;
+    });
 
   return pendingFaces;
+}
+
+export function initQQFaces(): void {
+  preloadQQFaceImages(POPULAR_QQ_FACES);
+  if (fullFacesCache) {
+    preloadQQFaceImages(fullFacesCache);
+    return;
+  }
+  void loadQQFaces();
 }

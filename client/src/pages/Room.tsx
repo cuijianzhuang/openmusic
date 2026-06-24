@@ -19,7 +19,7 @@ import { useFavorites } from '../hooks/useFavorites';
 import { createRandomNickname } from '../lib/randomNickname';
 
 import { songKey } from '../api/music';
-import { getCoverUrl } from '../api/music';
+import SongCover from '../components/SongCover';
 
 import QueuePanel from '../components/QueuePanel';
 
@@ -1019,7 +1019,7 @@ export default function Room() {
                     const key = songKey(song);
                     return (
                       <div key={`${song.requestedAt}-${key}-${index}`} className="group flex items-center gap-2 rounded-xl p-2.5 transition-colors hover:bg-netease-card/80 sm:gap-3 sm:p-3">
-                        <img src={getCoverUrl(song)} alt="" className="h-12 w-12 flex-shrink-0 rounded-lg bg-netease-card object-cover" />
+                        <SongCover song={song} className="h-12 w-12 flex-shrink-0 rounded-lg bg-netease-card object-cover" />
                         <div className="min-w-0 flex-1 space-y-0.5">
                           <div className="flex min-w-0 items-center gap-2">
                             <p className="truncate text-sm font-medium">{song.name}</p>
@@ -1104,7 +1104,7 @@ export default function Room() {
                     const key = songKey(song);
                     return (
                       <div key={key} className="group flex items-center gap-2 rounded-xl p-2.5 transition-colors hover:bg-netease-card/80 sm:gap-3 sm:p-3">
-                        <img src={getCoverUrl(song)} alt="" className="h-12 w-12 flex-shrink-0 rounded-lg bg-netease-card object-cover" />
+                        <SongCover song={song} className="h-12 w-12 flex-shrink-0 rounded-lg bg-netease-card object-cover" />
                         <div className="min-w-0 flex-1 space-y-0.5">
                           <p className="truncate text-sm font-medium">{song.name}</p>
                           <p className="truncate text-xs text-netease-muted">{song.artist}{song.album ? ` · ${song.album}` : ''}</p>

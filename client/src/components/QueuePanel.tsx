@@ -3,7 +3,7 @@ import { Trash2, Music, Zap, ThumbsUp } from 'lucide-react';
 import { getClientId } from '../lib/clientId';
 import { useRoomStore } from '../stores/roomStore';
 import { useSocket } from '../hooks/useSocket';
-import { getCoverUrl } from '../api/music';
+import SongCover from './SongCover';
 import SourceBadge from './SourceBadge';
 import FavoriteButton from './FavoriteButton';
 
@@ -122,9 +122,8 @@ export default function QueuePanel({ fillHeight = false }: Props) {
                   i
                 )}
               </span>
-              <img
-                src={getCoverUrl(song)}
-                alt=""
+              <SongCover
+                song={song}
                 className="w-11 h-11 rounded-lg object-cover bg-netease-card flex-shrink-0"
               />
               <div className="flex-1 min-w-0 self-stretch flex flex-col justify-center gap-1">

@@ -46,6 +46,7 @@ interface AudioRuntime {
   endedTrackKey: MutableRefObject<string | null>;
   skippingRef: MutableRefObject<boolean>;
   errorRetries: MutableRefObject<number>;
+  urlRefreshAttempted: MutableRefObject<boolean>;
   requestSkip: () => void;
   finishSong: (queueId: string) => void;
   playAudio: (audio: HTMLAudioElement) => Promise<PlayResult>;
@@ -125,6 +126,8 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
   const justSkippedRef = useRef(false);
   const prevQueueIdRef = useRef<string | null>(null);
   const errorRetries = useRef(0);
+  const urlRefreshAttempted = useRef(false);
+  const lastSkipAt = useRef(0);
   const wasOwnerRef = useRef(isOwner);
 
   const playAudio = useCallback(async (audio: HTMLAudioElement) => {
@@ -240,6 +243,10 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     const { isOwner, room: live } = useRoomStore.getState();
     if (!isOwner) return;
 
+    const now = Date.now();
+    if (now - lastSkipAt.current < 2000) return;
+    lastSkipAt.current = now;
+
     skippingRef.current = true;
     justSkippedRef.current = true;
     readyTrackKey.current = null;
@@ -267,6 +274,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
       endedTrackKey,
       skippingRef,
       errorRetries,
+      urlRefreshAttempted,
       requestSkip,
       finishSong,
       playAudio,
@@ -306,6 +314,26 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
             a.load();
             await a.play().catch(() => {});
           });
+          return;
+        }
+        if (!runtime.urlRefreshAttempted.current && live.room?.current) {
+          runtime.urlRefreshAttempted.current = true;
+          runtime.errorRetries.current = 0;
+          const song = live.room.current;
+          void resolveSongUrl(song, { refresh: true })
+            .then((url) => {
+              controller.enqueue(async () => {
+                const a = controller.audio;
+                a.pause();
+                a.currentTime = 0;
+                a.src = url;
+                a.load();
+                await a.play().catch(() => {});
+              });
+            })
+            .catch(() => {
+              runtime.requestSkip();
+            });
           return;
         }
         runtime.requestSkip();
@@ -425,6 +453,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
       readyTrackKey.current = null;
       markAudioReadyTrackQueueId(null);
       errorRetries.current = 0;
+      urlRefreshAttempted.current = false;
       lastTrackKey.current = trackKey;
       setTrackLoading(true);
 
@@ -442,13 +471,18 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
         url = await resolveSongUrl(current);
       } catch (err) {
         console.error('Failed to load song:', err);
-        if (gen !== loadGeneration.current) return;
-        readyTrackKey.current = null;
-        setTrackLoading(false);
-        if (useRoomStore.getState().isOwner) {
-          requestSkip();
+        try {
+          url = await resolveSongUrl(current, { refresh: true });
+        } catch (refreshErr) {
+          console.error('Failed to load song (refresh url):', refreshErr);
+          if (gen !== loadGeneration.current) return;
+          readyTrackKey.current = null;
+          setTrackLoading(false);
+          if (useRoomStore.getState().isOwner) {
+            requestSkip();
+          }
+          return;
         }
-        return;
       }
 
       if (gen !== loadGeneration.current) return;

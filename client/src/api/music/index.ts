@@ -5,6 +5,7 @@ import { interleaveSearchResults } from './merge';
 import { hasValidLrc, fetchFallbackLrc } from './lrcFallback';
 import { fetchWithTimeout } from '../http';
 import { toSecureMediaUrl } from '../../lib/secureMediaUrl';
+import { resizeCoverUrl, type CoverSize } from '../../lib/coverUrl';
 import { getClientId } from '../../lib/clientId';
 
 function getProvider(source: MusicSource) {
@@ -91,10 +92,16 @@ export async function getLyrics(song: Pick<Song, 'id' | 'source' | 'lrc' | 'name
   return lrc;
 }
 
-export function getCoverUrl(song: Pick<Song, 'id' | 'source' | 'pic'>): string {
+export function getCoverUrl(
+  song: Pick<Song, 'id' | 'source' | 'pic'>,
+  size: CoverSize = 'full',
+): string {
   const source = song.source || 'netease';
-  return toSecureMediaUrl(getProvider(source).getCoverUrl({ ...song, source }));
+  const raw = toSecureMediaUrl(getProvider(source).getCoverUrl({ ...song, source }));
+  return resizeCoverUrl(raw, size);
 }
+
+export type { CoverSize } from '../../lib/coverUrl';
 
 export function getSourceLabel(source?: MusicSource): string {
   if (!source) return '网易';

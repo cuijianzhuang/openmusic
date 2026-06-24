@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { Flame, Plus, Loader2, TrendingUp } from 'lucide-react';
 import type { HotSongItem, SearchResult } from '../types';
-import { getHotSongs, getCoverUrl, songKey } from '../api/music';
+import { getHotSongs, songKey } from '../api/music';
+import SongCover from './SongCover';
 import SourceBadge from './SourceBadge';
 
 interface Props {
@@ -159,14 +160,9 @@ export default function HotSongPanel({ addingId, onAdd, refreshKey = 0, compact 
                   >
                     {rank}
                   </span>
-                  <img
-                    src={getCoverUrl(song)}
-                    alt=""
+                  <SongCover
+                    song={song}
                     className="w-9 h-9 rounded-md object-cover bg-netease-card flex-shrink-0"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).src =
-                        'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect fill="%23333" width="48" height="48"/><text x="24" y="28" text-anchor="middle" fill="%23666" font-size="16">♪</text></svg>';
-                    }}
                   />
                   <div className="flex-1 min-w-0">
                     <TruncateWithTip text={song.name} className="text-xs font-medium truncate leading-snug" />

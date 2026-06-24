@@ -146,7 +146,7 @@ export default function TvDisplay() {
       </div>
     );
   } else {
-    const coverUrl = getCoverUrl(current);
+    const coverUrl = getCoverUrl(current, 'medium');
     content = (
       <div className="fixed inset-0 z-50 flex flex-col animate-fade-in select-none">
         <div
@@ -156,7 +156,7 @@ export default function TvDisplay() {
             filter: 'blur(60px) brightness(0.35)',
           }}
         />
-        <img src={coverUrl} alt="" className="hidden" onLoad={() => setBgLoaded(true)} />
+        <img src={coverUrl} alt="" className="hidden" onLoad={() => setBgLoaded(true)} loading="eager" decoding="async" />
         <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/20 to-black/70" />
 
         <div className="relative z-10 flex-1 flex flex-col lg:flex-row overflow-hidden min-h-0 px-4 lg:px-12 gap-4 lg:gap-10">
