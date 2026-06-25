@@ -36,6 +36,7 @@ const CURATED_PLAYLISTS: NeteasePlaylistSearchItem[] = [
 const CURATED_IDS = new Set(CURATED_PLAYLISTS.map((item) => item.id));
 const RECOMMEND_KEYWORD = '推荐';
 const RECOMMEND_EXTRA_LIMIT = 2;
+const SKELETON_COUNT = CURATED_PLAYLISTS.length + RECOMMEND_EXTRA_LIMIT;
 
 function mergePlaylistMeta(
   base: NeteasePlaylistSearchItem[],
@@ -73,7 +74,7 @@ function PlaylistCover({
   return (
     <div
       className={`relative overflow-hidden bg-netease-card ${
-        compact ? 'h-14 w-14 rounded-md' : 'aspect-square w-full rounded-xl'
+        compact ? 'h-12 w-12 flex-shrink-0 rounded-md' : 'aspect-square w-full rounded-lg'
       }`}
     >
       {playlist.coverImgUrl ? (
@@ -90,15 +91,47 @@ function PlaylistCover({
         />
       ) : null}
       <div
-        className={`h-full w-full items-center justify-center bg-gradient-to-br from-netease-card to-netease-dark text-netease-muted/35 ${playlist.coverImgUrl ? 'hidden' : 'flex'} ${compact ? 'text-base' : 'text-2xl'}`}
+        className={`h-full w-full items-center justify-center bg-gradient-to-br from-netease-card to-netease-dark text-netease-muted/35 ${playlist.coverImgUrl ? 'hidden' : 'flex'} ${compact ? 'text-sm' : 'text-lg'}`}
       >
         ♪
       </div>
       {isLoading && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-          <Loader2 className={`animate-spin text-white ${compact ? 'h-3.5 w-3.5' : 'h-5 w-5'}`} />
+          <Loader2 className={`animate-spin text-white ${compact ? 'h-3.5 w-3.5' : 'h-4 w-4'}`} />
         </div>
       )}
+    </div>
+  );
+}
+
+function PlaylistSkeleton({ compact = false }: { compact?: boolean }) {
+  if (compact) {
+    return (
+      <div className="flex min-w-min gap-2 pb-0.5">
+        {Array.from({ length: SKELETON_COUNT }, (_, i) => (
+          <div key={i} className="flex w-[4.25rem] flex-shrink-0 flex-col">
+            <div className="h-12 w-12 rounded-md skeleton-shimmer" />
+            <div className="mt-1 space-y-1">
+              <div className="h-2 w-full rounded skeleton-shimmer" />
+              <div className="h-2 w-2/3 rounded skeleton-shimmer" />
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      {Array.from({ length: SKELETON_COUNT }, (_, i) => (
+        <div key={i} className="flex flex-col items-center">
+          <div className="aspect-square w-full rounded-lg skeleton-shimmer" />
+          <div className="mt-1 w-full space-y-1">
+            <div className="h-2 w-full rounded skeleton-shimmer" />
+            <div className="h-2 w-4/5 rounded skeleton-shimmer" />
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -151,10 +184,8 @@ export default function RecommendedPlaylistsPanel({ onSelectPlaylist, compact = 
           <h2 className="text-xs font-medium">为你推荐</h2>
         </div>
         <div className="overflow-x-auto p-2">
-          {loading && playlists.length === CURATED_PLAYLISTS.length ? (
-            <div className="flex items-center justify-center py-3 text-netease-muted">
-              <Loader2 className="h-4 w-4 animate-spin" />
-            </div>
+          {loading ? (
+            <PlaylistSkeleton compact />
           ) : (
             <div className="flex min-w-min gap-2 pb-0.5">
               {playlists.map((playlist) => {
@@ -165,10 +196,10 @@ export default function RecommendedPlaylistsPanel({ onSelectPlaylist, compact = 
                     type="button"
                     disabled={Boolean(loadingId)}
                     onClick={() => void handleSelect(playlist)}
-                    className="group flex w-[4.5rem] flex-shrink-0 flex-col text-left transition-colors disabled:opacity-60"
+                    className="group flex w-[4.25rem] flex-shrink-0 flex-col items-center text-center transition-colors disabled:opacity-60"
                   >
                     <PlaylistCover playlist={playlist} isLoading={isLoading} compact />
-                    <p className="mt-1 line-clamp-2 text-[10px] font-medium leading-tight text-white/85">
+                    <p className="mt-1 line-clamp-2 w-full text-center text-[10px] font-medium leading-tight text-white/85">
                       {playlist.name}
                     </p>
                   </button>
@@ -182,17 +213,15 @@ export default function RecommendedPlaylistsPanel({ onSelectPlaylist, compact = 
   }
 
   return (
-    <div className="flex flex-shrink-0 flex-col overflow-hidden">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
       <div className="flex flex-shrink-0 items-center gap-1.5 border-t border-netease-border/50 px-4 py-1.5 lg:border-t-0">
         <Sparkles className="h-4 w-4 text-sky-400" />
         <h2 className="text-sm font-medium">为你推荐</h2>
       </div>
 
-      <div className="px-2 py-1.5">
-        {loading && playlists.length === CURATED_PLAYLISTS.length ? (
-          <div className="flex items-center justify-center py-6 text-netease-muted">
-            <Loader2 className="h-5 w-5 animate-spin" />
-          </div>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-2">
+        {loading ? (
+          <PlaylistSkeleton />
         ) : (
           <div className="grid grid-cols-2 gap-2">
             {playlists.map((playlist) => {
@@ -203,10 +232,10 @@ export default function RecommendedPlaylistsPanel({ onSelectPlaylist, compact = 
                   type="button"
                   disabled={Boolean(loadingId)}
                   onClick={() => void handleSelect(playlist)}
-                  className="group flex flex-col text-left transition-colors hover:bg-netease-card/60 disabled:opacity-60 rounded-lg p-0.5"
+                  className="group flex flex-col items-center rounded-lg p-0.5 text-center transition-colors hover:bg-netease-card/60 disabled:opacity-60"
                 >
                   <PlaylistCover playlist={playlist} isLoading={isLoading} />
-                  <p className="mt-1 line-clamp-2 px-0.5 text-[10px] font-medium leading-tight text-white/90">
+                  <p className="mt-1 line-clamp-2 w-full px-0.5 text-center text-[10px] font-medium leading-tight text-white/90">
                     {playlist.name}
                   </p>
                 </button>

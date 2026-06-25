@@ -70,8 +70,10 @@ interface ChatOverlayPortalProps {
   desktopPanelClassName: string;
   mobilePanelClassName: string;
   children: ReactNode;
-  /** 限制在聊天室容器内（不挂到 document.body） */
+  /** 限制在聊天室容器内（不挂到 document.body）；手机端居中弹窗时忽略 */
   contained?: boolean;
+  /** 手机端全屏遮罩 + 居中弹窗（挂 document.body） */
+  mobileCentered?: boolean;
 }
 
 function ChatOverlayPortal({
@@ -85,14 +87,20 @@ function ChatOverlayPortal({
   mobilePanelClassName,
   children,
   contained = false,
+  mobileCentered = false,
 }: ChatOverlayPortalProps) {
-  const mountNode = contained
+  const useContained = contained && !isMobileLayout;
+  const mountNode = useContained
     ? (overlayHostRef?.current ?? containerRef.current)
     : (isMobileLayout ? document.body : containerRef.current);
   if (!mountNode) return null;
 
   const overlay = isMobileLayout ? (
-    <div className={`${contained ? 'absolute' : 'fixed'} inset-0 z-[60] pointer-events-auto`}>
+    <div
+      className={`${mobileCentered || !useContained ? 'fixed' : 'absolute'} inset-0 z-[80] pointer-events-auto ${
+        mobileCentered ? 'flex items-center justify-center p-4' : ''
+      }`}
+    >
       <button
         type="button"
         className="absolute inset-0 bg-black/70 backdrop-blur-sm"
@@ -191,11 +199,12 @@ function ReactionDetailModal({
     <ChatOverlayPortal
       isMobileLayout={isMobileLayout}
       containerRef={containerRef}
+      mobileCentered
       onClose={onClose}
       ariaLabel="关闭点评详情"
       panelRef={panelRef}
       desktopPanelClassName="relative z-10 flex w-[min(280px,92%)] max-h-[min(72%,320px)] flex-col rounded-2xl border border-netease-border/70 bg-netease-dark/98 p-3 shadow-2xl backdrop-blur"
-      mobilePanelClassName="absolute inset-x-0 bottom-0 z-10 flex max-h-[min(75vh,420px)] flex-col rounded-t-2xl border-t border-netease-border/70 bg-netease-dark/98 p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] shadow-2xl backdrop-blur"
+      mobilePanelClassName="relative z-10 flex w-[min(300px,calc(100%-2rem))] max-h-[min(70vh,360px)] flex-col rounded-2xl border border-netease-border/70 bg-netease-dark/98 p-3 shadow-2xl backdrop-blur"
     >
       <div className="mb-2 flex flex-shrink-0 items-center justify-between">
         <span className="text-sm text-white">{title}</span>
@@ -404,12 +413,13 @@ export function ChatReactionPicker({
       isMobileLayout={isMobileLayout}
       containerRef={containerRef}
       overlayHostRef={overlayHostRef}
-      contained
+      contained={!isMobileLayout}
+      mobileCentered={isMobileLayout}
       onClose={onClose}
       ariaLabel="关闭点评表情"
       panelRef={panelRef}
       desktopPanelClassName="relative z-10 box-border flex w-[min(280px,calc(100%-1.5rem))] max-h-[min(72%,360px)] flex-col overflow-hidden rounded-2xl border border-netease-border/70 bg-netease-dark/98 p-2.5 shadow-2xl backdrop-blur"
-      mobilePanelClassName="absolute inset-x-0 bottom-0 z-10 box-border flex max-h-[min(55%,360px)] flex-col overflow-hidden rounded-t-2xl border-t border-netease-border/70 bg-netease-dark/98 p-2.5 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] shadow-2xl backdrop-blur"
+      mobilePanelClassName="relative z-10 box-border flex w-[min(300px,calc(100%-2rem))] max-h-[min(70vh,400px)] flex-col overflow-hidden rounded-2xl border border-netease-border/70 bg-netease-dark/98 p-2.5 shadow-2xl backdrop-blur"
     >
       <div className="mb-1.5 flex flex-shrink-0 items-center justify-between px-0.5">
         <span className="text-[11px] text-netease-muted">点评表情</span>

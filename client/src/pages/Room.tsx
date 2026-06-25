@@ -36,7 +36,7 @@ import AudioEngine from '../components/AudioEngine';
 import SongResultList from '../components/SongResultList';
 import SourceBadge from '../components/SourceBadge';
 import SearchFilterSelect from '../components/SearchFilterSelect';
-import SearchSkeleton from '../components/SearchSkeleton';
+import SearchSkeleton, { RESULT_BODY_HEIGHT } from '../components/SearchSkeleton';
 import PlaylistImportModal from '../components/PlaylistImportModal';
 import ChatPanel from '../components/ChatPanel';
 import HotSongPanel from '../components/HotSongPanel';
@@ -162,6 +162,7 @@ export default function Room() {
   const [results, setResults] = useState<SearchResult[]>([]);
 
   const [searching, setSearching] = useState(false);
+  const [playlistSearchLoading, setPlaylistSearchLoading] = useState(false);
 
   const [joinError, setJoinError] = useState('');
 
@@ -456,7 +457,7 @@ export default function Room() {
       setPlaylistSearchTotal(0);
       return;
     }
-    setSearching(true);
+    setPlaylistSearchLoading(true);
     setIsPlaylistResults(false);
     setResults([]);
     try {
@@ -469,7 +470,7 @@ export default function Room() {
       setPlaylistSearchTotal(0);
       showToast(err instanceof Error ? err.message : '歌单搜索失败', 'error');
     } finally {
-      setSearching(false);
+      setPlaylistSearchLoading(false);
     }
   }, [showToast]);
 
@@ -532,6 +533,7 @@ export default function Room() {
     setResults([]);
     setPlaylistSearchResults([]);
     setPlaylistSearchTotal(0);
+    setPlaylistSearchLoading(false);
     setSearchedKeyword('');
     setIsPlaylistResults(false);
     setListPageSongs([]);
@@ -659,15 +661,21 @@ export default function Room() {
   const searchableCount = sources.filter((s) => s.supportsSearch).length;
   const qqImportEnabled = sources.some((s) => s.id === 'tencent' && s.supportsSearch);
   const queueCount = (room.current ? 1 : 0) + room.queue.length;
-  const showDesktopSearchOverlay = Boolean(searchedKeyword || searching);
-  const showPlaylistSearch = searchMode === 'playlist' && Boolean(searchedKeyword || searching);
+  const showDesktopSearchOverlay = Boolean(searchedKeyword || searching || playlistSearchLoading);
+  const showPlaylistSearch = searchMode === 'playlist' && Boolean(searchedKeyword || playlistSearchLoading);
   const hasPlaylistSearchResults = showPlaylistSearch && playlistSearchResults.length > 0;
-  const showPlaylistEmpty = showPlaylistSearch && !searching && playlistSearchResults.length === 0;
+  const showPlaylistEmpty = showPlaylistSearch && !playlistSearchLoading && playlistSearchResults.length === 0;
+  const showPlaylistSkeleton = showPlaylistSearch && playlistSearchLoading && playlistSearchResults.length === 0;
   const playlistSearchTotalPages = Math.max(1, Math.ceil(playlistSearchTotal / PLAYLIST_SEARCH_PAGE_SIZE));
+  const searchButtonLoading = searchMode === 'song'
+    ? searching
+    : playlistSearchLoading && playlistSearchResults.length === 0;
 
   const renderResultsSummary = () => {
+    if (searchMode === 'playlist' && playlistSearchLoading) {
+      return `正在搜索歌单「${searchedKeyword}」...`;
+    }
     if (searching) {
-      if (showPlaylistSearch) return `正在搜索歌单「${searchedKeyword}」...`;
       return isPlaylistResults ? searchedKeyword : `正在搜索「${searchedKeyword}」...`;
     }
     if (hasPlaylistSearchResults) return `找到 ${playlistSearchTotal || playlistSearchResults.length} 个相关歌单`; 
@@ -749,47 +757,77 @@ export default function Room() {
       <button
         type="button"
         onClick={handleSearch}
-        disabled={searching || !query.trim()}
+        disabled={!query.trim() || (searchMode === 'song' && searching)}
         className="flex-shrink-0 px-3.5 sm:px-5 py-3 sm:py-3.5 rounded-xl sm:rounded-2xl bg-netease-red text-white text-sm font-medium hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
       >
-        {searching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4 sm:hidden" />}
+        {searchButtonLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4 sm:hidden" />}
         <span className="hidden sm:inline">搜索</span>
       </button>
     </div>
   );
 
   const playlistSearchList = (
-    <div className="animate-slide-up">
-      <div className="space-y-2">
-        {playlistSearchResults.map((playlist) => (
-          <div key={playlist.id} className="group flex items-center gap-2 rounded-xl p-2.5 transition-colors hover:bg-netease-card/80 sm:gap-3 sm:p-3">
-            <img
-              src={playlist.coverImgUrl || 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect fill="%23333" width="48" height="48"/><text x="24" y="28" text-anchor="middle" fill="%23666" font-size="16">♪</text></svg>'}
-              alt=""
-              className="h-12 w-12 flex-shrink-0 rounded-lg bg-netease-card object-cover"
-            />
-            <div className="min-w-0 flex-1 space-y-0.5">
-              <p className="truncate text-sm font-medium">{playlist.name}</p>
-              <p className="truncate text-xs text-netease-muted">{playlist.creatorName || '网易云歌单'} · {playlist.trackCount} 首</p>
+    <div
+      className="flex min-h-0 flex-col"
+      style={{ height: RESULT_BODY_HEIGHT }}
+    >
+      <div className={`relative min-h-0 flex-1 overflow-y-auto ${playlistSearchLoading ? 'pointer-events-none' : ''}`}>
+        <div className={`space-y-2 transition-opacity ${playlistSearchLoading ? 'opacity-40' : ''}`}>
+          {playlistSearchResults.map((playlist) => (
+            <div key={playlist.id} className="group flex items-center gap-2 rounded-xl p-2.5 transition-colors hover:bg-netease-card/80 sm:gap-3 sm:p-3">
+              <img
+                src={playlist.coverImgUrl || 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect fill="%23333" width="48" height="48"/><text x="24" y="28" text-anchor="middle" fill="%23666" font-size="16">♪</text></svg>'}
+                alt=""
+                className="h-12 w-12 flex-shrink-0 rounded-lg bg-netease-card object-cover"
+              />
+              <div className="min-w-0 flex-1 space-y-0.5">
+                <p className="truncate text-sm font-medium">{playlist.name}</p>
+                <p className="truncate text-xs text-netease-muted">{playlist.creatorName || '网易云歌单'} · {playlist.trackCount} 首</p>
+              </div>
+              <SourceBadge source="netease" variant="muted" />
+              <button
+                type="button"
+                onClick={() => handlePlaylistImport('netease', playlist.id)}
+                disabled={playlistSearchLoading || searching}
+                className="flex flex-shrink-0 items-center gap-1 rounded-full bg-netease-red/10 px-2.5 py-1 text-xs font-medium text-netease-red transition-all hover:bg-netease-red hover:text-white disabled:opacity-50"
+              >
+                <ListMusic className="h-4 w-4" />
+                查看
+              </button>
             </div>
-            <SourceBadge source="netease" variant="muted" />
-            <button
-              type="button"
-              onClick={() => handlePlaylistImport('netease', playlist.id)}
-              disabled={searching}
-              className="flex flex-shrink-0 items-center gap-1 rounded-full bg-netease-red/10 px-2.5 py-1 text-xs font-medium text-netease-red transition-all hover:bg-netease-red hover:text-white disabled:opacity-50"
-            >
-              <ListMusic className="h-4 w-4" />
-              查看
-            </button>
+          ))}
+        </div>
+        {playlistSearchLoading && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <Loader2 className="h-6 w-6 animate-spin text-netease-muted" />
           </div>
-        ))}
+        )}
       </div>
       {playlistSearchTotalPages > 1 && (
-        <div className="mt-2 flex items-center justify-between border-t border-netease-border/40 pt-4">
-          <button type="button" disabled={playlistSearchPage <= 1 || searching} onClick={() => void doPlaylistSearch(searchedKeyword, playlistSearchPage - 1)} className="rounded-lg px-3 py-1.5 text-sm text-netease-muted transition-colors hover:text-white disabled:cursor-not-allowed disabled:opacity-30">上一页</button>
-          <span className="text-xs text-netease-muted">{playlistSearchPage} / {playlistSearchTotalPages}<span className="ml-1 text-netease-muted/50">共 {playlistSearchTotal} 个</span></span>
-          <button type="button" disabled={playlistSearchPage >= playlistSearchTotalPages || searching} onClick={() => void doPlaylistSearch(searchedKeyword, playlistSearchPage + 1)} className="rounded-lg px-3 py-1.5 text-sm text-netease-muted transition-colors hover:text-white disabled:cursor-not-allowed disabled:opacity-30">下一页</button>
+        <div className="mt-auto flex-shrink-0 border-t border-netease-border/40 pt-3">
+          <div className="flex items-center justify-between">
+            <button
+              type="button"
+              disabled={playlistSearchPage <= 1 || playlistSearchLoading}
+              onClick={() => void doPlaylistSearch(searchedKeyword, playlistSearchPage - 1)}
+              className="rounded-lg px-3 py-1.5 text-sm text-netease-muted transition-colors hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+            >
+              上一页
+            </button>
+            <span className="flex items-center gap-1.5 text-xs text-netease-muted">
+              {playlistSearchLoading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              {playlistSearchPage} / {playlistSearchTotalPages}
+              <span className="ml-1 text-netease-muted/50">共 {playlistSearchTotal} 个</span>
+            </span>
+            <button
+              type="button"
+              disabled={playlistSearchPage >= playlistSearchTotalPages || playlistSearchLoading}
+              onClick={() => void doPlaylistSearch(searchedKeyword, playlistSearchPage + 1)}
+              className="rounded-lg px-3 py-1.5 text-sm text-netease-muted transition-colors hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+            >
+              下一页
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -960,15 +998,15 @@ export default function Room() {
 
       <div className="flex-1 min-h-0 max-w-[1680px] mx-auto w-full px-3 sm:px-4 pt-3 sm:pt-4 pb-[calc(4.75rem+env(safe-area-inset-bottom,0px))] overflow-y-auto lg:overflow-hidden">
 
-        <div className="flex flex-col lg:grid lg:grid-cols-[400px_minmax(0,1fr)_420px] lg:h-full lg:min-h-0 gap-3 lg:gap-4">
+        <div className="flex flex-col lg:grid lg:grid-cols-[360px_minmax(0,1fr)_360px] lg:h-full lg:min-h-0 gap-3 lg:gap-4">
 
           {/* 左侧：点歌热榜 + 为你推荐 */}
           {isLgUp && (
             <div className="order-0 flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-netease-border/50 bg-netease-card/30 lg:h-full">
-              <div className="flex min-h-0 flex-1 flex-col overflow-hidden border-b border-netease-border/50">
+              <div className="flex min-h-[9rem] flex-[5] flex-col overflow-hidden border-b border-netease-border/50">
                 <HotSongPanel embedded addingId={addingId} onAdd={handleAdd} refreshKey={hotRefreshKey} />
               </div>
-              <div className="flex flex-shrink-0 flex-col overflow-hidden">
+              <div className="flex min-h-0 flex-[3.7] flex-col overflow-hidden">
                 <RecommendedPlaylistsPanel onSelectPlaylist={handleRecommendPlaylistSelect} />
               </div>
             </div>
@@ -992,7 +1030,7 @@ export default function Room() {
                   onClick={() => setSongHistoryOpen(true)}
                   className="rounded-lg px-2 py-1 text-[11px] sm:text-xs text-white/75 hover:bg-white/10 hover:text-white transition-colors whitespace-nowrap"
                 >
-                  点歌历史
+                  播放历史
                 </button>
                 {searchableCount > 0 && (
                   <div className="flex flex-shrink-0 items-center gap-1">
@@ -1022,13 +1060,12 @@ export default function Room() {
 
             {/* 手机：搜索结果内联展示（保持原样） */}
             <div className="lg:hidden">
-              {searching && searchedKeyword && (
-                <div className="max-h-56 overflow-hidden rounded-xl">
-                  <SearchSkeleton />
-                </div>
+              {searching && searchedKeyword && !showPlaylistSearch && <SearchSkeleton />}
+              {showPlaylistSkeleton && (
+                <SearchSkeleton count={PLAYLIST_SEARCH_PAGE_SIZE} showPaginationFooter={false} />
               )}
 
-              {!searching && searchedKeyword && (
+              {!searching && !playlistSearchLoading && searchedKeyword && (
                 <div className="flex items-center justify-between mb-2 px-1 gap-2">
                   <span className="text-xs text-netease-muted min-w-0 truncate">
                     {renderResultsSummary()}
@@ -1050,13 +1087,13 @@ export default function Room() {
                 </div>
               )}
 
-              {!searching && searchedKeyword && !hasPlaylistSearchResults && results.length === 0 && (
+              {!searching && !playlistSearchLoading && searchedKeyword && !hasPlaylistSearchResults && results.length === 0 && (
                 <p className="text-center text-netease-muted py-4 sm:py-6 animate-fade-in">
                   {showPlaylistEmpty ? '没有找到相关歌单' : (isPlaylistResults ? '歌单为空或链接无效' : '换个关键词试试')}
                 </p>
               )}
 
-              {!searching && hasPlaylistSearchResults && playlistSearchList}
+              {hasPlaylistSearchResults && playlistSearchList}
 
               {!searching && searchedKeyword && (
                 !showPlaylistSearch && (
@@ -1123,14 +1160,17 @@ export default function Room() {
                 </button>
               </div>
             </div>
-            <div className={`flex-1 min-h-0 p-3 ${searching ? 'overflow-hidden' : 'overflow-y-auto'}`}>
-              {searching && searchedKeyword && <SearchSkeleton />}
-              {!searching && searchedKeyword && !hasPlaylistSearchResults && results.length === 0 && (
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3">
+              {searching && searchedKeyword && !showPlaylistSearch && <SearchSkeleton fillHeight />}
+              {showPlaylistSkeleton && (
+                <SearchSkeleton fillHeight count={PLAYLIST_SEARCH_PAGE_SIZE} showPaginationFooter={false} />
+              )}
+              {!searching && !playlistSearchLoading && searchedKeyword && !hasPlaylistSearchResults && results.length === 0 && (
                 <p className="text-center text-netease-muted py-10 animate-fade-in">
                   {showPlaylistEmpty ? '没有找到相关歌单' : (isPlaylistResults ? '歌单为空或链接无效' : '换个关键词试试')}
                 </p>
               )}
-              {!searching && hasPlaylistSearchResults && playlistSearchList}
+              {hasPlaylistSearchResults && playlistSearchList}
               {!searching && searchedKeyword && (
                 !showPlaylistSearch && (
                 <SongResultList
@@ -1139,6 +1179,7 @@ export default function Room() {
                   onAdd={handleAdd}
                   keyword={searchedKeyword}
                   alwaysShowActions
+                  fillHeight
                   onPageResultsChange={handleListPageResultsChange}
                 />
                 )
@@ -1160,11 +1201,11 @@ export default function Room() {
 
       {songHistoryOpen && (
         <div className="fixed inset-0 z-50 flex items-start justify-center px-4 pt-24 pb-8">
-          <button type="button" className="absolute inset-0 bg-black/65 backdrop-blur-sm" onClick={() => setSongHistoryOpen(false)} aria-label="关闭点歌历史" />
+          <button type="button" className="absolute inset-0 bg-black/65 backdrop-blur-sm" onClick={() => setSongHistoryOpen(false)} aria-label="关闭播放历史" />
           <div className="relative z-10 flex max-h-[min(72vh,680px)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-white/10 glass shadow-2xl">
             <div className="flex items-center justify-between border-b border-netease-border/50 px-4 py-3">
               <div>
-                <h2 className="text-sm font-medium text-white">点歌历史</h2>
+                <h2 className="text-sm font-medium text-white">播放历史</h2>
                 <p className="mt-0.5 text-xs text-netease-muted">最近 {songHistoryItems.length} 首，可直接复播</p>
               </div>
               <button type="button" onClick={() => setSongHistoryOpen(false)} className="rounded-lg p-1.5 text-netease-muted hover:bg-white/10 hover:text-white"><X className="h-5 w-5" /></button>
@@ -1173,12 +1214,12 @@ export default function Room() {
               {songHistoryLoading ? (
                 <div className="py-16 text-center text-sm text-netease-muted">
                   <Loader2 className="mx-auto mb-2 h-8 w-8 animate-spin opacity-40" />
-                  加载点歌历史…
+                  加载播放历史…
                 </div>
               ) : !songHistoryItems.length ? (
                 <div className="py-16 text-center text-sm text-netease-muted">
                   <History className="mx-auto mb-2 h-8 w-8 opacity-40" />
-                  暂无点歌历史
+                  暂无播放历史
                 </div>
               ) : (
                 <div className="space-y-2">
@@ -1247,8 +1288,8 @@ export default function Room() {
                 <button type="button" onClick={() => setFavoritesOpen(false)} className="rounded-lg p-1.5 text-netease-muted hover:bg-white/10 hover:text-white"><X className="h-5 w-5" /></button>
               </div>
             </div>
-            <div className="min-h-0 flex-1 overflow-y-auto p-3">
-              <div className="relative mb-3">
+            <div className="flex-shrink-0 border-b border-netease-border/50 px-4 py-2.5">
+              <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-netease-muted" />
                 <input
                   type="text"
@@ -1258,6 +1299,8 @@ export default function Room() {
                   className="w-full rounded-xl border border-netease-border bg-netease-dark py-2 pl-9 pr-3 text-sm text-white placeholder:text-netease-muted/50 focus:border-netease-red/50 focus:outline-none"
                 />
               </div>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto p-3">
               {favoritesLoading ? (
                 <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-netease-red" /></div>
               ) : filteredFavorites.length === 0 ? (
