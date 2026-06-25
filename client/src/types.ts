@@ -1,5 +1,10 @@
 export type MusicSource = 'netease' | 'tencent' | 'kugou';
 
+export interface RoomAudioQuality {
+  netease: string;
+  tencent: string;
+}
+
 export interface Song {
   id: string;
   source: MusicSource;
@@ -8,7 +13,7 @@ export interface Song {
   album?: string;
   pic?: string;
   duration?: number;
-  /** 直链播放地址（QQ cyapi 等） */
+  /** 直链播放地址（酷狗等） */
   url?: string;
   /** 歌词文本或歌词 API 地址 */
   lrc?: string;
@@ -117,6 +122,8 @@ export interface RoomState {
   songHistory?: SongHistoryItem[];
   /** 服务端正在为空队列拉取随机歌曲 */
   randomLoading?: boolean;
+  /** 房间播放音质（网易 / QQ） */
+  audioQuality?: RoomAudioQuality;
 }
 
 /** CRDT 播放状态（服务端唯一时间源） */

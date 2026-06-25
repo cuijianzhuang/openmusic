@@ -23,6 +23,25 @@ const MAX_RANDOM_PREFETCH_ATTEMPTS = 20;
 const AUTO_ADVANCE_GRACE_SEC = 0.15;
 const LRC_TAIL_PADDING_SEC = 20;
 
+const NETEASE_CANONICAL = new Set(['standard', 'higher', 'exhigh', 'lossless', 'hires']);
+const TENCENT_CANONICAL = new Set(['standard', 'exhigh', 'lossless']);
+const QUALITY_ALIASES = {
+  '128': 'standard',
+  '320': 'exhigh',
+  flac: 'lossless',
+};
+
+function normalizeRoomAudioQuality(input) {
+  const rawNetease = String(input?.netease || 'lossless');
+  const rawTencent = String(input?.tencent || 'lossless');
+  const netease = QUALITY_ALIASES[rawNetease] || rawNetease;
+  const tencent = QUALITY_ALIASES[rawTencent] || rawTencent;
+  return {
+    netease: NETEASE_CANONICAL.has(netease) ? netease : 'lossless',
+    tencent: TENCENT_CANONICAL.has(tencent) ? tencent : 'lossless',
+  };
+}
+
 const rooms = new Map();
 const ensurePlaybackInflight = new Map();
 
@@ -110,6 +129,7 @@ function snapshotRoomForStorage(room) {
     skipRequests: room.skipRequests,
     randomPlayedKeys: Array.from(room.randomPlayedKeys),
     nextRandom: serializeSongMeta(room.nextRandom),
+    audioQuality: room.audioQuality ?? { netease: 'lossless', tencent: 'lossless' },
     createdAt: room.createdAt,
   };
 }
@@ -137,6 +157,7 @@ function restoreRoomFromStorage(data) {
   room.isLocked = Boolean(data.isLocked);
   room.muteAll = Boolean(data.muteAll);
   room.mutedUserIds = new Set(data.mutedUserIds || []);
+  room.audioQuality = normalizeRoomAudioQuality(data.audioQuality);
   room.createdAt = data.createdAt ?? Date.now();
 
   if (room.isPlaying && room.current) {
@@ -274,6 +295,10 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
     randomLoading: false,
     playbackLock: null,
     autoAdvancePromise: null,
+    audioQuality: {
+      netease: 'lossless',
+      tencent: 'lossless',
+    },
     createdAt: Date.now(),
     destroyTimer: null,
   };
@@ -571,6 +596,20 @@ export function setRoomLock(roomId, actorId, options = {}, connectionId = null) 
 
   persistRoom(room);
   invalidateRoomsListCache();
+  return { room: serializeRoom(room) };
+}
+
+export function setRoomAudioQuality(roomId, actorId, quality = {}, connectionId = null) {
+  const room = rooms.get(roomId);
+  if (!room) return { error: '房间不存在' };
+  if (!isOwnerConnection(room, actorId, connectionId)) return { error: '仅房主可调整音质' };
+
+  const current = normalizeRoomAudioQuality(room.audioQuality);
+  room.audioQuality = normalizeRoomAudioQuality({
+    netease: quality.netease ?? current.netease,
+    tencent: quality.tencent ?? current.tencent,
+  });
+  persistRoom(room);
   return { room: serializeRoom(room) };
 }
 
@@ -1673,6 +1712,7 @@ function serializeRoom(room, options = {}) {
     skipRequests: room.skipRequests,
     chatVisibleSince: forUser?.chatVisibleSince ?? null,
     randomLoading: Boolean(room.randomLoading),
+    audioQuality: normalizeRoomAudioQuality(room.audioQuality),
   };
 }
 

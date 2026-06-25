@@ -1,6 +1,5 @@
 import type { MusicProvider, SearchResult } from '../types';
 import type { MusicSource } from '../../../types';
-import { tencentCyapiProvider } from './cyapi';
 import { fetchWithTimeout } from '../../http';
 
 const API_BASE = '/api/meting';
@@ -53,15 +52,10 @@ function createMetingProvider(
   source: Extract<MusicSource, 'netease' | 'tencent'>,
   meta: Omit<import('../types').MusicProviderMeta, 'id'>,
 ): MusicProvider {
-  const cyapi = source === 'tencent' ? tencentCyapiProvider : null;
-
   return {
     id: source,
     ...meta,
     async search(keyword) {
-      if (cyapi && meta.supportsSearch) {
-        return cyapi.search(keyword);
-      }
       if (!meta.supportsSearch || !keyword.trim()) return [];
       const data = await metingFetch<Record<string, unknown>[]>(source, {
         type: 'search',
@@ -81,9 +75,10 @@ function createMetingProvider(
       const song = normalizeSong(raw, source);
       return song.id ? song : null;
     },
-    async getSongUrl(song) {
+    async getSongUrl(song, quality) {
       if (song.url?.startsWith('http')) return song.url;
       const query = new URLSearchParams({ server: song.source, type: 'url', id: song.id });
+      if (quality) query.set('quality', quality);
       const res = await fetchWithTimeout(`${API_BASE}?${query}`, { redirect: 'follow' });
       const text = await res.text();
       if (text.startsWith('@')) return text.slice(1);
@@ -92,12 +87,10 @@ function createMetingProvider(
     },
     async getLyrics(song) {
       if (song.lrc?.startsWith('[')) return song.lrc;
-      if (cyapi && song.source === 'tencent') return cyapi.getLyrics(song);
       return metingText(song.source, { type: 'lrc', id: song.id });
     },
     getCoverUrl(song) {
       if (song.pic) return song.pic;
-      if (cyapi) return cyapi.getCoverUrl(song);
       return `${API_BASE}?server=${song.source}&type=pic&id=${song.id}`;
     },
   };
@@ -117,5 +110,16 @@ export const tencentProvider = createMetingProvider('tencent', {
   color: '#31c27c',
   supportsSearch: true,
   supportsIdLookup: false,
-  description: '通过 cyapi 搜索，Meting 播放',
 });
+
+export async function metingSearchPlaylists(
+  server: Extract<MusicSource, 'netease' | 'tencent'>,
+  keyword: string,
+): Promise<Record<string, unknown>[]> {
+  if (!keyword.trim()) return [];
+  const data = await metingFetch<Record<string, unknown>[]>(server, {
+    type: 'search_playlist',
+    id: keyword.trim(),
+  });
+  return Array.isArray(data) ? data : [];
+}

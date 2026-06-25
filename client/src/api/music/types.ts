@@ -13,7 +13,7 @@ export interface MusicProviderMeta {
 export interface MusicProvider extends MusicProviderMeta {
   search(keyword: string): Promise<SearchResult[]>;
   getSongById(id: string): Promise<SearchResult | null>;
-  getSongUrl(song: Pick<Song, 'id' | 'source' | 'url'>): Promise<string>;
+  getSongUrl(song: Pick<Song, 'id' | 'source' | 'url'>, quality?: string): Promise<string>;
   getLyrics(song: Pick<Song, 'id' | 'source' | 'lrc'>): Promise<string>;
   getCoverUrl(song: Pick<Song, 'id' | 'source' | 'pic'>): string;
 }

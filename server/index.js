@@ -21,6 +21,7 @@ import {
   renameUser,
   renameRoom,
   setRoomLock,
+  setRoomAudioQuality,
   setChatMute,
   addToQueue,
   removeFromQueue,
@@ -55,7 +56,6 @@ import {
 } from './roomManager.js';
 import {
   isCyapiConfigured,
-  searchQqMusic,
   searchKugouMusic,
   getKugouSongDetail,
 } from './cyapi.js';
@@ -395,39 +395,26 @@ app.get('/api/music/netease/playlists/search', async (req, res) => {
   const limit = Math.min(50, Math.max(1, parseInt(String(req.query.limit || '20'), 10) || 20));
   if (!keyword) return res.json({ playlists: [], total: 0, page, limit });
 
-  const params = new URLSearchParams({
-    csrf_token: '',
-    hlpretag: '',
-    hlposttag: '',
-    s: keyword,
-    type: '1000',
-    offset: String((page - 1) * limit),
-    total: page === 1 ? 'true' : 'false',
-    limit: String(limit),
-  });
-
   try {
-    const response = await fetchWithTimeout(`https://music.163.com/api/search/get/web?${params.toString()}`, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36',
-        Referer: 'https://music.163.com/',
-      },
-    }, 10000);
+    const targetUrl = buildMetingUrl({ server: 'netease', type: 'search_playlist', id: keyword });
+    const response = await fetchWithTimeout(targetUrl, {}, 10000);
     if (!response.ok) return res.status(response.status).json({ error: '网易云歌单搜索失败' });
     const data = await response.json();
-    const playlists = Array.isArray(data?.result?.playlists) ? data.result.playlists : [];
+    const playlists = Array.isArray(data) ? data : [];
+    const normalized = playlists.map((item) => ({
+      id: String(item.id || ''),
+      name: String(item.name || item.title || '未命名歌单'),
+      coverImgUrl: String(item.cover || item.coverImgUrl || item.pic || ''),
+      creatorName: String(item.creator?.nickname || item.creator?.name || item.user?.nickname || ''),
+      trackCount: Number(item.trackCount || item.track_count || item.song_count || 0),
+      playCount: Number(item.playCount || item.playcount || 0),
+    })).filter((item) => item.id);
+    const start = (page - 1) * limit;
     res.json({
       page,
       limit,
-      total: Number(data?.result?.playlistCount || 0),
-      playlists: playlists.map((item) => ({
-        id: String(item.id || ''),
-        name: String(item.name || '未命名歌单'),
-        coverImgUrl: String(item.coverImgUrl || ''),
-        creatorName: String(item.creator?.nickname || ''),
-        trackCount: Number(item.trackCount || 0),
-        playCount: Number(item.playCount || 0),
-      })).filter((item) => item.id),
+      total: normalized.length,
+      playlists: normalized.slice(start, start + limit),
     });
   } catch (err) {
     console.error('Netease playlist search error:', err.message);
@@ -450,9 +437,8 @@ app.get('/api/music/sources', (_req, res) => {
       name: 'QQ音乐',
       shortName: 'QQ',
       color: '#31c27c',
-      supportsSearch: isCyapiConfigured(),
+      supportsSearch: true,
       supportsIdLookup: false,
-      description: isCyapiConfigured() ? '通过迟言 API 搜索' : '请配置 CYAPI_KEY',
     },
     {
       id: 'kugou',
@@ -461,7 +447,7 @@ app.get('/api/music/sources', (_req, res) => {
       color: '#2688ee',
       supportsSearch: isCyapiConfigured(),
       supportsIdLookup: false,
-      description: isCyapiConfigured() ? '通过迟言 API 搜索' : '请配置 CYAPI_KEY',
+      description: isCyapiConfigured() ? '通过迟言 API 搜索' : '请配置 CYAPI_KEY（酷狗）',
     },
   ];
   res.json(sources);
@@ -530,29 +516,6 @@ app.get('/api/media-proxy', async (req, res) => {
   } catch (err) {
     console.error('Media proxy error:', err.message);
     res.status(502).json({ error: '媒体代理失败' });
-  }
-});
-
-/** cyapi QQ 音乐搜索 */
-app.get('/api/music/cyapi/search', async (req, res) => {
-  if (!limitProxyRequest(`qq:${getRequestIp(req)}`)) {
-    return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
-  }
-
-  if (!isCyapiConfigured()) {
-    return res.status(503).json({ error: '未配置 CYAPI_KEY' });
-  }
-
-  const keyword = String(req.query.q || '').trim();
-  const num = Math.min(Math.max(parseInt(String(req.query.num || '15'), 10) || 15, 1), 30);
-
-  if (!keyword) return res.json([]);
-
-  try {
-    res.json(await searchQqMusic(keyword, num));
-  } catch (err) {
-    console.error('Cyapi QQ search error:', err.message);
-    res.status(502).json({ error: 'QQ音乐搜索失败' });
   }
 });
 
@@ -944,6 +907,26 @@ io.on('connection', (socket) => {
     }
 
     const result = setRoomLock(roomId, getSocketUserId(socket), { locked, password }, socket.id);
+    if (result.error) {
+      callback?.({ success: false, error: result.error });
+      return;
+    }
+
+    io.to(roomId).emit('room_update', result.room);
+    callback?.({ success: true, room: result.room });
+  });
+
+  socket.on('set_room_audio_quality', ({ netease, tencent }, callback) => {
+    if (rejectReadOnly(socket, callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, 'set_room_audio_quality', callback)) return;
+
+    const roomId = socketToRoom.get(socket.id);
+    if (!roomId) {
+      callback?.({ success: false, error: '未加入房间' });
+      return;
+    }
+
+    const result = setRoomAudioQuality(roomId, getSocketUserId(socket), { netease, tencent }, socket.id);
     if (result.error) {
       callback?.({ success: false, error: result.error });
       return;

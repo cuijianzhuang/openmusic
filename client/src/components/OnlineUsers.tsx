@@ -229,16 +229,30 @@ export default function OnlineUsers({ users, ownerId, creatorId, onNotice }: Pro
                     </div>
 
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5">
-                        <p className="min-w-0 truncate text-sm text-white" title={user.nickname}>
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <p className="min-w-0 flex-1 truncate text-sm text-white" title={user.nickname}>
                           {user.nickname}
                         </p>
-                        {isMe && <span className="rounded-full bg-netease-red/20 px-1.5 text-[9px] text-netease-red">我</span>}
-                        {isRoomOwner && <span className="rounded-full bg-amber-400/15 px-1.5 text-[9px] text-amber-300">房主</span>}
-                        {isCreator && !isRoomOwner && (
-                          <span className="rounded-full bg-white/8 px-1.5 text-[9px] text-netease-muted">创建者</span>
+                        {isMe && (
+                          <span className="flex-shrink-0 whitespace-nowrap rounded-full bg-netease-red/20 px-1.5 py-0 text-[9px] leading-4 text-netease-red">
+                            我
+                          </span>
                         )}
-                        {user.readOnly && <span className="rounded-full bg-white/8 px-1.5 text-[9px] text-netease-muted">TV</span>}
+                        {isRoomOwner && (
+                          <span className="flex-shrink-0 whitespace-nowrap rounded-full bg-amber-400/15 px-1.5 py-0 text-[9px] leading-4 text-amber-300">
+                            房主
+                          </span>
+                        )}
+                        {isCreator && !isRoomOwner && (
+                          <span className="flex-shrink-0 whitespace-nowrap rounded-full bg-white/8 px-1.5 py-0 text-[9px] leading-4 text-netease-muted">
+                            创建者
+                          </span>
+                        )}
+                        {user.readOnly && (
+                          <span className="flex-shrink-0 whitespace-nowrap rounded-full bg-white/8 px-1.5 py-0 text-[9px] leading-4 text-netease-muted">
+                            TV
+                          </span>
+                        )}
                       </div>
                       <div className="mt-0.5 flex items-center gap-1 text-[10px] text-netease-muted/70">
                         <MapPin className="h-3 w-3 flex-shrink-0" />

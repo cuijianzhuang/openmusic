@@ -3,10 +3,12 @@ import { createPortal } from 'react-dom';
 
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 
-import { Search, Loader2, Copy, Check, Crown, Tv, LogOut, X, Heart, Trash2, Plus, Download, ListMusic, Upload, History, ListPlus, Pencil, Lock, LockOpen } from 'lucide-react';
+import { Search, Loader2, Copy, Check, Crown, Tv, LogOut, X, Heart, Trash2, Plus, Download, ListMusic, Upload, History, ListPlus, Pencil, Lock, LockOpen, SlidersHorizontal } from 'lucide-react';
 
 import { searchAllSongs, getAvailableSources, type SearchFilterMode } from '../api/music';
-import { importPlaylist, searchNeteasePlaylists, type NeteasePlaylistSearchItem, type PlaylistPlatform } from '../api/music/playlist';
+import { importPlaylist, searchPlaylists, type PlaylistSearchItem, type PlaylistPlatform } from '../api/music/playlist';
+import { normalizeRoomAudioQuality } from '../api/music/quality';
+import { clearSongUrlCache } from '../lib/songPreloadCache';
 import { rememberPlaylistImportHistory } from '../components/PlaylistImportModal';
 
 import type { FavoriteSong, MusicSource, SearchResult, Song, SongHistoryItem } from '../types';
@@ -44,6 +46,8 @@ import RecommendedPlaylistsPanel from '../components/RecommendedPlaylistsPanel';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useSongHistoryStore } from '../stores/songHistoryStore';
 
+import RoomQualityModal from '../components/RoomQualityModal';
+import RoomQualityBadge from '../components/RoomQualityBadge';
 import JumpRequestBanner from '../components/JumpRequestBanner';
 import Toast from '../components/Toast';
 import { copyToClipboard } from '../lib/copyToClipboard';
@@ -150,7 +154,7 @@ export default function Room() {
     noindex: true,
   });
 
-  const { joinRoom, addSong, leaveRoom, listFavorites, setFavorite, importFavorites, renameRoomName, setRoomLock, loadSongHistory } = useSocket();
+  const { joinRoom, addSong, leaveRoom, listFavorites, setFavorite, importFavorites, renameRoomName, setRoomLock, setRoomAudioQuality, loadSongHistory } = useSocket();
   const { applyFavorites } = useFavorites();
 
 
@@ -177,7 +181,7 @@ export default function Room() {
   const [searchFilterMode, setSearchFilterMode] = useState<SearchFilterMode>('smart');
   const [playlistImportOpen, setPlaylistImportOpen] = useState(false);
   const [isPlaylistResults, setIsPlaylistResults] = useState(false);
-  const [playlistSearchResults, setPlaylistSearchResults] = useState<NeteasePlaylistSearchItem[]>([]);
+  const [playlistSearchResults, setPlaylistSearchResults] = useState<PlaylistSearchItem[]>([]);
   const [playlistSearchPage, setPlaylistSearchPage] = useState(1);
   const [playlistSearchTotal, setPlaylistSearchTotal] = useState(0);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -197,6 +201,8 @@ export default function Room() {
   const [lockOpen, setLockOpen] = useState(false);
   const [lockPassword, setLockPassword] = useState('');
   const [lockSaving, setLockSaving] = useState(false);
+  const [qualityOpen, setQualityOpen] = useState(false);
+  const [qualitySaving, setQualitySaving] = useState(false);
   const songHistoryItems = useSongHistoryStore((s) => s.songs);
   const songHistoryLoading = useSongHistoryStore((s) => s.loading);
 
@@ -461,7 +467,7 @@ export default function Room() {
     setIsPlaylistResults(false);
     setResults([]);
     try {
-      const data = await searchNeteasePlaylists(trimmed, page, PLAYLIST_SEARCH_PAGE_SIZE);
+      const data = await searchPlaylists(trimmed, page, PLAYLIST_SEARCH_PAGE_SIZE);
       setPlaylistSearchResults(data.playlists);
       setPlaylistSearchPage(data.page);
       setPlaylistSearchTotal(data.total);
@@ -509,8 +515,8 @@ export default function Room() {
     }
   }, [showToast]);
 
-  const handleRecommendPlaylistSelect = useCallback(async (playlist: NeteasePlaylistSearchItem) => {
-    await handlePlaylistImport('netease', playlist.id);
+  const handleRecommendPlaylistSelect = useCallback(async (playlist: PlaylistSearchItem) => {
+    await handlePlaylistImport(playlist.platform, playlist.id);
   }, [handlePlaylistImport]);
 
   const handleSearch = useCallback(() => {
@@ -582,9 +588,27 @@ export default function Room() {
     }
   }, [addingPage, addSong, showToast]);
 
+  const handleSaveRoomQuality = useCallback(async (quality: ReturnType<typeof normalizeRoomAudioQuality>) => {
+    if (qualitySaving) return;
+    setQualitySaving(true);
+    const res = await setRoomAudioQuality(quality);
+    setQualitySaving(false);
+    if (res.success) {
+      clearSongUrlCache();
+      showToast('音质已更新', 'success');
+    } else {
+      showToast(res.error || '音质设置失败', 'error');
+    }
+  }, [qualitySaving, setRoomAudioQuality, showToast]);
+
   const handleAddCurrentPage = useCallback(() => {
     void handleAddMany(listPageSongs);
   }, [handleAddMany, listPageSongs]);
+
+  useEffect(() => {
+    if (!room?.audioQuality) return;
+    clearSongUrlCache();
+  }, [room?.audioQuality?.netease, room?.audioQuality?.tencent]);
 
 
 
@@ -750,7 +774,7 @@ export default function Room() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-          placeholder={searchMode === 'playlist' ? '搜索网易云歌单...' : '搜索歌曲、歌手...'}
+          placeholder={searchMode === 'playlist' ? '搜索网易/QQ歌单...' : '搜索歌曲、歌手...'}
           className="w-full bg-netease-card border border-netease-border rounded-xl sm:rounded-2xl pl-10 sm:pl-12 pr-4 py-3 sm:py-3.5 text-sm sm:text-base text-white placeholder:text-netease-muted/50 focus:outline-none focus:border-netease-red/50 transition-colors"
         />
       </div>
@@ -774,7 +798,7 @@ export default function Room() {
       <div className={`relative min-h-0 flex-1 overflow-y-auto ${playlistSearchLoading ? 'pointer-events-none' : ''}`}>
         <div className={`space-y-2 transition-opacity ${playlistSearchLoading ? 'opacity-40' : ''}`}>
           {playlistSearchResults.map((playlist) => (
-            <div key={playlist.id} className="group flex items-center gap-2 rounded-xl p-2.5 transition-colors hover:bg-netease-card/80 sm:gap-3 sm:p-3">
+            <div key={`${playlist.platform}-${playlist.id}`} className="group flex items-center gap-2 rounded-xl p-2.5 transition-colors hover:bg-netease-card/80 sm:gap-3 sm:p-3">
               <img
                 src={playlist.coverImgUrl || 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect fill="%23333" width="48" height="48"/><text x="24" y="28" text-anchor="middle" fill="%23666" font-size="16">♪</text></svg>'}
                 alt=""
@@ -782,12 +806,14 @@ export default function Room() {
               />
               <div className="min-w-0 flex-1 space-y-0.5">
                 <p className="truncate text-sm font-medium">{playlist.name}</p>
-                <p className="truncate text-xs text-netease-muted">{playlist.creatorName || '网易云歌单'} · {playlist.trackCount} 首</p>
+                <p className="truncate text-xs text-netease-muted">
+                  {playlist.creatorName || (playlist.platform === 'qq' ? 'QQ音乐歌单' : '网易云歌单')} · {playlist.trackCount} 首
+                </p>
               </div>
-              <SourceBadge source="netease" variant="muted" />
+              <SourceBadge source={playlist.platform === 'qq' ? 'tencent' : 'netease'} variant="muted" />
               <button
                 type="button"
-                onClick={() => handlePlaylistImport('netease', playlist.id)}
+                onClick={() => handlePlaylistImport(playlist.platform, playlist.id)}
                 disabled={playlistSearchLoading || searching}
                 className="flex flex-shrink-0 items-center gap-1 rounded-full bg-netease-red/10 px-2.5 py-1 text-xs font-medium text-netease-red transition-all hover:bg-netease-red hover:text-white disabled:opacity-50"
               >
@@ -849,6 +875,14 @@ export default function Room() {
         />
       )}
 
+      <RoomQualityModal
+        open={qualityOpen}
+        value={normalizeRoomAudioQuality(room?.audioQuality)}
+        saving={qualitySaving}
+        onClose={() => setQualityOpen(false)}
+        onSave={handleSaveRoomQuality}
+      />
+
       <header className="glass flex-shrink-0 z-30 border-b border-netease-border/50 px-3 sm:px-4 py-2.5 sm:py-3 safe-top">
 
         <div className="max-w-[1680px] mx-auto flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
@@ -904,13 +938,27 @@ export default function Room() {
 
                 )}
 
+                {isOwner && (
+                  <button
+                    type="button"
+                    onClick={() => setQualityOpen(true)}
+                    className="flex-shrink-0 rounded-lg p-1 text-netease-muted transition-colors hover:bg-white/10 hover:text-white"
+                    title="调整音质"
+                  >
+                    <SlidersHorizontal className="w-3.5 h-3.5" />
+                  </button>
+                )}
+
               </div>
 
               <p className="text-xs text-netease-muted mt-0.5">
                 房间号 <span className="text-netease-red">{room.id}</span>
               </p>
 
-              <p className="text-xs text-netease-muted">{room.userCount} 人在线</p>
+              <div className="mt-0.5 flex flex-wrap items-center gap-2">
+                <p className="text-xs text-netease-muted">{room.userCount} 人在线</p>
+                <RoomQualityBadge audioQuality={room.audioQuality} />
+              </div>
 
             </div>
 

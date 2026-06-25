@@ -4,7 +4,7 @@
 
 ### 1. Meting-API（必填）
 
-网易云 / QQ 播放、歌词、封面、网易歌单导入均依赖 Meting-API。
+网易云 / QQ 播放、歌词、封面、歌单搜索与导入均依赖 Meting-API。
 
 ```bash
 docker pull ghcr.io/mikus-loli/meting-api:latest
@@ -15,7 +15,7 @@ docker run -d --name meting -p 3000:3000 ghcr.io/mikus-loli/meting-api:latest
 
 ### 2. 迟言 API Key（可选）
 
-用于 QQ 搜索、酷狗、队列为空随机推荐、QQ 歌单导入。不配置时仅网易可用。
+用于**酷狗**搜索/播放、**队列为空随机推荐**（wyrp）。不配置时网易与 QQ 仍可用，酷狗与随机推荐不可用。
 
 在 [迟言 API](https://cyapi.top/) 注册获取 `CYAPI_KEY`。
 
@@ -37,7 +37,7 @@ docker run -d --name meting -p 3000:3000 ghcr.io/mikus-loli/meting-api:latest
 | `CLIENT_ID_SECRET` | 生产必填 | 浏览器会话签名密钥，**重启后不要变化** |
 | `METING_API_URL` | 必填 | Meting-API 地址 |
 | `METING_API_AUTH` | 推荐 | Meting 的 `auth` 令牌 |
-| `CYAPI_KEY` | 可选 | 迟言 API Key |
+| `CYAPI_KEY` | 可选 | 迟言 API Key（酷狗 + 随机推荐） |
 | `CYAPI_BASE` | 可选 | 迟言 API 根地址，默认 `https://cyapi.top/API` |
 | `REDIS_URL` | 可选 | Redis 连接串 |
 | `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` 等 | 可选 | 与 `REDIS_URL` 二选一 |

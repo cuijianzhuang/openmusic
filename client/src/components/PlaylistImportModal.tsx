@@ -167,7 +167,7 @@ export default function PlaylistImportModal({
               type="button"
               onClick={() => setPlatform('qq')}
               disabled={!qqImportEnabled}
-              title={qqImportEnabled ? undefined : '请配置 CYAPI_KEY 后使用'}
+              title={qqImportEnabled ? undefined : 'QQ 音乐歌单导入暂不可用'}
               className="w-full rounded-xl border border-white/10 bg-netease-card/80 px-4 py-3 text-sm text-white text-left hover:border-netease-red/40 hover:bg-white/5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {PLATFORM_LABELS.qq}

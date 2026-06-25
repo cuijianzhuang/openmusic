@@ -107,7 +107,7 @@ export const kugouProvider: MusicProvider = {
     };
   },
 
-  async getSongUrl(song) {
+  async getSongUrl(song, _quality?: string) {
     if (isPlayableUrl(song.url)) return song.url!;
     const detail = await fetchKugouDetail(song.id);
     if (!isPlayableUrl(detail?.url)) throw new Error('无法获取播放链接');

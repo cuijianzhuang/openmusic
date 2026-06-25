@@ -5,6 +5,7 @@ import { interleaveSearchResults } from './merge';
 import { hasValidLrc, fetchFallbackLrc } from './lrcFallback';
 import { fetchWithTimeout } from '../http';
 import { toSecureMediaUrl } from '../../lib/secureMediaUrl';
+import { getRoomPlaybackQuality } from './quality';
 import { resizeCoverUrl, type CoverSize } from '../../lib/coverUrl';
 import { getClientId } from '../../lib/clientId';
 
@@ -68,9 +69,20 @@ export async function getSongById(source: MusicSource, id: string): Promise<Sear
 
 export async function getSongUrl(song: Pick<Song, 'id' | 'source' | 'url'>): Promise<string> {
   const source = song.source || 'netease';
-  const url = await getProvider(source).getSongUrl({ ...song, source });
+  const quality = getRoomPlaybackQuality(source);
+  const url = await getProvider(source).getSongUrl({ ...song, source }, quality);
   return toSecureMediaUrl(url);
 }
+
+export {
+  getQualityLabel,
+  normalizeRoomAudioQuality,
+  DEFAULT_ROOM_AUDIO_QUALITY,
+  NETEASE_QUALITY_OPTIONS,
+  TENCENT_QUALITY_OPTIONS,
+} from './quality';
+export type { NeteaseQuality, TencentQuality } from './quality';
+export type { RoomAudioQuality } from '../../types';
 
 const lyricsInflight = new Map<string, Promise<string>>();
 const LYRICS_CACHE_TTL_MS = 5 * 60_000;

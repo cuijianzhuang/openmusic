@@ -1,4 +1,5 @@
 import { getSongUrl, getTrackKey } from '../api/music';
+import { getRoomPlaybackQuality } from '../api/music/quality';
 import type { QueueItem } from '../types';
 import { isMobileDevice } from './audioUnlock';
 
@@ -76,6 +77,22 @@ function trackKeyOf(song: Pick<QueueItem, 'queueId' | 'id' | 'source'>) {
   return getTrackKey(song);
 }
 
+function urlCacheKey(song: Pick<QueueItem, 'queueId' | 'id' | 'source'>) {
+  const source = song.source || 'netease';
+  const quality = getRoomPlaybackQuality(source);
+  return `${trackKeyOf(song)}:${quality || 'default'}`;
+}
+
+export function clearSongUrlCache() {
+  urlCache.clear();
+  pendingFetches.clear();
+  try {
+    sessionStorage.removeItem(URL_CACHE_STORAGE_KEY);
+  } catch {
+    // sessionStorage may be unavailable.
+  }
+}
+
 function trimUrlCache() {
   while (urlCache.size > MAX_URL_CACHE) {
     const oldest = urlCache.keys().next().value;
@@ -89,7 +106,7 @@ async function fetchSongUrl(
   song: Pick<QueueItem, 'queueId' | 'id' | 'source' | 'url'>,
   options: { refresh?: boolean } = {},
 ): Promise<string | null> {
-  const key = trackKeyOf(song);
+  const key = urlCacheKey(song);
   if (options.refresh) {
     urlCache.delete(key);
   } else {

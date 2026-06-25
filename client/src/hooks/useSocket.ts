@@ -599,6 +599,19 @@ if (s.connected) {
     });
   }, []);
 
+  const setRoomAudioQuality = useCallback((quality: { netease: string; tencent: string }): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
+    return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
+      'set_room_audio_quality',
+      quality,
+      { success: false, error: '连接超时，请重试' },
+    ).then((res) => {
+      if (res.success && res.room) {
+        applyRoomSnapshot(res.room);
+      }
+      return res;
+    });
+  }, []);
+
   const setChatMute = useCallback((options: { muteAll?: boolean; userId?: string; muted?: boolean }): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
     return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
       'set_chat_mute',
@@ -704,6 +717,8 @@ if (s.connected) {
     renameRoomName,
 
     setRoomLock,
+
+    setRoomAudioQuality,
 
     setChatMute,
 
