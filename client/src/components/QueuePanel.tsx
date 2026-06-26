@@ -8,6 +8,8 @@ import { useSocket } from '../hooks/useSocket';
 import SongCover from './SongCover';
 import SourceBadge from './SourceBadge';
 import FavoriteButton from './FavoriteButton';
+import Tooltip from './Tooltip';
+import TruncateTip from './TruncateTip';
 
 /** 单条约 64px + 间距，固定显示 3 条 */
 const VISIBLE_ROWS = 3;
@@ -132,22 +134,22 @@ export default function QueuePanel({ fillHeight = false }: Props) {
               />
               <div className="flex-1 min-w-0 self-stretch flex flex-col justify-center gap-1">
                 <div className="flex items-center gap-1.5 min-w-0">
-                  <p
+                  <TruncateTip
+                    text={song.name}
+                    as="p"
                     className={`min-w-0 flex-1 text-sm leading-5 truncate ${
                       song.isCurrent ? 'text-netease-red font-medium' : 'text-white/92'
                     }`}
-                    title={song.name}
-                  >
-                    {song.name}
-                  </p>
+                  />
                   {hasSourceError && (
-                    <span
-                      className="inline-flex flex-shrink-0 items-center gap-0.5 rounded-md border border-red-500/40 bg-red-500/15 px-1.5 py-0.5 text-[9px] sm:text-[10px] font-medium leading-tight text-red-400 max-w-[9rem] sm:max-w-none"
-                      title="歌曲源异常，将跳过此歌"
-                    >
+                    <Tooltip content="歌曲源异常，将跳过此歌" side="bottom">
+                      <span
+                        className="inline-flex flex-shrink-0 items-center gap-0.5 rounded-md border border-red-500/40 bg-red-500/15 px-1.5 py-0.5 text-[9px] sm:text-[10px] font-medium leading-tight text-red-400 max-w-[9rem] sm:max-w-none"
+                      >
                       <AlertTriangle className="h-3 w-3 flex-shrink-0" />
                       <span className="truncate sm:whitespace-nowrap">歌曲源异常，将跳过此歌</span>
                     </span>
+                    </Tooltip>
                   )}
                   {Boolean(song.ownerPriority) && (
                     <span className="rounded-full bg-amber-400/15 px-1.5 py-0 text-[9px] leading-4 text-amber-300">房主</span>
@@ -163,47 +165,52 @@ export default function QueuePanel({ fillHeight = false }: Props) {
                   />
                   {!song.isCurrent && (
                     <div className="flex flex-shrink-0 items-center gap-0.5">
-                      <button
-                        onClick={() => handleLike(song.queueId)}
-                        className={`flex min-w-7 items-center justify-center gap-0.5 rounded-lg px-1 py-1 text-[11px] transition-colors ${
-                          likedByMe
-                            ? 'bg-netease-red/10 text-netease-red'
-                            : 'text-netease-muted hover:bg-white/10 hover:text-white'
-                        }`}
-                        title={likedByMe ? '取消点赞' : '点赞提高排序'}
-                      >
-                        <ThumbsUp className="h-3.5 w-3.5" />
-                        {likeCount > 0 && <span>{likeCount}</span>}
-                      </button>
-                      {canJump && (
+                      <Tooltip content={likedByMe ? '取消点赞' : '点赞提高排序'}>
                         <button
-                          onClick={() => handleJumpRequest(song.queueId)}
-                          className="rounded-lg p-1 text-amber-400/75 transition-colors hover:bg-amber-400/10 hover:text-amber-300"
-                          title={canControlPlayback ? '管理员插队，优先于点赞排序' : '插队到下一首'}
+                          onClick={() => handleLike(song.queueId)}
+                          className={`flex min-w-7 items-center justify-center gap-0.5 rounded-lg px-1 py-1 text-[11px] transition-colors ${
+                            likedByMe
+                              ? 'bg-netease-red/10 text-netease-red'
+                              : 'text-netease-muted hover:bg-white/10 hover:text-white'
+                          }`}
+                          aria-label={likedByMe ? '取消点赞' : '点赞'}
                         >
-                          <Zap className="h-3.5 w-3.5" />
+                          <ThumbsUp className="h-3.5 w-3.5" />
+                          {likeCount > 0 && <span>{likeCount}</span>}
                         </button>
+                      </Tooltip>
+                      {canJump && (
+                        <Tooltip content={canControlPlayback ? '管理员插队，优先于点赞排序' : '插队到下一首'}>
+                          <button
+                            onClick={() => handleJumpRequest(song.queueId)}
+                            className="rounded-lg p-1 text-amber-400/75 transition-colors hover:bg-amber-400/10 hover:text-amber-300"
+                            aria-label="插队"
+                          >
+                            <Zap className="h-3.5 w-3.5" />
+                          </button>
+                        </Tooltip>
                       )}
                       {canRemove && (
-                        <button
-                          onClick={() => removeSong(song.queueId)}
-                          className="rounded-lg p-1 text-netease-muted transition-colors hover:bg-netease-red/10 hover:text-netease-red"
-                          title={canControlPlayback && !isMine ? '移除歌曲' : '删除我的点歌'}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                        <Tooltip content={canControlPlayback && !isMine ? '移除歌曲' : '删除我的点歌'}>
+                          <button
+                            onClick={() => removeSong(song.queueId)}
+                            className="rounded-lg p-1 text-netease-muted transition-colors hover:bg-netease-red/10 hover:text-netease-red"
+                            aria-label="删除"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </Tooltip>
                       )}
                     </div>
                   )}
                 </div>
                 <div className="flex items-center gap-2 text-[11px] leading-4 text-netease-muted min-w-0">
-                  <span className="min-w-0 truncate" title={song.artist}>
-                    {song.artist}
-                  </span>
+                  <TruncateTip text={song.artist} className="min-w-0 truncate" />
                   {!song.isCurrent && song.requestedBy && (
-                    <span className="min-w-0 truncate text-netease-muted/65" title={`${song.requestedBy}点的歌`}>
-                      {song.requestedBy}点的歌
-                    </span>
+                    <TruncateTip
+                      text={`${song.requestedBy}点的歌`}
+                      className="min-w-0 truncate text-netease-muted/65"
+                    />
                   )}
                 </div>
               </div>

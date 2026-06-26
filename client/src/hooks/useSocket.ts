@@ -41,6 +41,8 @@ type JoinSession = {
 };
 
 let lastJoinSession: JoinSession | null = null;
+let lastTvJoinSession: JoinSession | null = null;
+let activeJoinMode: 'normal' | 'tv' | null = null;
 let rejoinInFlight = false;
 let joinGeneration = 0;
 
@@ -84,14 +86,78 @@ function emitWithAck<TResponse>(
 }
 
 function joinPayload(session: JoinSession) {
-  return {
+  const base = {
     roomId: session.roomId,
     nickname: session.nickname,
     password: session.password?.trim() || undefined,
     readOnly: Boolean(session.readOnly),
+  };
+  if (session.readOnly) {
+    return base;
+  }
+  return {
+    ...base,
     clientId: getClientId(),
     clientToken: getClientToken(),
   };
+}
+
+type JoinAckResponse = {
+  success: boolean;
+  error?: string;
+  needsPassword?: boolean;
+  room?: RoomState;
+  messages?: ChatMessage[];
+  chatHasMore?: boolean;
+  playbackState?: PlaybackState;
+  socketId?: string;
+  connectionId?: string;
+  clientId?: string;
+  clientToken?: string;
+  isOwner?: boolean;
+  isAdmin?: boolean;
+  canControlPlayback?: boolean;
+  isPlaybackLeader?: boolean;
+  nickname?: string;
+};
+
+function applyJoinResponse(session: JoinSession, res: JoinAckResponse) {
+  if (!res.success || !res.room) return;
+
+  applyRoomSnapshot(res.room, true);
+  applyJoinSnapshot(res.room, res.playbackState);
+  applyJoinExtras(res.room, { messages: res.messages, chatHasMore: res.chatHasMore });
+
+  const isTvSession = Boolean(session.readOnly);
+  if (isTvSession) {
+    activeJoinMode = 'tv';
+    lastTvJoinSession = session;
+  } else {
+    activeJoinMode = 'normal';
+    lastJoinSession = session;
+    lastTvJoinSession = null;
+    rememberClientIdentity(res.clientId || res.socketId, res.clientToken);
+  }
+
+  const resolvedNickname = res.nickname?.trim()
+    || res.room.users.find((user) => user.id === res.socketId)?.nickname?.trim();
+  if (!isTvSession && resolvedNickname) {
+    useRoomStore.getState().setNickname(resolvedNickname);
+    lastJoinSession = { ...session, nickname: resolvedNickname };
+  }
+
+  if (res.socketId) {
+    useRoomStore.getState().setConnectionInfo(
+      res.socketId,
+      Boolean(res.isOwner),
+      res.connectionId || null,
+      Boolean(res.isAdmin),
+      Boolean(res.isPlaybackLeader),
+    );
+  }
+  if (res.room.current) {
+    prefetchCurrentSong(res.room.current);
+  }
 }
 
 function applyRoomSnapshot(room: RoomState, force = false) {
@@ -138,8 +204,10 @@ function applyJoinExtras(
   prefetchSongHistory(room.id);
 }
 
-function rejoinLastRoom() {
-  const session = lastJoinSession;
+function rejoinActiveRoom() {
+  const session = activeJoinMode === 'tv'
+    ? lastTvJoinSession
+    : lastJoinSession;
   const currentRoom = useRoomStore.getState().room;
   if (!session || !currentRoom || rejoinInFlight) return;
 
@@ -147,50 +215,10 @@ function rejoinLastRoom() {
   getSocket().timeout(SOCKET_ACK_TIMEOUT_MS).emit(
     'join_room',
     joinPayload(session),
-    (
-      err: Error | null,
-      res: {
-        success: boolean;
-        room?: RoomState;
-        messages?: ChatMessage[];
-        chatHasMore?: boolean;
-        playbackState?: PlaybackState;
-        socketId?: string;
-        connectionId?: string;
-        clientId?: string;
-        clientToken?: string;
-        isOwner?: boolean;
-        isAdmin?: boolean;
-        canControlPlayback?: boolean;
-        isPlaybackLeader?: boolean;
-        nickname?: string;
-      } | undefined,
-    ) => {
+    (err: Error | null, res: JoinAckResponse | undefined) => {
       rejoinInFlight = false;
       if (err || !res?.success || !res.room) return;
-
-      applyRoomSnapshot(res.room, true);
-      applyJoinSnapshot(res.room, res.playbackState);
-      applyJoinExtras(res.room, { messages: res.messages, chatHasMore: res.chatHasMore });
-      rememberClientIdentity(res.clientId || res.socketId, res.clientToken);
-      const resolvedNickname = res.nickname?.trim()
-        || res.room.users.find((user) => user.id === res.socketId)?.nickname?.trim();
-      if (resolvedNickname) {
-        useRoomStore.getState().setNickname(resolvedNickname);
-        lastJoinSession = { ...session, nickname: resolvedNickname };
-      }
-      if (res.socketId) {
-        useRoomStore.getState().setConnectionInfo(
-          res.socketId,
-          Boolean(res.isOwner),
-          res.connectionId || null,
-          Boolean(res.isAdmin),
-          Boolean(res.isPlaybackLeader),
-        );
-      }
-      if (res.room.current) {
-        prefetchCurrentSong(res.room.current);
-      }
+      applyJoinResponse(session, res);
     },
   );
 }
@@ -262,6 +290,8 @@ if (socketListenersAttached) return;
     const onKicked = ({ message }: { message?: string }) => {
       joinGeneration += 1;
       lastJoinSession = null;
+      lastTvJoinSession = null;
+      activeJoinMode = null;
       useChatStore.getState().clear();
       useSongHistoryStore.getState().clear();
       stopSharedAudio();
@@ -294,7 +324,7 @@ if (socketListenersAttached) return;
 
     s.on('connect', () => {
       debugLog('socket_connect', { id: s.id, transport: s.io.engine?.transport?.name });
-      rejoinLastRoom();
+      rejoinActiveRoom();
     });
     s.on('disconnect', (reason) => {
       debugLog('socket_disconnect', { reason });
@@ -348,51 +378,15 @@ if (!connected.current && !socketConnectRequested) {
       };
       const generation = ++joinGeneration;
 
-      return emitWithAck<{
-        success: boolean;
-        error?: string;
-        needsPassword?: boolean;
-        room?: RoomState;
-        messages?: ChatMessage[];
-        chatHasMore?: boolean;
-        playbackState?: PlaybackState;
-        socketId?: string;
-        connectionId?: string;
-        clientId?: string;
-        clientToken?: string;
-        isOwner?: boolean;
-        isAdmin?: boolean;
-        isPlaybackLeader?: boolean;
-        nickname?: string;
-      }>('join_room', joinPayload(session), { success: false, error: '连接超时，请检查网络' })
+      return emitWithAck<JoinAckResponse>(
+        'join_room',
+        joinPayload(session),
+        { success: false, error: '连接超时，请检查网络' },
+      )
         .then((res) => {
           if (res.success && res.room) {
             if (generation !== joinGeneration) return res;
-            lastJoinSession = session;
-            applyRoomSnapshot(res.room, true);
-            applyJoinSnapshot(res.room, res.playbackState);
-            applyJoinExtras(res.room, { messages: res.messages, chatHasMore: res.chatHasMore });
-            rememberClientIdentity(res.clientId || res.socketId, res.clientToken);
-
-            const resolvedNickname = res.nickname?.trim()
-              || res.room.users.find((user) => user.id === res.socketId)?.nickname?.trim();
-            if (resolvedNickname) {
-              useRoomStore.getState().setNickname(resolvedNickname);
-              lastJoinSession = { ...session, nickname: resolvedNickname };
-            }
-
-            if (res.socketId) {
-              setConnectionInfo(
-                res.socketId,
-                Boolean(res.isOwner),
-                res.connectionId || null,
-                Boolean(res.isAdmin),
-                Boolean(res.isPlaybackLeader),
-              );
-            }
-            if (res.room.current) {
-              prefetchCurrentSong(res.room.current);
-            }
+            applyJoinResponse(session, res);
           }
 
           return res;
@@ -409,6 +403,8 @@ if (!connected.current && !socketConnectRequested) {
   const leaveRoom = useCallback((): Promise<void> => {
     joinGeneration += 1;
     lastJoinSession = null;
+    lastTvJoinSession = null;
+    activeJoinMode = null;
     useChatStore.getState().clear();
     useSongHistoryStore.getState().clear();
     stopSharedAudio();
@@ -657,6 +653,32 @@ if (s.connected) {
     });
   }, []);
 
+  const setRoomAnnouncement = useCallback((options: { enabled?: boolean; text?: string }): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
+    return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
+      'set_room_announcement',
+      options,
+      { success: false, error: '连接超时，请重试' },
+    ).then((res) => {
+      if (res.success && res.room) {
+        applyRoomSnapshot(res.room);
+      }
+      return res;
+    });
+  }, []);
+
+  const setSongRequestEnabled = useCallback((enabled: boolean): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
+    return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
+      'set_room_song_request',
+      { enabled },
+      { success: false, error: '连接超时，请重试' },
+    ).then((res) => {
+      if (res.success && res.room) {
+        applyRoomSnapshot(res.room);
+      }
+      return res;
+    });
+  }, []);
+
   const setRoomAudioQuality = useCallback((quality: { netease: string; tencent: string }): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
     return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
       'set_room_audio_quality',
@@ -779,6 +801,10 @@ if (s.connected) {
     setRoomLock,
 
     setRoomFmMode,
+
+    setRoomAnnouncement,
+
+    setSongRequestEnabled,
 
     setRoomAudioQuality,
 

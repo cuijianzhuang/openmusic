@@ -23,6 +23,8 @@ import {
   setRoomLock,
   setRoomAudioQuality,
   setRoomFmMode,
+  setRoomAnnouncement,
+  setSongRequestEnabled,
   setChatMute,
   addToQueue,
   removeFromQueue,
@@ -800,7 +802,9 @@ io.on('connection', (socket) => {
       }
     }
 
-    const { userId, clientToken: nextClientToken } = resolveUserIdentity(clientId, clientToken);
+    const { userId, clientToken: nextClientToken } = Boolean(readOnly)
+      ? { userId: createServerClientId(), clientToken: null }
+      : resolveUserIdentity(clientId, clientToken);
 
     // 同一连接再次加入同一房间，但解析出的用户身份不同（如身份令牌尚未持久化、
     // 快速重连或 StrictMode 重复挂载）：先移除旧的占位用户，避免一个浏览器出现多个用户。
@@ -936,6 +940,46 @@ io.on('connection', (socket) => {
     }
 
     const result = setRoomFmMode(roomId, getSocketUserId(socket), mode, socket.id);
+    if (result.error) {
+      callback?.({ success: false, error: result.error });
+      return;
+    }
+
+    io.to(roomId).emit('room_update', result.room);
+    callback?.({ success: true, room: result.room });
+  });
+
+  socket.on('set_room_announcement', ({ enabled, text }, callback) => {
+    if (rejectReadOnly(socket, callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, 'set_room_announcement', callback)) return;
+
+    const roomId = socketToRoom.get(socket.id);
+    if (!roomId) {
+      callback?.({ success: false, error: '未加入房间' });
+      return;
+    }
+
+    const result = setRoomAnnouncement(roomId, getSocketUserId(socket), { enabled, text }, socket.id);
+    if (result.error) {
+      callback?.({ success: false, error: result.error });
+      return;
+    }
+
+    io.to(roomId).emit('room_update', result.room);
+    callback?.({ success: true, room: result.room });
+  });
+
+  socket.on('set_room_song_request', ({ enabled }, callback) => {
+    if (rejectReadOnly(socket, callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, 'set_room_song_request', callback)) return;
+
+    const roomId = socketToRoom.get(socket.id);
+    if (!roomId) {
+      callback?.({ success: false, error: '未加入房间' });
+      return;
+    }
+
+    const result = setSongRequestEnabled(roomId, getSocketUserId(socket), enabled, socket.id);
     if (result.error) {
       callback?.({ success: false, error: result.error });
       return;

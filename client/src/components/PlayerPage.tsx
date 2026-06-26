@@ -18,6 +18,7 @@ import VinylPlayer from './VinylPlayer';
 import SongInfoPanel from './SongInfoPanel';
 
 import ProgressBar from './ProgressBar';
+import Tooltip from './Tooltip';
 import VolumeControl from './VolumeControl';
 import FavoriteButton from './FavoriteButton';
 
@@ -259,43 +260,49 @@ export default function PlayerPage({ onClose }: Props) {
             iconClassName="w-5 h-5 sm:w-6 sm:h-6 2xl:w-8 2xl:h-8"
           />
 
-          <button
-            onClick={canControlPlayback ? handlePlayPause : undefined}
-            disabled={trackLoading || !canControlPlayback}
-            className={`w-14 h-14 sm:w-16 sm:h-16 2xl:w-24 2xl:h-24 flex items-center justify-center rounded-full transition-all shadow-lg shadow-black/30 disabled:opacity-80 ${canControlPlayback ? 'bg-white text-black hover:scale-105' : 'bg-white/10 text-white/70 cursor-not-allowed'}`}
-            title={canControlPlayback ? '暂停/播放' : (isPlaying ? '正在播放' : '已暂停')}
-          >
-            {trackLoading ? (
-              <Loader2 className="w-6 h-6 sm:w-7 sm:h-7 2xl:w-10 2xl:h-10 animate-spin" />
-            ) : isPlaying ? (
-              <Pause className="w-6 h-6 sm:w-7 sm:h-7 2xl:w-10 2xl:h-10" />
-            ) : (
-              <Play className="w-6 h-6 sm:w-7 sm:h-7 2xl:w-10 2xl:h-10 ml-0.5 2xl:ml-1" />
-            )}
-          </button>
-
-          {canControlPlayback ? (
+          <Tooltip content={canControlPlayback ? '暂停/播放' : (isPlaying ? '正在播放' : '已暂停')}>
             <button
-              onClick={handleSkip}
-              disabled={trackLoading}
-              className="w-10 h-10 sm:w-12 sm:h-12 2xl:w-20 2xl:h-20 flex items-center justify-center text-white/70 hover:text-white transition-colors disabled:opacity-50"
-              title="切歌"
+              onClick={canControlPlayback ? handlePlayPause : undefined}
+              disabled={trackLoading || !canControlPlayback}
+              className={`w-14 h-14 sm:w-16 sm:h-16 2xl:w-24 2xl:h-24 flex items-center justify-center rounded-full transition-all shadow-lg shadow-black/30 disabled:opacity-80 ${canControlPlayback ? 'bg-white text-black hover:scale-105' : 'bg-white/10 text-white/70 cursor-not-allowed'}`}
+              aria-label="播放控制"
             >
               {trackLoading ? (
-                <Loader2 className="w-5 h-5 sm:w-6 sm:h-6 2xl:w-8 2xl:h-8 animate-spin" />
+                <Loader2 className="w-6 h-6 sm:w-7 sm:h-7 2xl:w-10 2xl:h-10 animate-spin" />
+              ) : isPlaying ? (
+                <Pause className="w-6 h-6 sm:w-7 sm:h-7 2xl:w-10 2xl:h-10" />
               ) : (
-                <SkipForward className="w-5 h-5 sm:w-6 sm:h-6 2xl:w-8 2xl:h-8" />
+                <Play className="w-6 h-6 sm:w-7 sm:h-7 2xl:w-10 2xl:h-10 ml-0.5 2xl:ml-1" />
               )}
             </button>
+          </Tooltip>
+
+          {canControlPlayback ? (
+            <Tooltip content="切歌">
+              <button
+                onClick={handleSkip}
+                disabled={trackLoading}
+                className="w-10 h-10 sm:w-12 sm:h-12 2xl:w-20 2xl:h-20 flex items-center justify-center text-white/70 hover:text-white transition-colors disabled:opacity-50"
+                aria-label="切歌"
+              >
+                {trackLoading ? (
+                  <Loader2 className="w-5 h-5 sm:w-6 sm:h-6 2xl:w-8 2xl:h-8 animate-spin" />
+                ) : (
+                  <SkipForward className="w-5 h-5 sm:w-6 sm:h-6 2xl:w-8 2xl:h-8" />
+                )}
+              </button>
+            </Tooltip>
           ) : (
-            <button
-              onClick={handleRequestSkip}
-              disabled={hasPendingSkip}
-              className="w-10 h-10 sm:w-12 sm:h-12 2xl:w-20 2xl:h-20 flex items-center justify-center text-white/70 hover:text-white transition-colors disabled:opacity-40"
-              title={hasPendingSkip ? '已申请切歌' : '申请切歌'}
-            >
-              <SkipForward className="w-5 h-5 sm:w-6 sm:h-6 2xl:w-8 2xl:h-8" />
-            </button>
+            <Tooltip content={hasPendingSkip ? '已申请切歌' : '申请切歌'}>
+              <button
+                onClick={handleRequestSkip}
+                disabled={hasPendingSkip}
+                className="w-10 h-10 sm:w-12 sm:h-12 2xl:w-20 2xl:h-20 flex items-center justify-center text-white/70 hover:text-white transition-colors disabled:opacity-40"
+                aria-label="申请切歌"
+              >
+                <SkipForward className="w-5 h-5 sm:w-6 sm:h-6 2xl:w-8 2xl:h-8" />
+              </button>
+            </Tooltip>
           )}
 
         </div>

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, Check } from 'lucide-react';
 import type { MusicSource } from '../types';
+import Tooltip from './Tooltip';
 
 export type SearchFilterMode = 'smart' | MusicSource;
 
@@ -60,23 +61,43 @@ export default function SearchFilterSelect({ value, onChange }: Props) {
           {OPTIONS.map((opt, i) => (
             <div key={opt.value}>
               {i === 1 && <div className="my-1 border-t border-white/10" />}
-              <button
-                type="button"
-                role="option"
-                aria-selected={value === opt.value}
-                title={opt.hint}
-                onClick={() => select(opt.value)}
-                className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${
-                  value === opt.value
-                    ? 'text-netease-red bg-netease-red/10'
-                    : 'text-white/80 hover:bg-white/10 hover:text-white'
-                }`}
-              >
-                <Check
-                  className={`w-3.5 h-3.5 flex-shrink-0 ${value === opt.value ? 'opacity-100' : 'opacity-0'}`}
-                />
-                <span>{opt.label}</span>
-              </button>
+              {opt.hint ? (
+                <Tooltip content={opt.hint}>
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={value === opt.value}
+                    onClick={() => select(opt.value)}
+                    className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${
+                      value === opt.value
+                        ? 'text-netease-red bg-netease-red/10'
+                        : 'text-white/80 hover:bg-white/10 hover:text-white'
+                    }`}
+                  >
+                    <Check
+                      className={`w-3.5 h-3.5 flex-shrink-0 ${value === opt.value ? 'opacity-100' : 'opacity-0'}`}
+                    />
+                    <span>{opt.label}</span>
+                  </button>
+                </Tooltip>
+              ) : (
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={value === opt.value}
+                  onClick={() => select(opt.value)}
+                  className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${
+                    value === opt.value
+                      ? 'text-netease-red bg-netease-red/10'
+                      : 'text-white/80 hover:bg-white/10 hover:text-white'
+                  }`}
+                >
+                  <Check
+                    className={`w-3.5 h-3.5 flex-shrink-0 ${value === opt.value ? 'opacity-100' : 'opacity-0'}`}
+                  />
+                  <span>{opt.label}</span>
+                </button>
+              )}
             </div>
           ))}
         </div>

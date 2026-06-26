@@ -10,6 +10,7 @@ import { useSocket } from '../hooks/useSocket';
 import type { RoomSummary } from '../types';
 import { createRandomNickname } from '../lib/randomNickname';
 import { usePageSeo } from '../lib/seo';
+import Tooltip from '../components/Tooltip';
 
 function GiteeIcon({ className }: { className?: string }) {
   return (
@@ -74,9 +75,11 @@ function RoomCard({
               </span>
             )}
             {room.isLocked && !room.hasPassword && (
-              <span className="flex-shrink-0 p-1 rounded-md bg-red-500/10 text-red-400/90" title="已上锁">
-                <Lock className="w-3.5 h-3.5" />
-              </span>
+              <Tooltip content="已上锁">
+                <span className="flex-shrink-0 p-1 rounded-md bg-red-500/10 text-red-400/90">
+                  <Lock className="w-3.5 h-3.5" />
+                </span>
+              </Tooltip>
             )}
           </div>
           <span className="flex-shrink-0 flex items-center gap-1.5 text-xs text-white/50 bg-white/5 px-2.5 py-1 rounded-full">

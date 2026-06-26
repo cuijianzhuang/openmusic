@@ -14,8 +14,7 @@ import SourceBadge from './SourceBadge';
 import ProgressBar from './ProgressBar';
 import VolumeControl from './VolumeControl';
 import FavoriteButton from './FavoriteButton';
-
-
+import Tooltip from './Tooltip';
 
 interface Props {
 
@@ -250,43 +249,49 @@ export default function MiniPlayer({ onExpand }: Props) {
 
 
 
-        <button
-          onClick={canControlPlayback ? handlePlayPause : undefined}
-          disabled={trackLoading || !canControlPlayback}
-          className={`w-9 h-9 flex items-center justify-center rounded-full transition-all disabled:opacity-70 ${canControlPlayback ? 'bg-white text-black hover:scale-105' : 'bg-white/10 text-white/70 cursor-not-allowed'}`}
-          title={canControlPlayback ? '暂停/播放' : (isPlaying ? '房主正在播放' : '房主已暂停')}
-        >
-          {trackLoading ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : isPlaying ? (
-            <Pause className="w-4 h-4" />
-          ) : (
-            <Play className="w-4 h-4 ml-0.5" />
-          )}
-        </button>
-
-        {canControlPlayback ? (
+        <Tooltip content={canControlPlayback ? '暂停/播放' : (isPlaying ? '房主正在播放' : '房主已暂停')}>
           <button
-            onClick={handleSkip}
-            disabled={trackLoading}
-            className="w-8 h-8 flex items-center justify-center text-netease-muted hover:text-white transition-colors disabled:opacity-50"
-            title="切歌"
+            onClick={canControlPlayback ? handlePlayPause : undefined}
+            disabled={trackLoading || !canControlPlayback}
+            className={`w-9 h-9 flex items-center justify-center rounded-full transition-all disabled:opacity-70 ${canControlPlayback ? 'bg-white text-black hover:scale-105' : 'bg-white/10 text-white/70 cursor-not-allowed'}`}
+            aria-label="播放控制"
           >
             {trackLoading ? (
               <Loader2 className="w-4 h-4 animate-spin" />
+            ) : isPlaying ? (
+              <Pause className="w-4 h-4" />
             ) : (
-              <SkipForward className="w-4 h-4" />
+              <Play className="w-4 h-4 ml-0.5" />
             )}
           </button>
+        </Tooltip>
+
+        {canControlPlayback ? (
+          <Tooltip content="切歌">
+            <button
+              onClick={handleSkip}
+              disabled={trackLoading}
+              className="w-8 h-8 flex items-center justify-center text-netease-muted hover:text-white transition-colors disabled:opacity-50"
+              aria-label="切歌"
+            >
+              {trackLoading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <SkipForward className="w-4 h-4" />
+              )}
+            </button>
+          </Tooltip>
         ) : (
-          <button
-            onClick={handleRequestSkip}
-            disabled={hasPendingSkip}
-            className="w-8 h-8 flex items-center justify-center text-netease-muted hover:text-white transition-colors disabled:opacity-40"
-            title={hasPendingSkip ? '已申请切歌' : '申请切歌'}
-          >
-            <SkipForward className="w-4 h-4" />
-          </button>
+          <Tooltip content={hasPendingSkip ? '已申请切歌' : '申请切歌'}>
+            <button
+              onClick={handleRequestSkip}
+              disabled={hasPendingSkip}
+              className="w-8 h-8 flex items-center justify-center text-netease-muted hover:text-white transition-colors disabled:opacity-40"
+              aria-label="申请切歌"
+            >
+              <SkipForward className="w-4 h-4" />
+            </button>
+          </Tooltip>
         )}
 
         <VolumeControl compact className="flex-shrink-0" />

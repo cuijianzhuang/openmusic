@@ -1,6 +1,7 @@
 import { Check, X } from 'lucide-react';
 import { useRoomStore } from '../stores/roomStore';
 import { useSocket } from '../hooks/useSocket';
+import Tooltip from './Tooltip';
 
 export default function JumpRequestBanner() {
   const room = useRoomStore((s) => s.room);
@@ -25,20 +26,24 @@ export default function JumpRequestBanner() {
             </p>
             <p className="text-xs text-sky-200/50 truncate">{req.songName}</p>
           </div>
-          <button
-            onClick={() => approveSkip(req.id)}
-            className="p-1.5 rounded-lg bg-green-500/20 text-green-400 hover:bg-green-500/30 transition-colors"
-            title="同意"
-          >
-            <Check className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => rejectSkip(req.id)}
-            className="p-1.5 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors"
-            title="拒绝"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          <Tooltip content="同意">
+            <button
+              onClick={() => approveSkip(req.id)}
+              className="p-1.5 rounded-lg bg-green-500/20 text-green-400 hover:bg-green-500/30 transition-colors"
+              aria-label="同意"
+            >
+              <Check className="w-4 h-4" />
+            </button>
+          </Tooltip>
+          <Tooltip content="拒绝">
+            <button
+              onClick={() => rejectSkip(req.id)}
+              className="p-1.5 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors"
+              aria-label="拒绝"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </Tooltip>
         </div>
       ))}
     </div>

@@ -130,6 +130,12 @@ export interface RoomState {
   audioQuality?: RoomAudioQuality;
   /** 队列为空时网易云私人漫游模式 */
   neteaseFmMode?: string;
+  /** 公告是否开启 */
+  announcementEnabled?: boolean;
+  /** 公告内容 */
+  announcementText?: string;
+  /** 是否允许成员点歌（关闭后仅房主/管理员可点） */
+  songRequestEnabled?: boolean;
 }
 
 /** CRDT 播放状态（服务端唯一时间源） */

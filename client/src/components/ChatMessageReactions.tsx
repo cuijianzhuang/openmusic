@@ -16,6 +16,7 @@ import {
   subscribeQQFaces,
   type QFaceItem,
 } from '../lib/qface';
+import Tooltip from './Tooltip';
 
 const MAX_VISIBLE_GROUPS = 3;
 
@@ -27,21 +28,23 @@ function ReactionFaceButton({
   onPick: (emoji: string) => void;
 }) {
   return (
-    <button
-      key={face.id}
-      type="button"
-      onMouseDown={(event) => event.preventDefault()}
-      onClick={() => onPick(qqFaceToken(face.id))}
-      className="flex h-10 w-full items-center justify-center overflow-hidden rounded-lg transition-colors hover:bg-white/10 active:bg-white/15"
-      title={face.text}
-    >
-      <QFaceImage
-        id={face.id}
-        priority={QFaceLoadPriority.PANEL}
-        className="h-7 w-7 max-w-full object-contain"
-        placeholderClassName="h-7 w-7"
-      />
-    </button>
+    <Tooltip content={face.text}>
+      <button
+        key={face.id}
+        type="button"
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => onPick(qqFaceToken(face.id))}
+        className="flex h-10 w-full items-center justify-center overflow-hidden rounded-lg transition-colors hover:bg-white/10 active:bg-white/15"
+        aria-label={face.text}
+      >
+        <QFaceImage
+          id={face.id}
+          priority={QFaceLoadPriority.PANEL}
+          className="h-7 w-7 max-w-full object-contain"
+          placeholderClassName="h-7 w-7"
+        />
+      </button>
+    </Tooltip>
   );
 }
 

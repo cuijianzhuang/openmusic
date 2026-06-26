@@ -3,6 +3,8 @@ import { Check, Crown, MapPin, Pencil, Shield, UserMinus, Users, X } from 'lucid
 import { useRoomStore } from '../stores/roomStore';
 import { useSocket } from '../hooks/useSocket';
 import ConfirmModal from './ConfirmModal';
+import Tooltip from './Tooltip';
+import TruncateTip from './TruncateTip';
 import type { RoomUser } from '../types';
 
 interface Props {
@@ -21,6 +23,7 @@ export default function OnlineUsers({ users, creatorId, onNotice }: Props) {
   const room = useRoomStore((s) => s.room);
   const mySocketId = useRoomStore((s) => s.mySocketId);
   const isOwner = useRoomStore((s) => s.isOwner);
+  const canControlPlayback = useRoomStore((s) => s.canControlPlayback);
   const adminIds = room?.adminIds || [];
   const userNicknames = room?.userNicknames || {};
   const nickname = useRoomStore((s) => s.nickname);
@@ -95,7 +98,7 @@ export default function OnlineUsers({ users, creatorId, onNotice }: Props) {
   };
 
   const handleKick = (user: DisplayUser) => {
-    if (!isOwner || kickingId || user.offline) return;
+    if (!canControlPlayback || kickingId || user.offline) return;
     setPendingAction({ type: 'kick', user });
   };
 
@@ -141,7 +144,7 @@ export default function OnlineUsers({ users, creatorId, onNotice }: Props) {
   };
 
   const canKick = (user: DisplayUser) => (
-    isOwner
+    canControlPlayback
     && !user.offline
     && user.id !== mySocketId
     && user.id !== creatorId
@@ -157,31 +160,36 @@ export default function OnlineUsers({ users, creatorId, onNotice }: Props) {
 
   return (
     <div className="relative" ref={panelRef}>
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        className="flex items-center gap-2 rounded-xl px-2 py-1.5 text-xs text-netease-muted hover:bg-netease-card hover:text-white transition-colors"
-        title="查看房间用户"
-      >
+      <Tooltip content="查看房间用户" side="bottom">
+        <button
+          type="button"
+          onClick={() => setOpen((value) => !value)}
+          className="flex items-center gap-2 rounded-xl px-2 py-1.5 text-xs text-netease-muted hover:bg-netease-card hover:text-white transition-colors"
+          aria-label="查看房间用户"
+        >
         <Users className="w-4 h-4" />
         <div className="flex -space-x-2">
           {orderedUsers.slice(0, 5).map((user) => (
-            <div
+            <Tooltip
               key={user.id}
-              title={user.id === creatorId ? `${user.nickname}（房主）` : user.nickname}
-              className={`relative w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white border-2 border-netease-dark ${
-                user.id === creatorId
-                  ? 'bg-gradient-to-br from-amber-500 to-orange-600'
-                  : user.id === mySocketId
-                    ? 'bg-gradient-to-br from-netease-red to-pink-500'
-                    : 'bg-gradient-to-br from-zinc-500 to-zinc-700'
-              }`}
+              content={user.id === creatorId ? `${user.nickname}（房主）` : user.nickname}
+              side="bottom"
             >
-              {user.nickname.charAt(0).toUpperCase()}
-              {user.id === creatorId && (
-                <Crown className="absolute -top-1 -right-1 w-3 h-3 text-amber-300" />
-              )}
-            </div>
+              <div
+                className={`relative w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white border-2 border-netease-dark ${
+                  user.id === creatorId
+                    ? 'bg-gradient-to-br from-amber-500 to-orange-600'
+                    : user.id === mySocketId
+                      ? 'bg-gradient-to-br from-netease-red to-pink-500'
+                      : 'bg-gradient-to-br from-zinc-500 to-zinc-700'
+                }`}
+              >
+                {user.nickname.charAt(0).toUpperCase()}
+                {user.id === creatorId && (
+                  <Crown className="absolute -top-1 -right-1 w-3 h-3 text-amber-300" />
+                )}
+              </div>
+            </Tooltip>
           ))}
           {orderedUsers.length > 5 && (
             <div className="w-7 h-7 rounded-full bg-netease-card flex items-center justify-center text-[10px] text-white border-2 border-netease-dark">
@@ -190,7 +198,8 @@ export default function OnlineUsers({ users, creatorId, onNotice }: Props) {
           )}
         </div>
         <span className="hidden sm:inline">共 {users.length} 人</span>
-      </button>
+        </button>
+      </Tooltip>
 
       {open && (
         <div className="absolute right-0 top-full mt-2 w-72 rounded-2xl border border-netease-border/70 bg-netease-dark/95 p-3 shadow-2xl backdrop-blur z-30">
@@ -243,9 +252,11 @@ export default function OnlineUsers({ users, creatorId, onNotice }: Props) {
 
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 items-center gap-1.5">
-                        <p className="min-w-0 flex-1 truncate text-sm text-white" title={user.nickname}>
-                          {user.nickname}
-                        </p>
+                        <TruncateTip
+                          text={user.nickname}
+                          as="p"
+                          className="min-w-0 flex-1 truncate text-sm text-white"
+                        />
                         {isMe && (
                           <span className="flex-shrink-0 whitespace-nowrap rounded-full bg-netease-red/20 px-1.5 py-0 text-[9px] leading-4 text-netease-red">
                             我
@@ -298,32 +309,35 @@ export default function OnlineUsers({ users, creatorId, onNotice }: Props) {
                       )}
 
                       {canToggleAdmin(user) && (
-                        <button
-                          type="button"
-                          onClick={() => handleToggleAdmin(user)}
-                          disabled={adminTogglingId === user.id}
-                          className={`rounded-lg p-1.5 transition-colors disabled:opacity-40 ${
-                            isAdmin
-                              ? 'bg-sky-400/15 text-sky-300'
-                              : 'text-netease-muted hover:bg-sky-400/10 hover:text-sky-300'
-                          }`}
-                          aria-label={isAdmin ? '取消管理员' : '设为管理员'}
-                          title={isAdmin ? '取消管理员' : '设为管理员'}
-                        >
-                          <Shield className="w-3.5 h-3.5" />
-                        </button>
+                        <Tooltip content={isAdmin ? '取消管理员' : '设为管理员'}>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleAdmin(user)}
+                            disabled={adminTogglingId === user.id}
+                            className={`rounded-lg p-1.5 transition-colors disabled:opacity-40 ${
+                              isAdmin
+                                ? 'bg-sky-400/15 text-sky-300'
+                                : 'text-netease-muted hover:bg-sky-400/10 hover:text-sky-300'
+                            }`}
+                            aria-label={isAdmin ? '取消管理员' : '设为管理员'}
+                          >
+                            <Shield className="w-3.5 h-3.5" />
+                          </button>
+                        </Tooltip>
                       )}
 
                       {canKick(user) && (
-                        <button
-                          type="button"
-                          onClick={() => handleKick(user)}
-                          disabled={kickingId === user.id}
-                          className="rounded-lg p-1.5 text-netease-muted hover:bg-red-500/10 hover:text-red-300 transition-colors disabled:opacity-40"
-                          aria-label="踢出"
-                        >
-                          <UserMinus className="w-3.5 h-3.5" />
-                        </button>
+                        <Tooltip content="踢出">
+                          <button
+                            type="button"
+                            onClick={() => handleKick(user)}
+                            disabled={kickingId === user.id}
+                            className="rounded-lg p-1.5 text-netease-muted hover:bg-red-500/10 hover:text-red-300 transition-colors disabled:opacity-40"
+                            aria-label="踢出"
+                          >
+                            <UserMinus className="w-3.5 h-3.5" />
+                          </button>
+                        </Tooltip>
                       )}
                     </div>
                   </div>
@@ -342,15 +356,17 @@ export default function OnlineUsers({ users, creatorId, onNotice }: Props) {
                         placeholder="输入新昵称"
                         autoFocus
                       />
-                      <button
-                        type="button"
-                        onClick={saveNickname}
-                        disabled={saving || !draftName.trim()}
-                        className="rounded-lg bg-netease-red px-2 text-white disabled:opacity-40"
-                        title="保存昵称"
-                      >
-                        <Check className="w-3.5 h-3.5" />
-                      </button>
+                      <Tooltip content="保存昵称">
+                        <button
+                          type="button"
+                          onClick={saveNickname}
+                          disabled={saving || !draftName.trim()}
+                          className="rounded-lg bg-netease-red px-2 text-white disabled:opacity-40"
+                          aria-label="保存昵称"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                        </button>
+                      </Tooltip>
                     </div>
                   )}
                 </div>

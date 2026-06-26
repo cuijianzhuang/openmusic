@@ -134,6 +134,9 @@ function snapshotRoomForStorage(room) {
     userNicknames: Object.fromEntries(room.userNicknames || []),
     audioQuality: room.audioQuality ?? { netease: 'hires', tencent: 'lossless' },
     neteaseFmMode: normalizeFmMode(room.neteaseFmMode),
+    announcementEnabled: Boolean(room.announcementEnabled),
+    announcementText: String(room.announcementText || '').slice(0, MAX_ANNOUNCEMENT_LENGTH),
+    songRequestEnabled: room.songRequestEnabled !== false,
     createdAt: room.createdAt,
   };
 }
@@ -166,6 +169,9 @@ function restoreRoomFromStorage(data) {
   room.userNicknames = new Map(Object.entries(data.userNicknames || {}));
   room.audioQuality = normalizeRoomAudioQuality(data.audioQuality);
   room.neteaseFmMode = normalizeFmMode(data.neteaseFmMode);
+  room.announcementEnabled = Boolean(data.announcementEnabled);
+  room.announcementText = String(data.announcementText || '').slice(0, MAX_ANNOUNCEMENT_LENGTH);
+  room.songRequestEnabled = data.songRequestEnabled !== false;
   room.createdAt = data.createdAt ?? Date.now();
 
   if (room.isPlaying && room.current) {
@@ -311,6 +317,9 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
       tencent: 'lossless',
     },
     neteaseFmMode: DEFAULT_FM_MODE,
+    announcementEnabled: false,
+    announcementText: '',
+    songRequestEnabled: true,
     createdAt: Date.now(),
     destroyTimer: null,
   };
@@ -396,6 +405,18 @@ function canControlPlayback(room, userId) {
   if (isRoomCreator(room, userId)) return true;
   return isAdminUser(room, userId);
 }
+
+function canModerate(room, userId) {
+  return canControlPlayback(room, userId);
+}
+
+function canUserRequestSong(room, userId) {
+  if (!room || !userId) return false;
+  if (room.songRequestEnabled !== false) return true;
+  return canControlPlayback(room, userId);
+}
+
+const MAX_ANNOUNCEMENT_LENGTH = 2000;
 
 function removeUserFromAdmins(room, userId) {
   if (!userId) return;
@@ -600,10 +621,12 @@ export function addUser(roomId, userId, nickname, options = {}) {
     normalizeNickname(nickname) || existing?.nickname || getDefaultNickname(room),
   );
 
+  const readOnly = Boolean(options.readOnly);
+
   room.users.set(userId, {
     id: userId,
     nickname: resolvedNickname,
-    readOnly: Boolean(options.readOnly),
+    readOnly,
     joinedAt: existing?.joinedAt || Date.now(),
     connectionId: options.connectionId || null,
     connectionIds,
@@ -812,7 +835,7 @@ function isUserChatMuted(room, userId) {
 export function setChatMute(roomId, actorId, options = {}, connectionId = null) {
   const room = rooms.get(roomId);
   if (!room) return { error: '房间不存在' };
-  if (!isOwnerConnection(room, actorId, connectionId)) return { error: '仅房主可禁言' };
+  if (!canModerate(room, actorId)) return { error: '仅房主或管理员可禁言' };
 
   if (!room.mutedUserIds) room.mutedUserIds = new Set();
 
@@ -829,6 +852,32 @@ export function setChatMute(roomId, actorId, options = {}, connectionId = null) 
     }
   }
 
+  persistRoom(room);
+  return { room: serializeRoom(room) };
+}
+
+export function setRoomAnnouncement(roomId, actorId, options = {}, connectionId = null) {
+  const room = rooms.get(roomId);
+  if (!room) return { error: '房间不存在' };
+  if (!canModerate(room, actorId)) return { error: '仅房主或管理员可设置公告' };
+
+  if (options.enabled !== undefined) {
+    room.announcementEnabled = Boolean(options.enabled);
+  }
+  if (options.text !== undefined) {
+    room.announcementText = String(options.text || '').trim().slice(0, MAX_ANNOUNCEMENT_LENGTH);
+  }
+
+  persistRoom(room);
+  return { room: serializeRoom(room) };
+}
+
+export function setSongRequestEnabled(roomId, actorId, enabled, connectionId = null) {
+  const room = rooms.get(roomId);
+  if (!room) return { error: '房间不存在' };
+  if (!canModerate(room, actorId)) return { error: '仅房主或管理员可调整点歌设置' };
+
+  room.songRequestEnabled = Boolean(enabled);
   persistRoom(room);
   return { room: serializeRoom(room) };
 }
@@ -874,7 +923,7 @@ export function renameUser(roomId, socketId, nickname) {
 export function kickUser(roomId, actorId, targetUserId, connectionId = null) {
   const room = rooms.get(roomId);
   if (!room) return { error: '房间不存在' };
-  if (!isOwnerConnection(room, actorId, connectionId)) return { error: '仅房主可踢人' };
+  if (!canModerate(room, actorId)) return { error: '仅房主或管理员可踢人' };
   if (targetUserId === actorId) return { error: '不能踢出自己' };
   if (targetUserId === room.creatorId) return { error: '不能踢出房间创建者' };
 
@@ -1054,6 +1103,10 @@ export async function addToQueue(roomId, song, requestedByUser) {
     id: requestedByUser?.id || '',
     nickname: requestedByUser?.nickname || '匿名',
   };
+
+  if (!canUserRequestSong(room, requestedBy.id)) {
+    return { error: '房主已禁止点歌' };
+  }
 
   if (isSongInPlaylist(room, song)) {
     return { error: '这首歌已经在歌单里啦' };
@@ -1904,6 +1957,9 @@ function serializeRoom(room, options = {}) {
     randomLoading: Boolean(room.randomLoading),
     audioQuality: normalizeRoomAudioQuality(room.audioQuality),
     neteaseFmMode: normalizeFmMode(room.neteaseFmMode),
+    announcementEnabled: Boolean(room.announcementEnabled),
+    announcementText: String(room.announcementText || '').slice(0, MAX_ANNOUNCEMENT_LENGTH),
+    songRequestEnabled: room.songRequestEnabled !== false,
   };
 }
 

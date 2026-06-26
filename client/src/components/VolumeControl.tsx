@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Volume2, Volume1, VolumeX } from 'lucide-react';
 import { useAudioStore } from '../stores/audioStore';
 import { applyAudioVolume } from '../lib/audioElement';
+import Tooltip from './Tooltip';
 
 interface Props {
   className?: string;
@@ -64,7 +65,6 @@ export default function VolumeControl({
         style={{ ['--volume-pct' as string]: pct }}
         className={`volume-range absolute left-1/2 top-1/2 h-1 -translate-x-1/2 -translate-y-1/2 -rotate-90 cursor-pointer ${inputWidth}`}
         aria-label="音量"
-        title="音量"
       />
     </div>
   );
@@ -72,16 +72,17 @@ export default function VolumeControl({
   if (compact) {
     return (
       <div ref={rootRef} className={`relative flex items-center ${className}`}>
-        <button
-          type="button"
-          onClick={() => setExpanded((v) => !v)}
-          className={`flex items-center justify-center transition-colors ${buttonClassName}`}
-          title="音量"
-          aria-label="音量"
-          aria-expanded={expanded}
-        >
-          <Icon className={iconClassName} />
-        </button>
+        <Tooltip content="音量">
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className={`flex items-center justify-center transition-colors ${buttonClassName}`}
+            aria-label="音量"
+            aria-expanded={expanded}
+          >
+            <Icon className={iconClassName} />
+          </button>
+        </Tooltip>
         {expanded && (
           <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2.5 py-3 rounded-lg bg-netease-card border border-netease-border/60 shadow-lg flex flex-col items-center">
             {slider}

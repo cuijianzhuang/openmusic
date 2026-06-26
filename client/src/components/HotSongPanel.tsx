@@ -1,9 +1,11 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { Flame, Plus, Loader2, TrendingUp } from 'lucide-react';
 import type { HotSongItem, SearchResult } from '../types';
 import { getHotSongs, songKey } from '../api/music';
 import SongCover from './SongCover';
 import SourceBadge from './SourceBadge';
+import Tooltip from './Tooltip';
+import TruncateTip from './TruncateTip';
 
 interface Props {
   addingId: string | null;
@@ -19,27 +21,6 @@ function rankStyle(rank: number) {
   if (rank === 2) return 'bg-orange-500/90 text-white';
   if (rank === 3) return 'bg-amber-500/80 text-white';
   return 'bg-white/10 text-white/50';
-}
-
-function TruncateWithTip({ text, className }: { text: string; className?: string }) {
-  const ref = useRef<HTMLParagraphElement>(null);
-  const [title, setTitle] = useState<string | undefined>();
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const update = () => setTitle(el.scrollWidth > el.clientWidth ? text : undefined);
-    update();
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [text]);
-
-  return (
-    <p ref={ref} className={className} title={title}>
-      {text}
-    </p>
-  );
 }
 
 const HOT_SONG_LIST_LIMIT = 15;
@@ -122,8 +103,8 @@ export default function HotSongPanel({
                     </span>
                     <span className="text-[10px] text-netease-muted truncate">{song.count} 次</span>
                   </div>
-                  <TruncateWithTip text={song.name} className="text-xs font-medium truncate" />
-                  <TruncateWithTip text={song.artist} className="text-[10px] text-netease-muted truncate" />
+                  <TruncateTip text={song.name} className="text-xs font-medium truncate" />
+                  <TruncateTip text={song.artist} className="text-[10px] text-netease-muted truncate" />
                 </button>
               ))}
             </div>
@@ -177,26 +158,28 @@ export default function HotSongPanel({
                     className="w-9 h-9 rounded-md object-cover bg-netease-card flex-shrink-0"
                   />
                   <div className="flex-1 min-w-0">
-                    <TruncateWithTip text={song.name} className="text-xs font-medium truncate leading-snug" />
-                    <TruncateWithTip text={song.artist} className="text-[10px] text-netease-muted truncate" />
+                    <TruncateTip text={song.name} className="text-xs font-medium truncate leading-snug" />
+                    <TruncateTip text={song.artist} className="text-[10px] text-netease-muted truncate" />
                   </div>
                   <div className="flex flex-col items-end gap-1 flex-shrink-0">
                     <span className="text-[10px] text-orange-400/90 font-medium">{song.count} 次</span>
                     <SourceBadge source={song.source} variant="muted" className="scale-90 origin-right" />
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => handleAdd(song)}
-                    disabled={isAdding}
-                    className="flex-shrink-0 p-1.5 rounded-lg bg-netease-red/10 text-netease-red opacity-0 group-hover:opacity-100 hover:bg-netease-red hover:text-white transition-all disabled:opacity-50"
-                    title="点歌"
-                  >
-                    {isAdding ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Plus className="w-3.5 h-3.5" />
-                    )}
-                  </button>
+                  <Tooltip content="点歌">
+                    <button
+                      type="button"
+                      onClick={() => handleAdd(song)}
+                      disabled={isAdding}
+                      className="flex-shrink-0 p-1.5 rounded-lg bg-netease-red/10 text-netease-red opacity-0 group-hover:opacity-100 hover:bg-netease-red hover:text-white transition-all disabled:opacity-50"
+                      aria-label="点歌"
+                    >
+                      {isAdding ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Plus className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+                  </Tooltip>
                 </div>
               );
             })}

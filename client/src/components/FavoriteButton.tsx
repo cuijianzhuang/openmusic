@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Heart, Loader2 } from 'lucide-react';
 import type { Song } from '../types';
 import { useFavorites } from '../hooks/useFavorites';
+import Tooltip from './Tooltip';
 
 interface Props {
   song: Song | null;
@@ -39,20 +40,23 @@ export default function FavoriteButton({
 
   const hoverClass = showOnHover ? 'opacity-100 sm:opacity-0 sm:group-hover:opacity-100' : '';
 
+  const tip = error || `${titlePrefix}${favorited ? '取消收藏' : '收藏'}`;
+
   return (
-    <button
-      type="button"
-      onClick={handleToggle}
-      disabled={!song || loading}
-      className={`flex flex-shrink-0 items-center justify-center rounded-full transition-colors disabled:opacity-50 ${favorited ? 'text-rose-300' : ''} ${hoverClass} ${className}`}
-      title={error || `${titlePrefix}${favorited ? '取消收藏' : '收藏'}`}
-      aria-label={favorited ? '取消收藏' : '收藏'}
-    >
-      {loading ? (
-        <Loader2 className={`${iconClassName} animate-spin`} />
-      ) : (
-        <Heart className={`${iconClassName} ${favorited ? 'fill-current' : ''}`} />
-      )}
-    </button>
+    <Tooltip content={tip}>
+      <button
+        type="button"
+        onClick={handleToggle}
+        disabled={!song || loading}
+        className={`flex flex-shrink-0 items-center justify-center rounded-full transition-colors disabled:opacity-50 ${favorited ? 'text-rose-300' : ''} ${hoverClass} ${className}`}
+        aria-label={favorited ? '取消收藏' : '收藏'}
+      >
+        {loading ? (
+          <Loader2 className={`${iconClassName} animate-spin`} />
+        ) : (
+          <Heart className={`${iconClassName} ${favorited ? 'fill-current' : ''}`} />
+        )}
+      </button>
+    </Tooltip>
   );
 }

@@ -16,6 +16,7 @@ import VinylPlayer from '../components/VinylPlayer';
 import SongInfoPanel from '../components/SongInfoPanel';
 import ProgressBar from '../components/ProgressBar';
 import AudioEngine from '../components/AudioEngine';
+import Tooltip from '../components/Tooltip';
 import { usePageSeo } from '../lib/seo';
 
 function getStoredRoomPassword(roomId: string | undefined) {
@@ -213,15 +214,16 @@ export default function TvDisplay() {
     <div ref={containerRef} className="h-full w-full bg-[#080808]">
       <AudioEngine tvMode />
       {!isFullscreen && room && !joinError && (
-        <button
-          type="button"
-          onClick={enterFullscreen}
-          className="fixed top-4 right-4 z-[55] w-10 h-10 flex items-center justify-center rounded-xl bg-black/40 border border-white/10 text-white/70 hover:text-white hover:bg-black/60 transition-colors"
-          title="全屏"
-          aria-label="全屏"
-        >
-          <Maximize className="w-5 h-5" />
-        </button>
+        <Tooltip content="全屏">
+          <button
+            type="button"
+            onClick={enterFullscreen}
+            className="fixed top-4 right-4 z-[55] w-10 h-10 flex items-center justify-center rounded-xl bg-black/40 border border-white/10 text-white/70 hover:text-white hover:bg-black/60 transition-colors"
+            aria-label="全屏"
+          >
+            <Maximize className="w-5 h-5" />
+          </button>
+        </Tooltip>
       )}
       {content}
     </div>

@@ -9,6 +9,7 @@ import { useMediaQuery } from '../hooks/useMediaQuery';
 import type { ChatMessage, ChatReplyRef, RoomUser } from '../types';
 import { isChatMutedForUser } from '../lib/chatMute';
 import QFaceImage from './QFaceImage';
+import Tooltip from './Tooltip';
 import { ChatMessageReactions, ChatReactionPicker } from './ChatMessageReactions';
 import {
   ensureQQFacesLoaded,
@@ -67,7 +68,7 @@ export default function ChatPanel() {
   const room = useRoomStore((s) => s.room);
   const nickname = useRoomStore((s) => s.nickname);
   const mySocketId = useRoomStore((s) => s.mySocketId);
-  const isOwner = useRoomStore((s) => s.isOwner);
+  const canControlPlayback = useRoomStore((s) => s.canControlPlayback);
   const messages = useChatStore((s) => s.messages);
   const hasMoreOlder = useChatStore((s) => s.hasMoreOlder);
   const loadingOlder = useChatStore((s) => s.loadingOlder);
@@ -564,24 +565,25 @@ export default function ChatPanel() {
       </div>
       <div ref={bindEmojiGridRef} className={gridClassName}>
         {qqFaces.map((face) => (
-          <button
-            key={face.id}
-            type="button"
-            data-face-id={face.id}
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => insertEmoji(face)}
-            className="flex h-8 items-center justify-center rounded-lg transition-colors hover:bg-white/10 active:bg-white/15"
-            title={face.text}
-          >
-            <QFaceImage
-              id={face.id}
-              priority={QFaceLoadPriority.PANEL}
-              nearPriority={QFaceLoadPriority.NEAR}
-              observeRoot={emojiGridRoot}
-              className="h-6 w-auto max-w-7 object-contain"
-              placeholderClassName="h-6 w-6"
-            />
-          </button>
+          <Tooltip key={face.id} content={face.text}>
+            <button
+              type="button"
+              data-face-id={face.id}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => insertEmoji(face)}
+              className="flex h-8 items-center justify-center rounded-lg transition-colors hover:bg-white/10 active:bg-white/15"
+              aria-label={face.text}
+            >
+              <QFaceImage
+                id={face.id}
+                priority={QFaceLoadPriority.PANEL}
+                nearPriority={QFaceLoadPriority.NEAR}
+                observeRoot={emojiGridRoot}
+                className="h-6 w-auto max-w-7 object-contain"
+                placeholderClassName="h-6 w-6"
+              />
+            </button>
+          </Tooltip>
         ))}
       </div>
     </>
@@ -685,15 +687,17 @@ export default function ChatPanel() {
             <span className="text-[10px] text-amber-400/90 bg-amber-400/10 px-1.5 py-0.5 rounded-full">全体禁言</span>
           )}
         </div>
-        {isOwner && (
-          <button
-            type="button"
-            onClick={() => setShowMutePicker(true)}
-            className="rounded-lg p-1.5 text-netease-muted transition-colors hover:bg-white/10 hover:text-white"
-            title="禁言管理"
-          >
-            <MicOff className="h-4 w-4" />
-          </button>
+        {canControlPlayback && (
+          <Tooltip side="bottom" content="禁言管理">
+            <button
+              type="button"
+              onClick={() => setShowMutePicker(true)}
+              className="rounded-lg p-1.5 text-netease-muted transition-colors hover:bg-white/10 hover:text-white"
+              aria-label="禁言管理"
+            >
+              <MicOff className="h-4 w-4" />
+            </button>
+          </Tooltip>
         )}
       </div>
 
@@ -718,13 +722,14 @@ export default function ChatPanel() {
                   {msg.nickname}{isRoomCreator && <span className="ml-1 text-amber-400/80">房主</span>}
                 </button>
                 {msg.timestamp > 0 && (
-                  <time
-                    dateTime={new Date(msg.timestamp).toISOString()}
-                    className="text-[10px] text-netease-muted/65 tabular-nums whitespace-nowrap"
-                    title={new Date(msg.timestamp).toLocaleString('zh-CN')}
-                  >
-                    {formatChatTime(msg.timestamp)}
-                  </time>
+                  <Tooltip content={new Date(msg.timestamp).toLocaleString('zh-CN')} side="bottom">
+                    <time
+                      dateTime={new Date(msg.timestamp).toISOString()}
+                      className="text-[10px] text-netease-muted/65 tabular-nums whitespace-nowrap"
+                    >
+                      {formatChatTime(msg.timestamp)}
+                    </time>
+                  </Tooltip>
                 )}
               </div>
               <div className={`flex max-w-[90%] items-start gap-1.5 ${isMe ? 'flex-row-reverse justify-end' : ''}`}>
@@ -752,19 +757,23 @@ export default function ChatPanel() {
                     reactionPickerMessageId === msg.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
                   }`}
                 >
-                  <button type="button" onClick={() => handleReply(msg)} className="rounded p-0.5 text-netease-muted hover:bg-white/10 hover:text-white" title="回复">
-                    <Reply className="h-3 w-3" />
-                  </button>
-                  <button
-                    type="button"
-                    disabled={chatMuted}
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => setReactionPickerMessageId((current) => (current === msg.id ? null : msg.id))}
-                    className="rounded p-0.5 text-netease-muted hover:bg-white/10 hover:text-white disabled:opacity-40"
-                    title="点评表情"
-                  >
-                    <Smile className="h-3 w-3" />
-                  </button>
+                  <Tooltip content="回复">
+                    <button type="button" onClick={() => handleReply(msg)} className="rounded p-0.5 text-netease-muted hover:bg-white/10 hover:text-white" aria-label="回复">
+                      <Reply className="h-3 w-3" />
+                    </button>
+                  </Tooltip>
+                  <Tooltip content="点评表情">
+                    <button
+                      type="button"
+                      disabled={chatMuted}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => setReactionPickerMessageId((current) => (current === msg.id ? null : msg.id))}
+                      className="rounded p-0.5 text-netease-muted hover:bg-white/10 hover:text-white disabled:opacity-40"
+                      aria-label="点评表情"
+                    >
+                      <Smile className="h-3 w-3" />
+                    </button>
+                  </Tooltip>
                 </div>
               </div>
             </div>
@@ -772,15 +781,16 @@ export default function ChatPanel() {
           })}
         </div>
         {showScrollToBottom && (
-          <button
-            type="button"
-            onClick={() => scrollChatToBottom('smooth')}
-            className="absolute bottom-3 right-3 z-20 flex h-8 w-8 items-center justify-center rounded-full border border-white/15 bg-netease-dark/95 text-white shadow-lg backdrop-blur transition-colors hover:bg-white/15"
-            title="回到底部"
-            aria-label="回到底部"
-          >
-            <ChevronDown className="h-4 w-4" />
-          </button>
+          <Tooltip content="回到底部">
+            <button
+              type="button"
+              onClick={() => scrollChatToBottom('smooth')}
+              className="absolute bottom-3 right-3 z-20 flex h-8 w-8 items-center justify-center rounded-full border border-white/15 bg-netease-dark/95 text-white shadow-lg backdrop-blur transition-colors hover:bg-white/15"
+              aria-label="回到底部"
+            >
+              <ChevronDown className="h-4 w-4" />
+            </button>
+          </Tooltip>
         )}
       </div>
 
@@ -822,15 +832,17 @@ export default function ChatPanel() {
               {renderEmojiPickerContent('grid max-h-64 grid-cols-8 gap-0.5 overflow-y-auto overscroll-contain px-0.5 py-0.5')}
             </div>
           )}
-          <button
-            type="button"
-            onClick={() => setShowEmoji((value) => !value)}
-            disabled={chatMuted}
-            className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl border border-netease-border/50 transition-colors disabled:opacity-40 ${showEmoji ? 'border-netease-red/30 bg-netease-red/15 text-netease-red' : 'bg-netease-dark text-netease-muted hover:bg-white/5 hover:text-white'}`}
-            title="QQ 表情"
-          >
-            <Smile className="h-4 w-4" />
-          </button>
+          <Tooltip content="QQ 表情">
+            <button
+              type="button"
+              onClick={() => setShowEmoji((value) => !value)}
+              disabled={chatMuted}
+              className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl border border-netease-border/50 transition-colors disabled:opacity-40 ${showEmoji ? 'border-netease-red/30 bg-netease-red/15 text-netease-red' : 'bg-netease-dark text-netease-muted hover:bg-white/5 hover:text-white'}`}
+              aria-label="QQ 表情"
+            >
+              <Smile className="h-4 w-4" />
+            </button>
+          </Tooltip>
           <div className="relative min-w-0 flex-1">
             {showMentionPicker && (
               <div className="absolute bottom-full left-0 z-20 mb-2 w-56 overflow-hidden rounded-2xl border border-netease-border/70 bg-netease-dark/95 p-1.5 shadow-2xl backdrop-blur">

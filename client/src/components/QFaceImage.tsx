@@ -9,6 +9,7 @@ import {
   subscribeQFaceImageState,
   type QFaceLoadPriority as QFacePriority,
 } from '../lib/qface';
+import Tooltip from './Tooltip';
 
 interface Props {
   id: string;
@@ -73,23 +74,23 @@ export default function QFaceImage({
   }, [id, nearPriority, observeRoot, priority]);
 
   return (
-    <span ref={anchorRef} className="inline-flex align-middle">
-      {decoded ? (
-        <img
-          src={getQQFaceUrl(id)}
-          alt={face.text}
-          title={face.text}
-          className={className}
-          decoding="async"
-          onLoad={() => markQFaceImageRendered(id)}
-        />
-      ) : (
-        <span
-          className={placeholderClassName || className}
-          title={face.text}
-          aria-hidden="true"
-        />
-      )}
-    </span>
+    <Tooltip content={face.text} side="bottom">
+      <span ref={anchorRef} className="inline-flex align-middle">
+        {decoded ? (
+          <img
+            src={getQQFaceUrl(id)}
+            alt={face.text}
+            className={className}
+            decoding="async"
+            onLoad={() => markQFaceImageRendered(id)}
+          />
+        ) : (
+          <span
+            className={placeholderClassName || className}
+            aria-hidden="true"
+          />
+        )}
+      </span>
+    </Tooltip>
   );
 }

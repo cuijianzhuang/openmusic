@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 
-import { Search, Loader2, Copy, Check, Crown, Tv, LogOut, X, Heart, Plus, Download, ListMusic, Upload, History, ListPlus, Pencil, Lock, LockOpen, Radio, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, Loader2, Copy, Check, Crown, Tv, LogOut, X, Heart, Plus, Download, ListMusic, Upload, History, ListPlus, Pencil, Lock, LockOpen, Radio, ChevronLeft, ChevronRight, Megaphone, Music2, Ban } from 'lucide-react';
 
 import { searchAllSongs, getAvailableSources, type SearchFilterMode } from '../api/music';
 import { importPlaylist, searchPlaylists, type PlaylistSearchItem, type PlaylistPlatform } from '../api/music/playlist';
@@ -50,8 +50,13 @@ import { useSongHistoryStore } from '../stores/songHistoryStore';
 
 import RoomFmModeBadge from '../components/RoomFmModeBadge';
 import RoomFmModeModal from '../components/RoomFmModeModal';
+import RoomAnnouncementModal from '../components/RoomAnnouncementModal';
+import RoomAnnouncementPopup from '../components/RoomAnnouncementPopup';
+import { canRequestSong } from '../lib/roomPermissions';
+import { markAnnouncementSeen, shouldAutoShowAnnouncement } from '../lib/announcementSeen';
 import JumpRequestBanner from '../components/JumpRequestBanner';
 import Toast from '../components/Toast';
+import Tooltip from '../components/Tooltip';
 import { copyToClipboard } from '../lib/copyToClipboard';
 
 
@@ -147,7 +152,7 @@ export default function Room() {
 
   const roomPassword = (location.state as { password?: string } | null)?.password || getStoredRoomPassword(roomId);
 
-  const { room, showPlayer, setShowPlayer, isOwner, isAdmin, mySocketId, exitReason } = useRoomStore();
+  const { room, showPlayer, setShowPlayer, isOwner, isAdmin, canControlPlayback, mySocketId, exitReason } = useRoomStore();
 
   usePageSeo({
     title: room?.name ? `${room.name} 房间` : '正在加入房间',
@@ -158,7 +163,7 @@ export default function Room() {
     noindex: true,
   });
 
-  const { joinRoom, addSong, leaveRoom, listFavorites, setFavorite, importFavorites, renameRoomName, setRoomLock, setRoomFmMode, loadSongHistory } = useSocket();
+  const { joinRoom, addSong, leaveRoom, listFavorites, setFavorite, importFavorites, renameRoomName, setRoomLock, setRoomFmMode, setRoomAnnouncement, setSongRequestEnabled, loadSongHistory } = useSocket();
   const { applyFavorites } = useFavorites();
 
 
@@ -210,6 +215,10 @@ export default function Room() {
   const [lockSaving, setLockSaving] = useState(false);
   const [fmOpen, setFmOpen] = useState(false);
   const [fmSaving, setFmSaving] = useState(false);
+  const [announcementOpen, setAnnouncementOpen] = useState(false);
+  const [announcementSaving, setAnnouncementSaving] = useState(false);
+  const [announcementPopupOpen, setAnnouncementPopupOpen] = useState(false);
+  const [songRequestSaving, setSongRequestSaving] = useState(false);
   const songHistoryItems = useSongHistoryStore((s) => s.songs);
   const songHistoryLoading = useSongHistoryStore((s) => s.loading);
 
@@ -225,6 +234,7 @@ export default function Room() {
   const closeToast = useCallback(() => setToast(null), []);
 
   const isCreator = Boolean(room?.creatorId && mySocketId && room.creatorId === mySocketId);
+  const songRequestAllowed = canRequestSong(room, isOwner, isAdmin);
 
   const openRenameModal = useCallback(() => {
     if (!room) return;
@@ -439,6 +449,12 @@ export default function Room() {
       }
 
       rememberRoomPassword(roomId, roomPassword);
+      if (
+        res.room
+        && shouldAutoShowAnnouncement(res.room.id, res.room.announcementEnabled, res.room.announcementText)
+      ) {
+        setAnnouncementPopupOpen(true);
+      }
     });
 
     return () => {
@@ -447,6 +463,13 @@ export default function Room() {
       // 刷新/关闭页面时不主动 leave，避免房间被暂停；依赖 socket 断开与重连
     };
   }, [roomId, roomPassword, joinRoom, leaveRoom, navigate]);
+
+  useEffect(() => {
+    if (!room?.id) return;
+    if (shouldAutoShowAnnouncement(room.id, room.announcementEnabled, room.announcementText)) {
+      setAnnouncementPopupOpen(true);
+    }
+  }, [room?.id, room?.announcementEnabled, room?.announcementText]);
 
   useEffect(() => {
     if (!exitReason) return;
@@ -586,6 +609,10 @@ export default function Room() {
   }, []);
 
   const handleAdd = async (song: SearchResult) => {
+    if (!songRequestAllowed) {
+      showToast('房主已禁止点歌', 'error');
+      return;
+    }
     const key = songKey(song);
     setAddingId(key);
     const res = await addSong({
@@ -614,6 +641,10 @@ export default function Room() {
 
   const handleAddMany = useCallback(async (songs: SearchResult[]) => {
     if (addingPage || songs.length === 0) return;
+    if (!canRequestSong(useRoomStore.getState().room, isOwner, isAdmin)) {
+      showToast('房主已禁止点歌', 'error');
+      return;
+    }
     setAddingPage(true);
     try {
       const result = await addSongsToQueue(songs, {
@@ -626,7 +657,7 @@ export default function Room() {
     } finally {
       setAddingPage(false);
     }
-  }, [addingPage, addSong, showToast]);
+  }, [addingPage, addSong, showToast, isOwner, isAdmin]);
 
   const handleSaveFmMode = useCallback(async (mode: string) => {
     if (fmSaving) return;
@@ -640,6 +671,39 @@ export default function Room() {
       showToast(res.error || '漫游模式设置失败', 'error');
     }
   }, [fmSaving, setRoomFmMode, showToast]);
+
+  const handleSaveAnnouncement = useCallback(async (options: { enabled: boolean; text: string }) => {
+    if (announcementSaving) return;
+    setAnnouncementSaving(true);
+    const res = await setRoomAnnouncement(options);
+    setAnnouncementSaving(false);
+    if (res.success) {
+      setAnnouncementOpen(false);
+      showToast('公告已更新', 'success');
+    } else {
+      showToast(res.error || '公告设置失败', 'error');
+    }
+  }, [announcementSaving, setRoomAnnouncement, showToast]);
+
+  const handleToggleSongRequest = useCallback(async () => {
+    if (songRequestSaving || !room) return;
+    const next = room.songRequestEnabled === false;
+    setSongRequestSaving(true);
+    const res = await setSongRequestEnabled(next);
+    setSongRequestSaving(false);
+    if (res.success) {
+      showToast(next ? '已允许成员点歌' : '已禁止成员点歌', 'success');
+    } else {
+      showToast(res.error || '点歌设置失败', 'error');
+    }
+  }, [songRequestSaving, room, setSongRequestEnabled, showToast]);
+
+  const handleCloseAnnouncementPopup = useCallback(() => {
+    if (room?.id && room.announcementEnabled && room.announcementText?.trim()) {
+      markAnnouncementSeen(room.id, room.announcementEnabled, room.announcementText);
+    }
+    setAnnouncementPopupOpen(false);
+  }, [room]);
 
   const handleAddCurrentPage = useCallback(() => {
     void handleAddMany(listPageSongs);
@@ -783,7 +847,8 @@ export default function Room() {
 
   const searchBar = (
     <div className="flex gap-2 mb-2">
-      <div className="flex flex-shrink-0 overflow-hidden rounded-xl border border-netease-border bg-netease-card p-1 sm:rounded-2xl" title="搜索类型">
+      <Tooltip side="bottom" content="搜索类型">
+        <div className="flex flex-shrink-0 overflow-hidden rounded-xl border border-netease-border bg-netease-card p-1 sm:rounded-2xl">
         {([
           ['song', '歌曲'],
           ['playlist', '歌单'],
@@ -799,7 +864,8 @@ export default function Room() {
             {label}
           </button>
         ))}
-      </div>
+        </div>
+      </Tooltip>
       <div className="relative flex-1 min-w-0">
         <Search className="absolute left-3 sm:left-4 top-1/2 -translate-y-1/2 w-4 sm:w-5 h-4 sm:h-5 text-netease-muted pointer-events-none" />
         <input
@@ -916,6 +982,21 @@ export default function Room() {
         onSave={handleSaveFmMode}
       />
 
+      <RoomAnnouncementModal
+        open={announcementOpen}
+        enabled={Boolean(room?.announcementEnabled)}
+        text={room?.announcementText || ''}
+        saving={announcementSaving}
+        onClose={() => setAnnouncementOpen(false)}
+        onSave={handleSaveAnnouncement}
+      />
+
+      <RoomAnnouncementPopup
+        open={announcementPopupOpen}
+        text={room?.announcementText || ''}
+        onClose={handleCloseAnnouncementPopup}
+      />
+
       <header className="glass flex-shrink-0 z-30 border-b border-netease-border/50 px-3 sm:px-4 py-2.5 sm:py-3 safe-top">
 
         <div className="max-w-[1680px] mx-auto flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
@@ -934,29 +1015,35 @@ export default function Room() {
 
                 {isCreator && (
                   <>
-                    <button
-                      type="button"
-                      onClick={openRenameModal}
-                      className="flex-shrink-0 rounded-lg p-1 text-netease-muted hover:bg-white/10 hover:text-white transition-colors"
-                      title="修改房间名"
-                    >
-                      <Pencil className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={openLockModal}
-                      className={`flex-shrink-0 rounded-lg p-1 transition-colors hover:bg-white/10 ${room.isLocked ? 'text-amber-400' : 'text-netease-muted hover:text-white'}`}
-                      title={room.isLocked ? '房间已上锁' : '房间上锁'}
-                    >
-                      {room.isLocked ? <Lock className="w-3.5 h-3.5" /> : <LockOpen className="w-3.5 h-3.5" />}
-                    </button>
+                    <Tooltip side="bottom" content="修改房间名">
+                      <button
+                        type="button"
+                        onClick={openRenameModal}
+                        className="flex-shrink-0 rounded-lg p-1 text-netease-muted hover:bg-white/10 hover:text-white transition-colors"
+                        aria-label="修改房间名"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                    </Tooltip>
+                    <Tooltip side="bottom" content={room.isLocked ? '房间已上锁' : '房间上锁'}>
+                      <button
+                        type="button"
+                        onClick={openLockModal}
+                        className={`flex-shrink-0 rounded-lg p-1 transition-colors hover:bg-white/10 ${room.isLocked ? 'text-amber-400' : 'text-netease-muted hover:text-white'}`}
+                        aria-label={room.isLocked ? '房间已上锁' : '房间上锁'}
+                      >
+                        {room.isLocked ? <Lock className="w-3.5 h-3.5" /> : <LockOpen className="w-3.5 h-3.5" />}
+                      </button>
+                    </Tooltip>
                   </>
                 )}
 
                 {!isCreator && (room.isLocked || room.hasPassword) && (
-                  <span className="flex-shrink-0 text-amber-400/90" title={room.hasPassword ? '密码房' : '已上锁'}>
-                    <Lock className="w-3.5 h-3.5" />
-                  </span>
+                  <Tooltip side="bottom" content={room.hasPassword ? '密码房' : '已上锁'}>
+                    <span className="flex-shrink-0 text-amber-400/90">
+                      <Lock className="w-3.5 h-3.5" />
+                    </span>
+                  </Tooltip>
                 )}
 
                 {isOwner && (
@@ -978,14 +1065,50 @@ export default function Room() {
                 )}
 
                 {isOwner && (
-                  <button
-                    type="button"
-                    onClick={() => setFmOpen(true)}
-                    className="flex-shrink-0 rounded-lg p-1 text-netease-muted transition-colors hover:bg-white/10 hover:text-white"
-                    title="私人漫游模式"
-                  >
-                    <Radio className="w-3.5 h-3.5" />
-                  </button>
+                  <Tooltip side="bottom" content="私人漫游模式">
+                    <button
+                      type="button"
+                      onClick={() => setFmOpen(true)}
+                      className="flex-shrink-0 rounded-lg p-1 text-netease-muted transition-colors hover:bg-white/10 hover:text-white"
+                      aria-label="私人漫游模式"
+                    >
+                      <Radio className="w-3.5 h-3.5" />
+                    </button>
+                  </Tooltip>
+                )}
+
+                {canControlPlayback && (
+                  <>
+                    <Tooltip side="bottom" content="房间公告">
+                      <button
+                        type="button"
+                        onClick={() => setAnnouncementOpen(true)}
+                        className={`flex-shrink-0 rounded-lg p-1 transition-colors hover:bg-white/10 ${
+                          room.announcementEnabled ? 'text-amber-400' : 'text-netease-muted hover:text-white'
+                        }`}
+                        aria-label="房间公告"
+                      >
+                        <Megaphone className="w-3.5 h-3.5" />
+                      </button>
+                    </Tooltip>
+                    <Tooltip side="bottom" content={room.songRequestEnabled === false ? '已禁止点歌（点击允许）' : '允许点歌（点击禁止）'}>
+                      <button
+                        type="button"
+                        onClick={() => void handleToggleSongRequest()}
+                        disabled={songRequestSaving}
+                        className={`flex-shrink-0 rounded-lg p-1 transition-colors hover:bg-white/10 disabled:opacity-50 ${
+                          room.songRequestEnabled === false ? 'text-amber-400' : 'text-netease-muted hover:text-white'
+                        }`}
+                        aria-label={room.songRequestEnabled === false ? '已禁止点歌' : '允许点歌'}
+                      >
+                        {room.songRequestEnabled === false ? (
+                          <Ban className="w-3.5 h-3.5" />
+                        ) : (
+                          <Music2 className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                    </Tooltip>
+                  </>
                 )}
 
               </div>
@@ -997,6 +1120,18 @@ export default function Room() {
               <div className="mt-0.5 flex flex-wrap items-center gap-2">
                 <p className="text-xs text-netease-muted">{room.userCount} 人在线</p>
                 <RoomFmModeBadge fmMode={room.neteaseFmMode} />
+                {room.songRequestEnabled === false && (
+                  <span className="text-[10px] text-amber-400/90 bg-amber-400/10 px-1.5 py-0.5 rounded-full">禁止点歌</span>
+                )}
+                {room.announcementEnabled && room.announcementText?.trim() && (
+                  <button
+                    type="button"
+                    onClick={() => setAnnouncementPopupOpen(true)}
+                    className="text-[10px] text-amber-400/90 bg-amber-400/10 px-1.5 py-0.5 rounded-full hover:bg-amber-400/15"
+                  >
+                    查看公告
+                  </button>
+                )}
               </div>
 
             </div>
@@ -1017,49 +1152,38 @@ export default function Room() {
 
             <div className="flex items-center gap-1 sm:gap-2">
 
-              <button
+              <Tooltip side="bottom" content="TV歌词">
+                <button
+                  onClick={handleCopyTvLink}
+                  className="flex items-center gap-1.5 text-xs text-netease-muted hover:text-white transition-colors px-2.5 sm:px-3 py-1.5 rounded-lg hover:bg-netease-card"
+                >
+                  {tvCopied ? <Check className="w-4 h-4 text-green-400" /> : <Tv className="w-4 h-4" />}
+                  <span className="hidden sm:inline">{tvCopied ? '已复制' : 'TV歌词'}</span>
+                </button>
+              </Tooltip>
 
-                onClick={handleCopyTvLink}
+              <Tooltip side="bottom" content="分享房间">
+                <button
+                  onClick={handleCopyRoom}
+                  className="flex items-center gap-1.5 text-xs text-netease-muted hover:text-white transition-colors px-2.5 sm:px-3 py-1.5 rounded-lg hover:bg-netease-card"
+                >
+                  {copied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
+                  <span className="hidden sm:inline">{copied ? '已复制' : '分享房间'}</span>
+                </button>
+              </Tooltip>
 
-                className="flex items-center gap-1.5 text-xs text-netease-muted hover:text-white transition-colors px-2.5 sm:px-3 py-1.5 rounded-lg hover:bg-netease-card"
-
-                title="TV歌词"
-
-              >
-
-                {tvCopied ? <Check className="w-4 h-4 text-green-400" /> : <Tv className="w-4 h-4" />}
-
-                <span className="hidden sm:inline">{tvCopied ? '已复制' : 'TV歌词'}</span>
-
-              </button>
-
-              <button
-
-                onClick={handleCopyRoom}
-
-                className="flex items-center gap-1.5 text-xs text-netease-muted hover:text-white transition-colors px-2.5 sm:px-3 py-1.5 rounded-lg hover:bg-netease-card"
-
-                title="分享房间"
-
-              >
-
-                {copied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
-
-                <span className="hidden sm:inline">{copied ? '已复制' : '分享房间'}</span>
-
-              </button>
-
-              <button
-                onClick={() => {
-                  leaveRoom();
-                  navigate('/');
-                }}
-                className="flex items-center gap-1.5 text-xs text-netease-muted hover:text-white transition-colors px-2.5 sm:px-3 py-1.5 rounded-lg hover:bg-netease-card"
-                title="退出房间"
-              >
-                <LogOut className="w-4 h-4" />
-                <span className="hidden sm:inline">退出房间</span>
-              </button>
+              <Tooltip side="bottom" content="退出房间">
+                <button
+                  onClick={() => {
+                    leaveRoom();
+                    navigate('/');
+                  }}
+                  className="flex items-center gap-1.5 text-xs text-netease-muted hover:text-white transition-colors px-2.5 sm:px-3 py-1.5 rounded-lg hover:bg-netease-card"
+                >
+                  <LogOut className="w-4 h-4" />
+                  <span className="hidden sm:inline">退出房间</span>
+                </button>
+              </Tooltip>
 
             </div>
 
@@ -1353,36 +1477,39 @@ export default function Room() {
                 </p>
               </div>
               <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => void handleAddAllFavorites()}
-                  disabled={filteredFavorites.length === 0 || addingAllFavorites || importingFavorites}
-                  className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs text-netease-red hover:bg-netease-red/10 hover:text-netease-red disabled:opacity-50"
-                  title="一键点歌"
-                >
-                  {addingAllFavorites ? <Loader2 className="h-4 w-4 animate-spin" /> : <ListPlus className="h-4 w-4" />}
-                  一键点歌
-                </button>
-                <button
-                  type="button"
-                  onClick={handleImportFavoritesJson}
-                  disabled={importingFavorites}
-                  className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs text-netease-muted hover:bg-white/10 hover:text-white disabled:opacity-50"
-                  title="导入歌单"
-                >
-                  {importingFavorites ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                  {favoritesImportProgress || '导入歌单'}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleExportFavoritesJson}
-                  disabled={favorites.length === 0 || importingFavorites}
-                  className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs text-netease-muted hover:bg-white/10 hover:text-white disabled:opacity-50"
-                  title="导出歌单"
-                >
-                  <Upload className="h-4 w-4" />
-                  导出歌单
-                </button>
+                <Tooltip content="一键点歌">
+                  <button
+                    type="button"
+                    onClick={() => void handleAddAllFavorites()}
+                    disabled={filteredFavorites.length === 0 || addingAllFavorites || importingFavorites}
+                    className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs text-netease-red hover:bg-netease-red/10 hover:text-netease-red disabled:opacity-50"
+                  >
+                    {addingAllFavorites ? <Loader2 className="h-4 w-4 animate-spin" /> : <ListPlus className="h-4 w-4" />}
+                    一键点歌
+                  </button>
+                </Tooltip>
+                <Tooltip content="导入歌单">
+                  <button
+                    type="button"
+                    onClick={handleImportFavoritesJson}
+                    disabled={importingFavorites}
+                    className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs text-netease-muted hover:bg-white/10 hover:text-white disabled:opacity-50"
+                  >
+                    {importingFavorites ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                    {favoritesImportProgress || '导入歌单'}
+                  </button>
+                </Tooltip>
+                <Tooltip content="导出歌单">
+                  <button
+                    type="button"
+                    onClick={handleExportFavoritesJson}
+                    disabled={favorites.length === 0 || importingFavorites}
+                    className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs text-netease-muted hover:bg-white/10 hover:text-white disabled:opacity-50"
+                  >
+                    <Upload className="h-4 w-4" />
+                    导出歌单
+                  </button>
+                </Tooltip>
                 <button type="button" onClick={() => setFavoritesOpen(false)} className="rounded-lg p-1.5 text-netease-muted hover:bg-white/10 hover:text-white"><X className="h-5 w-5" /></button>
               </div>
             </div>
@@ -1412,20 +1539,21 @@ export default function Room() {
                     const key = songKey(song);
                     return (
                       <div key={key} className="group flex items-center gap-2 rounded-xl p-2.5 transition-colors hover:bg-netease-card/80 sm:gap-3 sm:p-3">
-                        <button
-                          type="button"
-                          onClick={() => void removeFavorite(song)}
-                          disabled={removingFavoriteId === key}
-                          className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-rose-300 transition-colors hover:bg-rose-500/10 disabled:opacity-50"
-                          title="取消收藏"
-                          aria-label="取消收藏"
-                        >
+                        <Tooltip content="取消收藏">
+                          <button
+                            type="button"
+                            onClick={() => void removeFavorite(song)}
+                            disabled={removingFavoriteId === key}
+                            className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-rose-300 transition-colors hover:bg-rose-500/10 disabled:opacity-50"
+                            aria-label="取消收藏"
+                          >
                           {removingFavoriteId === key ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
                           ) : (
                             <span className="text-base leading-none">❤</span>
                           )}
-                        </button>
+                          </button>
+                        </Tooltip>
                         <SongCover song={song} className="h-12 w-12 flex-shrink-0 rounded-lg bg-netease-card object-cover" />
                         <div className="min-w-0 flex-1 space-y-0.5">
                           <p className="truncate text-sm font-medium">{song.name}</p>

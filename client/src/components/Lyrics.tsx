@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { filterDisplayLyrics } from '../api/music';
 import type { LyricLine } from '../types';
 
@@ -14,6 +14,7 @@ interface Props {
 }
 
 const SIDE_WINDOW = 5;
+const SCROLL_IDLE_MS = 3000;
 
 export default function Lyrics({
   lines,
@@ -32,6 +33,7 @@ export default function Lyrics({
   const isSide = variant === 'side';
   const isLarge = size === 'large';
   const fullScroll = scrollable && isSide;
+  const shouldAutoScroll = fullScroll || !isSide;
 
   const activeIndex = displayLines.findIndex((line, i) => {
     const next = displayLines[i + 1];
@@ -53,22 +55,38 @@ export default function Lyrics({
       : displayLines.length;
   const visibleLines = displayLines.slice(windowStart, windowEnd);
 
-  useEffect(() => {
-    if ((isSide && !fullScroll) || manualScroll || !activeRef.current || !containerRef.current) return;
-
+  const scrollActiveToCenter = useCallback((behavior: ScrollBehavior = 'smooth') => {
     const container = containerRef.current;
     const active = activeRef.current;
-    const offset = active.offsetTop - container.clientHeight / 2 + active.clientHeight / 2;
+    if (!container || !active) return;
 
-    container.scrollTo({ top: offset, behavior: 'smooth' });
-  }, [activeIndex, manualScroll, isSide, fullScroll]);
+    const containerRect = container.getBoundingClientRect();
+    const activeRect = active.getBoundingClientRect();
+    const nextTop = container.scrollTop
+      + (activeRect.top - containerRect.top)
+      - container.clientHeight / 2
+      + activeRect.height / 2;
+
+    container.scrollTo({ top: Math.max(0, nextTop), behavior });
+  }, []);
+
+  useEffect(() => {
+    setManualScroll(false);
+  }, [lines]);
+
+  useEffect(() => {
+    if (!shouldAutoScroll || manualScroll || activeIndex < 0) return;
+    scrollActiveToCenter('smooth');
+  }, [activeIndex, manualScroll, shouldAutoScroll, scrollActiveToCenter]);
 
   const handleScroll = () => {
-    if (isSide && !fullScroll) return;
+    if (!shouldAutoScroll) return;
     setManualScroll(true);
     clearTimeout(scrollTimer.current);
-    scrollTimer.current = setTimeout(() => setManualScroll(false), 5000);
+    scrollTimer.current = setTimeout(() => setManualScroll(false), SCROLL_IDLE_MS);
   };
+
+  useEffect(() => () => clearTimeout(scrollTimer.current), []);
 
   if (displayLines.length === 0) {
     return (
@@ -94,7 +112,7 @@ export default function Lyrics({
         : { maskImage: 'linear-gradient(transparent, black 12%, black 88%, transparent)' }}
     >
       <div className={fullScroll
-        ? (isLarge ? 'space-y-2 sm:space-y-3 py-2 2xl:space-y-6 2xl:py-4' : 'space-y-3 py-2')
+        ? (isLarge ? 'space-y-2 sm:space-y-3 py-[min(38vh,320px)] 2xl:space-y-6' : 'space-y-3 py-[min(38vh,320px)]')
         : isSide
           ? (isLarge ? 'space-y-2 sm:space-y-3 py-1 sm:py-2 2xl:space-y-8 2xl:py-4' : 'space-y-3 py-2')
           : 'space-y-5 py-[40vh] 2xl:space-y-8'}>

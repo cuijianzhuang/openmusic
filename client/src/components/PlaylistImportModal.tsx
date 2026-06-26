@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { X, Loader2, ChevronLeft, Clock, Trash2 } from 'lucide-react';
 import type { PlaylistPlatform } from '../api/music/playlist';
+import Tooltip from './Tooltip';
 
 const HINTS: Record<PlaylistPlatform, string> = {
   netease: '复制网易云歌单分享文案或链接粘贴到下方。',
@@ -163,15 +164,16 @@ export default function PlaylistImportModal({
             >
               {PLATFORM_LABELS.netease}
             </button>
-            <button
-              type="button"
-              onClick={() => setPlatform('qq')}
-              disabled={!qqImportEnabled}
-              title={qqImportEnabled ? undefined : 'QQ 音乐歌单导入暂不可用'}
-              className="w-full rounded-xl border border-white/10 bg-netease-card/80 px-4 py-3 text-sm text-white text-left hover:border-netease-red/40 hover:bg-white/5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {PLATFORM_LABELS.qq}
-            </button>
+            <Tooltip content={qqImportEnabled ? undefined : 'QQ 音乐歌单导入暂不可用'}>
+              <button
+                type="button"
+                onClick={() => setPlatform('qq')}
+                disabled={!qqImportEnabled}
+                className="w-full rounded-xl border border-white/10 bg-netease-card/80 px-4 py-3 text-sm text-white text-left hover:border-netease-red/40 hover:bg-white/5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {PLATFORM_LABELS.qq}
+              </button>
+            </Tooltip>
           </div>
 
           <div className="mt-5 border-t border-white/10 pt-4">
@@ -185,19 +187,20 @@ export default function PlaylistImportModal({
               <div className="max-h-48 space-y-1.5 overflow-y-auto pr-1">
                 {visibleHistory.map((item) => (
                   <div key={item.id} className="group flex items-center gap-2 rounded-xl bg-white/[0.03] px-2.5 py-2 hover:bg-white/[0.06]">
-                    <button
-                      type="button"
-                      onClick={() => importFromHistory(item)}
-                      disabled={loading}
-                      className="min-w-0 flex-1 text-left disabled:opacity-50"
-                      title="直接解析该歌单"
-                    >
+                    <Tooltip content="直接解析该歌单">
+                      <button
+                        type="button"
+                        onClick={() => importFromHistory(item)}
+                        disabled={loading}
+                        className="min-w-0 flex-1 text-left disabled:opacity-50"
+                      >
                       <div className="flex items-center gap-2">
                         <span className="rounded bg-white/8 px-1.5 py-0.5 text-[10px] text-white/55">{PLATFORM_LABELS[item.platform]}</span>
                         <span className="min-w-0 truncate text-xs text-white/85">{item.name}</span>
                       </div>
                       <p className="mt-0.5 truncate text-[11px] text-netease-muted">ID：{item.playlistId}</p>
                     </button>
+                    </Tooltip>
                     <button
                       type="button"
                       onClick={() => removeHistory(item.id)}
