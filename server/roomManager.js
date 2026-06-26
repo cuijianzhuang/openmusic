@@ -130,6 +130,7 @@ function snapshotRoomForStorage(room) {
     randomPlayedKeys: Array.from(room.randomPlayedKeys),
     nextRandom: serializeSongMeta(room.nextRandom),
     adminIds: Array.from(room.adminIds || []),
+    autoPromotedAdminIds: Array.from(room.autoPromotedAdminIds || []),
     audioQuality: room.audioQuality ?? { netease: 'hires', tencent: 'lossless' },
     neteaseFmMode: normalizeFmMode(room.neteaseFmMode),
     createdAt: room.createdAt,
@@ -160,6 +161,7 @@ function restoreRoomFromStorage(data) {
   room.muteAll = Boolean(data.muteAll);
   room.mutedUserIds = new Set(data.mutedUserIds || []);
   room.adminIds = new Set(Array.isArray(data.adminIds) ? data.adminIds : []);
+  room.autoPromotedAdminIds = new Set(Array.isArray(data.autoPromotedAdminIds) ? data.autoPromotedAdminIds : []);
   room.audioQuality = normalizeRoomAudioQuality(data.audioQuality);
   room.neteaseFmMode = normalizeFmMode(data.neteaseFmMode);
   room.createdAt = data.createdAt ?? Date.now();
@@ -300,6 +302,7 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
     playbackLock: null,
     autoAdvancePromise: null,
     adminIds: new Set(),
+    autoPromotedAdminIds: new Set(),
     audioQuality: {
       netease: 'hires',
       tencent: 'lossless',
@@ -325,6 +328,19 @@ function isEligibleOwner(user) {
 function ensureAdminIds(room) {
   if (!room.adminIds) room.adminIds = new Set();
   return room.adminIds;
+}
+
+function ensureAutoPromotedAdminIds(room) {
+  if (!room.autoPromotedAdminIds) room.autoPromotedAdminIds = new Set();
+  return room.autoPromotedAdminIds;
+}
+
+function revokeAutoPromotedAdmins(room) {
+  const admins = ensureAdminIds(room);
+  for (const id of ensureAutoPromotedAdminIds(room)) {
+    admins.delete(id);
+  }
+  room.autoPromotedAdminIds.clear();
 }
 
 function pruneAdminIds(room) {
@@ -353,7 +369,9 @@ function canControlPlayback(room, userId) {
 }
 
 function removeUserFromAdmins(room, userId) {
-  if (userId) ensureAdminIds(room).delete(userId);
+  if (!userId) return;
+  ensureAdminIds(room).delete(userId);
+  ensureAutoPromotedAdminIds(room).delete(userId);
 }
 
 function sanitizeCreatorId(value) {
@@ -380,6 +398,7 @@ function refreshRoomOwner(room, options = {}) {
   const creatorOnline = isEligibleOwner(creator);
 
   if ((preferCreator || creatorOnline) && creatorOnline) {
+    revokeAutoPromotedAdmins(room);
     room.ownerId = room.creatorId;
     refreshOwnerConnection(room);
     return;
@@ -395,6 +414,7 @@ function refreshRoomOwner(room, options = {}) {
   const nextId = getNextOwnerId(room);
   if (nextId) {
     ensureAdminIds(room).add(nextId);
+    ensureAutoPromotedAdminIds(room).add(nextId);
     room.ownerId = nextId;
   } else {
     room.ownerId = null;
@@ -660,8 +680,10 @@ export function setRoomAdmin(roomId, actorId, targetUserId, admin = true, connec
     }
     if (admins.size >= MAX_ADMINS) return { error: '管理员最多 3 人' };
     admins.add(targetUserId);
+    ensureAutoPromotedAdminIds(room).delete(targetUserId);
   } else {
     admins.delete(targetUserId);
+    ensureAutoPromotedAdminIds(room).delete(targetUserId);
   }
 
   if (room.ownerId === targetUserId) {
