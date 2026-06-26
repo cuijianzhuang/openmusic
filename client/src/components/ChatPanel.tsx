@@ -64,6 +64,24 @@ function compactReplyText(text: string) {
   return text.replace(/\s+/g, ' ').slice(0, 48);
 }
 
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function buildMentionPrefix(nickname: string) {
+  return `@${nickname} `;
+}
+
+function stripLeadingMention(value: string) {
+  return value.replace(/^@[^\s@]{1,24}\s*/, '');
+}
+
+function hasMentionInText(messageText: string, targetNickname: string) {
+  return new RegExp(`@${escapeRegExp(targetNickname)}(?:\\s|$)`).test(messageText);
+}
+
+const MENTION_TOKEN_RE = /(@[^\s@]{1,24})(?=\s|$)/g;
+
 export default function ChatPanel() {
   const room = useRoomStore((s) => s.room);
   const nickname = useRoomStore((s) => s.nickname);
@@ -271,7 +289,7 @@ export default function ChatPanel() {
     for (const msg of latestMessages) {
       if (notifiedMessageIdsRef.current.has(msg.id) || msg.userId === myUserId) continue;
       const mentionedById = msg.mentions?.some((mention) => mention.id === myUserId);
-      const mentionedByName = myName ? msg.text.includes(`@${myName}`) : false;
+      const mentionedByName = myName ? hasMentionInText(msg.text, myName) : false;
       if (!mentionedById && !mentionedByName) continue;
 
       notifiedMessageIdsRef.current.add(msg.id);
@@ -423,9 +441,15 @@ export default function ChatPanel() {
   };
 
   const applyReplyMention = (targetNickname: string) => {
-    const body = serializeEditor().replace(/^@[^\s@]{1,24}\s+/, '');
-    const prefix = `@${targetNickname} `;
-    setEditorPlainText(`${prefix}${body}`.slice(0, MAX_CHAT_LENGTH));
+    const body = stripLeadingMention(serializeEditor());
+    const editor = inputRef.current;
+    if (!editor) {
+      setText((buildMentionPrefix(targetNickname) + body).slice(0, MAX_CHAT_LENGTH));
+      return;
+    }
+    editor.textContent = '';
+    setText('');
+    insertPlainText(`${buildMentionPrefix(targetNickname)}${body}`.slice(0, MAX_CHAT_LENGTH));
   };
 
   const clearEditor = () => {
@@ -439,7 +463,7 @@ export default function ChatPanel() {
 
   const buildMentions = (messageText: string) => {
     return room.users
-      .filter((user) => messageText.includes(`@${user.nickname}`))
+      .filter((user) => hasMentionInText(messageText, user.nickname))
       .slice(0, 10)
       .map((user) => ({ id: user.id, nickname: user.nickname }));
   };
@@ -568,7 +592,7 @@ export default function ChatPanel() {
 
     return parseQQFaceTokens(messageText).map((part, index) => {
       if (typeof part === 'string') {
-        const pieces = part.split(/(@[^\s@]{1,24})/g);
+        const pieces = part.split(MENTION_TOKEN_RE);
         return pieces.map((piece, pieceIndex) => piece.startsWith('@')
           ? <span key={`${keyPrefix}-mention-${index}-${pieceIndex}`} className="text-sky-300">{piece}</span>
           : <span key={`${keyPrefix}-text-${index}-${pieceIndex}`}>{piece}</span>);
@@ -857,8 +881,7 @@ export default function ChatPanel() {
               onClick={() => {
                 if (replyTo) {
                   const current = serializeEditor();
-                  const escaped = replyTo.nickname.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                  const stripped = current.replace(new RegExp(`^@${escaped}\\s+`), '');
+                  const stripped = stripLeadingMention(current);
                   if (stripped !== current) setEditorPlainText(stripped);
                 }
                 setReplyTo(null);
