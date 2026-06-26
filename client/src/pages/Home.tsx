@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Music, Users, Radio, ArrowRight, Lock, ListMusic,
-  Loader2, RefreshCw, Plus, Hash, X, Disc3, Sparkles, Github,
+  Loader2, RefreshCw, Plus, Hash, X, Disc3, Sparkles, Github, History,
 } from 'lucide-react';
 import { createRoom, checkRoom, listRooms } from '../api/meting';
 import { useRoomStore } from '../stores/roomStore';
@@ -10,6 +10,7 @@ import { useSocket } from '../hooks/useSocket';
 import type { RoomSummary } from '../types';
 import { createRandomNickname } from '../lib/randomNickname';
 import { usePageSeo } from '../lib/seo';
+import { partitionRoomsByRecent } from '../lib/recentRooms';
 import Tooltip from '../components/Tooltip';
 
 function GiteeIcon({ className }: { className?: string }) {
@@ -43,9 +44,11 @@ function PlayingBars() {
 function RoomCard({
   room,
   onJoin,
+  isRecent,
 }: {
   room: RoomSummary;
   onJoin: (room: RoomSummary) => void;
+  isRecent?: boolean;
 }) {
   const isActive = room.isPlaying && room.currentSong;
 
@@ -66,6 +69,12 @@ function RoomCard({
       <div className="relative p-5">
         <div className="flex items-start justify-between gap-3 mb-4">
           <div className="flex items-center gap-2 min-w-0 flex-1">
+            {isRecent && (
+              <span className="flex-shrink-0 flex items-center gap-1 text-[10px] uppercase tracking-wide text-sky-400/90 bg-sky-500/10 px-1.5 py-0.5 rounded-md font-medium">
+                <History className="w-3 h-3" />
+                最近
+              </span>
+            )}
             <h3 className="text-base font-semibold text-white truncate group-hover:text-netease-red transition-colors">
               {room.name}
             </h3>
@@ -298,6 +307,11 @@ export default function Home() {
     goToRoom(id, cardPassword.trim());
   };
 
+  const { recent: recentRooms, others: otherRooms } = useMemo(
+    () => partitionRoomsByRecent(rooms),
+    [rooms],
+  );
+
   const inputCls = 'w-full bg-[#0d0d0d] border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm placeholder:text-white/30 focus:outline-none focus:border-netease-red/50 transition-colors';
 
   return (
@@ -430,10 +444,32 @@ export default function Home() {
               </button>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {rooms.map((room) => (
-                <RoomCard key={room.id} room={room} onJoin={handleRoomCardClick} />
-              ))}
+            <div className="space-y-8">
+              {recentRooms.length > 0 && (
+                <section>
+                  <div className="flex items-center gap-2 mb-4">
+                    <History className="w-4 h-4 text-sky-400/80" />
+                    <h2 className="text-sm font-medium text-white/70">最近访问</h2>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {recentRooms.map((room) => (
+                      <RoomCard key={room.id} room={room} onJoin={handleRoomCardClick} isRecent />
+                    ))}
+                  </div>
+                </section>
+              )}
+              {otherRooms.length > 0 && (
+                <section>
+                  {recentRooms.length > 0 && (
+                    <h2 className="text-sm font-medium text-white/50 mb-4">全部房间</h2>
+                  )}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {otherRooms.map((room) => (
+                      <RoomCard key={room.id} room={room} onJoin={handleRoomCardClick} />
+                    ))}
+                  </div>
+                </section>
+              )}
             </div>
           )}
         </div>

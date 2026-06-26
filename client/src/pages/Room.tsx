@@ -58,6 +58,8 @@ import JumpRequestBanner from '../components/JumpRequestBanner';
 import Toast from '../components/Toast';
 import Tooltip from '../components/Tooltip';
 import { copyToClipboard } from '../lib/copyToClipboard';
+import { rememberRoomVisit } from '../lib/recentRooms';
+import { buildRoomShareText } from '../lib/roomShare';
 
 
 function roomPasswordKey(roomId: string) {
@@ -152,7 +154,7 @@ export default function Room() {
 
   const roomPassword = (location.state as { password?: string } | null)?.password || getStoredRoomPassword(roomId);
 
-  const { room, showPlayer, setShowPlayer, isOwner, isAdmin, canControlPlayback, mySocketId, exitReason } = useRoomStore();
+  const { room, nickname, showPlayer, setShowPlayer, isOwner, isAdmin, canControlPlayback, mySocketId, exitReason } = useRoomStore();
 
   usePageSeo({
     title: room?.name ? `${room.name} 房间` : '正在加入房间',
@@ -449,6 +451,7 @@ export default function Room() {
       }
 
       rememberRoomPassword(roomId, roomPassword);
+      rememberRoomVisit(roomId);
       if (
         res.room
         && shouldAutoShowAnnouncement(res.room.id, res.room.announcementEnabled, res.room.announcementText)
@@ -710,8 +713,17 @@ export default function Room() {
   }, [handleAddMany, listPageSongs]);
 
   const handleCopyRoom = async () => {
-    const url = `${window.location.origin}/room/${room?.id}`;
-    const ok = await copyToClipboard(url);
+    if (!room?.id) return;
+    const text = buildRoomShareText({
+      inviterNickname: nickname,
+      roomId: room.id,
+      roomName: room.name,
+      currentSong: room.current
+        ? { name: room.current.name, artist: room.current.artist }
+        : null,
+      isPlaying: room.isPlaying,
+    });
+    const ok = await copyToClipboard(text);
     if (ok) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
