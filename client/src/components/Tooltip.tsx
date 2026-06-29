@@ -21,6 +21,8 @@ interface TooltipProps {
   side?: TooltipSide;
   delay?: number;
   disabled?: boolean;
+  /** 触屏设备点击切换显示（用于截断文本等） */
+  tapToShow?: boolean;
   children: ReactElement;
 }
 
@@ -76,11 +78,31 @@ function getTooltipStyle(rect: DOMRect, side: TooltipSide): CSSProperties {
   }
 }
 
+function getPrefersHover(): boolean {
+  if (typeof window === 'undefined') return true;
+  return window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+}
+
+function usePrefersHover() {
+  const [prefersHover, setPrefersHover] = useState(getPrefersHover);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(hover: hover) and (pointer: fine)');
+    const update = () => setPrefersHover(mq.matches);
+    update();
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, []);
+
+  return prefersHover;
+}
+
 export default function Tooltip({
   content,
   side = 'top',
   delay = 320,
   disabled = false,
+  tapToShow = false,
   children,
 }: TooltipProps) {
   const tipId = useId();
@@ -88,6 +110,7 @@ export default function Tooltip({
   const timerRef = useRef<ReturnType<typeof setTimeout>>();
   const [open, setOpen] = useState(false);
   const [style, setStyle] = useState<CSSProperties>({ position: 'fixed', top: 0, left: 0 });
+  const prefersHover = usePrefersHover();
 
   const enabled = !disabled && hasTooltipContent(content);
 
@@ -97,9 +120,14 @@ export default function Tooltip({
     setStyle(getTooltipStyle(el.getBoundingClientRect(), side));
   }, [side]);
 
-  const show = useCallback(() => {
+  const show = useCallback((immediate = false) => {
     if (!enabled) return;
     clearTimeout(timerRef.current);
+    if (immediate) {
+      updatePosition();
+      setOpen(true);
+      return;
+    }
     timerRef.current = setTimeout(() => {
       updatePosition();
       setOpen(true);
@@ -124,6 +152,27 @@ export default function Tooltip({
     };
   }, [open, updatePosition]);
 
+  useEffect(() => {
+    if (!open) return;
+
+    const dismiss = (event: Event) => {
+      const anchor = anchorRef.current;
+      if (anchor && event.target instanceof Node && anchor.contains(event.target)) return;
+      hide();
+    };
+
+    const dismissOnScroll = () => hide();
+
+    document.addEventListener('touchstart', dismiss, { passive: true, capture: true });
+    document.addEventListener('pointerdown', dismiss, { capture: true });
+    document.addEventListener('scroll', dismissOnScroll, { passive: true, capture: true });
+    return () => {
+      document.removeEventListener('touchstart', dismiss, true);
+      document.removeEventListener('pointerdown', dismiss, true);
+      document.removeEventListener('scroll', dismissOnScroll, true);
+    };
+  }, [open, hide]);
+
   if (!isValidElement(children)) return children;
 
   const child = children as ReactElement<Record<string, unknown>>;
@@ -133,19 +182,28 @@ export default function Tooltip({
     ref: mergeRefs<HTMLElement>((node) => { anchorRef.current = node; }, childRef),
     onMouseEnter: (event: MouseEvent<HTMLElement>) => {
       (child.props.onMouseEnter as ((e: MouseEvent<HTMLElement>) => void) | undefined)?.(event);
-      show();
+      if (prefersHover) show();
     },
     onMouseLeave: (event: MouseEvent<HTMLElement>) => {
       (child.props.onMouseLeave as ((e: MouseEvent<HTMLElement>) => void) | undefined)?.(event);
-      hide();
+      if (prefersHover) hide();
     },
     onFocus: (event: FocusEvent<HTMLElement>) => {
       (child.props.onFocus as ((e: FocusEvent<HTMLElement>) => void) | undefined)?.(event);
-      show();
+      if (event.target instanceof HTMLElement && event.target.matches(':focus-visible')) {
+        show();
+      }
     },
     onBlur: (event: FocusEvent<HTMLElement>) => {
       (child.props.onBlur as ((e: FocusEvent<HTMLElement>) => void) | undefined)?.(event);
       hide();
+    },
+    onClick: (event: MouseEvent<HTMLElement>) => {
+      (child.props.onClick as ((e: MouseEvent<HTMLElement>) => void) | undefined)?.(event);
+      if (tapToShow && !prefersHover && enabled) {
+        if (open) hide();
+        else show(true);
+      }
     },
     'aria-describedby': open && enabled ? tipId : undefined,
     title: undefined,

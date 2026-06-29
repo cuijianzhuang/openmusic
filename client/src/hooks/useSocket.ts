@@ -6,6 +6,7 @@ import { useRoomStore } from '../stores/roomStore';
 import { useChatStore } from '../stores/chatStore';
 import { useSongHistoryStore } from '../stores/songHistoryStore';
 import { useAudioStore } from '../stores/audioStore';
+import { songKey } from '../api/music';
 
 import type { ChatMention, ChatReplyRef, ChatMessage, FavoriteSong, PlaybackState, RoomState, Song, SongHistoryItem } from '../types';
 
@@ -258,7 +259,27 @@ if (socketListenersAttached) return;
         users: room.users.length,
         randomLoading: room.randomLoading,
       });
-      const { mySocketId } = useRoomStore.getState();
+      const { mySocketId, room: prevRoom } = useRoomStore.getState();
+
+      if (prevRoom?.id === room.id && room.current) {
+        const prevKey = prevRoom.current ? songKey(prevRoom.current) : null;
+        const nextKey = songKey(room.current);
+        if (prevKey !== nextKey) {
+          const current = room.current;
+          useSongHistoryStore.getState().appendSong(room.id, {
+            id: current.id,
+            source: current.source,
+            name: current.name,
+            artist: current.artist,
+            album: current.album,
+            pic: current.pic,
+            duration: current.duration,
+            requestedBy: current.requestedBy,
+            requestedById: current.requestedById,
+            requestedAt: Date.now(),
+          });
+        }
+      }
 
       applyRoomSnapshot(room);
 

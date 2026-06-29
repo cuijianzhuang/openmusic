@@ -105,15 +105,25 @@ export async function importPlaylist(
   return data as PlaylistImportResult;
 }
 
-/** 网易 + QQ 歌单搜索，结果交替合并 */
+export type PlaylistChannelFilter = 'all' | 'netease' | 'qq';
+
+/** 歌单搜索，支持按渠道筛选（网易 / QQ） */
 export async function searchPlaylists(
   keyword: string,
   page = 1,
   limit = 20,
+  channel: PlaylistChannelFilter = 'all',
 ): Promise<PlaylistSearchResult> {
   const trimmed = keyword.trim();
   if (!trimmed) {
     return { playlists: [], total: 0, page, limit };
+  }
+
+  if (channel === 'netease') {
+    return searchNeteasePlaylists(trimmed, page, limit);
+  }
+  if (channel === 'qq') {
+    return searchTencentPlaylists(trimmed, page, limit);
   }
 
   const [neteaseBatch, tencentBatch] = await Promise.allSettled([

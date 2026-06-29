@@ -1511,7 +1511,11 @@ async function applyJumpToFront(room, queueId, options = {}) {
   const [song] = room.queue.splice(qIdx, 1);
   if (ownerPriority) {
     song.ownerPriority = Date.now();
-    song.priorityBy = priorityBy || '管理员';
+    if (priorityBy) {
+      song.priorityBy = priorityBy;
+    } else {
+      delete song.priorityBy;
+    }
   }
   room.queue.unshift(song);
   if (!room.current) {
@@ -1537,7 +1541,7 @@ export async function requestJump(roomId, socketId, queueId) {
 
   const jumped = await applyJumpToFront(room, queueId, {
     ownerPriority: isController,
-    priorityBy: isController ? user.nickname : '',
+    priorityBy: isController && !isRoomCreator(room, socketId) ? user.nickname : '',
   });
   if (!jumped) return { error: '歌曲不在队列中' };
 
@@ -1558,9 +1562,10 @@ export async function approveJump(roomId, socketId, requestId, connectionId = nu
   room.jumpRequests.splice(reqIdx, 1);
 
   const approver = room.users.get(socketId);
+  const isAdminJump = approver && !isRoomCreator(room, socketId);
   await applyJumpToFront(room, req.queueId, {
     ownerPriority: true,
-    priorityBy: approver?.nickname || '管理员',
+    priorityBy: isAdminJump ? approver.nickname : '',
   });
 
   persistRoom(room);

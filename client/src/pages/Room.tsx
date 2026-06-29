@@ -6,7 +6,7 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Search, Loader2, Copy, Check, Crown, Tv, LogOut, X, Heart, Plus, Download, ListMusic, Upload, History, ListPlus, Pencil, Lock, LockOpen, Radio, ChevronLeft, ChevronRight, Megaphone, Music2, Ban, Image } from 'lucide-react';
 
 import { searchAllSongs, getAvailableSources, type SearchFilterMode } from '../api/music';
-import { importPlaylist, searchPlaylists, type PlaylistSearchItem, type PlaylistPlatform } from '../api/music/playlist';
+import { importPlaylist, searchPlaylists, type PlaylistSearchItem, type PlaylistPlatform, type PlaylistChannelFilter as PlaylistChannelFilterMode } from '../api/music/playlist';
 import { normalizeFmMode } from '../api/music/fmMode';
 import { addSongsToQueue, formatBulkAddToast } from '../lib/addSongsToQueue';
 import { rememberPlaylistImportHistory } from '../components/PlaylistImportModal';
@@ -40,6 +40,8 @@ import AudioEngine from '../components/AudioEngine';
 import SongResultList from '../components/SongResultList';
 import SourceBadge from '../components/SourceBadge';
 import SearchFilterSelect from '../components/SearchFilterSelect';
+import PlaylistChannelFilter from '../components/PlaylistChannelFilter';
+import PageNumberPagination from '../components/PageNumberPagination';
 import SearchSkeleton, { RESULT_BODY_HEIGHT } from '../components/SearchSkeleton';
 import PlaylistImportModal from '../components/PlaylistImportModal';
 import ChatPanel from '../components/ChatPanel';
@@ -146,6 +148,14 @@ type FavoritesPageSize = (typeof FAVORITES_PAGE_SIZE_OPTIONS)[number];
 const DEFAULT_FAVORITES_PAGE_SIZE: FavoritesPageSize = 15;
 type SearchMode = 'song' | 'playlist';
 
+interface PlaylistSearchBackup {
+  keyword: string;
+  results: PlaylistSearchItem[];
+  page: number;
+  total: number;
+  channel: PlaylistChannelFilterMode;
+}
+
 
 export default function Room() {
 
@@ -198,6 +208,8 @@ export default function Room() {
   const [playlistSearchResults, setPlaylistSearchResults] = useState<PlaylistSearchItem[]>([]);
   const [playlistSearchPage, setPlaylistSearchPage] = useState(1);
   const [playlistSearchTotal, setPlaylistSearchTotal] = useState(0);
+  const [playlistChannelFilter, setPlaylistChannelFilter] = useState<PlaylistChannelFilterMode>('all');
+  const [playlistSearchBackup, setPlaylistSearchBackup] = useState<PlaylistSearchBackup | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [hotRefreshKey, setHotRefreshKey] = useState(0);
   const [coverBgEnabled, setCoverBgEnabled] = useState(readRoomCoverBgEnabled);
@@ -526,7 +538,7 @@ export default function Room() {
     }
   }, [isPlaylistResults, searchedKeyword, doSearch]);
 
-  const doPlaylistSearch = useCallback(async (keyword: string, page = 1) => {
+  const doPlaylistSearch = useCallback(async (keyword: string, page = 1, channel = playlistChannelFilter) => {
     const trimmed = keyword.trim();
     if (!trimmed) {
       setPlaylistSearchResults([]);
@@ -537,7 +549,7 @@ export default function Room() {
     setIsPlaylistResults(false);
     setResults([]);
     try {
-      const data = await searchPlaylists(trimmed, page, PLAYLIST_SEARCH_PAGE_SIZE);
+      const data = await searchPlaylists(trimmed, page, PLAYLIST_SEARCH_PAGE_SIZE, channel);
       setPlaylistSearchResults(data.playlists);
       setPlaylistSearchPage(data.page);
       setPlaylistSearchTotal(data.total);
@@ -548,10 +560,26 @@ export default function Room() {
     } finally {
       setPlaylistSearchLoading(false);
     }
-  }, [showToast]);
+  }, [playlistChannelFilter, showToast]);
+
+  const handlePlaylistChannelChange = useCallback((next: PlaylistChannelFilterMode) => {
+    setPlaylistChannelFilter(next);
+    if (searchedKeyword.trim() && searchMode === 'playlist') {
+      void doPlaylistSearch(searchedKeyword, 1, next);
+    }
+  }, [searchedKeyword, searchMode, doPlaylistSearch]);
 
   const handlePlaylistImport = useCallback(async (platform: PlaylistPlatform, input: string) => {
     setPlaylistImportOpen(false);
+    if (searchMode === 'playlist' && searchedKeyword.trim() && playlistSearchResults.length > 0) {
+      setPlaylistSearchBackup({
+        keyword: searchedKeyword,
+        results: playlistSearchResults,
+        page: playlistSearchPage,
+        total: playlistSearchTotal,
+        channel: playlistChannelFilter,
+      });
+    }
     setSearching(true);
     setIsPlaylistResults(true);
     setSearchMode('song');
@@ -583,7 +611,7 @@ export default function Room() {
     } finally {
       setSearching(false);
     }
-  }, [showToast]);
+  }, [showToast, searchMode, searchedKeyword, playlistSearchResults, playlistSearchPage, playlistSearchTotal, playlistChannelFilter]);
 
   const handleRecommendPlaylistSelect = useCallback(async (playlist: PlaylistSearchItem) => {
     await handlePlaylistImport(playlist.platform, playlist.id);
@@ -613,7 +641,25 @@ export default function Room() {
     setSearchedKeyword('');
     setIsPlaylistResults(false);
     setListPageSongs([]);
+    setPlaylistSearchBackup(null);
   }, []);
+
+  const handleBackToPlaylistSearch = useCallback(() => {
+    if (!playlistSearchBackup) {
+      clearSearchResults();
+      return;
+    }
+    setIsPlaylistResults(false);
+    setResults([]);
+    setSearchMode('playlist');
+    setSearchedKeyword(playlistSearchBackup.keyword);
+    setQuery(playlistSearchBackup.keyword);
+    setPlaylistSearchResults(playlistSearchBackup.results);
+    setPlaylistSearchPage(playlistSearchBackup.page);
+    setPlaylistSearchTotal(playlistSearchBackup.total);
+    setPlaylistChannelFilter(playlistSearchBackup.channel);
+    setListPageSongs([]);
+  }, [playlistSearchBackup, clearSearchResults]);
 
   const handleAdd = async (song: SearchResult) => {
     if (!songRequestAllowed) {
@@ -921,29 +967,41 @@ export default function Room() {
       <div className={`relative min-h-0 flex-1 overflow-y-auto ${playlistSearchLoading ? 'pointer-events-none' : ''}`}>
         <div className={`space-y-2 transition-opacity ${playlistSearchLoading ? 'opacity-40' : ''}`}>
           {playlistSearchResults.map((playlist) => (
-            <div key={`${playlist.platform}-${playlist.id}`} className="group flex items-center gap-2 rounded-xl p-2.5 transition-colors hover:bg-netease-card/80 sm:gap-3 sm:p-3">
-              <img
-                src={playlist.coverImgUrl || 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect fill="%23333" width="48" height="48"/><text x="24" y="28" text-anchor="middle" fill="%23666" font-size="16">♪</text></svg>'}
-                alt=""
-                className="h-12 w-12 flex-shrink-0 rounded-lg bg-netease-card object-cover"
-              />
-              <div className="min-w-0 flex-1 space-y-0.5">
-                <p className="truncate text-sm font-medium">{playlist.name}</p>
-                <p className="truncate text-xs text-netease-muted">
-                  {playlist.creatorName || (playlist.platform === 'qq' ? 'QQ音乐歌单' : '网易云歌单')} · {playlist.trackCount} 首
-                </p>
-              </div>
-              <SourceBadge source={playlist.platform === 'qq' ? 'tencent' : 'netease'} variant="muted" />
-              <button
-                type="button"
-                onClick={() => handlePlaylistImport(playlist.platform, playlist.id)}
-                disabled={playlistSearchLoading || searching}
-                className="flex flex-shrink-0 items-center gap-1 rounded-full bg-netease-red/10 px-2.5 py-1 text-xs font-medium text-netease-red transition-all hover:bg-netease-red hover:text-white disabled:opacity-50"
+            <Tooltip key={`${playlist.platform}-${playlist.id}`} content="双击查看歌单" side="bottom">
+              <div
+                className="group flex cursor-pointer items-center gap-2 rounded-xl p-2.5 transition-colors hover:bg-netease-card/80 sm:gap-3 sm:p-3"
+                onDoubleClick={() => {
+                  if (!playlistSearchLoading && !searching) {
+                    void handlePlaylistImport(playlist.platform, playlist.id);
+                  }
+                }}
               >
-                <ListMusic className="h-4 w-4" />
-                查看
-              </button>
-            </div>
+                <img
+                  src={playlist.coverImgUrl || 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect fill="%23333" width="48" height="48"/><text x="24" y="28" text-anchor="middle" fill="%23666" font-size="16">♪</text></svg>'}
+                  alt=""
+                  className="h-12 w-12 flex-shrink-0 rounded-lg bg-netease-card object-cover"
+                />
+                <div className="min-w-0 flex-1 space-y-0.5">
+                  <p className="truncate text-sm font-medium">{playlist.name}</p>
+                  <p className="truncate text-xs text-netease-muted">
+                    {playlist.creatorName || (playlist.platform === 'qq' ? 'QQ音乐歌单' : '网易云歌单')} · {playlist.trackCount} 首
+                  </p>
+                </div>
+                <SourceBadge source={playlist.platform === 'qq' ? 'tencent' : 'netease'} variant="muted" />
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void handlePlaylistImport(playlist.platform, playlist.id);
+                  }}
+                  disabled={playlistSearchLoading || searching}
+                  className="flex flex-shrink-0 items-center gap-1 rounded-full bg-netease-red/10 px-2.5 py-1 text-xs font-medium text-netease-red transition-all hover:bg-netease-red hover:text-white disabled:opacity-50"
+                >
+                  <ListMusic className="h-4 w-4" />
+                  查看
+                </button>
+              </div>
+            </Tooltip>
           ))}
         </div>
         {playlistSearchLoading && (
@@ -953,32 +1011,60 @@ export default function Room() {
         )}
       </div>
       {playlistSearchTotalPages > 1 && (
-        <div className="mt-auto flex-shrink-0 border-t border-netease-border/40 pt-3">
-          <div className="flex items-center justify-between">
-            <button
-              type="button"
-              disabled={playlistSearchPage <= 1 || playlistSearchLoading}
-              onClick={() => void doPlaylistSearch(searchedKeyword, playlistSearchPage - 1)}
-              className="rounded-lg px-3 py-1.5 text-sm text-netease-muted transition-colors hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
-            >
-              上一页
-            </button>
-            <span className="flex items-center gap-1.5 text-xs text-netease-muted">
-              {playlistSearchLoading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-              {playlistSearchPage} / {playlistSearchTotalPages}
-              <span className="ml-1 text-netease-muted/50">共 {playlistSearchTotal} 个</span>
-            </span>
-            <button
-              type="button"
-              disabled={playlistSearchPage >= playlistSearchTotalPages || playlistSearchLoading}
-              onClick={() => void doPlaylistSearch(searchedKeyword, playlistSearchPage + 1)}
-              className="rounded-lg px-3 py-1.5 text-sm text-netease-muted transition-colors hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
-            >
-              下一页
-            </button>
+        <div className="mt-auto flex-shrink-0 space-y-2 border-t border-netease-border/40 pt-3">
+          <div className="text-center text-xs text-netease-muted">
+            共 {playlistSearchTotal} 个歌单
           </div>
+          <PageNumberPagination
+            page={playlistSearchPage}
+            totalPages={playlistSearchTotalPages}
+            disabled={playlistSearchLoading}
+            onPageChange={(p) => void doPlaylistSearch(searchedKeyword, p)}
+          />
         </div>
       )}
+    </div>
+  );
+
+  const overlaySearchBar = (
+    <div className="flex gap-2 flex-shrink-0">
+      <div className="flex flex-shrink-0 overflow-hidden rounded-xl border border-netease-border bg-netease-card p-1">
+        {([
+          ['song', '歌曲'],
+          ['playlist', '歌单'],
+        ] as const).map(([mode, label]) => (
+          <button
+            key={mode}
+            type="button"
+            onClick={() => setSearchMode(mode)}
+            className={`rounded-lg px-2.5 py-1.5 text-xs transition-colors ${
+              searchMode === mode ? 'bg-netease-red text-white shadow-sm' : 'text-netease-muted hover:text-white'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className="relative flex-1 min-w-0">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-netease-muted pointer-events-none" />
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+          placeholder={searchMode === 'playlist' ? '搜索网易/QQ歌单...' : '搜索歌曲、歌手...'}
+          className="w-full bg-netease-card border border-netease-border rounded-xl pl-9 pr-3 py-2 text-sm text-white placeholder:text-netease-muted/50 focus:outline-none focus:border-netease-red/50 transition-colors"
+        />
+      </div>
+      <button
+        type="button"
+        onClick={handleSearch}
+        disabled={!query.trim() || (searchMode === 'song' && searching)}
+        className="flex-shrink-0 px-3 py-2 rounded-xl bg-netease-red text-white text-sm font-medium hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
+      >
+        {searchButtonLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+        搜索
+      </button>
     </div>
   );
 
@@ -1323,10 +1409,25 @@ export default function Room() {
 
               {!searching && !playlistSearchLoading && searchedKeyword && (
                 <div className="flex items-center justify-between mb-2 px-1 gap-2">
-                  <span className="text-xs text-netease-muted min-w-0 truncate">
-                    {renderResultsSummary()}
-                  </span>
+                  <div className="flex items-center gap-2 min-w-0">
+                    {isPlaylistResults && playlistSearchBackup && (
+                      <button
+                        type="button"
+                        onClick={handleBackToPlaylistSearch}
+                        className="flex flex-shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-xs text-netease-muted hover:bg-white/10 hover:text-white transition-colors"
+                      >
+                        <ChevronLeft className="w-3.5 h-3.5" />
+                        返回
+                      </button>
+                    )}
+                    <span className="text-xs text-netease-muted min-w-0 truncate">
+                      {renderResultsSummary()}
+                    </span>
+                  </div>
                   <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+                    {hasPlaylistSearchResults && (
+                      <PlaylistChannelFilter value={playlistChannelFilter} onChange={handlePlaylistChannelChange} />
+                    )}
                     {searchableCount > 0 && !isPlaylistResults && (
                       searchMode === 'song' && <SearchFilterSelect value={searchFilterMode} onChange={handleSearchFilterChange} />
                     )}
@@ -1395,13 +1496,28 @@ export default function Room() {
             onPointerDown={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-netease-border/50 flex-shrink-0">
-              <div className="min-w-0">
-                <h2 className="text-sm font-medium text-white">{isPlaylistResults ? '歌单' : '搜索结果'}</h2>
-                <p className="text-xs text-netease-muted mt-0.5 truncate">
-                  {renderResultsSummary()}
-                </p>
+              <div className="min-w-0 flex items-center gap-2">
+                {isPlaylistResults && playlistSearchBackup && (
+                  <button
+                    type="button"
+                    onClick={handleBackToPlaylistSearch}
+                    className="flex flex-shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-xs text-netease-muted hover:bg-white/10 hover:text-white transition-colors"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                    返回歌单
+                  </button>
+                )}
+                <div className="min-w-0">
+                  <h2 className="text-sm font-medium text-white">{isPlaylistResults ? '歌单详情' : '搜索结果'}</h2>
+                  <p className="text-xs text-netease-muted mt-0.5 truncate">
+                    {renderResultsSummary()}
+                  </p>
+                </div>
               </div>
               <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+                {hasPlaylistSearchResults && (
+                  <PlaylistChannelFilter value={playlistChannelFilter} onChange={handlePlaylistChannelChange} />
+                )}
                 {!searching && searchableCount > 0 && !isPlaylistResults && (
                   searchMode === 'song' && <SearchFilterSelect value={searchFilterMode} onChange={handleSearchFilterChange} />
                 )}
@@ -1416,7 +1532,10 @@ export default function Room() {
                 </button>
               </div>
             </div>
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3">
+            <div className="flex-shrink-0 px-3 pt-3">
+              {overlaySearchBar}
+            </div>
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3 pt-2">
               {searching && searchedKeyword && !showPlaylistSearch && <SearchSkeleton fillHeight />}
               {showPlaylistSkeleton && (
                 <SearchSkeleton fillHeight count={PLAYLIST_SEARCH_PAGE_SIZE} showPaginationFooter={false} />

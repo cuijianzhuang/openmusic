@@ -30,7 +30,7 @@ export default function TruncateTip({
   }, [text, className]);
 
   return (
-    <Tooltip content={text} side={side} disabled={!truncated}>
+    <Tooltip content={text} side={side} disabled={!truncated} tapToShow>
       {createElement(Tag, { ref, className }, text)}
     </Tooltip>
   );

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Plus, Loader2, ChevronLeft, ChevronRight, ChevronsLeft } from 'lucide-react';
+import { Plus, Loader2 } from 'lucide-react';
 import type { SearchResult } from '../types';
 import { songKey } from '../api/music';
 import SongCover from './SongCover';
@@ -15,6 +15,7 @@ import {
 } from '../lib/songResultPagination';
 import Tooltip from './Tooltip';
 import TruncateTip from './TruncateTip';
+import PageNumberPagination from './PageNumberPagination';
 
 interface Props {
   results: SearchResult[];
@@ -37,7 +38,6 @@ export default function SongResultList({
 }: Props) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<SongResultPageSize>(getStoredSongResultPageSize);
-  const [jumpInput, setJumpInput] = useState('');
 
   const totalPages = Math.max(1, Math.ceil(results.length / pageSize));
   const pageResults = results.slice((page - 1) * pageSize, page * pageSize);
@@ -53,14 +53,6 @@ export default function SongResultList({
     setStoredSongResultPageSize(next);
     setPage(1);
   }, []);
-
-  const handleJumpToPage = useCallback(() => {
-    const target = Number.parseInt(jumpInput.trim(), 10);
-    if (!Number.isFinite(target)) return;
-    const clamped = Math.min(Math.max(1, target), totalPages);
-    setPage(clamped);
-    setJumpInput(String(clamped));
-  }, [jumpInput, totalPages]);
 
   if (results.length === 0) return null;
 
@@ -126,61 +118,11 @@ export default function SongResultList({
           </span>
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-1">
-            <Tooltip content="首页">
-              <button
-                type="button"
-                disabled={page <= 1}
-                onClick={() => setPage(1)}
-                className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-netease-muted transition-colors hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
-              >
-                <ChevronsLeft className="h-3.5 w-3.5" />
-                首页
-              </button>
-            </Tooltip>
-            <button
-              type="button"
-              disabled={page <= 1}
-              onClick={() => setPage((p) => p - 1)}
-              className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-netease-muted transition-colors hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
-            >
-              <ChevronLeft className="h-3.5 w-3.5" />
-              上一页
-            </button>
-          </div>
-
-          <div className="flex items-center gap-1.5">
-            <input
-              type="number"
-              min={1}
-              max={totalPages}
-              value={jumpInput}
-              onChange={(e) => setJumpInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleJumpToPage()}
-              placeholder={String(page)}
-              className="w-12 rounded-lg border border-netease-border/60 bg-netease-card px-2 py-1 text-center text-xs text-white focus:border-netease-red/50 focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-              aria-label="跳转到页码"
-            />
-            <button
-              type="button"
-              onClick={handleJumpToPage}
-              className="rounded-lg px-2 py-1 text-xs text-netease-muted transition-colors hover:bg-white/5 hover:text-white"
-            >
-              跳转
-            </button>
-          </div>
-
-          <button
-            type="button"
-            disabled={page >= totalPages}
-            onClick={() => setPage((p) => p + 1)}
-            className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-netease-muted transition-colors hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
-          >
-            下一页
-            <ChevronRight className="h-3.5 w-3.5" />
-          </button>
-        </div>
+        <PageNumberPagination
+          page={page}
+          totalPages={totalPages}
+          onPageChange={setPage}
+        />
       </div>
     </div>
   );

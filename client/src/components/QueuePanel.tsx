@@ -103,6 +103,8 @@ export default function QueuePanel({ fillHeight = false }: Props) {
           const canJump = !song.isCurrent && (canControlPlayback || isMine);
           const canRemove = !song.isCurrent && (canControlPlayback || isMine);
           const hasSourceError = isTrackSourceError(song);
+          const isAdminPriority = Boolean(song.ownerPriority && song.priorityBy);
+          const isOwnerPriority = Boolean(song.ownerPriority && !song.priorityBy);
 
           return (
             <div
@@ -111,9 +113,11 @@ export default function QueuePanel({ fillHeight = false }: Props) {
               className={`group flex items-center gap-2.5 px-2.5 py-2 rounded-xl transition-colors ${
                 song.isCurrent
                   ? 'bg-netease-red/10 border border-netease-red/25'
-                  : song.ownerPriority
+                  : isAdminPriority
                     ? 'bg-sky-400/10 border border-sky-400/20 hover:bg-sky-400/15'
-                    : 'bg-netease-card/35 hover:bg-netease-card/80'
+                    : isOwnerPriority
+                      ? 'bg-amber-400/10 border border-amber-400/20 hover:bg-amber-400/15'
+                      : 'bg-netease-card/35 hover:bg-netease-card/80'
               }`}
               style={{ minHeight: ROW_HEIGHT }}
             >
@@ -151,9 +155,12 @@ export default function QueuePanel({ fillHeight = false }: Props) {
                     </span>
                     </Tooltip>
                   )}
-                  {Boolean(song.ownerPriority) && (
+                  {isOwnerPriority && (
+                    <span className="rounded-full bg-amber-400/15 px-1.5 py-0 text-[9px] leading-4 text-amber-300">房主</span>
+                  )}
+                  {isAdminPriority && (
                     <TruncateTip
-                      text={song.priorityBy || '管理员'}
+                      text={song.priorityBy!}
                       as="span"
                       className="flex-shrink-0 max-w-[4.5rem] rounded-full bg-sky-400/15 px-1.5 py-0 text-[9px] leading-4 text-sky-300 truncate"
                     />
