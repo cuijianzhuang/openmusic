@@ -8,6 +8,16 @@ import {
   queueSaveRoomToStorage,
   deleteRoomFromStorage,
 } from './roomStorage.js';
+import {
+  DEFAULT_MEMBER_SETTINGS,
+  buildWelcomeText,
+  normalizeIncomingMemberTier,
+  normalizeMemberSettings,
+  restoreMemberTiersFromStorage,
+  serializeMemberSettings,
+  serializeMemberTier,
+  serializeMemberTiersMap,
+} from './memberTier.js';
 
 const generateRoomId = customAlphabet('ABCDEFGHJKLMNPQRSTUVWXYZ23456789', 6);
 const generateId = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz', 12);
@@ -137,6 +147,8 @@ function snapshotRoomForStorage(room) {
     announcementEnabled: Boolean(room.announcementEnabled),
     announcementText: String(room.announcementText || '').slice(0, MAX_ANNOUNCEMENT_LENGTH),
     songRequestEnabled: room.songRequestEnabled !== false,
+    memberTiers: serializeMemberTiersMap(room.memberTiers),
+    memberSettings: serializeMemberSettings(room.memberSettings),
     createdAt: room.createdAt,
   };
 }
@@ -172,6 +184,8 @@ function restoreRoomFromStorage(data) {
   room.announcementEnabled = Boolean(data.announcementEnabled);
   room.announcementText = String(data.announcementText || '').slice(0, MAX_ANNOUNCEMENT_LENGTH);
   room.songRequestEnabled = data.songRequestEnabled !== false;
+  room.memberTiers = restoreMemberTiersFromStorage(data.memberTiers);
+  room.memberSettings = normalizeMemberSettings(data.memberSettings);
   room.createdAt = data.createdAt ?? Date.now();
 
   if (room.isPlaying && room.current) {
@@ -320,6 +334,8 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
     announcementEnabled: false,
     announcementText: '',
     songRequestEnabled: true,
+    memberTiers: new Map(),
+    memberSettings: { ...DEFAULT_MEMBER_SETTINGS },
     createdAt: Date.now(),
     destroyTimer: null,
   };
@@ -511,10 +527,12 @@ function getSongDurationSeconds(song) {
 
   let lastTime = 0;
   const regex = /\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]/g;
+  const PHANTOM_LRC_MINUTES = 90;
   for (const line of String(song?.lrc || '').split('\n')) {
     let match;
     while ((match = regex.exec(line))) {
       const minutes = Number(match[1]);
+      if (minutes >= PHANTOM_LRC_MINUTES) continue;
       const seconds = Number(match[2]);
       const fraction = match[3] ? Number(`0.${match[3].padEnd(3, '0').slice(0, 3)}`) : 0;
       const time = minutes * 60 + seconds + fraction;
@@ -823,6 +841,109 @@ export function setRoomAudioQuality(roomId, actorId, quality = {}, connectionId 
   });
   persistRoom(room);
   return { room: serializeRoom(room) };
+}
+
+export function setRoomMemberTier(roomId, actorId, targetUserId, payload = {}, connectionId = null) {
+  const room = rooms.get(roomId);
+  if (!room) return { error: '房间不存在' };
+  if (!isOwnerConnection(room, actorId, connectionId)) return { error: '仅房主可设置贵宾角标' };
+
+  const userId = String(targetUserId || '').trim();
+  if (!userId) return { error: '无效用户' };
+  if (userId === room.creatorId) return { error: '房主无需设置贵宾角标' };
+
+  if (!room.memberTiers) room.memberTiers = new Map();
+  const normalized = normalizeIncomingMemberTier(payload);
+  room.memberTiers.set(userId, serializeMemberTier(userId, {
+    ...normalized,
+    assignedAt: Date.now(),
+  }));
+
+  persistRoom(room);
+  invalidateRoomsListCache();
+  return { room: serializeRoom(room) };
+}
+
+export function removeRoomMemberTier(roomId, actorId, targetUserId, connectionId = null) {
+  const room = rooms.get(roomId);
+  if (!room) return { error: '房间不存在' };
+  if (!isOwnerConnection(room, actorId, connectionId)) return { error: '仅房主可移除贵宾角标' };
+
+  const userId = String(targetUserId || '').trim();
+  if (!userId) return { error: '无效用户' };
+  if (!room.memberTiers?.has(userId)) return { error: '该用户不是贵宾' };
+
+  room.memberTiers.delete(userId);
+  persistRoom(room);
+  invalidateRoomsListCache();
+  return { room: serializeRoom(room) };
+}
+
+export function setRoomMemberSettings(roomId, actorId, settings = {}, connectionId = null) {
+  const room = rooms.get(roomId);
+  if (!room) return { error: '房间不存在' };
+  if (!isOwnerConnection(room, actorId, connectionId)) return { error: '仅房主可调整贵宾设置' };
+
+  room.memberSettings = normalizeMemberSettings({
+    ...normalizeMemberSettings(room.memberSettings),
+    ...settings,
+  });
+  persistRoom(room);
+  return { room: serializeRoom(room) };
+}
+
+const MEMBER_WELCOME_COOLDOWN_MS = 5 * 60 * 1000;
+
+function hasRecentMemberWelcome(room, userId) {
+  if (!room?.messages?.length || !userId) return false;
+  const now = Date.now();
+  for (let i = room.messages.length - 1; i >= 0; i -= 1) {
+    const message = room.messages[i];
+    if (message.kind !== 'welcome' || message.targetUserId !== userId) continue;
+    return now - message.timestamp < MEMBER_WELCOME_COOLDOWN_MS;
+  }
+  return false;
+}
+
+export function postMemberWelcomeMessage(roomId, userId) {
+  const room = rooms.get(roomId);
+  if (!room || !userId) return null;
+
+  const tier = room.memberTiers?.get(userId);
+  if (!tier) return null;
+
+  const settings = normalizeMemberSettings(room.memberSettings);
+  if (!settings.welcomeEnabled) return null;
+
+  if (hasRecentMemberWelcome(room, userId)) return null;
+
+  const user = room.users.get(userId);
+  const nickname = user?.nickname || room.userNicknames?.get(userId) || '贵宾';
+  const message = {
+    id: generateId(),
+    userId: 'system',
+    nickname: '房间迎宾',
+    text: buildWelcomeText(settings, tier, nickname),
+    kind: 'welcome',
+    mentions: [],
+    replyTo: null,
+    timestamp: Date.now(),
+    memberTier: {
+      badgeLabel: tier.badgeLabel,
+      badgeColor: tier.badgeColor,
+      borderStyleId: tier.borderStyleId,
+      borderColor: tier.borderColor,
+    },
+    targetUserId: userId,
+    targetNickname: nickname,
+  };
+
+  room.messages.push(message);
+  if (room.messages.length > MAX_CHAT_MESSAGES) {
+    room.messages.splice(0, room.messages.length - MAX_CHAT_MESSAGES);
+  }
+  persistRoom(room);
+  return serializeChatMessage(message);
 }
 
 function isUserChatMuted(room, userId) {
@@ -1663,10 +1784,14 @@ function serializeChatMessage(message) {
     userId: message.userId,
     nickname: message.nickname,
     text: message.text,
+    kind: message.kind || 'chat',
     mentions: message.mentions || [],
     replyTo: message.replyTo || null,
     timestamp: message.timestamp,
     reactions: serializeReactions(message.reactions),
+    memberTier: message.memberTier || null,
+    targetUserId: message.targetUserId || null,
+    targetNickname: message.targetNickname || null,
   };
 }
 
@@ -1976,6 +2101,8 @@ function serializeRoom(room, options = {}) {
     announcementEnabled: Boolean(room.announcementEnabled),
     announcementText: String(room.announcementText || '').slice(0, MAX_ANNOUNCEMENT_LENGTH),
     songRequestEnabled: room.songRequestEnabled !== false,
+    memberTiers: serializeMemberTiersMap(room.memberTiers),
+    memberSettings: serializeMemberSettings(room.memberSettings),
   };
 }
 

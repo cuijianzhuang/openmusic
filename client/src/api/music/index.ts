@@ -156,6 +156,8 @@ export function getSourceLabel(source?: MusicSource): string {
 export function parseLrc(lrc: string): import('../../types').LyricLine[] {
   const lines: import('../../types').LyricLine[] = [];
   const regex = /\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]/g;
+  /** 网易云等常用 99:xx 存放页脚推广，非真实歌词时间 */
+  const PHANTOM_LRC_MINUTES = 90;
 
   for (const line of lrc.split('\n')) {
     const matches = [...line.matchAll(regex)];
@@ -166,6 +168,7 @@ export function parseLrc(lrc: string): import('../../types').LyricLine[] {
 
     for (const match of matches) {
       const minutes = parseInt(match[1], 10);
+      if (minutes >= PHANTOM_LRC_MINUTES) continue;
       const seconds = parseInt(match[2], 10);
       const fraction = match[3] ? Number(`0.${match[3].padEnd(3, '0').slice(0, 3)}`) : 0;
       const time = minutes * 60 + seconds + fraction;
@@ -176,15 +179,20 @@ export function parseLrc(lrc: string): import('../../types').LyricLine[] {
   return lines.sort((a, b) => a.time - b.time);
 }
 
-/** 过滤 LRC 中的制作信息、歌手标注等非演唱歌词 */
+/** 过滤 LRC 中的制作信息、推广文案等非演唱歌词 */
 const CREDIT_LINE_RE =
-  /^(歌手|演唱|原唱|专辑|来源|OP|SP|版权|未经许可|宣传|策划|统筹|发行|出品|监制|配唱|监唱|制作|录音|混音|母带|编曲|作曲|作词|吉他|贝斯|鼓|键盘|和声|弦乐|钢琴|打击乐|营销推广|音乐制作|音乐监制|歌曲监制|和声编写|弦乐编写|混音工程师|录音工程师|母带工程师|制作统筹|人声|弦乐演奏|吉他演奏|贝斯演奏|鼓演奏)\s*[:：]/i;
+  /^(歌手|演唱|原唱|专辑|来源|OP|SP|版权|未经许可|宣传|策划|统筹|发行|出品方?|监制|配唱|监唱|制作|录音|混音|母带|编曲|作曲|作词|吉他|贝斯|鼓|键盘|和声|弦乐|钢琴|打击乐|营销推广|音乐制作|音乐监制|歌曲监制|和声编写|弦乐编写|混音工程师|录音工程师|母带工程师|制作统筹|人声|弦乐演奏|吉他演奏|贝斯演奏|鼓演奏)\s*[:：]/i;
+
+const PROMO_LINE_RE =
+  /(网易飓风计划|现金激励|流量扶持|业务联系|vip\.163\.com|来自〖|〗)/i;
 
 export function filterDisplayLyrics(lines: import('../../types').LyricLine[]): import('../../types').LyricLine[] {
   return lines.filter((line) => {
     const text = line.text.trim();
     if (!text) return false;
-    return !CREDIT_LINE_RE.test(text);
+    if (CREDIT_LINE_RE.test(text)) return false;
+    if (PROMO_LINE_RE.test(text)) return false;
+    return true;
   });
 }
 
@@ -220,9 +228,9 @@ export function getActiveLyricPair(
 /** 歌词结束后常见纯音乐尾奏预留（秒） */
 const LRC_TAIL_PADDING_SEC = 20;
 
-/** 从 LRC 推算备选时长（毫秒）：歌词末行 + 20 秒尾奏 */
+/** 从 LRC 推算备选时长（毫秒）：有效歌词末行 + 20 秒尾奏 */
 export function getLrcFallbackDurationMs(lrc: string): number | undefined {
-  const lines = parseLrc(lrc);
+  const lines = filterDisplayLyrics(parseLrc(lrc));
   if (lines.length === 0) return undefined;
   return Math.round((lines[lines.length - 1].time + LRC_TAIL_PADDING_SEC) * 1000);
 }

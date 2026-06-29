@@ -5,6 +5,21 @@ export interface RoomAudioQuality {
   tencent: string;
 }
 
+export interface RoomMemberTier {
+  userId: string;
+  badgeLabel: string;
+  badgeColor: string;
+  borderStyleId: string;
+  borderColor: string;
+  assignedAt?: number;
+}
+
+export interface RoomMemberSettings {
+  welcomeEnabled: boolean;
+  welcomeTemplateId: string;
+  welcomeCustomText?: string;
+}
+
 export interface Song {
   id: string;
   source: MusicSource;
@@ -80,10 +95,14 @@ export interface ChatMessage {
   userId: string;
   nickname: string;
   text: string;
+  kind?: 'chat' | 'welcome' | 'system';
   mentions?: ChatMention[];
   replyTo?: ChatReplyRef | null;
   timestamp: number;
   reactions?: ChatReactionGroup[];
+  memberTier?: Pick<RoomMemberTier, 'badgeLabel' | 'badgeColor' | 'borderStyleId' | 'borderColor'>;
+  targetUserId?: string;
+  targetNickname?: string;
 }
 
 export interface SkipRequest {
@@ -138,6 +157,10 @@ export interface RoomState {
   announcementText?: string;
   /** 是否允许成员点歌（关闭后仅房主/管理员可点） */
   songRequestEnabled?: boolean;
+  /** 房间贵宾角标（userId → 配置） */
+  memberTiers?: Record<string, RoomMemberTier>;
+  /** 贵宾欢迎语等房间级设置 */
+  memberSettings?: RoomMemberSettings;
 }
 
 /** CRDT 播放状态（服务端唯一时间源） */

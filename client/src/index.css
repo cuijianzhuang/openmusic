@@ -161,3 +161,54 @@ body {
     cursor: pointer;
   }
 }
+
+/* 贵宾点歌边框 — 纯色描边 + 向内光晕（亮度见 memberTierPresets.ts MEMBER_FRAME_GLOW） */
+.member-queue-shell {
+  position: relative;
+  border-radius: 0.75rem;
+  overflow: hidden;
+  border-style: solid;
+  border-color: var(--member-border-color);
+  --member-glow-outer: 0.28;
+  --member-glow-inset: 0.14;
+  --member-glow-inner-mix: 10%;
+}
+
+.member-queue-inner {
+  position: relative;
+  border-radius: inherit;
+  overflow: hidden;
+}
+
+.member-queue-compact {
+  border-width: 1.5px;
+  box-shadow:
+    inset 0 0 8px 1px color-mix(in srgb, var(--member-border-color) calc(var(--member-glow-inset) * 100%), transparent),
+    inset 0 0 14px 2px color-mix(in srgb, var(--member-border-color) var(--member-glow-inner-mix), transparent),
+    0 0 5px color-mix(in srgb, var(--member-border-color) calc(var(--member-glow-outer) * 100%), transparent);
+}
+
+.member-frame-preview {
+  border-width: 2px;
+  box-shadow:
+    inset 0 0 10px 2px color-mix(in srgb, var(--member-border-color) calc(var(--member-glow-inset) * 100%), transparent),
+    inset 0 0 18px 3px color-mix(in srgb, var(--member-border-color) var(--member-glow-inner-mix), transparent),
+    0 0 7px color-mix(in srgb, var(--member-border-color) calc(var(--member-glow-outer) * 100%), transparent);
+}
+
+.member-badge-shine {
+  background-image: linear-gradient(120deg, transparent 30%, rgba(255,255,255,0.55) 50%, transparent 70%);
+  background-size: 200% 100%;
+  animation: member-badge-shimmer 2.6s ease-in-out infinite;
+}
+
+@keyframes member-badge-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.welcome-chat-card {
+  background: linear-gradient(135deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02));
+  border: 1px solid rgba(255,255,255,0.12);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.25);
+}

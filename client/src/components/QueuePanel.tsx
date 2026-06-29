@@ -10,6 +10,8 @@ import SourceBadge from './SourceBadge';
 import FavoriteButton from './FavoriteButton';
 import Tooltip from './Tooltip';
 import TruncateTip from './TruncateTip';
+import MemberQueueFrame from './MemberQueueFrame';
+import MemberTierBadge from './MemberTierBadge';
 
 /** 单条约 64px + 间距，固定显示 3 条 */
 const VISIBLE_ROWS = 3;
@@ -105,22 +107,10 @@ export default function QueuePanel({ fillHeight = false }: Props) {
           const hasSourceError = isTrackSourceError(song);
           const isAdminPriority = Boolean(song.ownerPriority && song.priorityBy);
           const isOwnerPriority = Boolean(song.ownerPriority && !song.priorityBy);
+          const memberTier = song.requestedById ? room.memberTiers?.[song.requestedById] : undefined;
 
-          return (
-            <div
-              key={song.queueId || `current-${song.id}`}
-              ref={song.isCurrent ? currentRef : undefined}
-              className={`group flex items-center gap-2.5 px-2.5 py-2 rounded-xl transition-colors ${
-                song.isCurrent
-                  ? 'bg-netease-red/10 border border-netease-red/25'
-                  : isAdminPriority
-                    ? 'bg-sky-400/10 border border-sky-400/20 hover:bg-sky-400/15'
-                    : isOwnerPriority
-                      ? 'bg-amber-400/10 border border-amber-400/20 hover:bg-amber-400/15'
-                      : 'bg-netease-card/35 hover:bg-netease-card/80'
-              }`}
-              style={{ minHeight: ROW_HEIGHT }}
-            >
+          const rowInner = (
+            <>
               <span className="w-5 text-center text-[11px] text-netease-muted flex-shrink-0">
                 {song.isCurrent ? (
                   <span className="inline-flex gap-0.5 items-end h-3.5">
@@ -134,6 +124,7 @@ export default function QueuePanel({ fillHeight = false }: Props) {
               </span>
               <SongCover
                 song={song}
+                size="tiny"
                 className="w-11 h-11 rounded-lg object-cover bg-netease-card flex-shrink-0"
               />
               <div className="flex-1 min-w-0 self-stretch flex flex-col justify-center gap-1">
@@ -150,9 +141,9 @@ export default function QueuePanel({ fillHeight = false }: Props) {
                       <span
                         className="inline-flex flex-shrink-0 items-center gap-0.5 rounded-md border border-red-500/40 bg-red-500/15 px-1.5 py-0.5 text-[9px] sm:text-[10px] font-medium leading-tight text-red-400 max-w-[9rem] sm:max-w-none"
                       >
-                      <AlertTriangle className="h-3 w-3 flex-shrink-0" />
-                      <span className="truncate sm:whitespace-nowrap">歌曲源异常，将跳过此歌</span>
-                    </span>
+                        <AlertTriangle className="h-3 w-3 flex-shrink-0" />
+                        <span className="truncate sm:whitespace-nowrap">歌曲源异常，将跳过此歌</span>
+                      </span>
                     </Tooltip>
                   )}
                   {isOwnerPriority && (
@@ -165,6 +156,7 @@ export default function QueuePanel({ fillHeight = false }: Props) {
                       className="flex-shrink-0 max-w-[4.5rem] rounded-full bg-sky-400/15 px-1.5 py-0 text-[9px] leading-4 text-sky-300 truncate"
                     />
                   )}
+                  {memberTier && <MemberTierBadge tier={memberTier} />}
                   <SourceBadge
                     source={song.source || 'netease'}
                     className="rounded-full px-1.5 py-0 text-[9px] leading-4"
@@ -225,6 +217,45 @@ export default function QueuePanel({ fillHeight = false }: Props) {
                   )}
                 </div>
               </div>
+            </>
+          );
+
+          if (memberTier) {
+            const memberInnerClassName = song.isCurrent ? 'bg-netease-red/10' : 'bg-transparent';
+            return (
+              <MemberQueueFrame
+                key={song.queueId || `current-${song.id}`}
+                variant="queue"
+                tier={memberTier}
+                innerClassName={memberInnerClassName}
+              >
+                <div
+                  ref={song.isCurrent ? currentRef : undefined}
+                  className="group flex items-center gap-2.5 px-2.5 py-2 transition-colors hover:bg-netease-card/80"
+                  style={{ minHeight: ROW_HEIGHT }}
+                >
+                  {rowInner}
+                </div>
+              </MemberQueueFrame>
+            );
+          }
+
+          return (
+            <div
+              key={song.queueId || `current-${song.id}`}
+              ref={song.isCurrent ? currentRef : undefined}
+              className={`group flex items-center gap-2.5 px-2.5 py-2 transition-colors rounded-xl border ${
+                song.isCurrent
+                  ? 'bg-netease-red/10 border-netease-red/25'
+                  : isAdminPriority
+                    ? 'bg-sky-400/10 border border-sky-400/20 hover:bg-sky-400/15'
+                    : isOwnerPriority
+                      ? 'bg-amber-400/10 border border-amber-400/20 hover:bg-amber-400/15'
+                      : 'bg-netease-card/35 border-transparent hover:bg-netease-card/80'
+              }`}
+              style={{ minHeight: ROW_HEIGHT }}
+            >
+              {rowInner}
             </div>
           );
         })}

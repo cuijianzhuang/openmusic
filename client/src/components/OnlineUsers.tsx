@@ -5,11 +5,13 @@ import { useSocket } from '../hooks/useSocket';
 import ConfirmModal from './ConfirmModal';
 import Tooltip from './Tooltip';
 import TruncateTip from './TruncateTip';
+import MemberTierBadge from './MemberTierBadge';
 import type { RoomUser } from '../types';
 
 interface Props {
   users: RoomUser[];
   creatorId?: string | null;
+  memberTiers?: Record<string, { badgeLabel: string; badgeColor: string }>;
   onNotice?: (message: string, type: 'success' | 'error') => void;
 }
 
@@ -19,7 +21,7 @@ type PendingAction =
   | { type: 'kick'; user: DisplayUser }
   | { type: 'admin'; user: DisplayUser; admin: boolean };
 
-export default function OnlineUsers({ users, creatorId, onNotice }: Props) {
+export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNotice }: Props) {
   const room = useRoomStore((s) => s.room);
   const mySocketId = useRoomStore((s) => s.mySocketId);
   const isOwner = useRoomStore((s) => s.isOwner);
@@ -276,6 +278,9 @@ export default function OnlineUsers({ users, creatorId, onNotice }: Props) {
                           <span className="flex-shrink-0 whitespace-nowrap rounded-full bg-sky-400/15 px-1.5 py-0 text-[9px] leading-4 text-sky-300">
                             管理员
                           </span>
+                        )}
+                        {memberTiers[user.id] && (
+                          <MemberTierBadge tier={memberTiers[user.id]} />
                         )}
                         {user.offline && (
                           <span className="flex-shrink-0 whitespace-nowrap rounded-full bg-white/8 px-1.5 py-0 text-[9px] leading-4 text-netease-muted">

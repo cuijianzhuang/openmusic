@@ -156,10 +156,12 @@ async function resolveMp3DurationMs(url) {
 function getLrcFallbackDurationMs(lrc) {
   let lastTimeSec = 0;
   const regex = /\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]/g;
+  const PHANTOM_LRC_MINUTES = 90;
   for (const line of String(lrc || '').split('\n')) {
     let match;
     while ((match = regex.exec(line))) {
       const minutes = Number(match[1]);
+      if (minutes >= PHANTOM_LRC_MINUTES) continue;
       const seconds = Number(match[2]);
       const fraction = match[3] ? Number(`0.${match[3].padEnd(3, '0').slice(0, 3)}`) : 0;
       const time = minutes * 60 + seconds + fraction;

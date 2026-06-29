@@ -1,4 +1,4 @@
-const METING_API_URL = (process.env.METING_API_URL || 'http://localhost:3000').replace(/\/$/, '');
+const METING_API_URL = (process.env.METING_API_URL ).replace(/\/$/, '');
 const METING_API_AUTH = process.env.METING_API_AUTH || '';
 
 const NETEASE_HEADERS = {

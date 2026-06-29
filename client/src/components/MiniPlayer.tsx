@@ -4,12 +4,13 @@ import { useRoomStore } from '../stores/roomStore';
 import { useAudioStore } from '../stores/audioStore';
 import { useSocket } from '../hooks/useSocket';
 
-import { formatDuration, getCoverUrl, getActiveLyricPair } from '../api/music';
+import { formatDuration, getActiveLyricPair } from '../api/music';
 import { useTrackDuration, clampPlaybackTime } from '../hooks/useTrackDuration';
 import { useSmoothPlaybackTime } from '../hooks/useSmoothPlaybackTime';
 import { useTrackLyrics } from '../hooks/useTrackLyrics';
 
 import SourceBadge from './SourceBadge';
+import SongCover from './SongCover';
 
 import ProgressBar from './ProgressBar';
 import VolumeControl from './VolumeControl';
@@ -185,13 +186,11 @@ export default function MiniPlayer({ onExpand, transparentBar = true }: Props) {
 
         <button onClick={onExpand} className="flex items-center gap-2 sm:gap-2.5 flex-shrink-0 max-w-[38%] sm:max-w-[32%] min-w-0 text-left">
 
-          <img
-            src={getCoverUrl(current, 'thumb')}
-            alt=""
+          <SongCover
+            song={current}
+            size="tiny"
+            eager
             className="w-10 h-10 sm:w-11 sm:h-11 rounded-lg object-cover flex-shrink-0"
-            loading="eager"
-            decoding="async"
-            fetchPriority="high"
           />
 
           <div className="min-w-0 hidden sm:block">

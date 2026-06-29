@@ -1,4 +1,5 @@
 import './loadEnv.js';
+import { resizeCoverForThumb } from './coverUrl.js';
 import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
@@ -22,6 +23,10 @@ import {
   renameRoom,
   setRoomLock,
   setRoomAudioQuality,
+  setRoomMemberTier,
+  removeRoomMemberTier,
+  setRoomMemberSettings,
+  postMemberWelcomeMessage,
   setRoomFmMode,
   setRoomAnnouncement,
   setSongRequestEnabled,
@@ -70,7 +75,7 @@ import { recordSongRequest, getHotSongs } from './songHotRank.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 4000;
-const METING_API_URL = (process.env.METING_API_URL || 'http://localhost:3000').replace(/\/$/, '');
+const METING_API_URL = (process.env.METING_API_URL ).replace(/\/$/, '');
 const METING_API_AUTH = process.env.METING_API_AUTH || '';
 const VMY_LRC_URL = (process.env.VMY_LRC_URL || 'https://api.52vmy.cn/api/music/lrc').replace(/\/$/, '');
 const DISCONNECT_GRACE_MS = 1500;
@@ -314,11 +319,14 @@ function buildMetingUrl(query) {
   return `${METING_API_URL}/api?${params.toString()}`;
 }
 
-async function proxyMetingResponse(targetUrl, res) {
+async function proxyMetingResponse(targetUrl, res, thumbPx = 0) {
   const response = await fetchWithTimeout(targetUrl, { redirect: 'manual' });
 
   if (response.status >= 300 && response.status < 400) {
-    const location = response.headers.get('location');
+    let location = response.headers.get('location');
+    if (location && thumbPx > 0) {
+      location = resizeCoverForThumb(location, thumbPx);
+    }
     if (location) return res.redirect(response.status, location);
   }
 
@@ -463,7 +471,10 @@ app.get('/api/meting', async (req, res) => {
   }
 
   try {
-    await proxyMetingResponse(buildMetingUrl(req.query), res);
+    const thumbPx = parseInt(String(req.query.size || ''), 10) || 0;
+    const query = { ...req.query };
+    delete query.size;
+    await proxyMetingResponse(buildMetingUrl(query), res, thumbPx);
   } catch (err) {
     console.error('Meting proxy error:', err.message);
     res.status(502).json({ error: '无法连接 Meting API，请检查 METING_API_URL 配置' });
@@ -812,6 +823,15 @@ io.on('connection', (socket) => {
       removeUser(id, prevUserId, socket.id);
     }
 
+    const joinInternalBefore = getRoomInternal(id);
+    const priorUser = joinInternalBefore?.users?.get(userId);
+    const hadActiveSession = Boolean(
+      priorUser && (
+        (Array.isArray(priorUser.connectionIds) && priorUser.connectionIds.length > 0)
+        || priorUser.connectionId
+      ),
+    );
+
     const clientIp = getClientIp(socket);
     const joinedRoom = addUser(id, userId, nickname, {
       readOnly: Boolean(readOnly),
@@ -832,6 +852,8 @@ io.on('connection', (socket) => {
     socket.join(id);
     attachUserLocation(id, userId, clientIp);
 
+    const welcomeMessage = hadActiveSession ? null : postMemberWelcomeMessage(id, userId);
+
     // 无当前歌曲且队列为空时，加入后会异步拉取随机歌曲，先告知客户端"加载中"，
     // 避免播放条在随机歌曲到达前直接消失。
     const loadingRoom = markRandomLoading(id);
@@ -842,6 +864,9 @@ io.on('connection', (socket) => {
 
     const joinUser = joinInternal?.users.get(userId);
     socket.to(id).emit('room_update', roomPayload);
+    if (welcomeMessage) {
+      socket.to(id).emit('chat_message', welcomeMessage);
+    }
     callback?.({
       success: true,
       room: roomPayload,
@@ -1000,6 +1025,66 @@ io.on('connection', (socket) => {
     }
 
     const result = setRoomAudioQuality(roomId, getSocketUserId(socket), { netease, tencent }, socket.id);
+    if (result.error) {
+      callback?.({ success: false, error: result.error });
+      return;
+    }
+
+    io.to(roomId).emit('room_update', result.room);
+    callback?.({ success: true, room: result.room });
+  });
+
+  socket.on('set_room_member_tier', ({ userId, tier }, callback) => {
+    if (rejectReadOnly(socket, callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, 'set_room_member_tier', callback)) return;
+
+    const roomId = socketToRoom.get(socket.id);
+    if (!roomId) {
+      callback?.({ success: false, error: '未加入房间' });
+      return;
+    }
+
+    const result = setRoomMemberTier(roomId, getSocketUserId(socket), userId, tier, socket.id);
+    if (result.error) {
+      callback?.({ success: false, error: result.error });
+      return;
+    }
+
+    io.to(roomId).emit('room_update', result.room);
+    callback?.({ success: true, room: result.room });
+  });
+
+  socket.on('remove_room_member_tier', ({ userId }, callback) => {
+    if (rejectReadOnly(socket, callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, 'remove_room_member_tier', callback)) return;
+
+    const roomId = socketToRoom.get(socket.id);
+    if (!roomId) {
+      callback?.({ success: false, error: '未加入房间' });
+      return;
+    }
+
+    const result = removeRoomMemberTier(roomId, getSocketUserId(socket), userId, socket.id);
+    if (result.error) {
+      callback?.({ success: false, error: result.error });
+      return;
+    }
+
+    io.to(roomId).emit('room_update', result.room);
+    callback?.({ success: true, room: result.room });
+  });
+
+  socket.on('set_room_member_settings', (settings, callback) => {
+    if (rejectReadOnly(socket, callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, 'set_room_member_settings', callback)) return;
+
+    const roomId = socketToRoom.get(socket.id);
+    if (!roomId) {
+      callback?.({ success: false, error: '未加入房间' });
+      return;
+    }
+
+    const result = setRoomMemberSettings(roomId, getSocketUserId(socket), settings, socket.id);
     if (result.error) {
       callback?.({ success: false, error: result.error });
       return;

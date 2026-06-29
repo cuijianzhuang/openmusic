@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Check, X } from 'lucide-react';
 
 interface Props {
@@ -19,9 +20,9 @@ export default function Toast({ message, type = 'success', onClose, duration = 3
 
   const isSuccess = type === 'success';
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-x-0 top-4 z-[100] flex justify-center px-4 pointer-events-none"
+      className="fixed inset-x-0 top-[max(0.75rem,env(safe-area-inset-top))] z-[130] flex justify-center px-4 pointer-events-none"
       role="status"
     >
       <div
@@ -34,6 +35,7 @@ export default function Toast({ message, type = 'success', onClose, duration = 3
         {isSuccess ? <Check className="w-4 h-4 flex-shrink-0" /> : <X className="w-4 h-4 flex-shrink-0" />}
         <span className="truncate">{message}</span>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

@@ -10,6 +10,8 @@ import type { ChatMessage, ChatReplyRef, RoomUser } from '../types';
 import { isChatMutedForUser } from '../lib/chatMute';
 import QFaceImage from './QFaceImage';
 import Tooltip from './Tooltip';
+import MemberTierBadge from './MemberTierBadge';
+import { fireWelcomeConfetti } from '../lib/confettiBurst';
 import { ChatMessageReactions, ChatReactionPicker } from './ChatMessageReactions';
 import {
   ensureQQFacesLoaded,
@@ -123,6 +125,10 @@ export default function ChatPanel() {
   const mentionQueryRef = useRef('');
   const reactionPickerOpenRef = useRef(false);
   const scrollBottomRafRef = useRef<number | null>(null);
+  const welcomeConfettiIdsRef = useRef(new Set<string>());
+  const welcomeConfettiCooldownRef = useRef(new Map<string, number>());
+  const chatConfettiRootRef = useRef<HTMLDivElement | null>(null);
+  const WELCOME_CONFETTI_COOLDOWN_MS = 5 * 60 * 1000;
 
   reactionPickerOpenRef.current = reactionPickerMessageId !== null;
 
@@ -187,8 +193,28 @@ export default function ChatPanel() {
       mentionQueryRef.current = '';
       setMentionIndex(0);
       notifiedMessageIdsRef.current.clear();
+      welcomeConfettiIdsRef.current.clear();
+      welcomeConfettiCooldownRef.current.clear();
     }
   }, [room?.id]);
+
+  useEffect(() => {
+    const container = chatConfettiRootRef.current;
+    if (!container) return;
+
+    for (const msg of messages) {
+      if (msg.kind !== 'welcome' || welcomeConfettiIdsRef.current.has(msg.id)) continue;
+      welcomeConfettiIdsRef.current.add(msg.id);
+
+      const targetId = msg.targetUserId || msg.id;
+      const lastAt = welcomeConfettiCooldownRef.current.get(targetId) || 0;
+      const now = Date.now();
+      if (now - lastAt < WELCOME_CONFETTI_COOLDOWN_MS) continue;
+
+      welcomeConfettiCooldownRef.current.set(targetId, now);
+      fireWelcomeConfetti(container);
+    }
+  }, [messages]);
 
   useEffect(() => {
     const el = chatScrollRoot;
@@ -755,7 +781,7 @@ export default function ChatPanel() {
         )}
       </div>
 
-      <div className="relative min-h-0 flex-1">
+      <div ref={chatConfettiRootRef} className="relative min-h-0 flex-1 overflow-hidden">
         <div ref={setChatScrollRoot} className="h-full space-y-2 overflow-y-auto px-3 py-2 pb-3">
           {(loadingOlder || hasMoreOlder) && (
             <p className="py-1 text-center text-[10px] text-netease-muted">
@@ -765,9 +791,29 @@ export default function ChatPanel() {
           {messages.length === 0 ? (
             <p className="py-8 text-center text-xs text-netease-muted">暂无消息，打个招呼吧</p>
           ) : messages.map((msg) => {
+          if (msg.kind === 'welcome') {
+            return (
+              <div key={msg.id} className="flex justify-center py-1">
+                <div className="welcome-chat-card max-w-[92%] rounded-2xl px-4 py-3 text-center">
+                  <div className="mb-2 flex flex-wrap items-center justify-center gap-2">
+                    {msg.memberTier && <MemberTierBadge tier={msg.memberTier} />}
+                    {msg.targetNickname && (
+                      <span className="text-sm font-medium text-white">{msg.targetNickname}</span>
+                    )}
+                  </div>
+                  <p className="text-sm leading-6 text-white/95">{msg.text}</p>
+                  {msg.timestamp > 0 && (
+                    <p className="mt-2 text-[10px] text-netease-muted/70">{formatChatTime(msg.timestamp)}</p>
+                  )}
+                </div>
+              </div>
+            );
+          }
+
           const myUserId = mySocketId || getClientId();
           const isMe = msg.userId === myUserId;
           const isRoomCreator = msg.userId === room.creatorId;
+          const userMemberTier = room.memberTiers?.[msg.userId];
           const user = userMap.get(msg.userId);
           return (
             <div key={msg.id} className={`group flex flex-col ${isMe ? 'items-end' : 'items-start'}`} onContextMenu={(event) => { event.preventDefault(); handleReply(msg); }}>
@@ -775,6 +821,7 @@ export default function ChatPanel() {
                 <button type="button" onClick={() => user && handleAt(user)} className={`text-[10px] ${isMe ? 'text-netease-red/80' : 'text-netease-muted'} hover:text-sky-300`}>
                   {msg.nickname}{isRoomCreator && <span className="ml-1 text-amber-400/80">房主</span>}
                 </button>
+                {userMemberTier && <MemberTierBadge tier={userMemberTier} className="scale-90" />}
                 {msg.timestamp > 0 && (
                   <Tooltip content={new Date(msg.timestamp).toLocaleString('zh-CN')} side="bottom">
                     <time

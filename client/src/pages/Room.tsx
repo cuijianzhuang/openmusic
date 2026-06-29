@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 
-import { Search, Loader2, Copy, Check, Crown, Tv, LogOut, X, Heart, Plus, Download, ListMusic, Upload, History, ListPlus, Pencil, Lock, LockOpen, Radio, ChevronLeft, ChevronRight, Megaphone, Music2, Ban, Image } from 'lucide-react';
+import { Search, Loader2, Copy, Check, Crown, Tv, LogOut, X, Heart, Plus, Download, ListMusic, Upload, History, ListPlus, Pencil, Lock, LockOpen, Radio, ChevronLeft, ChevronRight, Megaphone, Music2, Ban, Image, Sparkles } from 'lucide-react';
 
 import { searchAllSongs, getAvailableSources, type SearchFilterMode } from '../api/music';
 import { importPlaylist, searchPlaylists, type PlaylistSearchItem, type PlaylistPlatform, type PlaylistChannelFilter as PlaylistChannelFilterMode } from '../api/music/playlist';
@@ -11,7 +11,7 @@ import { normalizeFmMode } from '../api/music/fmMode';
 import { addSongsToQueue, formatBulkAddToast } from '../lib/addSongsToQueue';
 import { rememberPlaylistImportHistory } from '../components/PlaylistImportModal';
 
-import type { FavoriteSong, MusicSource, SearchResult, Song, SongHistoryItem } from '../types';
+import type { FavoriteSong, MusicSource, RoomMemberSettings, RoomMemberTier, SearchResult, Song, SongHistoryItem } from '../types';
 
 import type { MusicProviderMeta } from '../api/music/types';
 
@@ -62,6 +62,8 @@ import RoomFmModeBadge from '../components/RoomFmModeBadge';
 import RoomFmModeModal from '../components/RoomFmModeModal';
 import RoomAnnouncementModal from '../components/RoomAnnouncementModal';
 import RoomAnnouncementPopup from '../components/RoomAnnouncementPopup';
+import RoomMemberModal from '../components/RoomMemberModal';
+import { DEFAULT_MEMBER_SETTINGS } from '../lib/memberTierPresets';
 import { canRequestSong } from '../lib/roomPermissions';
 import { markAnnouncementSeen, shouldAutoShowAnnouncement } from '../lib/announcementSeen';
 import JumpRequestBanner from '../components/JumpRequestBanner';
@@ -184,7 +186,7 @@ export default function Room() {
     noindex: true,
   });
 
-  const { joinRoom, addSong, leaveRoom, listFavorites, setFavorite, importFavorites, renameRoomName, setRoomLock, setRoomFmMode, setRoomAnnouncement, setSongRequestEnabled, loadSongHistory } = useSocket();
+  const { joinRoom, addSong, leaveRoom, listFavorites, setFavorite, importFavorites, renameRoomName, setRoomLock, setRoomFmMode, setRoomAnnouncement, setSongRequestEnabled, setRoomMemberTier, removeRoomMemberTier, setRoomMemberSettings, loadSongHistory } = useSocket();
   const { applyFavorites } = useFavorites();
 
 
@@ -247,6 +249,8 @@ export default function Room() {
   const [announcementOpen, setAnnouncementOpen] = useState(false);
   const [announcementSaving, setAnnouncementSaving] = useState(false);
   const [announcementPopupOpen, setAnnouncementPopupOpen] = useState(false);
+  const [memberOpen, setMemberOpen] = useState(false);
+  const [memberSaving, setMemberSaving] = useState(false);
   const [songRequestSaving, setSongRequestSaving] = useState(false);
   const songHistoryItems = useSongHistoryStore((s) => s.songs);
   const songHistoryLoading = useSongHistoryStore((s) => s.loading);
@@ -883,6 +887,42 @@ export default function Room() {
     }
   }, [announcementSaving, setRoomAnnouncement, showToast]);
 
+  const handleSaveMemberSettings = useCallback(async (settings: RoomMemberSettings) => {
+    if (memberSaving) return;
+    setMemberSaving(true);
+    const res = await setRoomMemberSettings(settings);
+    setMemberSaving(false);
+    if (res.success) {
+      showToast('贵宾设置已更新', 'success');
+    } else {
+      showToast(res.error || '贵宾设置失败', 'error');
+    }
+  }, [memberSaving, setRoomMemberSettings, showToast]);
+
+  const handleAssignMemberTier = useCallback(async (userId: string, tier: Omit<RoomMemberTier, 'userId' | 'assignedAt'>) => {
+    if (memberSaving) return;
+    setMemberSaving(true);
+    const res = await setRoomMemberTier(userId, tier);
+    setMemberSaving(false);
+    if (res.success) {
+      showToast('已赋予贵宾身份', 'success');
+    } else {
+      showToast(res.error || '赋予失败', 'error');
+    }
+  }, [memberSaving, setRoomMemberTier, showToast]);
+
+  const handleRemoveMemberTier = useCallback(async (userId: string) => {
+    if (memberSaving) return;
+    setMemberSaving(true);
+    const res = await removeRoomMemberTier(userId);
+    setMemberSaving(false);
+    if (res.success) {
+      showToast('已移除贵宾身份', 'success');
+    } else {
+      showToast(res.error || '移除失败', 'error');
+    }
+  }, [memberSaving, removeRoomMemberTier, showToast]);
+
   const handleToggleSongRequest = useCallback(async () => {
     if (songRequestSaving || !room) return;
     const next = room.songRequestEnabled === false;
@@ -1260,6 +1300,20 @@ export default function Room() {
         onSave={handleSaveAnnouncement}
       />
 
+      <RoomMemberModal
+        open={memberOpen}
+        users={room?.users ?? []}
+        creatorId={room?.creatorId ?? undefined}
+        adminIds={room?.adminIds ?? []}
+        memberTiers={room?.memberTiers ?? {}}
+        memberSettings={room?.memberSettings ?? DEFAULT_MEMBER_SETTINGS}
+        saving={memberSaving}
+        onClose={() => setMemberOpen(false)}
+        onSaveSettings={handleSaveMemberSettings}
+        onSaveTier={handleAssignMemberTier}
+        onRemoveTier={handleRemoveMemberTier}
+      />
+
       <RoomAnnouncementPopup
         open={announcementPopupOpen}
         text={room?.announcementText || ''}
@@ -1350,6 +1404,21 @@ export default function Room() {
                   </Tooltip>
                 )}
 
+                {isOwner && (
+                  <Tooltip side="bottom" content="贵宾管理">
+                    <button
+                      type="button"
+                      onClick={() => setMemberOpen(true)}
+                      className={`flex-shrink-0 rounded-lg p-1 transition-colors hover:bg-white/10 ${
+                        Object.keys(room.memberTiers ?? {}).length > 0 ? 'text-amber-400' : 'text-netease-muted hover:text-white'
+                      }`}
+                      aria-label="贵宾管理"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                    </button>
+                  </Tooltip>
+                )}
+
                 {canControlPlayback && (
                   <>
                     <Tooltip side="bottom" content="房间公告">
@@ -1414,6 +1483,7 @@ export default function Room() {
               <OnlineUsers
                 users={room.users}
                 creatorId={room.creatorId}
+                memberTiers={room.memberTiers}
                 onNotice={showToast}
               />
 
@@ -1482,6 +1552,7 @@ export default function Room() {
               <OnlineUsers
                 users={room.users}
                 creatorId={room.creatorId}
+                memberTiers={room.memberTiers}
                 onNotice={showToast}
               />
 

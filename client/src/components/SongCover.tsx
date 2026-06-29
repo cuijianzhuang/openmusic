@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { getCoverUrl } from '../api/music';
-import { getFallbackCoverUrl, type CoverSize } from '../lib/coverUrl';
+import { getCoverPixelSize, getFallbackCoverUrl, type CoverSize } from '../lib/coverUrl';
 import type { Song } from '../types';
 
 interface Props {
@@ -18,12 +18,15 @@ export default function SongCover({
 }: Props) {
   const [failed, setFailed] = useState(false);
   const src = failed ? getFallbackCoverUrl() : getCoverUrl(song, size);
+  const pixelSize = getCoverPixelSize(size);
 
   return (
     <img
       src={src}
       alt=""
       className={className}
+      width={pixelSize}
+      height={pixelSize}
       loading={eager ? 'eager' : 'lazy'}
       decoding="async"
       {...(eager ? { fetchPriority: 'high' as const } : {})}

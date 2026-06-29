@@ -713,6 +713,52 @@ if (s.connected) {
     });
   }, []);
 
+  const setRoomMemberTier = useCallback((
+    userId: string,
+    tier: { badgeLabel: string; badgeColor: string; borderStyleId: string; borderColor: string },
+  ): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
+    return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
+      'set_room_member_tier',
+      { userId, tier },
+      { success: false, error: '连接超时，请重试' },
+    ).then((res) => {
+      if (res.success && res.room) {
+        applyRoomSnapshot(res.room);
+      }
+      return res;
+    });
+  }, []);
+
+  const removeRoomMemberTier = useCallback((userId: string): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
+    return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
+      'remove_room_member_tier',
+      { userId },
+      { success: false, error: '连接超时，请重试' },
+    ).then((res) => {
+      if (res.success && res.room) {
+        applyRoomSnapshot(res.room);
+      }
+      return res;
+    });
+  }, []);
+
+  const setRoomMemberSettings = useCallback((settings: {
+    welcomeEnabled: boolean;
+    welcomeTemplateId: string;
+    welcomeCustomText?: string;
+  }): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
+    return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
+      'set_room_member_settings',
+      settings,
+      { success: false, error: '连接超时，请重试' },
+    ).then((res) => {
+      if (res.success && res.room) {
+        applyRoomSnapshot(res.room);
+      }
+      return res;
+    });
+  }, []);
+
   const setChatMute = useCallback((options: { muteAll?: boolean; userId?: string; muted?: boolean }): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
     return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
       'set_chat_mute',
@@ -828,6 +874,12 @@ if (s.connected) {
     setSongRequestEnabled,
 
     setRoomAudioQuality,
+
+    setRoomMemberTier,
+
+    removeRoomMemberTier,
+
+    setRoomMemberSettings,
 
     setChatMute,
 

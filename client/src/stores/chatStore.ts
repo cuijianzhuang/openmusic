@@ -1,6 +1,17 @@
 import { create } from 'zustand';
 import type { ChatMessage } from '../types';
 
+const WELCOME_MESSAGE_COOLDOWN_MS = 5 * 60 * 1000;
+
+function hasRecentWelcomeForUser(messages: ChatMessage[], targetUserId: string) {
+  const now = Date.now();
+  return messages.some(
+    (message) => message.kind === 'welcome'
+      && message.targetUserId === targetUserId
+      && now - message.timestamp < WELCOME_MESSAGE_COOLDOWN_MS,
+  );
+}
+
 function mergeMessages(existing: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] {
   if (incoming.length === 0) return existing;
   const ids = new Set(existing.map((m) => m.id));
@@ -57,9 +68,21 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   loadingOlder: false,
 
   reset: (roomId, messages, hasMoreOlder, chatVisibleSince = null) => {
+    const sorted = [...messages].sort((a, b) => a.timestamp - b.timestamp);
+    const deduped: ChatMessage[] = [];
+    for (const message of sorted) {
+      if (
+        message.kind === 'welcome'
+        && message.targetUserId
+        && hasRecentWelcomeForUser(deduped, message.targetUserId)
+      ) {
+        continue;
+      }
+      deduped.push(message);
+    }
     set({
       roomId,
-      messages: [...messages].sort((a, b) => a.timestamp - b.timestamp),
+      messages: deduped,
       hasMoreOlder,
       chatVisibleSince,
       loadingOlder: false,
@@ -70,6 +93,13 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     const state = get();
     if (state.chatVisibleSince != null && message.timestamp < state.chatVisibleSince) return;
     if (state.messages.some((m) => m.id === message.id)) return;
+    if (
+      message.kind === 'welcome'
+      && message.targetUserId
+      && hasRecentWelcomeForUser(state.messages, message.targetUserId)
+    ) {
+      return;
+    }
     set({ messages: [...state.messages, message] });
   },
 
