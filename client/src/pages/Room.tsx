@@ -85,6 +85,7 @@ import {
   ROOM_VISUAL_MODE_META,
   readRoomVisualMode,
   writeRoomVisualMode,
+  shouldProxySongPlaybackUrl,
   DEFAULT_ROOM_VISUAL_FX,
   type RoomVisualFxSettings,
   type RoomVisualMode,
@@ -1009,8 +1010,13 @@ export default function Room() {
 
   const handleVisualModeChange = (mode: RoomVisualMode) => {
     if (!isLgUp) return;
+    const prevNeedsProxy = shouldProxySongPlaybackUrl(visualMode);
+    const nextNeedsProxy = shouldProxySongPlaybackUrl(mode);
     setVisualMode(mode);
     writeRoomVisualMode(mode);
+    if (prevNeedsProxy !== nextNeedsProxy && room?.current) {
+      showToast('背景已切换，音频设置将在下一首歌曲生效，当前曲目继续播放', 'success');
+    }
   };
 
   useEffect(() => {

@@ -1,10 +1,25 @@
 import { getSharedAudio } from '../../../lib/audioElement';
+import { isProxiedMediaUrl, isSameOriginMediaUrl } from '../../../lib/mediaProxyUrl';
+import { shouldProxySongPlaybackUrl } from '../../../lib/roomVisualPreset';
 
 let audioCtx: AudioContext | null = null;
 let analyser: AnalyserNode | null = null;
 let freqBuf: Uint8Array<ArrayBuffer> | null = null;
 let wired = false;
 let playListenerAttached = false;
+
+function currentAudioSrc(): string {
+  const audio = getSharedAudio();
+  return audio.currentSrc || audio.src || '';
+}
+
+/** 当前曲目已走同源/代理地址时，才接入 Web Audio，避免切背景时劫持直链导致无声 */
+function canWireGalaxyAudioNow(): boolean {
+  if (!shouldProxySongPlaybackUrl()) return false;
+  const src = currentAudioSrc();
+  if (!src) return false;
+  return isProxiedMediaUrl(src) || isSameOriginMediaUrl(src);
+}
 
 const smooth = { bass: 0, mid: 0, treble: 0, beat: 0, energy: 0 };
 let bassBaseline = 0.08;
@@ -58,18 +73,20 @@ function wireAnalyser(audio: HTMLAudioElement): boolean {
 
 function ensureAnalyser(): AnalyserNode | null {
   attachPlayListener();
-  if (analyser) return analyser;
+  if (!canWireGalaxyAudioNow()) return null;
 
   const audio = getSharedAudio();
   audioCtx = audioCtx ?? new AudioContext();
-  analyser = audioCtx.createAnalyser();
-  analyser.fftSize = 2048;
-  analyser.smoothingTimeConstant = 0.86;
-  analyser.minDecibels = -82;
-  analyser.maxDecibels = -8;
+  if (!analyser) {
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 2048;
+    analyser.smoothingTimeConstant = 0.86;
+    analyser.minDecibels = -82;
+    analyser.maxDecibels = -8;
+  }
 
-  wireAnalyser(audio);
-  return analyser;
+  if (!wired) wireAnalyser(audio);
+  return wired ? analyser : null;
 }
 
 export function resumeGalaxyAudioContext(): void {

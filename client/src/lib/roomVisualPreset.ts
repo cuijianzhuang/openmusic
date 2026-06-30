@@ -164,18 +164,10 @@ export function shouldProxySongPlaybackUrl(mode?: RoomVisualMode): boolean {
 }
 
 export function writeRoomVisualMode(mode: RoomVisualMode): void {
-  const prevProxy = shouldProxySongPlaybackUrl();
   try {
     sessionStorage.setItem(MODE_KEY, mode);
   } catch {
     // ignore
-  }
-  if (prevProxy !== shouldProxySongPlaybackUrl()) {
-    try {
-      window.dispatchEvent(new CustomEvent('openmusic:playback-proxy-changed'));
-    } catch {
-      // ignore
-    }
   }
 }
 

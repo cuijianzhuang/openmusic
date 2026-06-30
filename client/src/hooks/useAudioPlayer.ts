@@ -719,39 +719,6 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     return () => window.clearInterval(id);
   }, [controller]);
 
-  // 背景模式切换（是否走 media-proxy）时，按新策略重载当前曲目的播放地址
-  useEffect(() => {
-    const onPlaybackProxyChanged = () => {
-      const liveRoom = useRoomStore.getState().room;
-      const current = liveRoom?.current;
-      if (!current) return;
-      if (!canSyncAudioForQueue(controller.audio, current.queueId)) return;
-
-      void resolveSongUrl(current, { refresh: true })
-        .then((url) => {
-          if (!canSyncAudioForQueue(controller.audio, current.queueId)) return;
-          const audio = controller.audio;
-          if (!audio) return;
-          const savedTime = audio.currentTime;
-          const wasPlaying = !audio.paused;
-          audio.src = url;
-          bindAudioQueueId(audio, current.queueId);
-          audio.load();
-          audio.currentTime = savedTime;
-          if (wasPlaying && useRoomStore.getState().room?.isPlaying) {
-            void playAudio(audio).then((result) => {
-              const latestRoom = useRoomStore.getState().room;
-              if (latestRoom) applyPlaybackResult(result, audio, latestRoom);
-            });
-          }
-        })
-        .catch(() => {});
-    };
-
-    window.addEventListener('openmusic:playback-proxy-changed', onPlaybackProxyChanged);
-    return () => window.removeEventListener('openmusic:playback-proxy-changed', onPlaybackProxyChanged);
-  }, [controller, playAudio, applyPlaybackResult]);
-
   // 服务端 PlaybackState（150ms 防抖后）→ 统一同步
   useEffect(() => {
     if (trackLoading) return;

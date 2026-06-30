@@ -740,8 +740,8 @@ export default function ChatPanel() {
       if (typeof part === 'string') {
         const pieces = part.split(MENTION_TOKEN_RE);
         return pieces.map((piece, pieceIndex) => piece.startsWith('@')
-          ? <span key={`${keyPrefix}-mention-${index}-${pieceIndex}`} className="text-sky-300">{piece}</span>
-          : <span key={`${keyPrefix}-text-${index}-${pieceIndex}`}>{piece}</span>);
+          ? <span key={`${keyPrefix}-mention-${index}-${pieceIndex}`} className="break-words text-sky-300 [overflow-wrap:anywhere]">{piece}</span>
+          : <span key={`${keyPrefix}-text-${index}-${pieceIndex}`} className="break-words [overflow-wrap:anywhere]">{piece}</span>);
       }
       return (
         <QFaceImage
@@ -902,7 +902,7 @@ export default function ChatPanel() {
       </div>
 
       <div ref={chatConfettiRootRef} className="relative min-h-0 flex-1 overflow-hidden">
-        <div ref={setChatScrollRoot} className="h-full space-y-2 overflow-y-auto px-3 py-2 pb-3">
+        <div ref={setChatScrollRoot} className="h-full space-y-2 overflow-x-hidden overflow-y-auto px-3 py-2 pb-3">
           {(loadingOlder || hasMoreOlder) && (
             <p className="py-1 text-center text-[10px] text-netease-muted">
               {loadingOlder ? '加载更早的消息…' : '上滑加载更多'}
@@ -921,7 +921,7 @@ export default function ChatPanel() {
                       <span className="text-sm font-medium text-white">{msg.targetNickname}</span>
                     )}
                   </div>
-                  <p className="text-sm leading-6 text-white/95">{msg.text}</p>
+                  <p className="break-words text-sm leading-6 text-white/95 [overflow-wrap:anywhere]">{msg.text}</p>
                   {msg.timestamp > 0 && (
                     <p className="mt-2 text-[10px] text-netease-muted/70">{formatChatTime(msg.timestamp)}</p>
                   )}
@@ -937,9 +937,9 @@ export default function ChatPanel() {
           const user = userMap.get(msg.userId);
           const isImageOnly = Boolean(msg.imageUrl && !msg.text);
           return (
-            <div key={msg.id} className={`group flex flex-col ${isMe ? 'items-end' : 'items-start'}`} onContextMenu={(event) => { event.preventDefault(); handleReply(msg); }}>
-              <div className={`mb-0.5 flex items-center gap-1.5 ${isMe ? 'flex-row-reverse' : ''}`}>
-                <button type="button" onClick={() => user && handleMentionOption({ type: 'user', user })} className={`text-[10px] ${isMe ? 'text-netease-red/80' : 'text-netease-muted'} hover:text-sky-300`}>
+            <div key={msg.id} className={`group flex w-full min-w-0 max-w-full flex-col ${isMe ? 'items-end' : 'items-start'}`} onContextMenu={(event) => { event.preventDefault(); handleReply(msg); }}>
+              <div className={`mb-0.5 flex max-w-full min-w-0 items-center gap-1.5 ${isMe ? 'flex-row-reverse' : ''}`}>
+                <button type="button" onClick={() => user && handleMentionOption({ type: 'user', user })} className={`max-w-full truncate text-[10px] ${isMe ? 'text-netease-red/80' : 'text-netease-muted'} hover:text-sky-300`}>
                   {msg.nickname}
                 </button>
                 {isRoomCreator && <RoleBadge role="owner" />}
@@ -955,11 +955,11 @@ export default function ChatPanel() {
                   </Tooltip>
                 )}
               </div>
-              <div className={`flex max-w-[90%] items-start gap-1.5 ${isMe ? 'flex-row-reverse justify-end' : ''}`}>
-                <div className={`min-w-0 ${isMe ? 'items-end' : 'items-start'} flex flex-col`}>
-                  <div className={`rounded-2xl text-sm leading-7 break-words ${isImageOnly ? 'p-1' : 'px-3 py-1.5'} ${isMe ? 'rounded-br-md bg-netease-red/20 text-white' : 'rounded-bl-md bg-netease-dark/80 text-white/90'}`}>
+              <div className={`flex min-w-0 max-w-[90%] items-start gap-1.5 ${isMe ? 'flex-row-reverse justify-end' : ''}`}>
+                <div className={`flex min-w-0 max-w-full flex-col ${isMe ? 'items-end' : 'items-start'}`}>
+                  <div className={`min-w-0 max-w-full rounded-2xl text-sm leading-7 break-words [overflow-wrap:anywhere] ${isImageOnly ? 'p-1' : 'px-3 py-1.5'} ${isMe ? 'rounded-br-md bg-netease-red/20 text-white' : 'rounded-bl-md bg-netease-dark/80 text-white/90'}`}>
                     {msg.replyTo && (
-                      <div className={`mb-1 rounded-lg border-l-2 border-white/20 bg-black/20 text-xs leading-5 text-netease-muted ${isImageOnly ? 'mx-1 mt-1 px-2 py-1' : 'px-2 py-1'}`}>
+                      <div className={`mb-1 min-w-0 max-w-full break-words [overflow-wrap:anywhere] rounded-lg border-l-2 border-white/20 bg-black/20 text-xs leading-5 text-netease-muted ${isImageOnly ? 'mx-1 mt-1 px-2 py-1' : 'px-2 py-1'}`}>
                         <span>回复 {msg.replyTo.nickname}：</span>
                         {renderMessageText(msg.replyTo.text, 'reply')}
                       </div>
