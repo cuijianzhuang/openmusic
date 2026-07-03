@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { toProxiedMediaUrl } from '../../../lib/mediaProxyUrl';
 
 export type FloatingSongCardActionId = 'favorite' | 'like' | 'jump' | 'remove' | 'ban';
 
@@ -160,7 +161,7 @@ function requestCover(url: string, onReady: () => void): void {
   img.onerror = () => {
     coverCache.set(url, 'failed');
   };
-  img.src = url;
+  img.src = toProxiedMediaUrl(url);
 }
 
 /** Mineradio shelfManager drawCard — 当前播放队列卡 */

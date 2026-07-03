@@ -440,7 +440,7 @@ export default function RoomImmersiveShell({
       {settingsOpen ? (
         <button
           type="button"
-          className="fixed inset-0 z-[78] bg-black/18 backdrop-blur-[2px]"
+          className="fixed inset-0 z-[78]"
           style={{ pointerEvents: 'auto' }}
           onClick={closeSettingsPanel}
           aria-label="关闭视觉控制台遮罩"

@@ -23,6 +23,8 @@ import { getClientId } from '../lib/clientId';
 import { VariableSizeList, type ListChildComponentProps, type ListOnScrollProps } from 'react-window';
 
 const VIRTUAL_LIST_THRESHOLD = 24;
+/** 变高消息在 VariableSizeList 下滚动时会因行高重算而跳动，暂用原生列表 */
+const VIRTUAL_LIST_ENABLED = false;
 const ROW_GAP_PX = 8;
 const ESTIMATED_ROW_HEIGHT = 64;
 
@@ -175,13 +177,14 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
   const rowHeightsRef = useRef(new Map<string, number>());
   const prevMessageCountRef = useRef(0);
   const prependAnchorRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
+  const bottomAnchorRef = useRef<HTMLDivElement | null>(null);
   const initialScrollDoneRef = useRef(false);
   const allowLoadOlderRef = useRef(false);
   const [showLoadOlderHint, setShowLoadOlderHint] = useState(false);
   const WELCOME_CONFETTI_COOLDOWN_MS = 5 * 60 * 1000;
   const WELCOME_CONFETTI_LIVE_GRACE_MS = 2500;
 
-  const useVirtualList = messages.length >= VIRTUAL_LIST_THRESHOLD;
+  const useVirtualList = VIRTUAL_LIST_ENABLED && messages.length >= VIRTUAL_LIST_THRESHOLD;
 
   reactionPickerOpenRef.current = reactionPickerMessageId !== null;
 
@@ -198,6 +201,67 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
     setChatScrollRoot(el);
     onScrollRootChange?.(el);
   }, [onScrollRootChange]);
+
+  const scrollToBottomEnd = useCallback((behavior: ScrollBehavior = 'instant') => {
+    if (useVirtualList) {
+      if (messages.length > 0) {
+        listRef.current?.scrollToItem(messages.length - 1, 'end');
+      }
+      return;
+    }
+    const anchor = bottomAnchorRef.current;
+    if (anchor) {
+      anchor.scrollIntoView({ block: 'end', behavior });
+      return;
+    }
+    const el = chatScrollRoot;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior });
+  }, [chatScrollRoot, messages.length, useVirtualList]);
+
+  const finishInitialScroll = useCallback(() => {
+    initialScrollDoneRef.current = true;
+    allowLoadOlderRef.current = true;
+    stickToBottomRef.current = true;
+    setShowLoadOlderHint(false);
+    setShowScrollToBottom(false);
+  }, []);
+
+  const pinToBottomUntilStable = useCallback(() => {
+    let frames = 0;
+    let lastHeight = -1;
+    let rafId = 0;
+    let cancelled = false;
+
+    const step = () => {
+      if (cancelled || initialScrollDoneRef.current) return;
+
+      const el = chatScrollRoot;
+      if (!el) {
+        rafId = requestAnimationFrame(step);
+        return;
+      }
+
+      scrollToBottomEnd('instant');
+      const height = el.scrollHeight;
+      frames += 1;
+      const stable = height === lastHeight && frames >= 2;
+      lastHeight = height;
+
+      if (stable || frames >= 12) {
+        finishInitialScroll();
+        return;
+      }
+      rafId = requestAnimationFrame(step);
+    };
+
+    scrollToBottomEnd('instant');
+    rafId = requestAnimationFrame(step);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(rafId);
+    };
+  }, [chatScrollRoot, finishInitialScroll, scrollToBottomEnd]);
 
   const setRowHeight = useCallback((index: number, messageId: string, height: number) => {
     const prev = rowHeightsRef.current.get(messageId);
@@ -222,16 +286,8 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
   }, [messages]);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'instant') => {
-    if (useVirtualList) {
-      if (messages.length > 0) {
-        listRef.current?.scrollToItem(messages.length - 1, 'end');
-      }
-      return;
-    }
-    const el = chatScrollRoot;
-    if (!el) return;
-    el.scrollTo({ top: el.scrollHeight, behavior });
-  }, [chatScrollRoot, messages.length, useVirtualList]);
+    scrollToBottomEnd(behavior);
+  }, [scrollToBottomEnd]);
 
   useEffect(() => {
     stickToBottomRef.current = true;
@@ -291,36 +347,40 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
       return;
     }
 
+    const needsInitialScroll = messages.length > 0 && !initialScrollDoneRef.current;
+    const grew = messages.length > prevMessageCountRef.current;
+
+    if (needsInitialScroll) {
+      if (useVirtualList) {
+        if (listHeight > 0 && listRef.current) {
+          listRef.current.scrollToItem(messages.length - 1, 'end');
+          finishInitialScroll();
+        }
+      } else if (outer) {
+        prevMessageCountRef.current = messages.length;
+        return pinToBottomUntilStable();
+      }
+      prevMessageCountRef.current = messages.length;
+      return;
+    }
+
     if (!stickToBottomRef.current) {
       prevMessageCountRef.current = messages.length;
       return;
     }
 
-    const grew = messages.length > prevMessageCountRef.current;
-    const needsInitialScroll = messages.length > 0 && !initialScrollDoneRef.current;
-
-    if (needsInitialScroll || grew) {
-      if (useVirtualList) {
-        if (listHeight > 0 && listRef.current) {
-          listRef.current.scrollToItem(messages.length - 1, 'end');
-          initialScrollDoneRef.current = true;
-          allowLoadOlderRef.current = true;
-          setShowLoadOlderHint(false);
-        }
-      } else if (outer) {
-        outer.scrollTop = outer.scrollHeight;
-        initialScrollDoneRef.current = true;
-        allowLoadOlderRef.current = true;
-        setShowLoadOlderHint(false);
-      }
+    if (grew) {
+      scrollToBottomEnd('instant');
     }
 
     prevMessageCountRef.current = messages.length;
-  }, [messages.length, messagesTailKey, chatScrollRoot, useVirtualList, listHeight]);
+  }, [messages.length, messagesTailKey, chatScrollRoot, useVirtualList, listHeight, finishInitialScroll, pinToBottomUntilStable, scrollToBottomEnd]);
 
   const handleScroll = useCallback(() => {
     const el = chatScrollRoot;
     if (!el) return;
+
+    if (!initialScrollDoneRef.current) return;
 
     const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     const atBottom = distanceToBottom < 80;
@@ -486,6 +546,7 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
           onPreviewImage={onPreviewImage}
         />
       ))}
+      <div ref={bottomAnchorRef} className="h-px w-full shrink-0" aria-hidden />
     </div>
   );
 

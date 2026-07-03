@@ -15,6 +15,7 @@ import {
   PARTICLE_FRAGMENT_SHADER,
 } from './lib/shaders';
 import { roomVisualFxLive } from '../../lib/roomVisualFxLive';
+import { toProxiedMediaUrl } from '../../lib/mediaProxyUrl';
 import { effectiveBloomStrength, syncGalaxyFxUniforms } from './lib/syncVisualUniforms';
 import { buildCoverEdgeTexture } from './lib/buildCoverEdgeTexture';
 import {
@@ -616,7 +617,7 @@ export default function GalaxyParticles({ coverUrl, preset, isPlaying }: Props) 
       uniforms.uHasCover.value = 0;
       uniforms.uHasDepth.value = 0;
     };
-    img.src = coverUrl;
+    img.src = toProxiedMediaUrl(coverUrl);
 
     return () => {
       cancelled = true;
