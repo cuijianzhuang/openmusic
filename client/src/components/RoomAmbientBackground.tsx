@@ -8,6 +8,7 @@ import { syncGalaxyHandGestureMode } from './galaxy/lib/galaxyHandGesture';
 import AmbientCoverLayers from './AmbientCoverLayers';
 
 const GalaxyBackground = lazy(() => import('./galaxy/GalaxyBackground3D'));
+const TopographyBackground = lazy(() => import('./topography/TopographyBackground3D'));
 
 interface Props {
   song: Pick<QueueItem, 'queueId' | 'id' | 'source' | 'pic' | 'url'> | null | undefined;
@@ -25,7 +26,8 @@ export default function RoomAmbientBackground({
   const coverUrl = song ? getCoverUrl(song, 'medium') : null;
   const meta = ROOM_VISUAL_MODE_META[visualMode];
   const shaderPreset = meta.shaderPreset;
-  const showGalaxy = shaderPreset !== undefined;
+  const showShaderBackground = shaderPreset !== undefined;
+  const isTopography = shaderPreset === 6;
   const showCoverUnderlay = visualMode === 'cover-bg' && Boolean(coverUrl);
 
   const [bgStyle, setBgStyle] = useState(() => {
@@ -87,15 +89,19 @@ export default function RoomAmbientBackground({
           <AmbientCoverLayers coverUrl={coverUrl!} />
         </div>
       ) : null}
-      {showGalaxy ? (
+      {showShaderBackground ? (
         <Suspense fallback={null}>
-          <GalaxyBackground
-            coverUrl={coverUrl}
-            preset={shaderPreset}
-            isPlaying={isPlaying}
-            song={song}
-            immersivePanelFocus={immersivePanelFocus}
-          />
+          {isTopography ? (
+            <TopographyBackground isPlaying={isPlaying} song={song} />
+          ) : (
+            <GalaxyBackground
+              coverUrl={coverUrl}
+              preset={shaderPreset!}
+              isPlaying={isPlaying}
+              song={song}
+              immersivePanelFocus={immersivePanelFocus}
+            />
+          )}
         </Suspense>
       ) : null}
       {visualMode === 'cover-bg' && !coverUrl ? (

@@ -14,6 +14,7 @@ export const GALAXY_PRESET_CAMERA: Record<
   3: { radius: 8.0, phi: 0.05, theta: 0 },
   4: { radius: 6.5, phi: 0.04, theta: 0 },
   5: { radius: 9.4, phi: 0.34, theta: -0.52 },
+  6: { radius: 9.4, phi: 0.34, theta: -0.52 },
 };
 
 function clampRange(v: number, min: number, max: number): number {

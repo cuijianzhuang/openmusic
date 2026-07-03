@@ -439,6 +439,7 @@ export default function GalaxyFloatingSongCard() {
       const item: FloatingSongCardItem = {
         ...entry.item,
         bass: entry.song.isCurrent ? bands.bass : 0,
+        isShelfCenter: isCenter,
       };
 
       const dofBlur = Math.max(0, Math.min(1, (pose.absD - 0.45) / 3.2));
@@ -485,7 +486,7 @@ export default function GalaxyFloatingSongCard() {
       const stackOpacity = pose.absD < 0.5 ? 1 : Math.max(0.22, 1 - pose.absD * 0.3);
       const passiveAlways = fx.shelfPresence === 'always';
       const mat = mesh.material as THREE.MeshBasicMaterial;
-      mat.color.setScalar(passiveAlways ? (isCenter ? 1 : 0.96) : 1);
+      mat.color.setScalar(1);
       const passiveDim = passiveAlways && !isCenter ? 0.92 : 1;
       mat.opacity = Math.min(
         1,

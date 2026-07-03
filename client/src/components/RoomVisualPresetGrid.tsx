@@ -10,6 +10,7 @@ const PRESET_DESC: Record<RoomVisualMode, string> = {
   'cover-bg': '封面铺满背景',
   emily: '专辑封面粒子',
   galaxy: '星河漫游',
+  topography: '棋盘海浪地形',
   vinyl: '旋转唱片',
   tunnel: '滚筒隧道',
 };

@@ -41,6 +41,26 @@ type LocalSliderDef = {
   step: number;
 };
 
+function motionSlidersForMode(mode: RoomVisualMode) {
+  if (mode === 'topography') {
+    return MOTION_FX_SLIDERS.filter((s) => s.key !== 'coverResolution' && s.key !== 'cinemaShake').map((s) => {
+      if (s.key === 'intensity') return { ...s, label: '起伏幅度' };
+      if (s.key === 'depth') return { ...s, label: '地形密度' };
+      if (s.key === 'speed') return { ...s, label: '起伏速度' };
+      if (s.key === 'cameraDistance') return { ...s, label: '镜头远近' };
+      return s;
+    });
+  }
+  return MOTION_FX_SLIDERS;
+}
+
+function advancedSlidersForMode(mode: RoomVisualMode) {
+  if (mode === 'topography') {
+    return ADVANCED_FX_SLIDERS.filter((s) => s.key === 'colorBoost' || s.key === 'bloomStrength');
+  }
+  return ADVANCED_FX_SLIDERS;
+}
+
 function renderSliders(
   defs: Array<(typeof MOTION_FX_SLIDERS)[number] | LocalSliderDef>,
   value: RoomVisualFxSettings,
@@ -275,43 +295,53 @@ export default function ImmersiveFxSettingsPanel({
               open={openFolds.motionCore}
               onToggle={() => toggleFold('motionCore')}
             >
-              {renderSliders(MOTION_FX_SLIDERS, value, onPatch, draggingKey, setDraggingKey)}
+              {renderSliders(motionSlidersForMode(visualMode), value, onPatch, draggingKey, setDraggingKey)}
 
               <FxSectionLabel>镜头与叠加</FxSectionLabel>
               <div className={`fx-toggle-grid ${dragging ? 'pointer-events-none invisible' : ''}`}>
+                {visualMode !== 'topography' ? (
+                  <FxMineradioToggle
+                    label="电影镜头"
+                    checked={value.cinema}
+                    onChange={(cinema) => onPatch({ cinema })}
+                  />
+                ) : null}
                 <FxMineradioToggle
-                  label="电影镜头"
-                  checked={value.cinema}
-                  onChange={(cinema) => onPatch({ cinema })}
-                />
-                <FxMineradioToggle
-                  label="浮空粒子层"
+                  label={visualMode === 'topography' ? '浮动方块' : '浮空粒子层'}
                   checked={value.floatLayer}
-                  disabled={visualMode !== 'emily'}
-                  title={visualMode !== 'emily' ? '仅 emily 封面模式可用' : undefined}
+                  disabled={visualMode !== 'emily' && visualMode !== 'topography'}
+                  title={
+                    visualMode !== 'emily' && visualMode !== 'topography'
+                      ? '仅 emily / 声波地形可用'
+                      : undefined
+                  }
                   onChange={(floatLayer) => onPatch({ floatLayer })}
                 />
-                <FxMineradioToggle
-                  label="粒子溢光"
-                  checked={value.bloom && value.bloomStrength > 0.01}
-                  onChange={(bloom) =>
-                    onPatch(
-                      bloom
-                        ? {
-                            bloom: true,
-                            ...(value.bloomStrength <= 0.01
-                              ? { bloomStrength: DEFAULT_ROOM_VISUAL_FX.bloomStrength }
-                              : {}),
-                          }
-                        : { bloom: false },
-                    )
-                  }
-                />
-                <FxMineradioToggle
-                  label="轮廓高亮"
-                  checked={value.edge}
-                  onChange={(edge) => onPatch({ edge })}
-                />
+                {visualMode !== 'topography' ? (
+                  <>
+                    <FxMineradioToggle
+                      label="粒子溢光"
+                      checked={value.bloom && value.bloomStrength > 0.01}
+                      onChange={(bloom) =>
+                        onPatch(
+                          bloom
+                            ? {
+                                bloom: true,
+                                ...(value.bloomStrength <= 0.01
+                                  ? { bloomStrength: DEFAULT_ROOM_VISUAL_FX.bloomStrength }
+                                  : {}),
+                              }
+                            : { bloom: false },
+                        )
+                      }
+                    />
+                    <FxMineradioToggle
+                      label="轮廓高亮"
+                      checked={value.edge}
+                      onChange={(edge) => onPatch({ edge })}
+                    />
+                  </>
+                ) : null}
               </div>
             </FxFold>
 
@@ -418,7 +448,7 @@ export default function ImmersiveFxSettingsPanel({
               open={openFolds.advancedCore}
               onToggle={() => toggleFold('advancedCore')}
             >
-              {renderSliders(ADVANCED_FX_SLIDERS, value, onPatch, draggingKey, setDraggingKey)}
+              {renderSliders(advancedSlidersForMode(visualMode), value, onPatch, draggingKey, setDraggingKey)}
             </FxFold>
 
             <div className={`fx-actions ${dragging ? 'pointer-events-none invisible' : ''}`}>

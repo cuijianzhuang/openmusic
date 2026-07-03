@@ -433,6 +433,7 @@ export function createStageLyricShaderMaterial(mask: LyricMaskAsset): THREE.Shad
     transparent: true,
     depthWrite: false,
     depthTest: false,
+    fog: false,
     side: THREE.DoubleSide,
   });
 }
@@ -533,6 +534,7 @@ function createStarRiver(dotTex: THREE.CanvasTexture): THREE.Points {
     transparent: true,
     depthWrite: false,
     depthTest: false,
+    fog: false,
     blending: THREE.AdditiveBlending,
   });
 
@@ -580,6 +582,7 @@ export function buildLyricMesh(mask: LyricMaskAsset): LyricMeshGroup {
     opacity: 0,
     depthWrite: false,
     depthTest: false,
+    fog: false,
     side: THREE.DoubleSide,
     blending: THREE.AdditiveBlending,
     color: LYRIC_PALETTE_FALLBACK.sunWarm.clone(),
@@ -604,6 +607,7 @@ export function buildLyricMesh(mask: LyricMaskAsset): LyricMeshGroup {
     opacity: 0,
     depthWrite: false,
     depthTest: false,
+    fog: false,
     side: THREE.DoubleSide,
     blending: THREE.AdditiveBlending,
     color: LYRIC_PALETTE_FALLBACK.glow.clone(),
@@ -621,6 +625,7 @@ export function buildLyricMesh(mask: LyricMaskAsset): LyricMeshGroup {
     opacity: 0,
     depthWrite: false,
     depthTest: false,
+    fog: false,
     side: THREE.DoubleSide,
   });
   const readability = new THREE.Mesh(geo.clone(), readabilityMat);
@@ -686,6 +691,7 @@ export function buildLyricMesh(mask: LyricMaskAsset): LyricMeshGroup {
     transparent: true,
     depthWrite: false,
     depthTest: false,
+    fog: false,
     blending: THREE.AdditiveBlending,
   });
   const sparks = new THREE.Points(pgeo, sparkMat);

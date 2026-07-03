@@ -475,6 +475,13 @@ function shapeBandsForPreset(
   let treble = Math.min(0.62, smoothTreb * 1.2) * intensity;
   let beatOut = beat;
 
+  if (preset === 6) {
+    const bassOut = Math.min(1.0, smoothBass * 1.18 + beat * 0.22) * intensity;
+    const midOut = Math.min(0.88, smoothMid * 1.12) * intensity;
+    const trebleOut = Math.min(0.78, smoothTreb * 1.08) * intensity;
+    return { bass: bassOut, mid: midOut, treble: trebleOut, beat: beatOut };
+  }
+
   if (preset !== undefined && preset >= 4) {
     const wallpaperAudio = preset === 5;
     const ringBass =
@@ -688,6 +695,30 @@ export function readGalaxyAudioBands(dt = 1 / 60, options: GalaxyAudioReadOption
   lastAdvanceMs = now;
   cachedBands = advanceGalaxyAudioBands(dt, options);
   return cachedBands;
+}
+
+/** 供 sonic 地形分析读取当前帧频谱（须先调用 readGalaxyAudioBands） */
+export function getGalaxyFrequencyBuffer(): Uint8Array | null {
+  if (!ensureAnalyser() || !freqBuf) return null;
+  return freqBuf;
+}
+
+export function isGalaxyPlaybackActive(): boolean {
+  return !getSharedAudio().paused && canWireGalaxyAudioNow();
+}
+
+let topographyBins512: Uint8Array | null = null;
+
+/** 将 2048 FFT 频谱下采样为 sonic 原版 512 bin */
+export function getTopographyFrequencyBins512(): Uint8Array | null {
+  const raw = getGalaxyFrequencyBuffer();
+  if (!raw) return null;
+  if (!topographyBins512) topographyBins512 = new Uint8Array(512);
+  const n = Math.min(512, Math.floor(raw.length / 2));
+  for (let i = 0; i < n; i++) {
+    topographyBins512[i] = Math.max(raw[i * 2] ?? 0, raw[i * 2 + 1] ?? 0);
+  }
+  return topographyBins512;
 }
 
 export function getCachedGalaxyAudioBands(): GalaxyAudioBands {

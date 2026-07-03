@@ -780,7 +780,7 @@ export default function GalaxyParticles({ coverUrl, preset, isPlaying }: Props) 
 
   return (
     <group ref={(node) => registerParticleRootGroup(node)}>
-      {preset === 0 ? <GalaxyFloatingSongCard /> : null}
+      <GalaxyFloatingSongCard />
       <GalaxyStageLyrics isPlaying={isPlaying} />
       <primitive object={backCoverLayer.points} />
       <points

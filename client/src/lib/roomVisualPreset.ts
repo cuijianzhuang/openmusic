@@ -3,8 +3,8 @@ import type { LyricFontKey } from './lyricStyle';
 const MODE_KEY = 'openmusic:room-visual-mode';
 const FX_KEY = 'openmusic:room-visual-fx';
 
-/** Mineradio 着色器预设：0=emily … 5=galaxy */
-export type RoomVisualPresetId = 0 | 1 | 2 | 3 | 4 | 5;
+/** Mineradio 着色器预设：0=emily … 5=galaxy，6=topography */
+export type RoomVisualPresetId = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 
 /** 房间背景模式 */
 export type RoomVisualMode =
@@ -12,6 +12,7 @@ export type RoomVisualMode =
   | 'tunnel'
   | 'vinyl'
   | 'galaxy'
+  | 'topography'
   | 'cover-bg'
   | 'off';
 
@@ -19,6 +20,7 @@ export const ROOM_VISUAL_DISPLAY_ORDER: RoomVisualMode[] = [
   'cover-bg',
   'emily',
   'galaxy',
+  'topography',
   'vinyl',
   'tunnel',
 ];
@@ -37,6 +39,7 @@ export const ROOM_VISUAL_MODE_META: Record<
   tunnel: { name: '滚筒', hasSettings: true, shaderPreset: 1 },
   vinyl: { name: '唱片', hasSettings: true, shaderPreset: 4 },
   galaxy: { name: '星河', hasSettings: true, shaderPreset: 5 },
+  topography: { name: '声波地形', hasSettings: true, shaderPreset: 6 },
   'cover-bg': { name: '封面背景', hasSettings: false },
   off: { name: '关闭背景', hasSettings: false },
 };
@@ -67,7 +70,7 @@ const LEGACY_NUMERIC_MODE: Record<number, RoomVisualMode> = {
   3: 'cover-bg',
   4: 'vinyl',
   5: 'galaxy',
-  6: 'galaxy',
+  6: 'topography',
 };
 
 export interface RoomVisualFxSettings {
@@ -412,6 +415,7 @@ const SHADER_VISUAL_MODES = new Set<RoomVisualMode>([
   'tunnel',
   'vinyl',
   'galaxy',
+  'topography',
 ]);
 
 export function roomAmbientGlassClass(mode: RoomVisualMode): string {

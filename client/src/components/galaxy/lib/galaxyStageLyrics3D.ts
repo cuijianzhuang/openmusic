@@ -94,6 +94,7 @@ function tickLyricMesh(
   fx: RoomVisualFxSettings,
   lyricGlowStrength: number,
   glowDrive: number,
+  spatialAnchor: 'galaxy' | 'topography' = 'galaxy',
 ): void {
   mesh.userData.age += dt;
   const a = Math.min(1, mesh.userData.age / 0.52);
@@ -121,8 +122,9 @@ function tickLyricMesh(
   const solar = runtime.highBloom;
   const opacityTarget = 0.96;
   const currentOpacity = data.textMat.uniforms.uOpacity.value as number;
+  const opacityEase = spatialAnchor === 'topography' ? 0.28 : 0.16;
   const opacity =
-    currentOpacity + (opacityTarget - currentOpacity) * 0.16;
+    currentOpacity + (opacityTarget - currentOpacity) * opacityEase;
   data.textMat.uniforms.uOpacity.value = opacity;
 
   const readabilityTarget = opacity * 0.86;
@@ -283,8 +285,22 @@ export function updateStageLyrics3D(params: {
   kick: BeatCameraKick;
   fx: RoomVisualFxSettings;
   runtime: StageLyricsRuntime;
+  spatialAnchor?: 'galaxy' | 'topography';
+  cameraLockDistance?: number;
 }): void {
-  const { stageRoot, currentMesh, camera, dt, time, bands, kick, fx, runtime } = params;
+  const {
+    stageRoot,
+    currentMesh,
+    camera,
+    dt,
+    time,
+    bands,
+    kick,
+    fx,
+    runtime,
+    spatialAnchor = 'galaxy',
+    cameraLockDistance,
+  } = params;
   if (!stageRoot) return;
 
   const lyricGlowStrength = fx.lyricGlow
@@ -328,14 +344,16 @@ export function updateStageLyrics3D(params: {
   const layoutTiltY = clampRange(fx.lyricTiltY || 0, -42, 42);
 
   const persp = camera as THREE.PerspectiveCamera;
+  const lockDistance = cameraLockDistance ?? 4.85 + layoutZ;
+  const useCameraLock = spatialAnchor === 'galaxy' && fx.lyricCameraLock;
   const lockFit =
-    fx.lyricCameraLock && persp.isPerspectiveCamera
-      ? lyricCameraLockFit(persp, currentMesh, layoutScale, layoutX, layoutY, 4.85 + layoutZ)
+    useCameraLock && persp.isPerspectiveCamera
+      ? lyricCameraLockFit(persp, currentMesh, layoutScale, layoutX, layoutY, lockDistance)
       : 1;
   runtime.lockFitScale += (lockFit - runtime.lockFitScale) * (lockFit < runtime.lockFitScale ? 0.18 : 0.1);
   stageRoot.scale.setScalar(layoutScale * runtime.lockFitScale);
 
-  // stageRoot 是粒子组的子节点：只用本地变换，旋转由父级 gestureRotation 继承。
+  // stageRoot 在星河为粒子组子节点；地形模式挂 platter 子节点，随地形旋转。
   stageRoot.position.set(layoutX, layoutY, layoutZ);
   lyricTiltEuler.set(
     (layoutTiltX || 0) * (Math.PI / 180),
@@ -346,7 +364,7 @@ export function updateStageLyrics3D(params: {
   stageRoot.quaternion.setFromEuler(lyricTiltEuler);
 
   if (currentMesh) {
-    tickLyricMesh(currentMesh, dt, time, bands, runtime, fx, lyricGlowStrength, glowDrive);
+    tickLyricMesh(currentMesh, dt, time, bands, runtime, fx, lyricGlowStrength, glowDrive, spatialAnchor);
   } else if (stageRoot.userData.starRiverMat) {
     stageRoot.userData.starRiverMat.uniforms.uOpacity.value = 0;
   }

@@ -20,6 +20,8 @@ export interface FloatingSongCardItem {
   bass: number;
   meta?: string;
   isCurrent?: boolean;
+  /** 歌单架当前居中选中 */
+  isShelfCenter?: boolean;
   actions: FloatingSongCardAction[];
 }
 
@@ -181,6 +183,7 @@ export function drawFloatingSongCard(
   ctx.clearRect(0, 0, W, H);
   const pad = 18;
   const isNow = item.tag === '正在播放';
+  const highlighted = Boolean(item.isShelfCenter || isNow);
   const cardBgOpacity = Math.min(0.98, Math.max(0.25, bgOpacity));
   const regions: FloatingSongCardActionRegion[] = [];
 
@@ -193,9 +196,9 @@ export function drawFloatingSongCard(
   ctx.fillStyle = grad;
   ctx.fill();
 
-  if (isNow) {
-    ctx.strokeStyle = accentRgba(accentHex, 0.72);
-    ctx.lineWidth = 1.8 + Math.sin(time * 3) * 0.28 + item.bass * 1.2;
+  if (highlighted) {
+    ctx.strokeStyle = accentRgba(accentHex, isNow ? 0.72 : 0.68);
+    ctx.lineWidth = isNow ? 1.8 + Math.sin(time * 3) * 0.28 + item.bass * 1.2 : 1.65;
   } else {
     ctx.strokeStyle = 'rgba(255,255,255,0.14)';
     ctx.lineWidth = 1.1;
@@ -205,22 +208,6 @@ export function drawFloatingSongCard(
   const coverSize = H - pad * 2 - 8;
   const cx = pad + 6;
   const cy = pad + 4;
-  makeRoundRect(ctx, cx, cy, coverSize, coverSize, 26);
-  ctx.fillStyle = 'rgba(255,255,255,0.04)';
-  ctx.fill();
-  if (item.coverUrl) {
-    const rec = coverCache.get(item.coverUrl);
-    if (rec instanceof HTMLImageElement) {
-      ctx.save();
-      makeRoundRect(ctx, cx, cy, coverSize, coverSize, 26);
-      ctx.clip();
-      ctx.drawImage(rec, cx, cy, coverSize, coverSize);
-      ctx.restore();
-    } else if (rec !== 'failed') {
-      requestCover(item.coverUrl, onCoverRequest);
-    }
-  }
-
   const tx = pad + coverSize + 22;
   const rightPad = 24;
   const textMaxWidth = W - tx - pad - rightPad;
@@ -286,6 +273,23 @@ export function drawFloatingSongCard(
     ctx.fill();
   }
 
+  // 封面最后绘制，避免卡片白色渐变 / 景深叠层压色
+  makeRoundRect(ctx, cx, cy, coverSize, coverSize, 26);
+  const coverRec = item.coverUrl ? coverCache.get(item.coverUrl) : null;
+  if (coverRec instanceof HTMLImageElement) {
+    ctx.save();
+    makeRoundRect(ctx, cx, cy, coverSize, coverSize, 26);
+    ctx.clip();
+    ctx.drawImage(coverRec, cx, cy, coverSize, coverSize);
+    ctx.restore();
+  } else {
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fill();
+    if (item.coverUrl && coverRec !== 'failed') {
+      requestCover(item.coverUrl, onCoverRequest);
+    }
+  }
+
   return regions;
 }
 
@@ -301,6 +305,7 @@ export function createFloatingSongCardMesh(): {
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('canvas 2d unavailable');
   const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
   texture.minFilter = THREE.LinearFilter;
   texture.magFilter = THREE.LinearFilter;
   texture.generateMipmaps = false;
