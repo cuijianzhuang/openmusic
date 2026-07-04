@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">OpenMusic</string>
+    <string name="title_activity_main">OpenMusic</string>
+    <string name="package_name">com.openmusic.app</string>
+    <string name="custom_url_scheme">com.openmusic.app</string>
+</resources>

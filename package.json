@@ -9,7 +9,11 @@
     "build": "npm run build --prefix client",
     "start": "npm run start --prefix server",
     "package:build": "node scripts/package-build.mjs",
-    "install:all": "npm install && npm install --prefix server && npm install --prefix client"
+    "install:all": "npm install && npm install --prefix server && npm install --prefix client",
+    "cap:sync:android": "npm run cap:sync:android --prefix client",
+    "cap:open:android": "npm run cap:open:android --prefix client",
+    "cap:run:android": "npm run cap:run:android --prefix client",
+    "cap:build:apk": "npm run cap:build:apk --prefix client"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

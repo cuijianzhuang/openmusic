@@ -6,9 +6,18 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "cap:sync": "node scripts/cap-sync.mjs",
+    "cap:sync:android": "node scripts/cap-sync.mjs android",
+    "cap:open:android": "npx cap open android",
+    "cap:run:android": "npm run cap:sync:android && npx cap run android",
+    "cap:build:apk": "node scripts/build-android-apk.mjs debug",
+    "cap:build:apk:release": "node scripts/build-android-apk.mjs release"
   },
   "dependencies": {
+    "@capacitor/android": "^7.2.0",
+    "@capacitor/app": "^7.0.1",
+    "@capacitor/core": "^7.2.0",
     "@mediapipe/tasks-vision": "^0.10.21",
     "@react-three/fiber": "^8.18.0",
     "lucide-react": "^0.469.0",
@@ -21,6 +30,7 @@
     "zustand": "^5.0.3"
   },
   "devDependencies": {
+    "@capacitor/cli": "^7.2.0",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "@types/react-window": "^1.8.8",

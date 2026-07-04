@@ -1,0 +1,8 @@
+{
+  "appId": "com.openmusic.app",
+  "appName": "OpenMusic",
+  "webDir": "dist",
+  "android": {
+    "allowMixedContent": false
+  }
+}
