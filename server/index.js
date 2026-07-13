@@ -1,5 +1,6 @@
 import './loadEnv.js';
 import { resizeCoverForThumb } from './coverUrl.js';
+import { serveUpstreamMedia } from './mediaProxy.js';
 import { fetchMeting, formatMetingFetchError } from './metingFetch.js';
 import { mountWechatFileHelperProxy } from './wechatFileHelperProxy.js';
 import { buildRobotsTxt, buildSitemapXml, resolveSiteOrigin } from './seoFiles.js';
