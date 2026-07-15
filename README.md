@@ -34,7 +34,7 @@
 * 🔗 房间分享（含邀请者、当前歌曲；密码房链接可带密码直达进房）
 * 🕐 最近访问房间
 * 🔄 Redis 持久化支持（可选）
-* 📱 Android 客户端（Capacitor 远程 URL 壳，桌面端首页可下载 APK）
+* 📱 Android / iOS 客户端（Capacitor 远程 URL 壳；桌面端可下载 APK / IPA）
 
 ### 房间点歌规则（房主 / 管理员）
 
@@ -156,9 +156,9 @@ REDIS_URL=redis://127.0.0.1:6379/0 # 可选，房间持久化
 
 ---
 
-## 📱 Android 客户端
+## 📱 Android / iOS 客户端
 
-采用 **Capacitor 远程 URL 模式**：App 内 WebView 直接打开线上站点（与 `server/.env` 中的 `CLIENT_URL` 一致）。前端更新只需部署服务器，**不必每次改代码都重打 APK**。
+采用 **Capacitor 远程 URL 模式**：App 内 WebView 直接打开线上站点（与 `server/.env` 中的 `CLIENT_URL` 一致）。前端更新只需部署服务器，**不必每次改代码都重打安装包**。iOS **不上架 App Store**，用 Sideloadly / AltStore 侧载即可。
 
 ### 1. 配置远程地址
 
@@ -173,35 +173,53 @@ cp .env.capacitor.example .env.capacitor
 CAPACITOR_SERVER_URL=https://your-domain.com
 ```
 
-须为 **HTTPS**（局域网调试可用 `http://`，会自动开启 cleartext）。
+须为 **HTTPS**（Android 局域网调试可用 `http://`，会自动开启 cleartext；iOS 建议始终用 HTTPS）。
 
-### 2. GitHub Actions 云端打包（推荐，无需 Android Studio）
+### 2. GitHub Actions 云端打包（推荐）
 
-工作流文件：`.github/workflows/android-apk.yml`
+#### Android APK
 
-1. 将代码 push 到 GitHub
-2. 打开仓库 **Actions** → **Android APK** → **Run workflow**
-3. 填写参数：
-   - `server_url`：与 `CLIENT_URL` 一致，例如 `https://your-domain.com`
-   - `build_type`：选 **`debug`**（可直接安装；`release` 未签名，部分手机装不了）
-4. 等待构建完成，在运行结果底部 **Artifacts** 下载 `openmusic-*.zip`
-5. **解压 zip**，得到 `openmusic.apk`（不要直接把 zip 当 APK 安装）
+工作流：`.github/workflows/android-apk.yml` → Actions → **Android APK** → Run workflow
 
-> Artifacts 默认保留约 90 天，不会自动上传到你的服务器。
+- `server_url`：与 `CLIENT_URL` 一致
+- `build_type`：选 **`debug`**（可直接安装）
+- Artifacts 里下载 zip，**解压**得到 `openmusic.apk`
 
-### 3. 部署 APK 供用户下载
+#### iOS IPA（未签名，供 Sideloadly 安装）
 
-将解压后的 APK 上传到服务器：
+工作流：`.github/workflows/ios-ipa.yml` → Actions → **iOS IPA** → Run workflow
+
+1. 填写 `server_url`（须 HTTPS）
+2. 构建完成后在 Artifacts 下载 `openmusic.ipa`
+3. 在 **Windows / Mac** 用 [Sideloadly](https://sideloadly.io/) 安装到 iPhone：
+   - 数据线连接手机，打开 Sideloadly
+   - 拖入 `openmusic.ipa`，填写任意 Apple ID
+   - 安装完成后：设置 → 通用 → VPN 与设备管理 → 信任该开发者
+4. 免费 Apple ID 证书大约 **7 天**过期，过期后用 Sideloadly 再签一次即可（不必重打 IPA，除非改了壳或远程地址）
+
+> 未签名 IPA **不能**像 APK 那样在手机上直接点开安装，必须经 Sideloadly / AltStore 用你的 Apple ID 重签。
+
+### 3. 部署供用户下载
 
 ```text
 server/downloads/openmusic.apk
+server/downloads/openmusic.ipa
 ```
 
-重启 Node 服务后，下载地址为：
+下载地址：
 
-`https://your-domain.com/downloads/openmusic.apk`
+- `https://your-domain.com/downloads/openmusic.apk`
+- `https://your-domain.com/downloads/openmusic.ipa`
 
-首页右上角 **Android** 按钮指向此地址，且仅在**桌面端**显示，手机浏览器访问时不显示。
+首页右上角 **Android** / **iOS** 按钮指向上述地址，仅在**桌面端**显示。
+
+### 4. 本地同步（可选）
+
+```bash
+cd client
+npm run cap:sync:android   # 或 cap:sync:ios
+npm run cap:open:android   # 或 cap:open:ios（需 Mac + Xcode）
+```
 
 
 ## 🛠 技术栈
@@ -213,7 +231,7 @@ server/downloads/openmusic.apk
 * TailwindCSS
 * Socket.IO Client
 * Three.js / React Three Fiber（房间视觉背景、沉浸模式 3D 场景）
-* Capacitor（Android 远程 URL 壳）
+* Capacitor（Android / iOS 远程 URL 壳）
 
 ### Backend
 

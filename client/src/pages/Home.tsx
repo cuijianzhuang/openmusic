@@ -14,6 +14,7 @@ import { partitionRoomsByRecent } from '../lib/recentRooms';
 import { areRoomListsEqual } from '../lib/roomListCompare';
 import { isMobileDevice } from '../lib/audioUnlock';
 import { ANDROID_APK_URL } from '../lib/androidDownload';
+import { IOS_IPA_URL } from '../lib/iosDownload';
 import Tooltip from '../components/Tooltip';
 
 function GiteeIcon({ className }: { className?: string }) {
@@ -334,16 +335,28 @@ export default function Home() {
         <div className="relative h-14 sm:h-16">
           <div className="absolute right-4 sm:right-6 top-1/2 -translate-y-1/2 z-30 flex items-center gap-2">
             {!isMobileDevice() && (
-              <Tooltip content="下载 Android 客户端">
-                <a
-                  href={ANDROID_APK_URL}
-                  download="openmusic.apk"
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium text-emerald-400/90 border border-emerald-500/25 hover:text-emerald-300 hover:bg-emerald-500/10 transition-colors"
-                >
-                  <Download className="w-4 h-4" />
-                  <span>Android</span>
-                </a>
-              </Tooltip>
+              <>
+                <Tooltip content="下载 Android 客户端">
+                  <a
+                    href={ANDROID_APK_URL}
+                    download="openmusic.apk"
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium text-emerald-400/90 border border-emerald-500/25 hover:text-emerald-300 hover:bg-emerald-500/10 transition-colors"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>Android</span>
+                  </a>
+                </Tooltip>
+                <Tooltip content="下载 iOS IPA（需 Sideloadly / AltStore 安装）">
+                  <a
+                    href={IOS_IPA_URL}
+                    download="openmusic.ipa"
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium text-sky-400/90 border border-sky-500/25 hover:text-sky-300 hover:bg-sky-500/10 transition-colors"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>iOS</span>
+                  </a>
+                </Tooltip>
+              </>
             )}
             <a
               href="https://gitee.com/w3126197382/openmusic"
@@ -364,7 +377,7 @@ export default function Home() {
               <Github className="w-4 h-4" />
             </a>
           </div>
-          <div className="max-w-6xl mx-auto px-4 sm:px-6 pr-14 sm:pr-52 h-full flex items-center gap-3 sm:gap-4">
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 pr-14 sm:pr-72 h-full flex items-center gap-3 sm:gap-4">
           <div className="flex items-center gap-2.5 flex-shrink-0">
             <div className="w-9 h-9 rounded-xl bg-netease-red/15 flex items-center justify-center">
               <Music className="w-5 h-5 text-netease-red" />

@@ -1,0 +1,74 @@
+name: iOS IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      server_url:
+        description: '远程站点 URL（与 CLIENT_URL 一致，须 HTTPS）'
+        required: true
+        default: 'https://m.qqovo.cn'
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Install client dependencies
+        run: npm ci
+        working-directory: client
+
+      - name: Sync Capacitor (remote URL)
+        env:
+          CAPACITOR_SERVER_URL: ${{ inputs.server_url }}
+        run: npm run cap:sync:ios
+        working-directory: client
+
+      - name: Install CocoaPods dependencies
+        run: pod install
+        working-directory: client/ios/App
+
+      - name: Build unsigned IPA (for Sideloadly / AltStore)
+        run: |
+          set -euo pipefail
+          ROOT="$(pwd)"
+          DERIVED="$ROOT/client/build/ios"
+          APP_DIR="$DERIVED/Build/Products/Release-iphoneos/App.app"
+          OUT_DIR="$ROOT/client/build/ipa"
+          mkdir -p "$OUT_DIR"
+
+          xcodebuild \
+            -workspace client/ios/App/App.xcworkspace \
+            -scheme App \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath "$DERIVED" \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+          test -d "$APP_DIR"
+
+          rm -rf "$OUT_DIR/Payload"
+          mkdir -p "$OUT_DIR/Payload"
+          cp -R "$APP_DIR" "$OUT_DIR/Payload/App.app"
+          (
+            cd "$OUT_DIR"
+            zip -qr openmusic.ipa Payload
+          )
+          cp "$OUT_DIR/openmusic.ipa" "$ROOT/openmusic.ipa"
+          ls -lh "$ROOT/openmusic.ipa"
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: openmusic-ios-${{ github.run_number }}
+          path: openmusic.ipa
+          if-no-files-found: error

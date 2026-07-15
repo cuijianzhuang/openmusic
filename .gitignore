@@ -7,6 +7,7 @@ release/
 server/.env
 client/.env.capacitor
 server/downloads/*.apk
+server/downloads/*.ipa
 
 # Capacitor / Android 本地构建产物
 client/android/.gradle/
@@ -16,6 +17,10 @@ client/android/local.properties
 client/android/.idea/
 client/android/captures/
 client/android/*.iml
+
+# Capacitor / iOS 本地构建产物
+client/build/ios/
+client/build/ipa/
 
 # 本地打包（不上传）
 scripts/package-build.mjs

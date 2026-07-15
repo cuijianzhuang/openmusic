@@ -931,6 +931,17 @@ function resolveAndroidApkPath() {
   return null;
 }
 
+function resolveIosIpaPath() {
+  const candidates = [
+    path.join(__dirname, 'downloads/openmusic.ipa'),
+    path.join(clientDist, 'downloads/openmusic.ipa'),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
 function sendAndroidApk(req, res) {
   const apkPath = resolveAndroidApkPath();
   if (!apkPath) {
@@ -942,7 +953,19 @@ function sendAndroidApk(req, res) {
   res.download(apkPath, 'openmusic.apk');
 }
 
+function sendIosIpa(req, res) {
+  const ipaPath = resolveIosIpaPath();
+  if (!ipaPath) {
+    return res.status(404).type('text/plain; charset=utf-8').send(
+      'IPA 尚未部署。请将 GitHub Actions 构建的 openmusic.ipa 上传到 server/downloads/openmusic.ipa，并用 Sideloadly 安装。',
+    );
+  }
+  res.setHeader('Content-Type', 'application/octet-stream');
+  res.download(ipaPath, 'openmusic.ipa');
+}
+
 app.get('/downloads/openmusic.apk', sendAndroidApk);
+app.get('/downloads/openmusic.ipa', sendIosIpa);
 
 mountWechatFileHelperProxy(app, fetchWithTimeout);
 
