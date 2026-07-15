@@ -24,6 +24,7 @@ interface Props {
   mySocketId: string | null;
   nickname: string;
   canControlPlayback: boolean;
+  memberJumpEnabled?: boolean;
   rowRef?: React.MutableRefObject<HTMLDivElement | null>;
   onLike: (queueId: string) => void;
   onJump: (queueId: string) => void;
@@ -38,6 +39,7 @@ function QueueRow({
   mySocketId,
   nickname,
   canControlPlayback,
+  memberJumpEnabled = false,
   rowRef,
   onLike,
   onJump,
@@ -52,7 +54,7 @@ function QueueRow({
   const likedByIds = Array.isArray(song.likedByIds) ? song.likedByIds : [];
   const likeCount = likedByIds.length;
   const likedByMe = Boolean(myUserId && likedByIds.includes(myUserId));
-  const canJump = !song.isCurrent && (canControlPlayback || isMine);
+  const canJump = !song.isCurrent && (canControlPlayback || (isMine && memberJumpEnabled));
   const canRemove = !song.isCurrent && (canControlPlayback || isMine);
   const hasSourceError = useTrackSourceError(song);
   const isAdminPriority = Boolean(song.ownerPriority && song.priorityBy);

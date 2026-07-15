@@ -1,3 +1,5 @@
+import { ensureImageFile, normalizeAllowedImageMime } from './imageMime';
+
 const MAX_DIMENSION = 1920;
 const JPEG_QUALITY = 0.82;
 const WEBP_QUALITY = 0.82;
@@ -52,19 +54,24 @@ export async function prepareChatImageFile(file: File): Promise<File> {
     throw new Error('图片不能超过 20MB');
   }
 
-  if (file.type === 'image/gif') {
-    return file;
+  const typed = await ensureImageFile(file, file.name || 'image');
+  if (!typed) {
+    throw new Error('仅支持 JPG、PNG、GIF、WebP 图片');
+  }
+
+  if (typed.type === 'image/gif') {
+    return typed;
   }
 
   let bitmap: ImageBitmap | null = null;
   try {
-    bitmap = await createImageBitmap(file);
+    bitmap = await createImageBitmap(typed);
     if (
       bitmap.width <= MAX_DIMENSION
       && bitmap.height <= MAX_DIMENSION
-      && file.size <= 512 * 1024
+      && typed.size <= 512 * 1024
     ) {
-      return file;
+      return typed;
     }
 
     const scale = Math.min(1, MAX_DIMENSION / Math.max(bitmap.width, bitmap.height));
@@ -79,12 +86,13 @@ export async function prepareChatImageFile(file: File): Promise<File> {
 
     ctx.drawImage(bitmap, 0, 0, targetWidth, targetHeight);
 
-    const useWebp = file.type === 'image/png' || file.type === 'image/webp';
+    const mime = normalizeAllowedImageMime(typed.type) || 'image/jpeg';
+    const useWebp = mime === 'image/png' || mime === 'image/webp';
     return encodeCanvas(
       canvas,
       useWebp ? 'image/webp' : 'image/jpeg',
       useWebp ? 'webp' : 'jpg',
-      file.name || 'image',
+      typed.name || 'image',
     );
   } finally {
     bitmap?.close();

@@ -10,12 +10,15 @@ interface Props {
   onClick?: () => void;
 }
 
+const META_TEXT =
+  'inline-flex h-5 items-center gap-x-1.5 whitespace-nowrap text-[10px] leading-none text-netease-muted';
+
 export default function RoomQualityBadge({ audioQuality, className = '', onClick }: Props) {
   const roomQuality = useRoomStore((s) => s.room?.audioQuality);
   const quality = resolveEffectiveAudioQuality(audioQuality ?? roomQuality);
 
   const content = (
-    <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] leading-none text-netease-muted">
+    <>
       <Tooltip content={`红点音质：${getQualityLabel(quality.netease)}`}>
         <span className="whitespace-nowrap">
           <span className="text-netease-red">红点</span>
@@ -31,18 +34,18 @@ export default function RoomQualityBadge({ audioQuality, className = '', onClick
           {getQualityLabel(quality.tencent)}
         </span>
       </Tooltip>
-    </span>
+    </>
   );
 
   if (!onClick) {
-    return <div className={className}>{content}</div>;
+    return <div className={`${META_TEXT} ${className}`}>{content}</div>;
   }
 
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`text-left transition-opacity hover:opacity-80 ${className}`}
+      className={`${META_TEXT} text-left font-normal transition-opacity hover:opacity-80 ${className}`}
       aria-label="设置我的音质"
     >
       {content}

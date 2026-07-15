@@ -1,4 +1,5 @@
 import { getClientId } from './clientId';
+import { ensureImageFile, sniffImageMime } from './imageMime';
 
 const DB_NAME = 'openmusic-user-stickers';
 const DB_VERSION = 1;
@@ -109,20 +110,6 @@ function stickerIdFromUrl(url: string) {
   return sanitizeStickerId(`wx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
 }
 
-function sniffImageMime(bytes: Uint8Array): string | null {
-  if (bytes.length >= 3 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) return 'image/gif';
-  if (bytes.length >= 4 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
-    return 'image/png';
-  }
-  if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xd8) return 'image/jpeg';
-  if (bytes.length >= 12
-    && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46
-    && bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) {
-    return 'image/webp';
-  }
-  return null;
-}
-
 export async function isLikelyImageBlob(blob: Blob): Promise<boolean> {
   if (!blob.size) return false;
   const type = blob.type.toLowerCase();
@@ -221,22 +208,24 @@ export async function getStickerBlobUrl(stickerId: string): Promise<string | nul
 export async function getStickerDataUrlForSend(stickerId: string): Promise<string | null> {
   const blob = await getBlob(stickerId);
   if (!blob) return null;
-  if (!(await isLikelyImageBlob(blob))) return null;
-  if (blob.size > MAX_STICKER_BYTES) return null;
+  const typed = await ensureImageFile(blob, stickerId);
+  if (!typed) return null;
+  if (typed.size > MAX_STICKER_BYTES) return null;
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result || ''));
     reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(blob);
+    reader.readAsDataURL(typed);
   });
 }
 
 export async function describeStickerSendIssue(stickerId: string): Promise<string | null> {
   const blob = await getBlob(stickerId);
   if (!blob) return '表情不存在，请删除后重新采集';
-  if (!(await isLikelyImageBlob(blob))) return '表情数据无效，请删除后重新采集';
-  if (blob.size > MAX_STICKER_BYTES) {
-    return `表情过大（当前 ${formatStickerSize(blob.size)}，限制 ${formatStickerSize(MAX_STICKER_BYTES)}），无法发送`;
+  const typed = await ensureImageFile(blob, stickerId);
+  if (!typed) return '表情数据无效或格式不支持，请删除后重新采集';
+  if (typed.size > MAX_STICKER_BYTES) {
+    return `表情过大（当前 ${formatStickerSize(typed.size)}，限制 ${formatStickerSize(MAX_STICKER_BYTES)}），无法发送`;
   }
   return null;
 }

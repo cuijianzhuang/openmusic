@@ -13,10 +13,10 @@ export default function RoomFmModeBadge({ fmMode, className = '' }: Props) {
   return (
     <Tooltip content={`私人漫游：${label}`}>
       <span
-        className={`inline-flex items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 text-[11px] ${className}`}
+        className={`inline-flex h-5 items-center gap-1 whitespace-nowrap text-[10px] leading-none text-netease-muted ${className}`}
       >
         <span className="font-medium text-[#ec4141]">漫游</span>
-        <span className="text-netease-muted">{label}</span>
+        <span>{label}</span>
       </span>
     </Tooltip>
   );

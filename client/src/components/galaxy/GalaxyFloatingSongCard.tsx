@@ -93,6 +93,7 @@ export default function GalaxyFloatingSongCard() {
   const nickname = useRoomStore((s) => s.nickname);
   const mySocketId = useRoomStore((s) => s.mySocketId);
   const canControlPlayback = useRoomStore((s) => s.canControlPlayback);
+  const memberJumpEnabled = Boolean(room?.memberJumpEnabled);
   const { toggleFavorite, isFavorite } = useFavorites();
   const { removeSong, requestJump, toggleQueueLike, banRoomSong } = useSocket();
   const current = room?.current ?? null;
@@ -155,8 +156,10 @@ export default function GalaxyFloatingSongCard() {
           tone: 'sky',
           badge: likedByIds.length > 0 ? String(likedByIds.length) : undefined,
         });
-        if (canControlPlayback || isMine) {
+        if (canControlPlayback || (isMine && memberJumpEnabled)) {
           actions.push({ id: 'jump', label: '插队', tone: 'amber' });
+        }
+        if (canControlPlayback || isMine) {
           actions.push({ id: 'remove', label: '删除', tone: 'red' });
         }
         if (canControlPlayback) {
@@ -182,7 +185,7 @@ export default function GalaxyFloatingSongCard() {
       };
       return { song, item, likedByMe };
     });
-  }, [canControlPlayback, displaySongs, isFavorite, mySocketId, nickname, progress, actionRevision]);
+  }, [canControlPlayback, displaySongs, isFavorite, memberJumpEnabled, mySocketId, nickname, progress, actionRevision]);
 
   useEffect(() => {
     const nextCount = displayItems.length;

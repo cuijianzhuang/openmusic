@@ -112,6 +112,7 @@ function getEffectivePlaybackQuality(song: Pick<QueueItem, 'queueId' | 'id' | 's
 function songLikelyNeedsPlaybackProxy(song: Pick<QueueItem, 'source' | 'url'>): boolean {
   if (shouldProxySongPlaybackUrl()) return true;
   if (!isHttpsPageContext()) return false;
+  // 酷狗迟言链基本为 http://，HTTPS 站点必须走 media-proxy（不可升 https）
   if (songSourceOf(song) === 'kugou') return true;
   return Boolean(song.url?.trim().startsWith('http://'));
 }

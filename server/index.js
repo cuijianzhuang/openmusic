@@ -1430,7 +1430,7 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
-  socket.on('set_room_song_request', ({ enabled, minStaySec, maxPerUser, cooldownSec, queueMaxLength }, callback) => {
+  socket.on('set_room_song_request', ({ enabled, minStaySec, maxPerUser, cooldownSec, queueMaxLength, memberJumpEnabled }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
     if (rejectRateLimited(socket, limitSocketAction, 'set_room_song_request', callback)) return;
 
@@ -1446,6 +1446,7 @@ io.on('connection', (socket) => {
       maxPerUser,
       cooldownSec,
       queueMaxLength,
+      memberJumpEnabled,
     }, socket.id);
     if (result.error) {
       callback?.({ success: false, error: result.error });

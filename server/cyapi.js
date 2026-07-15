@@ -271,6 +271,7 @@ export async function getKugouSongDetail(id) {
     id,
     name: detail.songName || '',
     artist: detail.singerName || '',
+    // 酷狗播放链仅 http，不可升 https（证书失败会卡死/重试）
     url: detail.url || '',
     pic: detail.albumImage || '',
     duration: detail.timeLength ? detail.timeLength * 1000 : undefined,

@@ -940,6 +940,7 @@ if (s.connected) {
 
   const setSongRequestEnabled = useCallback((options: {
     enabled?: boolean;
+    memberJumpEnabled?: boolean;
     minStaySec?: number;
     maxPerUser?: number;
     cooldownSec?: number;

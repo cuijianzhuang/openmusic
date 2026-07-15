@@ -18,6 +18,7 @@ type RowData = {
   mySocketId: string | null;
   nickname: string;
   canControlPlayback: boolean;
+  memberJumpEnabled: boolean;
   currentRef: React.RefObject<HTMLDivElement | null>;
   onLike: (queueId: string) => void;
   onJump: (queueId: string) => void;
@@ -38,6 +39,7 @@ function VirtualQueueRow({ index, style, data }: ListChildComponentProps<RowData
         mySocketId={data.mySocketId}
         nickname={data.nickname}
         canControlPlayback={data.canControlPlayback}
+        memberJumpEnabled={data.memberJumpEnabled}
         rowRef={song.isCurrent ? data.currentRef : undefined}
         onLike={data.onLike}
         onJump={data.onJump}
@@ -60,6 +62,7 @@ export default function QueuePanel({ fillHeight = false }: Props) {
   const nickname = useRoomStore((s) => s.nickname);
   const mySocketId = useRoomStore((s) => s.mySocketId);
   const canControlPlayback = useRoomStore((s) => s.canControlPlayback);
+  const memberJumpEnabled = useRoomStore((s) => Boolean(s.room?.memberJumpEnabled));
   const { removeSong, requestJump, toggleQueueLike, banRoomSong } = useSocket();
   const [jumpMsg, setJumpMsg] = useState('');
   const currentRef = useRef<HTMLDivElement>(null);
@@ -151,6 +154,7 @@ export default function QueuePanel({ fillHeight = false }: Props) {
     mySocketId,
     nickname,
     canControlPlayback,
+    memberJumpEnabled,
     currentRef,
     onLike: handleLike,
     onJump: handleJumpRequest,
@@ -162,6 +166,7 @@ export default function QueuePanel({ fillHeight = false }: Props) {
     mySocketId,
     nickname,
     canControlPlayback,
+    memberJumpEnabled,
     handleLike,
     handleJumpRequest,
     removeSong,
@@ -193,6 +198,7 @@ export default function QueuePanel({ fillHeight = false }: Props) {
       mySocketId={mySocketId}
       nickname={nickname}
       canControlPlayback={canControlPlayback}
+      memberJumpEnabled={memberJumpEnabled}
       rowRef={song.isCurrent ? currentRef : undefined}
       onLike={handleLike}
       onJump={handleJumpRequest}

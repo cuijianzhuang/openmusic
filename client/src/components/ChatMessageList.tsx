@@ -23,10 +23,13 @@ import { getClientId } from '../lib/clientId';
 import { VariableSizeList, type ListChildComponentProps, type ListOnScrollProps } from 'react-window';
 
 const VIRTUAL_LIST_THRESHOLD = 24;
-/** 变高消息在 VariableSizeList 下滚动时会因行高重算而跳动，暂用原生列表 */
-const VIRTUAL_LIST_ENABLED = true;
+/**
+ * VariableSizeList 用绝对定位；行高估矮或图片加载前量到偏矮高度时，会互相重叠。
+ * 先走原生列表保证稳定；消息上限 400，性能可接受。
+ */
+const VIRTUAL_LIST_ENABLED = false;
 const ROW_GAP_PX = 8;
-const ESTIMATED_ROW_HEIGHT = 64;
+const ESTIMATED_ROW_HEIGHT = 72;
 
 interface Props {
   roomMeta: ChatRoomMeta;
@@ -76,15 +79,18 @@ type VirtualRowData = {
 };
 
 function estimateMessageHeight(msg: ChatMessage): number {
-  if (msg.kind === 'welcome') return 112;
-  let height = 48;
-  if (msg.replyTo) height += 32;
+  if (msg.kind === 'welcome') return 120;
+  // 头像行 + 昵称行余量（宁可偏高出现空隙，也不要偏低导致重叠）
+  let height = 56;
+  if (msg.replyTo) height += 44;
   if (msg.imageUrl) {
-    height += msg.imageKey ? 164 : 120;
+    // 贴纸 max-h-28≈112；普通图 max-h-40≈160
+    height += msg.imageKey ? 120 : 168;
   } else if (msg.text) {
-    height += Math.min(88, Math.max(24, Math.ceil(msg.text.length / 28) * 22));
+    // leading-7 ≈ 28px/行
+    height += Math.min(160, Math.max(28, Math.ceil(msg.text.length / 22) * 28));
   }
-  if (msg.reactions?.length) height += 26;
+  if (msg.reactions?.length) height += 32;
   return height + ROW_GAP_PX;
 }
 
@@ -113,7 +119,7 @@ function VirtualChatRow({ index, style, data }: ListChildComponentProps<VirtualR
   if (!msg) return null;
 
   return (
-    <div style={style}>
+    <div style={style} className="overflow-hidden">
       <div ref={rowRef} className="px-3">
         <ChatMessageRow
           msg={msg}
@@ -330,8 +336,10 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
   }, [chatScrollRoot, flushWelcomeConfetti, scrollToBottomEnd]);
 
   const setRowHeight = useCallback((index: number, messageId: string, height: number) => {
+    if (!(height > 0)) return;
     const prev = rowHeightsRef.current.get(messageId);
-    if (prev !== undefined && Math.abs(prev - height) < 2) return;
+    // 只允许增高：图片未加载时测到的偏矮高度不要写回，否则会重叠
+    if (prev !== undefined && height <= prev + 1) return;
     rowHeightsRef.current.set(messageId, height);
     listRef.current?.resetAfterIndex(index);
     if (
@@ -486,7 +494,7 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
       }
 
       useChatStore.getState().prependOlder(res.messages, Boolean(res.hasMore));
-      rowHeightsRef.current.clear();
+      // 高度按 messageId 缓存，加载更早消息时不要清空已有高度
       listRef.current?.resetAfterIndex(0);
     });
   }, [chatScrollRoot, roomMeta.id, hasMoreOlder, loadChatHistory]);

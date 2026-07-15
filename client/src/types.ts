@@ -173,6 +173,8 @@ export interface RoomState {
   announcementText?: string;
   /** 是否允许成员点歌（关闭后仅房主/管理员可点） */
   songRequestEnabled?: boolean;
+  /** 是否允许成员为自己的点歌插队（默认关闭，房主/管理员始终可插队） */
+  memberJumpEnabled?: boolean;
   /** 进房后需等待的秒数才能点歌，0 表示不限制 */
   songRequestMinStaySec?: number;
   /** 每人队列中最多保留几首，0 表示不限制 */

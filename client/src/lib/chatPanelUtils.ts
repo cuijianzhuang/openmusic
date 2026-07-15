@@ -173,5 +173,17 @@ export function mentionQueryMatchesNickname(query: string, nickname: string): bo
   return name.includes(q) || name.startsWith(q);
 }
 
+/**
+ * 光标前 @ 后已是完整提及（`@昵称 `），不再弹出选择框。
+ * 用于引用回复 / 点击名字插入后，避免只剩一人还挂着候选列表。
+ */
+export function isCompletedMentionQuery(query: string, nicknames: string[]): boolean {
+  const labels = collectMentionLabels(nicknames);
+  for (const label of labels) {
+    if (query.startsWith(`${label} `)) return true;
+  }
+  return false;
+}
+
 export const CHAT_PHOTO_CLASS = 'max-h-40 max-w-[220px] object-contain';
 export const CHAT_STICKER_CLASS = 'max-h-28 max-w-[8.5rem] rounded-xl object-contain';

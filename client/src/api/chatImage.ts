@@ -1,13 +1,8 @@
 import { prepareChatImageFile } from '../lib/compressChatImage';
+import { ensureImageFile, imageMimeToExt, normalizeAllowedImageMime } from '../lib/imageMime';
 import { fetchWithTimeout } from './http';
 
 const MAX_CHAT_IMAGE_BYTES = 5 * 1024 * 1024;
-const ALLOWED_CHAT_IMAGE_TYPES = new Set([
-  'image/jpeg',
-  'image/png',
-  'image/gif',
-  'image/webp',
-]);
 
 export interface ChatImageUploadToken {
   token: string;
@@ -23,7 +18,7 @@ export interface ChatImageUploadResult {
 }
 
 export function validateChatImageFile(file: File): string | null {
-  if (!ALLOWED_CHAT_IMAGE_TYPES.has(file.type)) {
+  if (!normalizeAllowedImageMime(file.type)) {
     return '仅支持 JPG、PNG、GIF、WebP 图片';
   }
   if (file.size > MAX_CHAT_IMAGE_BYTES) {
@@ -59,13 +54,18 @@ async function requestChatImageUploadToken(roomId: string, ext: string): Promise
 }
 
 export async function uploadChatImage(roomId: string, file: File): Promise<ChatImageUploadResult> {
-  const prepared = await prepareChatImageFile(file);
+  const typed = await ensureImageFile(file, file.name || 'image');
+  if (!typed) {
+    throw new Error('仅支持 JPG、PNG、GIF、WebP 图片');
+  }
+
+  const prepared = await prepareChatImageFile(typed);
   const validationError = validateChatImageFile(prepared);
   if (validationError) {
     throw new Error(validationError);
   }
 
-  const ext = prepared.name.split('.').pop()?.toLowerCase() || 'jpg';
+  const ext = imageMimeToExt(prepared.type);
   const tokenData = await requestChatImageUploadToken(roomId, ext);
 
   const formData = new FormData();

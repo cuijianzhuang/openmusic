@@ -151,6 +151,7 @@ function snapshotRoomForStorage(room) {
     playbackUpdatedAt: room.playbackUpdatedAt ?? Date.now(),
     messages: room.messages.slice(-MAX_CHAT_MESSAGES).map(sanitizeMessageForStorage),
     knownUserIds: Array.from(room.knownUserIds || []),
+    chatVisibleSinceByUserId: Object.fromEntries(room.chatVisibleSinceByUserId || []),
     songHistory: (room.songHistory || [])
       .slice(0, MAX_SONG_HISTORY)
       .map(serializeSongHistoryForClient)
@@ -171,6 +172,7 @@ function snapshotRoomForStorage(room) {
     songRequestMaxPerUser: normalizeSongRequestMaxPerUser(room.songRequestMaxPerUser),
     songRequestCooldownSec: normalizeSongRequestCooldownSec(room.songRequestCooldownSec),
     queueMaxLength: normalizeQueueMaxLength(room.queueMaxLength),
+    memberJumpEnabled: Boolean(room.memberJumpEnabled),
     bannedSongs: serializeBannedSongs(room.bannedSongs),
     memberTiers: serializeMemberTiersMap(room.memberTiers),
     memberSettings: serializeMemberSettings(room.memberSettings),
@@ -188,6 +190,7 @@ function restoreRoomFromStorage(data) {
   room.playbackUpdatedAt = data.playbackUpdatedAt ?? Date.now();
   room.messages = data.messages || [];
   room.knownUserIds = new Set(data.knownUserIds || []);
+  room.chatVisibleSinceByUserId = restoreChatVisibleSinceMap(data.chatVisibleSinceByUserId);
   room.songHistory = (Array.isArray(data.songHistory) ? data.songHistory : [])
     .slice(0, MAX_SONG_HISTORY)
     .map(serializeSongHistoryForClient)
@@ -214,6 +217,7 @@ function restoreRoomFromStorage(data) {
   room.songRequestMaxPerUser = normalizeSongRequestMaxPerUser(data.songRequestMaxPerUser);
   room.songRequestCooldownSec = normalizeSongRequestCooldownSec(data.songRequestCooldownSec);
   room.queueMaxLength = normalizeQueueMaxLength(data.queueMaxLength);
+  room.memberJumpEnabled = Boolean(data.memberJumpEnabled);
   room.bannedSongs = restoreBannedSongs(data.bannedSongs);
   room.memberTiers = restoreMemberTiersFromStorage(data.memberTiers);
   room.memberSettings = normalizeMemberSettings(data.memberSettings);
@@ -350,6 +354,7 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
     skipRequests: [],
     messages: [],
     knownUserIds: new Set(),
+    chatVisibleSinceByUserId: new Map(),
     songHistory: [],
     randomPlayedKeys: new Set(),
     nextRandom: null,
@@ -372,6 +377,7 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
     songRequestMaxPerUser: 0,
     songRequestCooldownSec: 0,
     queueMaxLength: DEFAULT_QUEUE_MAX_LENGTH,
+    memberJumpEnabled: false,
     bannedSongs: [],
     lastSongRequestAt: new Map(),
     memberTiers: new Map(),
@@ -741,6 +747,30 @@ export function isUserBanned(roomId, userId, deviceId = null) {
   return isAccessBanned(room, userId, deviceId);
 }
 
+function restoreChatVisibleSinceMap(raw) {
+  const map = new Map();
+  if (!raw || typeof raw !== 'object') return map;
+  for (const [userId, value] of Object.entries(raw)) {
+    const ts = Number(value);
+    if (userId && Number.isFinite(ts) && ts > 0) map.set(userId, ts);
+  }
+  return map;
+}
+
+/** 新用户首进时间戳：只看进房之后的消息；刷新/发言后也不放开更早历史 */
+function resolveChatVisibleSince(room, userId, existingUser) {
+  if (!room.chatVisibleSinceByUserId) room.chatVisibleSinceByUserId = new Map();
+  const stored = room.chatVisibleSinceByUserId.get(userId);
+  if (Number.isFinite(stored) && stored > 0) return stored;
+  if (Number.isFinite(existingUser?.chatVisibleSince) && existingUser.chatVisibleSince > 0) {
+    room.chatVisibleSinceByUserId.set(userId, existingUser.chatVisibleSince);
+    return existingUser.chatVisibleSince;
+  }
+  const since = Date.now();
+  room.chatVisibleSinceByUserId.set(userId, since);
+  return since;
+}
+
 export function addUser(roomId, userId, nickname, options = {}) {
   const room = rooms.get(roomId);
   if (!room) return null;
@@ -755,11 +785,6 @@ export function addUser(roomId, userId, nickname, options = {}) {
   const existing = room.users.get(userId);
   const connectionIds = normalizeConnectionIds(existing, options.connectionId || null);
   if (!room.knownUserIds) room.knownUserIds = new Set();
-  const isReturningUser = room.knownUserIds.has(userId);
-  const hasSpokenInHistory = room.messages.some((message) => message.userId === userId);
-  const chatVisibleSince = isReturningUser || hasSpokenInHistory
-    ? null
-    : Date.now();
   room.knownUserIds.add(userId);
 
   const resolvedNickname = ensureUniqueNickname(
@@ -769,6 +794,7 @@ export function addUser(roomId, userId, nickname, options = {}) {
   );
 
   const readOnly = Boolean(options.readOnly);
+  const chatVisibleSince = resolveChatVisibleSince(room, userId, existing);
 
   room.users.set(userId, {
     id: userId,
@@ -1157,6 +1183,9 @@ export function setSongRequestEnabled(roomId, actorId, options = {}, connectionI
   if (options.queueMaxLength !== undefined) {
     room.queueMaxLength = normalizeQueueMaxLength(options.queueMaxLength);
     trimQueueToMaxLength(room);
+  }
+  if (options.memberJumpEnabled !== undefined) {
+    room.memberJumpEnabled = Boolean(options.memberJumpEnabled);
   }
 
   persistRoom(room);
@@ -1960,6 +1989,9 @@ export async function requestJump(roomId, socketId, queueId) {
   const isController = isControllerConnection(room, socketId);
   const isRequester = isQueueRequester(item, socketId, user);
   if (!isController && !isRequester) return { error: '只能为自己点的歌插队' };
+  if (!isController && !room.memberJumpEnabled) {
+    return { error: '房间未开启成员插队' };
+  }
 
   const jumped = await applyJumpToFront(room, queueId, {
     ownerPriority: isController,
@@ -2533,6 +2565,7 @@ function serializeRoom(room, options = {}) {
     songRequestMaxPerUser: normalizeSongRequestMaxPerUser(room.songRequestMaxPerUser),
     songRequestCooldownSec: normalizeSongRequestCooldownSec(room.songRequestCooldownSec),
     queueMaxLength: normalizeQueueMaxLength(room.queueMaxLength),
+    memberJumpEnabled: Boolean(room.memberJumpEnabled),
     bannedSongs: viewerCanModerate ? serializeBannedSongs(room.bannedSongs) : undefined,
     memberTiers: serializeMemberTiersMap(room.memberTiers),
     memberSettings: serializeMemberSettings(room.memberSettings),
@@ -2575,6 +2608,7 @@ export function prepareRoomBroadcast(roomId) {
     songRequestMaxPerUser: normalizeSongRequestMaxPerUser(room.songRequestMaxPerUser),
     songRequestCooldownSec: normalizeSongRequestCooldownSec(room.songRequestCooldownSec),
     queueMaxLength: normalizeQueueMaxLength(room.queueMaxLength),
+    memberJumpEnabled: Boolean(room.memberJumpEnabled),
     memberTiers: serializeMemberTiersMap(room.memberTiers),
     memberSettings: serializeMemberSettings(room.memberSettings),
   };

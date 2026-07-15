@@ -36,6 +36,7 @@ import {
   matchesMentionAllQuery,
   mentionQueryMatchesNickname,
   stripLeadingMention,
+  isCompletedMentionQuery,
 } from '../lib/chatPanelUtils';
 import {
   ensureQQFacesLoaded,
@@ -48,6 +49,7 @@ import {
   type QFaceItem,
 } from '../lib/qface';
 import { uploadChatImage } from '../api/chatImage';
+import { ensureImageFile } from '../lib/imageMime';
 import { readClipboardImageFile } from '../lib/compressChatImage';
 import { getClientId } from '../lib/clientId';
 
@@ -198,6 +200,13 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
       }
       return;
     }
+    // 已插入完整 @昵称 后（引用回复/点名），不再弹出候选
+    if (isCompletedMentionQuery(activeQuery, mentionNicknames)) {
+      setShowMentionPicker(false);
+      setMentionQuery('');
+      mentionQueryRef.current = '';
+      return;
+    }
     const queryChanged = mentionQueryRef.current !== activeQuery;
     mentionQueryRef.current = activeQuery;
     setMentionQuery(activeQuery);
@@ -209,7 +218,7 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
     const showAll = canControlPlayback && matchesMentionAllQuery(activeQuery);
     setShowMentionPicker(filtered.length > 0 || showAll);
     if (queryChanged) setMentionIndex(0);
-  }, [canControlPlayback, mySocketId, roomMeta.users]);
+  }, [canControlPlayback, mentionNicknames, mySocketId, roomMeta.users]);
 
   const insertPlainText = useCallback((value: string) => {
     const editor = inputRef.current;
@@ -361,13 +370,10 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
     try {
       let res: { success: boolean; error?: string };
       // 已配置图床时先上传，避免数 MB 的 data URL 经 WebSocket 广播导致超时
-      if (chatUploadEnabled && imageUrl.startsWith('data:')) {
+      if (chatUploadEnabled && (imageUrl.startsWith('data:') || imageUrl.startsWith('blob:'))) {
         const blob = await (await fetch(imageUrl)).blob();
-        const ext = (blob.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
-        const file = new File([blob], `sticker.${ext}`, {
-          type: blob.type || 'image/png',
-          lastModified: Date.now(),
-        });
+        const file = await ensureImageFile(blob, 'sticker');
+        if (!file) throw new Error('仅支持 JPG、PNG、GIF、WebP 图片');
         const uploaded = await uploadChatImage(roomMeta.id, file);
         res = await sendChat('', {
           imageUrl: uploaded.url,
@@ -462,6 +468,8 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
   };
 
   const applyReplyMention = useCallback((targetNickname: string) => {
+    const nick = String(targetNickname || '').trim();
+    if (!nick) return;
     const body = stripLeadingMention(serializeEditorElement(inputRef.current), mentionNicknames);
     const editor = inputRef.current;
     if (!editor) {
@@ -470,8 +478,13 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
     }
     editor.textContent = '';
     setHasDraft(true);
-    insertPlainText(`${buildMentionPrefix(targetNickname)}${body}`.slice(0, MAX_CHAT_LENGTH));
-  }, [insertPlainText]);
+    insertPlainText(`${buildMentionPrefix(nick)}${body}`.slice(0, MAX_CHAT_LENGTH));
+    // 引用/点名已是完整 @昵称，强制关掉候选（离线用户可能不在 nicknames 列表里）
+    setShowMentionPicker(false);
+    setMentionQuery('');
+    mentionQueryRef.current = '';
+    setMentionIndex(0);
+  }, [insertPlainText, mentionNicknames]);
 
   useImperativeHandle(ref, () => ({
     applyReplyMention,

@@ -15,6 +15,7 @@ type SettingsTab = 'fm' | 'member' | 'announcement' | 'songRequest';
 
 export interface SongRequestSettings {
   enabled: boolean;
+  memberJumpEnabled: boolean;
   minStayMinutes: number;
   maxPerUser: number;
   cooldownSec: number;
@@ -23,6 +24,7 @@ export interface SongRequestSettings {
 
 function songRequestEqual(a: SongRequestSettings, b: SongRequestSettings) {
   return a.enabled === b.enabled
+    && a.memberJumpEnabled === b.memberJumpEnabled
     && a.minStayMinutes === b.minStayMinutes
     && a.maxPerUser === b.maxPerUser
     && a.cooldownSec === b.cooldownSec
@@ -257,6 +259,7 @@ export default function RoomSettingsModal({
   const announcementDirty = draftAnnouncementEnabled !== announcementEnabled
     || draftAnnouncementText.trim() !== announcementText.trim();
   const songRequestDirty = draftSongRequest.enabled !== songRequest.enabled
+    || draftSongRequest.memberJumpEnabled !== songRequest.memberJumpEnabled
     || draftSongRequest.minStayMinutes !== songRequest.minStayMinutes
     || draftSongRequest.maxPerUser !== songRequest.maxPerUser
     || draftSongRequest.cooldownSec !== songRequest.cooldownSec
@@ -429,6 +432,14 @@ export default function RoomSettingsModal({
                   onChange={(enabled) => setDraftSongRequest((prev) => ({ ...prev, enabled }))}
                   label="允许成员点歌"
                   description="关闭后仅房主与管理员可点歌"
+                />
+
+                <Toggle
+                  checked={draftSongRequest.memberJumpEnabled}
+                  disabled={songRequestSaving}
+                  onChange={(memberJumpEnabled) => setDraftSongRequest((prev) => ({ ...prev, memberJumpEnabled }))}
+                  label="允许成员插队"
+                  description="开启后成员可对自己的点歌插队；房主与管理员始终可插队"
                 />
 
                 <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5">

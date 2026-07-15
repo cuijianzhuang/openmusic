@@ -371,12 +371,14 @@ export default function Room() {
   const canOpenRoomSettings = isOwner || canControlPlayback;
   const songRequestSettings: SongRequestSettings = useMemo(() => ({
     enabled: room?.songRequestEnabled !== false,
+    memberJumpEnabled: Boolean(room?.memberJumpEnabled),
     minStayMinutes: Math.floor((room?.songRequestMinStaySec ?? 0) / 60),
     maxPerUser: room?.songRequestMaxPerUser ?? 0,
     cooldownSec: room?.songRequestCooldownSec ?? 0,
     queueMaxLength: room?.queueMaxLength ?? 200,
   }), [
     room?.songRequestEnabled,
+    room?.memberJumpEnabled,
     room?.songRequestMinStaySec,
     room?.songRequestMaxPerUser,
     room?.songRequestCooldownSec,
@@ -1046,6 +1048,7 @@ export default function Room() {
     setSongRequestSaving(true);
     const res = await setSongRequestEnabled({
       enabled: settings.enabled,
+      memberJumpEnabled: settings.memberJumpEnabled,
       minStaySec: settings.minStayMinutes * 60,
       maxPerUser: settings.maxPerUser,
       cooldownSec: settings.cooldownSec,
@@ -1950,7 +1953,7 @@ export default function Room() {
       <RoomSettingsModal
         open={settingsOpen}
         isOwner={isOwner}
-        canModerate={canControlPlayback}
+        canModerate={isOwner || canControlPlayback}
         fmMode={normalizeFmMode(room?.neteaseFmMode)}
         fmSaving={fmSaving}
         announcementEnabled={Boolean(room?.announcementEnabled)}
@@ -2076,30 +2079,32 @@ export default function Room() {
               </p>
 
               {!pureMode && (
-              <div className="mt-0.5 flex flex-wrap items-center gap-2">
-                <p className="text-xs text-netease-muted">{room.userCount} 人在线</p>
+              <div className="mt-0.5 flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                <span className="inline-flex h-5 items-center whitespace-nowrap text-[10px] leading-none text-netease-muted">
+                  {room.userCount} 人在线
+                </span>
                 <RoomQualityBadge onClick={() => setQualityOpen(true)} />
                 <RoomFmModeBadge fmMode={room.neteaseFmMode} />
                 {room.songRequestEnabled === false && (
-                  <span className="text-[10px] text-amber-400/90 bg-amber-400/10 px-1.5 py-0.5 rounded-full">禁止点歌</span>
+                  <span className="inline-flex h-5 items-center text-[10px] leading-none text-amber-400/90 bg-amber-400/10 px-1.5 rounded-full">禁止点歌</span>
                 )}
                 {(room.songRequestMinStaySec ?? 0) > 0 && (
-                  <span className="text-[10px] text-white/45 bg-white/5 px-1.5 py-0.5 rounded-full">
+                  <span className="inline-flex h-5 items-center text-[10px] leading-none text-white/45 bg-white/5 px-1.5 rounded-full">
                     进房 {Math.ceil((room.songRequestMinStaySec ?? 0) / 60)} 分钟后可点歌
                   </span>
                 )}
                 {(room.songRequestMaxPerUser ?? 0) > 0 && (
-                  <span className="text-[10px] text-white/45 bg-white/5 px-1.5 py-0.5 rounded-full">
+                  <span className="inline-flex h-5 items-center text-[10px] leading-none text-white/45 bg-white/5 px-1.5 rounded-full">
                     每人最多 {room.songRequestMaxPerUser} 首待播
                   </span>
                 )}
                 {(room.songRequestCooldownSec ?? 0) > 0 && (
-                  <span className="text-[10px] text-white/45 bg-white/5 px-1.5 py-0.5 rounded-full">
+                  <span className="inline-flex h-5 items-center text-[10px] leading-none text-white/45 bg-white/5 px-1.5 rounded-full">
                     点歌冷却 {room.songRequestCooldownSec} 秒
                   </span>
                 )}
                 {(room.queueMaxLength ?? 200) < 200 && (
-                  <span className="text-[10px] text-white/45 bg-white/5 px-1.5 py-0.5 rounded-full">
+                  <span className="inline-flex h-5 items-center text-[10px] leading-none text-white/45 bg-white/5 px-1.5 rounded-full">
                     队列上限 {room.queueMaxLength} 首
                   </span>
                 )}
@@ -2107,7 +2112,7 @@ export default function Room() {
                   <button
                     type="button"
                     onClick={() => setAnnouncementPopupOpen(true)}
-                    className="text-[10px] text-amber-400/90 bg-amber-400/10 px-1.5 py-0.5 rounded-full hover:bg-amber-400/15"
+                    className="inline-flex h-5 items-center text-[10px] leading-none text-amber-400/90 bg-amber-400/10 px-1.5 rounded-full hover:bg-amber-400/15"
                   >
                     查看公告
                   </button>

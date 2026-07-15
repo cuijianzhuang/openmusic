@@ -1,6 +1,7 @@
 import type { SearchResult } from '../types';
 import { getSongUrl, songKey } from '../api/music';
 import { getSharedAudio } from './audioElement';
+import { getAudioController } from './audioController';
 import { useAudioStore } from '../stores/audioStore';
 import { useRoomStore } from '../stores/roomStore';
 
@@ -25,6 +26,11 @@ function notify() {
   listeners.forEach((cb) => cb());
 }
 
+/** 试听占用本机音频：房间主播放应暂停且勿自动跟播 */
+export function isSongPreviewSuppressingRoom(): boolean {
+  return status === 'loading' || status === 'playing' || status === 'paused';
+}
+
 function getOrCreatePreviewAudio(): HTMLAudioElement {
   if (!previewAudio) {
     previewAudio = new Audio();
@@ -37,6 +43,7 @@ function getOrCreatePreviewAudio(): HTMLAudioElement {
         lastError = '试听加载失败';
         status = 'error';
         notify();
+        resumeRoomAudioIfNeeded();
       }
     });
   }
@@ -44,11 +51,21 @@ function getOrCreatePreviewAudio(): HTMLAudioElement {
 }
 
 function pauseRoomAudioLocally() {
+  const room = useRoomStore.getState().room;
+  if (room?.isPlaying) {
+    pausedRoomForPreview = true;
+  }
   const audio = getSharedAudio();
   if (!audio.paused) {
     audio.pause();
-    pausedRoomForPreview = true;
   }
+  // 再入队 pause，排在可能已排队的 play/sync 之后，避免被跟播立刻挤掉
+  getAudioController().enqueue(() => {
+    if (!isSongPreviewSuppressingRoom()) return;
+    if (!getSharedAudio().paused) {
+      getSharedAudio().pause();
+    }
+  });
 }
 
 function resumeRoomAudioIfNeeded() {
@@ -73,6 +90,7 @@ function finishPreview(options: { resumeRoom: boolean }) {
   lastError = null;
   notify();
   if (options.resumeRoom) resumeRoomAudioIfNeeded();
+  else pausedRoomForPreview = false;
 }
 
 export function getSongPreviewState(): SongPreviewState {
@@ -103,7 +121,7 @@ export async function toggleSongPreview(song: SearchResult): Promise<void> {
       notify();
       return;
     }
-    if (status === 'paused' || status === 'error') {
+    if (status === 'paused') {
       pauseRoomAudioLocally();
       try {
         await audio.play();
@@ -114,9 +132,11 @@ export async function toggleSongPreview(song: SearchResult): Promise<void> {
         lastError = '无法播放试听';
         status = 'error';
         notify();
+        resumeRoomAudioIfNeeded();
       }
       return;
     }
+    // error：重新拉流
   }
 
   const token = ++loadToken;

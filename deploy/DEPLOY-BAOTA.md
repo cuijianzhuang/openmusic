@@ -105,6 +105,8 @@ pm2 startup   # 按提示设置开机自启
 
 **必须配置 `/socket.io/` 的 WebSocket**，否则房间无法实时同步。
 
+**建议增加 `/api/media-proxy` 关闭缓冲**（示例里已写）：蓝点（酷狗）只有 `http://` 音链，必须经本站转发；Nginx 默认缓冲容易导致播放卡顿。
+
 若使用 HTTPS，在宝塔申请 SSL 即可，反代地址仍用 `http://127.0.0.1:4000`。
 
 ---
@@ -122,6 +124,7 @@ pm2 startup   # 按提示设置开机自启
 | 问题 | 处理 |
 |------|------|
 | 页面能开但无法加入房间 | 检查 Nginx 是否配置 `socket.io` WebSocket |
+| 蓝点（酷狗）播放卡顿 | 按示例为 `/api/media-proxy` 加 `proxy_buffering off`；勿把酷狗链升成 https |
 | 搜不到歌 / 无法播放 | 检查 `METING_API_URL`、`CYAPI_KEY` |
 | 502 | PM2 是否运行：`pm2 list` |
 | 端口冲突 | 修改 `.env` 的 `PORT` 和 Nginx 反代端口 |
