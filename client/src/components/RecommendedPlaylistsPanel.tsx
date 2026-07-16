@@ -34,7 +34,7 @@ function PlaylistCover({
   return (
     <div
       className={`relative overflow-hidden bg-netease-card ${
-        compact ? 'aspect-square w-full flex-shrink-0 rounded-md' : 'aspect-square w-full rounded-lg'
+        compact ? 'aspect-square w-full flex-shrink-0 rounded-xl' : 'aspect-square w-full rounded-2xl'
       }`}
     >
       {playlist.coverImgUrl ? (
@@ -69,7 +69,7 @@ function PlaylistSkeleton({
 }: {
   compact?: boolean;
 }) {
-  const cardClass = compact ? 'aspect-square w-full rounded-md' : 'aspect-square w-full rounded-lg';
+  const cardClass = compact ? 'aspect-square w-full rounded-xl' : 'aspect-square w-full rounded-2xl';
 
   if (compact) {
     return (
@@ -138,8 +138,8 @@ function PlaylistCard({
         compact
           ? 'w-20 flex-shrink-0 items-center text-center'
           : immersive
-            ? 'mineradio-glass-card h-full w-full items-center rounded-xl p-1 text-center'
-            : 'h-full w-full items-center rounded-lg p-0.5 text-center hover:bg-netease-card/60'
+            ? 'mineradio-glass-card h-full w-full items-center rounded-2xl p-1.5 text-center'
+            : 'h-full w-full items-center rounded-2xl p-1 text-center hover:bg-netease-card/60'
       }`}
     >
       <PlaylistCover playlist={playlist} isLoading={isLoading} compact={compact} />
@@ -275,7 +275,7 @@ export default function RecommendedPlaylistsPanel({
 
   if (compact) {
     return (
-      <div className="flex flex-shrink-0 flex-col overflow-hidden rounded-2xl border border-netease-border/50 bg-netease-card/30">
+      <div className="flex flex-shrink-0 flex-col overflow-hidden rounded-3xl border border-netease-border/50 bg-netease-card/30">
         <div className="flex flex-shrink-0 items-center gap-1.5 border-b border-netease-border/50 px-3 py-2">
           <Sparkles className="h-3.5 w-3.5 text-sky-400" />
           <h2 className="text-xs font-medium">热榜歌单</h2>

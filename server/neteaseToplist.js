@@ -1,6 +1,10 @@
+import { getRedisClient } from './roomStorage.js';
+
 const HOT_TOPLIST_ID = '3778678';
 const TOPLIST_URL = `https://music.163.com/discover/toplist?id=${HOT_TOPLIST_ID}`;
-const CACHE_TTL_MS = 30 * 60 * 1000;
+const REDIS_CACHE_KEY = 'openmusic:netease:toplist:hot';
+/** 东八区日历日，热榜按「一天一清」 */
+const TZ_OFFSET_MS = 8 * 60 * 60 * 1000;
 
 const NETEASE_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -8,8 +12,22 @@ const NETEASE_HEADERS = {
   Accept: 'text/html,application/xhtml+xml',
 };
 
-/** @type {{ at: number; data: { id: string; name: string; songs: object[] } } | null} */
-let cache = null;
+/** @type {{ day: string; data: { id: string; name: string; songs: object[] } } | null} */
+let memoryCache = null;
+/** @type {Promise<{ id: string; name: string; songs: object[] }> | null} */
+let inflight = null;
+
+function chinaDayKey(now = Date.now()) {
+  return new Date(now + TZ_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+/** 距下一个东八区 0 点的秒数（至少 60s，避免边界抖动） */
+function secondsUntilNextChinaMidnight(now = Date.now()) {
+  const shifted = new Date(now + TZ_OFFSET_MS);
+  const nextMidnightUtcMs =
+    Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate() + 1) - TZ_OFFSET_MS;
+  return Math.max(60, Math.ceil((nextMidnightUtcMs - now) / 1000));
+}
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
   const controller = new AbortController();
@@ -77,16 +95,52 @@ function parseToplistHtml(html) {
   return parseFromHiddenList(html);
 }
 
-export async function fetchNeteaseHotToplist(limit = 200) {
+function sliceToplist(data, limit) {
   const n = Number.isFinite(limit) && limit > 0 ? Math.min(Math.floor(limit), 200) : 200;
-  const now = Date.now();
-  if (cache && now - cache.at < CACHE_TTL_MS) {
-    return {
-      ...cache.data,
-      songs: cache.data.songs.slice(0, n),
-    };
-  }
+  return {
+    ...data,
+    songs: Array.isArray(data.songs) ? data.songs.slice(0, n) : [],
+  };
+}
 
+function parseCachedPayload(raw) {
+  if (!raw) return null;
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!parsed || typeof parsed !== 'object') return null;
+    if (parsed.day !== chinaDayKey()) return null;
+    if (!parsed.data || !Array.isArray(parsed.data.songs) || parsed.data.songs.length === 0) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+async function readRedisCache() {
+  const client = getRedisClient();
+  if (!client) return null;
+  try {
+    const raw = await client.get(REDIS_CACHE_KEY);
+    return parseCachedPayload(raw);
+  } catch (err) {
+    console.error('网易云热榜 Redis 读取失败:', err.message);
+    return null;
+  }
+}
+
+async function writeRedisCache(day, data) {
+  const client = getRedisClient();
+  if (!client) return;
+  const ttlSec = secondsUntilNextChinaMidnight();
+  const payload = JSON.stringify({ day, data, cachedAt: Date.now() });
+  try {
+    await client.set(REDIS_CACHE_KEY, payload, { EX: ttlSec });
+  } catch (err) {
+    console.error('网易云热榜 Redis 写入失败:', err.message);
+  }
+}
+
+async function fetchFreshToplist() {
   const res = await fetchWithTimeout(TOPLIST_URL, { headers: NETEASE_HEADERS });
   if (!res.ok) throw new Error(`热榜请求失败 (${res.status})`);
 
@@ -94,11 +148,41 @@ export async function fetchNeteaseHotToplist(limit = 200) {
   const songs = parseToplistHtml(html);
   if (songs.length === 0) throw new Error('未能解析热榜歌曲');
 
-  const data = {
+  return {
     id: HOT_TOPLIST_ID,
     name: parseTitle(html),
     songs,
   };
-  cache = { at: now, data };
-  return { ...data, songs: songs.slice(0, n) };
+}
+
+async function loadToplistCached() {
+  const day = chinaDayKey();
+
+  if (memoryCache?.day === day && memoryCache.data?.songs?.length) {
+    return memoryCache.data;
+  }
+
+  const fromRedis = await readRedisCache();
+  if (fromRedis) {
+    memoryCache = fromRedis;
+    return fromRedis.data;
+  }
+
+  if (inflight) return inflight;
+
+  inflight = (async () => {
+    const data = await fetchFreshToplist();
+    memoryCache = { day, data };
+    await writeRedisCache(day, data);
+    return data;
+  })().finally(() => {
+    inflight = null;
+  });
+
+  return inflight;
+}
+
+export async function fetchNeteaseHotToplist(limit = 200) {
+  const data = await loadToplistCached();
+  return sliceToplist(data, limit);
 }

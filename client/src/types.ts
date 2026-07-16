@@ -258,7 +258,3 @@ export interface FavoriteSong extends Song {
   favoritedAt?: number;
 }
 
-export interface HotSongItem extends Song {
-  count: number;
-  lastRequestedAt?: number;
-}

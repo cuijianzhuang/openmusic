@@ -39,15 +39,15 @@ export default function RecommendedPlaylistsDrawer({ open, immersive = false, on
         aria-label="关闭热榜歌单"
       />
       <aside
-        className={`absolute left-0 flex flex-col shadow-2xl animate-fade-in ${
+        className={`absolute left-3 flex flex-col overflow-hidden shadow-2xl animate-fade-in ${
           immersive
-            ? `${immersiveGlassDrawer} top-0 bottom-0`
-            : 'top-14 bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] border-r border-netease-border/50 bg-[#101012]/95 backdrop-blur-xl'
+            ? `${immersiveGlassDrawer} top-3 bottom-3 rounded-[22px]`
+            : 'top-[calc(3.5rem+env(safe-area-inset-top,0px))] bottom-[calc(5.25rem+env(safe-area-inset-bottom,0px))] rounded-3xl border border-netease-border/50 bg-[#101012]/95 backdrop-blur-xl'
         }`}
-        style={{ width: PANEL_WIDTH, maxWidth: 'min(92vw, 360px)' }}
+        style={{ width: PANEL_WIDTH, maxWidth: 'min(calc(100vw - 1.5rem), 360px)' }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className={`flex flex-shrink-0 items-center justify-between gap-2 px-4 py-3 ${immersive ? immersiveGlassSheetHeader : 'border-b border-netease-border/50'}`}>
+        <div className={`flex flex-shrink-0 items-center justify-between gap-2 px-4 py-3 ${immersive ? immersiveGlassSheetHeader : 'border-b border-netease-border/40'}`}>
           <div className="flex items-center gap-2 min-w-0">
             <Sparkles className="h-4 w-4 flex-shrink-0 text-sky-400" />
             <h2 className="text-sm font-medium text-white">热榜歌单</h2>
@@ -55,7 +55,7 @@ export default function RecommendedPlaylistsDrawer({ open, immersive = false, on
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg p-1.5 text-netease-muted transition-colors hover:bg-white/10 hover:text-white"
+            className="rounded-full p-1.5 text-netease-muted transition-colors hover:bg-white/10 hover:text-white"
             aria-label="关闭"
           >
             <X className="h-5 w-5" />

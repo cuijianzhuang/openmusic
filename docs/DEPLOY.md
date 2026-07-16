@@ -23,7 +23,7 @@ docker run -d --name meting -p 3000:3000 w3126197382/meting-api:latest
 
 ### 3. Redis（推荐）
 
-配置后启用房间歌单、播放进度、点歌热榜、个人收藏持久化；未配置则仅内存，重启后丢失。
+配置后启用房间歌单、播放进度、个人收藏持久化；未配置则仅内存，重启后丢失。
 
 ---
 
@@ -133,8 +133,7 @@ location /socket.io/ {
 | `GET` | `/api/health` | 健康检查 |
 | `GET` | `/api/rooms` | 房间列表 |
 | `POST` | `/api/rooms` | 创建房间 |
-| `GET` | `/api/music/hot` | 点歌热榜 |
-| `GET` | `/api/music/toplist/netease` | 热歌榜 |
+| `GET` | `/api/music/toplist/netease` | 网易云热歌榜 |
 | `POST` | `/api/music/playlist/import` | 导入歌单 |
 | `GET` | `/api/media-proxy?url=` | HTTP 媒体同源代理 |
 

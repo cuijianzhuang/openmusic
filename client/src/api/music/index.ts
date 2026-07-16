@@ -1,4 +1,4 @@
-import type { MusicSource, RoomCheckResult, RoomSummary, SearchResult, Song, HotSongItem } from '../../types';
+import type { MusicSource, RoomCheckResult, RoomSummary, SearchResult, Song } from '../../types';
 import { getSourceShortLabel } from '../../lib/sourceLabels';
 import type { MusicProviderMeta } from './types';
 import { providers, getAllSources } from './sources';
@@ -293,34 +293,6 @@ export async function checkRoom(id: string): Promise<RoomCheckResult> {
   if (!res.ok) return { exists: false, hasPassword: false };
   const data = await res.json();
   return { exists: true, hasPassword: Boolean(data.hasPassword), name: data.name };
-}
-
-const HOT_SONGS_CACHE_TTL_MS = 30_000;
-const hotSongsCache = new Map<number, { data: HotSongItem[]; expires: number }>();
-const hotSongsInflight = new Map<number, Promise<HotSongItem[]>>();
-
-export async function getHotSongs(limit = 15): Promise<HotSongItem[]> {
-  const now = Date.now();
-  const cached = hotSongsCache.get(limit);
-  if (cached && cached.expires > now) {
-    return cached.data;
-  }
-
-  const inflight = hotSongsInflight.get(limit);
-  if (inflight) return inflight;
-
-  const promise = (async () => {
-    const res = await fetchWithTimeout(`/api/music/hot?limit=${limit}`);
-    if (!res.ok) throw new Error('获取热榜失败');
-    const data: HotSongItem[] = await res.json();
-    hotSongsCache.set(limit, { data, expires: Date.now() + HOT_SONGS_CACHE_TTL_MS });
-    return data;
-  })().finally(() => {
-    hotSongsInflight.delete(limit);
-  });
-
-  hotSongsInflight.set(limit, promise);
-  return promise;
 }
 
 export async function getAvailableSources(): Promise<MusicProviderMeta[]> {

@@ -93,7 +93,6 @@ import {
 import { importNeteasePlaylist, importQqPlaylist, fetchNeteasePlaylistMetas } from './playlistImport.js';
 import { fetchNeteaseHotToplist } from './neteaseToplist.js';
 import { importFavoriteSongs, listFavoriteSongs, setFavoriteSong } from './roomStorage.js';
-import { recordSongRequest, getHotSongs } from './songHotRank.js';
 import {
   createChatImageUploadToken,
   isQiniuConfigured,
@@ -435,17 +434,6 @@ async function proxyMetingResponse(targetUrl, res, thumbPx = 0, metingType = '')
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true });
-});
-
-app.get('/api/music/hot', async (req, res) => {
-  const limit = parseInt(String(req.query.limit || ''), 10);
-  try {
-    const songs = await getHotSongs(Number.isFinite(limit) ? limit : 20);
-    res.json(songs);
-  } catch (err) {
-    console.error('Hot songs error:', err.message);
-    res.status(500).json({ error: '获取热榜失败' });
-  }
 });
 
 app.get('/api/music/toplist/netease', async (req, res) => {
@@ -1752,7 +1740,6 @@ io.on('connection', (socket) => {
     }
 
     emitRoomAndPlayback(roomId, result.room);
-    recordSongRequest(clean.song);
     emitSystemChat(roomId, result.systemMessage);
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });

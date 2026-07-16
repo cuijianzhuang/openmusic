@@ -291,7 +291,6 @@ export default function Room() {
   const [playlistChannelFilter, setPlaylistChannelFilter] = useState<PlaylistChannelFilterMode>('all');
   const [playlistSearchBackup, setPlaylistSearchBackup] = useState<PlaylistSearchBackup | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
-  const [hotRefreshKey, setHotRefreshKey] = useState(0);
   const [immersiveExitPromptOpen, setImmersiveExitPromptOpen] = useState(false);
   const [immersiveTransition, setImmersiveTransition] = useState<ImmersiveTransitionState | null>(null);
   const [immersiveShellMotion, setImmersiveShellMotion] = useState<'entering' | 'exiting' | null>(null);
@@ -516,7 +515,6 @@ export default function Room() {
       });
       const toast = formatBulkAddToast(result);
       showToast(toast.message, toast.type);
-      if (result.added > 0) setHotRefreshKey((k) => k + 1);
     } finally {
       setAddingAllFavorites(false);
     }
@@ -997,7 +995,6 @@ export default function Room() {
     if (res.success) {
       lastSongRequestAtRef.current = Date.now();
       showToast('点歌成功', 'success');
-      setHotRefreshKey((k) => k + 1);
     } else if (res.error) {
       showToast(res.error, 'error');
     }
@@ -1028,7 +1025,6 @@ export default function Room() {
       });
       const toast = formatBulkAddToast(result);
       showToast(toast.message, toast.type);
-      if (result.added > 0) setHotRefreshKey((k) => k + 1);
     } finally {
       setAddingPage(false);
     }
@@ -2245,10 +2241,10 @@ export default function Room() {
 
         <div className={`flex flex-col gap-3 lg:gap-4 lg:h-full lg:min-h-0 ${pureMode ? '' : 'lg:grid lg:grid-cols-[360px_minmax(0,1fr)_360px]'}`}>
 
-          {/* 左侧：点歌热榜 */}
+          {/* 左侧：网易云热榜 */}
           {isLgUp && !pureMode && (
             <div className="order-0 flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-netease-border/50 bg-netease-card/30 lg:h-full">
-              <HotSongPanel embedded addingId={addingId} onAdd={handleAdd} refreshKey={hotRefreshKey} />
+              <HotSongPanel embedded addingId={addingId} onAdd={handleAdd} />
             </div>
           )}
 
@@ -2256,7 +2252,7 @@ export default function Room() {
           <div className="order-1 flex min-h-0 min-w-0 flex-col lg:h-full lg:overflow-hidden">
             {!isLgUp && !pureMode && (
               <div className="mb-3">
-                <HotSongPanel compact addingId={addingId} onAdd={handleAdd} refreshKey={hotRefreshKey} />
+                <HotSongPanel compact addingId={addingId} onAdd={handleAdd} />
               </div>
             )}
 
