@@ -28,6 +28,8 @@ interface Props {
   dislikeSkipThreshold?: number;
   /** 房主/管理员可拖拽排序 */
   canReorder?: boolean;
+  /** 队列已拖拽锁定时，点赞不再提高排序 */
+  likeRaisesOrder?: boolean;
   isDragOver?: boolean;
   rowRef?: React.MutableRefObject<HTMLDivElement | null>;
   onLike: (queueId: string) => void;
@@ -51,6 +53,7 @@ function QueueRow({
   memberJumpEnabled = false,
   dislikeSkipThreshold = 5,
   canReorder = false,
+  likeRaisesOrder = true,
   isDragOver = false,
   rowRef,
   onLike,
@@ -172,7 +175,7 @@ function QueueRow({
           {!song.isCurrent && (
             <div className="flex flex-shrink-0 items-center gap-0.5">
               {canLike && (
-                <Tooltip content={likedByMe ? '取消点赞' : '点赞提高排序'}>
+                <Tooltip content={likedByMe ? '取消点赞' : (likeRaisesOrder ? '点赞提高排序' : '点赞（拖拽排序优先，不再改序）')}>
                   <button
                     type="button"
                     onClick={() => onLike(song.queueId)}

@@ -45,6 +45,7 @@ function queueItemEqual(a: QueueItem, b: QueueItem): boolean {
     && a.requestedById === b.requestedById
     && a.ownerPriority === b.ownerPriority
     && a.priorityBy === b.priorityBy
+    && a.manualOrder === b.manualOrder
     && stringArraysEqual(a.likedByIds, b.likedByIds)
     && stringArraysEqual(a.dislikedByIds, b.dislikedByIds);
 }

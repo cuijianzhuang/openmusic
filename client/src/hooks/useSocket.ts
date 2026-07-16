@@ -695,8 +695,8 @@ if (s.connected) {
 
 
 
-  const skipSong = useCallback((): Promise<{ success: boolean; error?: string }> => {
-    return emitWithAck('skip_song', {}, { success: false, error: '连接超时，请重试' });
+  const skipSong = useCallback((options?: { reason?: 'manual' | 'source_error' | 'system' }): Promise<{ success: boolean; error?: string }> => {
+    return emitWithAck('skip_song', { reason: options?.reason || 'manual' }, { success: false, error: '连接超时，请重试' });
 
   }, []);
 
@@ -736,10 +736,10 @@ if (s.connected) {
 
   }, []);
 
-  const reorderQueue = useCallback((orderedQueueIds: string[]): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
+  const reorderQueue = useCallback((orderedQueueIds: string[], movedQueueId: string): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
     return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
       'reorder_queue',
-      { orderedQueueIds },
+      { orderedQueueIds, movedQueueId },
       { success: false, error: '连接超时，请重试' },
     ).then((res) => {
       if (res.success && res.room) {

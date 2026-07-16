@@ -1638,12 +1638,32 @@ function getQueueLikes(item) {
   return Array.isArray(item?.likedByIds) ? item.likedByIds.length : 0;
 }
 
+function queueHasManualOrder(room) {
+  return (room.queue || []).some((song) => Number.isFinite(song?.manualOrder));
+}
+
+function reindexManualOrder(room) {
+  room.queue.forEach((song, index) => {
+    song.manualOrder = index;
+  });
+}
+
 function sortQueueByPriority(room) {
+  const lockedByDrag = queueHasManualOrder(room);
   room.queue.sort((a, b) => {
+    // 拖拽排序锁定整队相对顺序，优先于点赞（点赞仍可点，只不再改序）
+    if (lockedByDrag) {
+      const aOrder = Number.isFinite(a.manualOrder) ? a.manualOrder : Number.MAX_SAFE_INTEGER;
+      const bOrder = Number.isFinite(b.manualOrder) ? b.manualOrder : Number.MAX_SAFE_INTEGER;
+      if (aOrder !== bOrder) return aOrder - bOrder;
+    }
+    // 插队 / 单曲拖动标记，优先于点赞
     const priorityDiff = (b.ownerPriority || 0) - (a.ownerPriority || 0);
     if (priorityDiff !== 0) return priorityDiff;
-    const likeDiff = getQueueLikes(b) - getQueueLikes(a);
-    if (likeDiff !== 0) return likeDiff;
+    if (!lockedByDrag) {
+      const likeDiff = getQueueLikes(b) - getQueueLikes(a);
+      if (likeDiff !== 0) return likeDiff;
+    }
     return (a.addedAt || 0) - (b.addedAt || 0);
   });
 }
@@ -1702,6 +1722,7 @@ export async function addToQueue(roomId, song, requestedByUser) {
     return { error: `队列最多保留 ${queueMaxLength} 首歌` };
   }
 
+  const hadManualOrder = queueHasManualOrder(room);
   const item = serializeQueueItemForRoom({
     queueId: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     ...song,
@@ -1713,6 +1734,9 @@ export async function addToQueue(roomId, song, requestedByUser) {
   });
 
   room.queue.push(item);
+  if (hadManualOrder) {
+    item.manualOrder = room.queue.length - 1;
+  }
 
   if (!canControlPlayback(room, requestedBy.id)) {
     const cooldownSec = normalizeSongRequestCooldownSec(room.songRequestCooldownSec);
@@ -1822,6 +1846,9 @@ export function removeFromQueue(roomId, socketId, queueId) {
   const songTitle = formatSongTitle(item);
   room.queue = room.queue.filter((s) => s.queueId !== queueId);
   room.jumpRequests = room.jumpRequests.filter((r) => r.queueId !== queueId);
+  if (queueHasManualOrder(room)) {
+    reindexManualOrder(room);
+  }
   const systemMessage = appendSystemChatMessage(
     room,
     `${formatActorName(user)} 移除了 ${songTitle}`,
@@ -2102,17 +2129,27 @@ export function markRandomLoading(roomId) {
   return serializeRoom(room);
 }
 
-export async function skipSong(roomId, socketId, connectionId = null) {
+export async function skipSong(roomId, socketId, connectionId = null, options = {}) {
   const room = rooms.get(roomId);
   if (!room) return { error: '房间不存在' };
   if (!isControllerConnection(room, socketId)) return { error: '仅房主或管理员可切歌' };
 
   const user = room.users.get(socketId);
   const songTitle = room.current ? formatSongTitle(room.current) : '';
+  const reason = String(options.reason || 'manual');
   await playNext(room, { allowFetchRandom: false });
-  const systemMessage = songTitle
-    ? appendSystemChatMessage(room, `${formatActorName(user)} 切了 ${songTitle}`)
-    : null;
+
+  let systemMessage = null;
+  if (songTitle) {
+    if (reason === 'source_error') {
+      systemMessage = appendSystemChatMessage(room, `因歌曲源异常，已跳过 ${songTitle}`);
+    } else if (reason === 'system') {
+      systemMessage = appendSystemChatMessage(room, `系统已跳过 ${songTitle}`);
+    } else {
+      systemMessage = appendSystemChatMessage(room, `${formatActorName(user)} 切了 ${songTitle}`);
+    }
+  }
+
   persistRoom(room);
   return { room: serializeRoom(room), systemMessage };
 }
@@ -2217,6 +2254,9 @@ async function applyJumpToFront(room, queueId, options = {}) {
     }
   }
   room.queue.unshift(song);
+  if (queueHasManualOrder(room) || Number.isFinite(song.manualOrder)) {
+    reindexManualOrder(room);
+  }
   if (!room.current) {
     await withPlaybackLock(room, async () => {
       if (!room.current) await playNextUnlocked(room, { allowFetchRandom: true });
@@ -2257,9 +2297,11 @@ export async function requestJump(roomId, socketId, queueId) {
 }
 
 /**
- * 房主/管理员拖拽重排待播队列；排序后写入 ownerPriority，边框样式与插队一致。
+ * 房主/管理员拖拽重排待播队列。
+ * 仅被拖动的歌曲写入 ownerPriority（边框与插队一致），不改动点歌人。
+ * 全队写入 manualOrder 以锁定顺序。
  */
-export function reorderQueue(roomId, actorId, orderedQueueIds) {
+export function reorderQueue(roomId, actorId, orderedQueueIds, movedQueueId = null) {
   const room = rooms.get(roomId);
   if (!room) return { error: '房间不存在' };
   if (!isControllerConnection(room, actorId)) return { error: '仅房主或管理员可排序播放列表' };
@@ -2282,18 +2324,24 @@ export function reorderQueue(roomId, actorId, orderedQueueIds) {
 
   const actor = room.users.get(actorId);
   const isAdminReorder = actor && !isRoomCreator(room, actorId);
-  const basePriority = Date.now();
+  const movedId = movedQueueId && byId.has(movedQueueId) ? movedQueueId : null;
 
   room.queue = orderedQueueIds.map((queueId, index) => {
     const song = byId.get(queueId);
-    song.ownerPriority = basePriority - index;
-    if (isAdminReorder) {
-      song.priorityBy = actor.nickname;
-    } else {
-      delete song.priorityBy;
-    }
+    song.manualOrder = index;
     return song;
   });
+
+  // 只给真正被拖动的那首加优先级边框，且绝不改写 requestedBy
+  if (movedId) {
+    const moved = byId.get(movedId);
+    moved.ownerPriority = Date.now();
+    if (isAdminReorder) {
+      moved.priorityBy = actor.nickname;
+    } else {
+      delete moved.priorityBy;
+    }
+  }
 
   persistRoom(room);
   return { room: serializeRoom(room) };
@@ -2699,6 +2747,7 @@ function serializeQueueItemForRoom(item) {
     dislikedByIds: Array.isArray(item.dislikedByIds) ? item.dislikedByIds : [],
     ownerPriority: item.ownerPriority || 0,
     priorityBy: item.priorityBy || '',
+    ...(Number.isFinite(item.manualOrder) ? { manualOrder: item.manualOrder } : {}),
   };
 }
 

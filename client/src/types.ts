@@ -45,6 +45,8 @@ export interface QueueItem extends Song {
   ownerPriority?: number;
   /** 管理员插队置顶的操作者昵称 */
   priorityBy?: string;
+  /** 拖拽排序后的锁定序号（服务端排序用，客户端可不展示） */
+  manualOrder?: number;
 }
 
 export interface SongHistoryItem extends Song {

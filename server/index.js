@@ -1798,7 +1798,7 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
-  socket.on('skip_song', async (_payload, callback) => {
+  socket.on('skip_song', async ({ reason } = {}, callback) => {
     if (rejectReadOnly(socket, callback)) return;
     if (rejectRateLimited(socket, limitSocketAction, 'skip_song', callback)) return;
 
@@ -1808,7 +1808,7 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const result = await skipSong(roomId, getSocketUserId(socket), socket.id);
+    const result = await skipSong(roomId, getSocketUserId(socket), socket.id, { reason });
     if (result.error) {
       callback?.({ success: false, error: result.error });
       return;
@@ -1867,7 +1867,7 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
-  socket.on('reorder_queue', ({ orderedQueueIds }, callback) => {
+  socket.on('reorder_queue', ({ orderedQueueIds, movedQueueId }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
     if (rejectRateLimited(socket, limitSocketAction, 'reorder_queue', callback)) return;
 
@@ -1877,7 +1877,7 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const result = reorderQueue(roomId, getSocketUserId(socket), orderedQueueIds);
+    const result = reorderQueue(roomId, getSocketUserId(socket), orderedQueueIds, movedQueueId);
     if (result.error) {
       callback?.({ success: false, error: result.error });
       return;

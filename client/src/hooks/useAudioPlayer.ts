@@ -92,7 +92,10 @@ interface AudioRuntime {
   lowestFallbackAttempted: MutableRefObject<boolean>;
   successRecordedTrackKey: MutableRefObject<string | null>;
   stallRetryTimer: MutableRefObject<number | null>;
-  requestSkip: () => void;
+  requestSkip: (options?: {
+    bypassThrottle?: boolean;
+    reason?: 'manual' | 'source_error' | 'system';
+  }) => void;
   finishSong: (queueId: string) => void;
   playAudio: (audio: HTMLAudioElement) => Promise<PlayResult>;
   applyPlaybackResult: (
@@ -321,7 +324,10 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     });
   }, [controller, tvMode, shouldSkipForEndedTrackKey, handleSyncResult]);
 
-  const requestSkip = useCallback((options: { bypassThrottle?: boolean } = {}) => {
+  const requestSkip = useCallback((options: {
+    bypassThrottle?: boolean;
+    reason?: 'manual' | 'source_error' | 'system';
+  } = {}) => {
     if (skippingRef.current) return;
     const { isPlaybackLeader, room: live } = useRoomStore.getState();
     if (!isPlaybackLeader) return;
@@ -344,7 +350,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     if (live) {
       useRoomStore.getState().setRoom({ ...live, currentTime: 0 });
     }
-    skipSong().finally(() => {
+    skipSong({ reason: options.reason || 'manual' }).finally(() => {
       skippingRef.current = false;
     });
   }, [controller, skipSong]);
@@ -418,12 +424,12 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
               });
               return;
             }
-            if (isLeader) runtime.requestSkip();
+            if (isLeader) runtime.requestSkip({ reason: 'source_error' });
             return;
           }
 
           if (runtime.lowestFallbackAttempted.current) {
-            if (isLeader) runtime.requestSkip();
+            if (isLeader) runtime.requestSkip({ reason: 'source_error' });
             return;
           }
 
@@ -442,7 +448,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
               });
               return;
             }
-            if (isLeader) runtime.requestSkip();
+            if (isLeader) runtime.requestSkip({ reason: 'source_error' });
           });
         });
       });
@@ -623,7 +629,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     if (isTrackSourceError(current)) {
       setTrackLoading(false);
       if (useRoomStore.getState().isPlaybackLeader) {
-        requestSkip({ bypassThrottle: true });
+        requestSkip({ bypassThrottle: true, reason: 'source_error' });
       }
       return;
     }
@@ -734,7 +740,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
         if (gen !== loadGeneration.current) return;
         clearAudioQueueBinding(controller.audio);
         if (useRoomStore.getState().isPlaybackLeader) {
-          requestSkip();
+          requestSkip({ reason: 'source_error' });
         }
       } finally {
         releaseLoadLock(loadLockRef, queueId, gen);
@@ -1013,7 +1019,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
   }, []);
 
   const handleSkip = useCallback(() => {
-    requestSkip();
+    requestSkip({ reason: 'manual' });
   }, [requestSkip]);
 
   return { handlePlayPause, handleSeek, handleSkip, audioRef };

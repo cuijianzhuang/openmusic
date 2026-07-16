@@ -22,6 +22,7 @@ type RowData = {
   memberJumpEnabled: boolean;
   dislikeSkipThreshold: number;
   canReorder: boolean;
+  likeRaisesOrder: boolean;
   dragOverQueueId: string | null;
   currentRef: React.RefObject<HTMLDivElement | null>;
   onLike: (queueId: string) => void;
@@ -51,6 +52,7 @@ function VirtualQueueRow({ index, style, data }: ListChildComponentProps<RowData
         memberJumpEnabled={data.memberJumpEnabled}
         dislikeSkipThreshold={data.dislikeSkipThreshold}
         canReorder={data.canReorder}
+        likeRaisesOrder={data.likeRaisesOrder}
         isDragOver={Boolean(
           data.dragOverQueueId
           && data.dragOverQueueId === song.queueId
@@ -85,6 +87,7 @@ export default function QueuePanel({ fillHeight = false }: Props) {
   const canControlPlayback = useRoomStore((s) => s.canControlPlayback);
   const memberJumpEnabled = useRoomStore((s) => Boolean(s.room?.memberJumpEnabled));
   const dislikeSkipThreshold = useRoomStore((s) => resolveDislikeSkipThreshold(s.room));
+  const likeRaisesOrder = useRoomStore((s) => !(s.room?.queue || []).some((song) => Number.isFinite(song.manualOrder)));
   const { removeSong, requestJump, reorderQueue, toggleQueueLike, toggleCurrentDislike, banRoomSong } = useSocket();
   const [jumpMsg, setJumpMsg] = useState('');
   const [dragFromId, setDragFromId] = useState<string | null>(null);
@@ -219,7 +222,7 @@ export default function QueuePanel({ fillHeight = false }: Props) {
     const [moved] = next.splice(fromIndex, 1);
     next.splice(toIndex, 0, moved);
 
-    const res = await reorderQueue(next);
+    const res = await reorderQueue(next, fromId);
     if (res.success) {
       showQueueMessage('已调整播放顺序');
     } else {
@@ -236,6 +239,7 @@ export default function QueuePanel({ fillHeight = false }: Props) {
     memberJumpEnabled,
     dislikeSkipThreshold,
     canReorder: canControlPlayback,
+    likeRaisesOrder,
     dragOverQueueId,
     currentRef,
     onLike: handleLike,
@@ -255,6 +259,7 @@ export default function QueuePanel({ fillHeight = false }: Props) {
     canControlPlayback,
     memberJumpEnabled,
     dislikeSkipThreshold,
+    likeRaisesOrder,
     dragOverQueueId,
     handleLike,
     handleDislike,
@@ -295,6 +300,7 @@ export default function QueuePanel({ fillHeight = false }: Props) {
       memberJumpEnabled={memberJumpEnabled}
       dislikeSkipThreshold={dislikeSkipThreshold}
       canReorder={canControlPlayback}
+      likeRaisesOrder={likeRaisesOrder}
       isDragOver={Boolean(dragOverQueueId && dragOverQueueId === song.queueId && dragFromId !== song.queueId)}
       rowRef={song.isCurrent ? currentRef : undefined}
       onLike={handleLike}
