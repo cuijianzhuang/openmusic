@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Music, Users, Radio, ArrowRight, Lock, ListMusic,
-  Loader2, RefreshCw, Plus, Hash, X, Disc3, Sparkles, Github, History, Download,
+  Loader2, RefreshCw, Plus, Hash, X, Disc3, Sparkles, Github, History, Download, Smartphone,
 } from 'lucide-react';
 import { createRoom, checkRoom, listRooms } from '../api/meting';
 import { useRoomStore } from '../stores/roomStore';
@@ -16,6 +16,7 @@ import { isMobileDevice } from '../lib/audioUnlock';
 import { ANDROID_APK_URL } from '../lib/androidDownload';
 import { IOS_IPA_URL } from '../lib/iosDownload';
 import Tooltip from '../components/Tooltip';
+import ClientDownloadModal from '../components/ClientDownloadModal';
 
 function GiteeIcon({ className }: { className?: string }) {
   return (
@@ -199,6 +200,7 @@ export default function Home() {
   const [joinPassword, setJoinPassword] = useState('');
   const [passwordTarget, setPasswordTarget] = useState<RoomSummary | null>(null);
   const [cardPassword, setCardPassword] = useState('');
+  const [downloadModalOpen, setDownloadModalOpen] = useState(false);
 
   const fetchRooms = useCallback(async (silent = false) => {
     if (!silent) setRoomsLoading(true);
@@ -334,7 +336,18 @@ export default function Home() {
       <header className="relative z-20 flex-shrink-0 border-b border-white/5 glass safe-top">
         <div className="relative h-14 sm:h-16">
           <div className="absolute right-4 sm:right-6 top-1/2 -translate-y-1/2 z-30 flex items-center gap-2">
-            {!isMobileDevice() && (
+            {isMobileDevice() ? (
+              <Tooltip content="下载客户端">
+                <button
+                  type="button"
+                  onClick={() => setDownloadModalOpen(true)}
+                  className="p-2.5 rounded-xl text-white/70 border border-white/10 hover:text-white hover:bg-white/5 transition-colors"
+                  aria-label="下载客户端"
+                >
+                  <Smartphone className="w-4 h-4" />
+                </button>
+              </Tooltip>
+            ) : (
               <>
                 <Tooltip content="下载 Android 客户端">
                   <a
@@ -642,6 +655,8 @@ export default function Home() {
           </button>
         </Modal>
       )}
+
+      <ClientDownloadModal open={downloadModalOpen} onClose={() => setDownloadModalOpen(false)} />
     </div>
   );
 }

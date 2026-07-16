@@ -1,10 +1,9 @@
 import { memo, useState, useEffect } from 'react';
-import { Flame, Plus, Loader2, TrendingUp } from 'lucide-react';
+import { Flame, Plus, Loader2 } from 'lucide-react';
 import type { SearchResult } from '../types';
 import { songKey } from '../api/music';
 import { getNeteaseHotToplist } from '../api/music/toplist';
 import SongCover from './SongCover';
-import Tooltip from './Tooltip';
 import TruncateTip from './TruncateTip';
 
 interface Props {
@@ -12,21 +11,110 @@ interface Props {
   onAdd: (song: SearchResult) => void;
   compact?: boolean;
   embedded?: boolean;
-  /** 紧凑横滑最多展示条数；完整列表固定 200 */
   compactLimit?: number;
 }
 
 const TOPLIST_LIMIT = 200;
 const COMPACT_LIMIT = 30;
 
-const HOT_NAME_LINE_CLS = 'w-full min-w-0 truncate leading-tight';
-const HOT_ARTIST_LINE_CLS = 'w-full min-w-0 truncate leading-tight';
+function rankClass(rank: number) {
+  if (rank === 1) return 'text-netease-red font-bold';
+  if (rank === 2) return 'text-orange-400/90 font-semibold';
+  if (rank === 3) return 'text-amber-400/80 font-semibold';
+  return 'text-netease-muted/70 font-medium tabular-nums';
+}
 
-function rankStyle(rank: number) {
-  if (rank === 1) return 'bg-netease-red text-white';
-  if (rank === 2) return 'bg-orange-500/90 text-white';
-  if (rank === 3) return 'bg-amber-500/80 text-white';
-  return 'bg-white/10 text-white/50';
+function ToplistRow({
+  song,
+  rank,
+  isAdding,
+  onAdd,
+}: {
+  song: SearchResult;
+  rank: number;
+  isAdding: boolean;
+  onAdd: () => void;
+}) {
+  return (
+    <div
+      className="group flex items-center gap-2 rounded-lg px-1.5 py-1.5 transition-colors hover:bg-white/[0.04]"
+      title="双击点歌"
+      onDoubleClick={() => onAdd()}
+    >
+      <span className={`w-4 flex-shrink-0 text-center text-[10px] leading-none ${rankClass(rank)}`}>
+        {rank}
+      </span>
+      <SongCover
+        song={song}
+        size="tiny"
+        className="h-9 w-9 flex-shrink-0 rounded-md object-cover bg-netease-card"
+      />
+      <div className="min-w-0 flex-1 self-stretch flex flex-col justify-center gap-0.5">
+        <TruncateTip
+          text={song.name}
+          as="p"
+          className="min-w-0 truncate text-sm leading-5 text-white/92"
+        />
+        <TruncateTip
+          text={song.artist}
+          as="p"
+          className="min-w-0 truncate text-[11px] leading-4 text-netease-muted"
+        />
+      </div>
+      <button
+        type="button"
+        onClick={onAdd}
+        disabled={isAdding}
+        className={`flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md transition-all hover:bg-netease-red/15 hover:text-netease-red disabled:opacity-50 ${
+          isAdding
+            ? 'text-netease-red opacity-100'
+            : 'text-netease-muted opacity-0 group-hover:opacity-100'
+        }`}
+        aria-label="点歌"
+      >
+        {isAdding ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <Plus className="h-3.5 w-3.5" />
+        )}
+      </button>
+    </div>
+  );
+}
+
+function CompactToplistCard({
+  song,
+  rank,
+  isAdding,
+  onAdd,
+}: {
+  song: SearchResult;
+  rank: number;
+  isAdding: boolean;
+  onAdd: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onAdd}
+      disabled={isAdding}
+      className="group flex w-[4.25rem] flex-shrink-0 flex-col text-left disabled:opacity-50"
+    >
+      <div className="relative aspect-square overflow-hidden rounded-lg bg-netease-card">
+        <SongCover song={song} size="tiny" className="h-full w-full object-cover" />
+        <span className={`absolute left-0.5 top-0.5 rounded px-1 text-[9px] font-bold leading-4 ${rankClass(rank)} bg-black/50`}>
+          {rank}
+        </span>
+        {isAdding && (
+          <span className="absolute inset-0 flex items-center justify-center bg-black/45">
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-white" />
+          </span>
+        )}
+      </div>
+      <p className="mt-1 truncate text-[11px] leading-4 text-white/88">{song.name}</p>
+      <p className="mt-0.5 truncate text-[10px] leading-3 text-netease-muted">{song.artist}</p>
+    </button>
+  );
 }
 
 export default memo(function HotSongPanel({
@@ -63,7 +151,6 @@ export default memo(function HotSongPanel({
     };
 
     void load();
-    // 热榜服务端按自然日缓存；前端每小时静默刷新即可
     const timer = window.setInterval(() => {
       if (document.hidden) return;
       void load(true);
@@ -77,44 +164,38 @@ export default memo(function HotSongPanel({
 
   const displaySongs = compact ? songs.slice(0, compactLimit) : songs;
 
+  const header = (
+    <div className="flex flex-shrink-0 items-center gap-1.5 px-3 py-2">
+      <Flame className="h-3.5 w-3.5 flex-shrink-0 text-orange-400/90" />
+      <h2 className="truncate text-sm font-medium text-white">{title}</h2>
+    </div>
+  );
+
   if (compact) {
     return (
-      <div className="bg-netease-card/30 border border-netease-border/50 rounded-2xl overflow-hidden flex-shrink-0">
-        <div className="flex items-center justify-between px-3 py-2 border-b border-netease-border/50">
-          <div className="flex items-center gap-1.5 min-w-0">
-            <Flame className="w-4 h-4 flex-shrink-0 text-orange-400" />
-            <h2 className="text-sm font-medium truncate">{title}</h2>
-          </div>
-          {!loading && songs.length > 0 && (
-            <span className="text-[10px] text-netease-muted flex-shrink-0">Top {displaySongs.length}</span>
-          )}
-        </div>
-        <div className="p-2 overflow-x-auto">
+      <div className="flex-shrink-0 overflow-hidden rounded-2xl border border-netease-border/50 bg-netease-card/30">
+        {header}
+        <div className="border-t border-netease-border/40 px-2 pb-2 pt-1.5">
           {loading && songs.length === 0 ? (
-            <p className="text-xs text-netease-muted text-center py-3">加载中...</p>
+            <p className="py-3 text-center text-xs text-netease-muted">加载中...</p>
           ) : error && songs.length === 0 ? (
-            <p className="text-xs text-netease-muted text-center py-3">{error}</p>
+            <p className="py-3 text-center text-xs text-netease-muted">{error}</p>
           ) : songs.length === 0 ? (
-            <p className="text-xs text-netease-muted text-center py-3">暂无热榜歌曲</p>
+            <p className="py-3 text-center text-xs text-netease-muted">暂无热榜歌曲</p>
           ) : (
-            <div className="flex gap-2 min-w-min pb-1">
-              {displaySongs.map((song, i) => (
-                <button
-                  key={songKey(song)}
-                  type="button"
-                  onClick={() => onAdd(song)}
-                  disabled={addingId === songKey(song)}
-                  className="flex-shrink-0 w-28 rounded-xl bg-netease-card/60 border border-netease-border/40 p-2 text-left hover:border-netease-red/40 transition-colors disabled:opacity-50"
-                >
-                  <div className="flex items-center gap-1 mb-1">
-                    <span className={`text-[10px] font-bold w-4 h-4 rounded flex items-center justify-center ${rankStyle(i + 1)}`}>
-                      {i + 1}
-                    </span>
-                  </div>
-                  <TruncateTip text={song.name} className={`text-xs font-medium ${HOT_NAME_LINE_CLS}`} />
-                  <TruncateTip text={song.artist} className={`mt-0.5 text-[10px] text-netease-muted ${HOT_ARTIST_LINE_CLS}`} />
-                </button>
-              ))}
+            <div className="flex min-w-min gap-2.5 overflow-x-auto pb-0.5">
+              {displaySongs.map((song, i) => {
+                const key = songKey(song);
+                return (
+                  <CompactToplistCard
+                    key={key}
+                    song={song}
+                    rank={i + 1}
+                    isAdding={addingId === key}
+                    onAdd={() => onAdd(song)}
+                  />
+                );
+              })}
             </div>
           )}
         </div>
@@ -123,77 +204,43 @@ export default memo(function HotSongPanel({
   }
 
   return (
-    <div className={`flex flex-col min-h-0 ${embedded ? 'h-full flex-1' : 'bg-netease-card/30 border border-netease-border/50 rounded-2xl overflow-hidden h-full'}`}>
-      <div className={`flex items-center justify-between gap-2 px-4 flex-shrink-0 ${embedded ? 'py-2' : 'py-2.5'} ${embedded ? '' : 'border-b border-netease-border/50'}`}>
-        <div className="flex items-center gap-1.5 min-w-0">
-          <Flame className="w-4 h-4 flex-shrink-0 text-orange-400" />
-          <h2 className="text-sm font-medium truncate">{title}</h2>
-        </div>
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          {!loading && songs.length > 0 && (
-            <span className="text-[10px] text-netease-muted">{songs.length} 首</span>
-          )}
-          <TrendingUp className="w-3.5 h-3.5 text-netease-muted" />
-        </div>
-      </div>
+    <div
+      className={`flex min-h-0 flex-col ${
+        embedded
+          ? 'h-full flex-1'
+          : 'h-full overflow-hidden rounded-2xl border border-netease-border/50 bg-netease-card/30'
+      }`}
+    >
+      <div className="border-b border-netease-border/40">{header}</div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto p-2">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-1.5 py-1">
         {loading && songs.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-10 text-netease-muted">
-            <Loader2 className="w-5 h-5 animate-spin mb-2" />
+          <div className="flex flex-col items-center justify-center py-12 text-netease-muted">
+            <Loader2 className="mb-2 h-5 w-5 animate-spin" />
             <p className="text-xs">加载热榜...</p>
           </div>
         ) : error && songs.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-10 text-netease-muted px-3">
-            <Flame className="w-6 h-6 mb-2 opacity-30" />
-            <p className="text-xs text-center">{error}</p>
+          <div className="flex flex-col items-center justify-center px-3 py-12 text-netease-muted">
+            <Flame className="mb-2 h-6 w-6 opacity-30" />
+            <p className="text-center text-xs">{error}</p>
           </div>
         ) : songs.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-10 text-netease-muted px-3">
-            <Flame className="w-6 h-6 mb-2 opacity-30" />
-            <p className="text-xs text-center">暂无热榜歌曲</p>
+          <div className="flex flex-col items-center justify-center px-3 py-12 text-netease-muted">
+            <Flame className="mb-2 h-6 w-6 opacity-30" />
+            <p className="text-center text-xs">暂无热榜歌曲</p>
           </div>
         ) : (
-          <div className="space-y-0.5">
+          <div className="space-y-1">
             {displaySongs.map((song, i) => {
-              const rank = i + 1;
               const key = songKey(song);
-              const isAdding = addingId === key;
-
               return (
-                <div
+                <ToplistRow
                   key={key}
-                  className={`flex items-center gap-2 rounded-xl transition-colors hover:bg-netease-card/80 group ${embedded ? 'px-1.5 py-1' : 'px-2 py-1.5'}`}
-                >
-                  <span
-                    className={`flex-shrink-0 w-5 h-5 rounded text-[11px] font-bold flex items-center justify-center ${rankStyle(rank)}`}
-                  >
-                    {rank}
-                  </span>
-                  <SongCover
-                    song={song}
-                    className="w-9 h-9 rounded-md object-cover bg-netease-card flex-shrink-0"
-                  />
-                  <div className="flex-1 min-w-0">
-                    <TruncateTip text={song.name} className={`text-xs font-medium ${HOT_NAME_LINE_CLS}`} />
-                    <TruncateTip text={song.artist} className={`mt-0.5 text-[10px] text-netease-muted ${HOT_ARTIST_LINE_CLS}`} />
-                  </div>
-                  <Tooltip content="点歌">
-                    <button
-                      type="button"
-                      onClick={() => onAdd(song)}
-                      disabled={isAdding}
-                      className="flex-shrink-0 p-1.5 rounded-lg bg-netease-red/10 text-netease-red opacity-0 group-hover:opacity-100 hover:bg-netease-red hover:text-white transition-all disabled:opacity-50"
-                      aria-label="点歌"
-                    >
-                      {isAdding ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      ) : (
-                        <Plus className="w-3.5 h-3.5" />
-                      )}
-                    </button>
-                  </Tooltip>
-                </div>
+                  song={song}
+                  rank={i + 1}
+                  isAdding={addingId === key}
+                  onAdd={() => onAdd(song)}
+                />
               );
             })}
           </div>

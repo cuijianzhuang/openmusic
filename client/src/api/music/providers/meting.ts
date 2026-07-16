@@ -4,6 +4,47 @@ import { fetchWithTimeout } from '../../http';
 
 const API_BASE = '/api/meting';
 
+function parseMetingMediaQuery(url: string): { server: MusicSource; id: string; type: 'url' | 'lrc' | 'pic' } | null {
+  try {
+    const parsed = new URL(url, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
+    const type = parsed.searchParams.get('type');
+    if (type !== 'url' && type !== 'lrc' && type !== 'pic') return null;
+    const server = parsed.searchParams.get('server');
+    const id = parsed.searchParams.get('id');
+    if (!server || !id) return null;
+    if (server !== 'netease' && server !== 'tencent') return null;
+    return { server, id, type };
+  } catch {
+    return null;
+  }
+}
+
+/** Meting 搜索结果里常带 127.0.0.1/api?type=url，需经 /api/meting 二次解析 */
+function isMetingResolverUrl(url?: string): boolean {
+  if (!url?.startsWith('http')) return false;
+  const query = parseMetingMediaQuery(url);
+  if (!query) return false;
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    return host === 'localhost'
+      || host === '127.0.0.1'
+      || host.endsWith('.local')
+      || parsed.pathname.includes('/api');
+  } catch {
+    return false;
+  }
+}
+
+function isDirectPlayableUrl(url?: string): boolean {
+  return Boolean(url?.startsWith('http') && !isMetingResolverUrl(url));
+}
+
+function normalizeMetingTextUrl(raw: string): string {
+  const text = raw.trim();
+  return text.startsWith('@') ? text.slice(1).trim() : text;
+}
+
 async function metingFetch<T>(server: MusicSource, params: Record<string, string>): Promise<T> {
   const query = new URLSearchParams({ server, ...params });
   const res = await fetchWithTimeout(`${API_BASE}?${query}`);
@@ -38,6 +79,7 @@ function normalizeSong(raw: Record<string, unknown>, source: MusicSource): Searc
     : String(artist || '未知歌手');
 
   const urlStr = raw.url ? String(raw.url) : '';
+  const lrcStr = raw.lrc ? String(raw.lrc) : '';
   const id = String(raw.id || extractIdFromUrl(urlStr) || '');
 
   return {
@@ -48,8 +90,8 @@ function normalizeSong(raw: Record<string, unknown>, source: MusicSource): Searc
     album: String(raw.album || raw.album_name || ''),
     pic: String(raw.pic || raw.cover || raw.album_pic || ''),
     duration: Number(raw.duration || raw.dt || 0) || undefined,
-    url: urlStr || undefined,
-    lrc: raw.lrc ? String(raw.lrc) : undefined,
+    url: isDirectPlayableUrl(urlStr) ? urlStr : undefined,
+    lrc: lrcStr.startsWith('[') ? lrcStr : undefined,
   };
 }
 
@@ -81,20 +123,17 @@ function createMetingProvider(
       return song.id ? song : null;
     },
     async getSongUrl(song, quality) {
-      if (song.url?.startsWith('http')) return song.url;
+      if (isDirectPlayableUrl(song.url)) return song.url!;
       const query = new URLSearchParams({ server: song.source, type: 'url', id: song.id });
       if (quality) query.set('quality', quality);
       const res = await fetchWithTimeout(`${API_BASE}?${query}`, { redirect: 'manual' });
       if (res.status >= 300 && res.status < 400) {
-        const location = res.headers.get('Location') || res.headers.get('location') || '';
-        const trimmed = location.trim();
-        if (trimmed.startsWith('@')) return trimmed.slice(1);
-        if (trimmed.startsWith('http')) return trimmed;
+        const location = normalizeMetingTextUrl(res.headers.get('Location') || res.headers.get('location') || '');
+        if (isDirectPlayableUrl(location)) return location;
       }
       if (!res.ok) throw new Error('API 请求失败');
-      const text = (await res.text()).trim();
-      if (text.startsWith('@')) return text.slice(1);
-      if (text.startsWith('http')) return text;
+      const text = normalizeMetingTextUrl(await res.text());
+      if (isDirectPlayableUrl(text)) return text;
       throw new Error('empty url');
     },
     async getLyrics(song) {

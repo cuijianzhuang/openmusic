@@ -74,18 +74,34 @@ export function shouldProxyPlaybackUrl(url: string, visualModeProxy = false): bo
 }
 
 /**
- * Meting `type=pic` 外链 → 同源 `/api/meting`（走重定向与缩略图，勿经 media-proxy）
+ * Meting `type=pic|url` 外链 → 同源 `/api/meting`（勿经 media-proxy 直接包 127.0.0.1）
  */
-export function toLocalMetingPicUrl(url: string): string | null {
+export function toLocalMetingMediaUrl(url: string): string | null {
   if (!url || url.startsWith('/api/meting')) return url.startsWith('/api/meting') ? url : null;
   try {
     const base = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
     const parsed = new URL(url, base);
-    if (parsed.searchParams.get('type') !== 'pic') return null;
+    const type = parsed.searchParams.get('type');
+    if (type !== 'pic' && type !== 'url') return null;
     const server = parsed.searchParams.get('server');
     const id = parsed.searchParams.get('id');
     if (!server || !id) return null;
-    return `/api/meting?server=${encodeURIComponent(server)}&type=pic&id=${encodeURIComponent(id)}`;
+    const query = new URLSearchParams({ server, type, id });
+    const quality = parsed.searchParams.get('quality');
+    if (quality) query.set('quality', quality);
+    return `/api/meting?${query.toString()}`;
+  } catch {
+    return null;
+  }
+}
+
+/** Meting `type=pic` 外链 → 同源 `/api/meting` */
+export function toLocalMetingPicUrl(url: string): string | null {
+  const local = toLocalMetingMediaUrl(url);
+  if (!local) return null;
+  try {
+    const parsed = new URL(url, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
+    return parsed.searchParams.get('type') === 'pic' ? local : null;
   } catch {
     return null;
   }

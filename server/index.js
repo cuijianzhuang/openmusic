@@ -356,48 +356,110 @@ function buildMetingUrl(query) {
   return `${METING_API_URL}/api?${params.toString()}`;
 }
 
-function parseMetingPicQuery(url) {
+function getMetingApiHostname() {
+  try {
+    return METING_API_URL ? new URL(METING_API_URL).hostname.toLowerCase() : '';
+  } catch {
+    return '';
+  }
+}
+
+function isMetingApiHostname(hostname) {
+  const metingHost = getMetingApiHostname();
+  return Boolean(metingHost && String(hostname || '').toLowerCase() === metingHost);
+}
+
+function parseMetingMediaQuery(url) {
   try {
     const parsed = new URL(url);
-    if (parsed.searchParams.get('type') !== 'pic') return null;
+    const type = parsed.searchParams.get('type');
+    if (type !== 'pic' && type !== 'url') return null;
     const server = parsed.searchParams.get('server');
     const id = parsed.searchParams.get('id');
     if (!server || !id) return null;
-    return { server, id };
+    const quality = parsed.searchParams.get('quality') || undefined;
+    return { server, id, type, quality };
   } catch {
     return null;
   }
 }
 
-/** media-proxy 误收到 Meting pic API 时，先解析为真实图片 CDN 地址 */
-async function resolveMediaProxyFetchUrl(fetchUrl, thumbPx = 0) {
-  const pic = parseMetingPicQuery(fetchUrl);
-  if (!pic) return fetchUrl;
+function parseMetingPicQuery(url) {
+  const query = parseMetingMediaQuery(url);
+  return query?.type === 'pic' ? query : null;
+}
 
+function normalizeMetingResolvedUrl(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return '';
+  return text.startsWith('@') ? text.slice(1).trim() : text;
+}
+
+function isUnresolvedMetingMediaUrl(url) {
+  const query = parseMetingMediaQuery(url);
+  if (!query) return false;
   try {
-    const response = await fetchMeting(
-      buildMetingUrl({ server: pic.server, type: 'pic', id: pic.id }),
-      { redirect: 'manual' },
-      15000,
-    );
+    const parsed = new URL(url);
+    return isMetingApiHostname(parsed.hostname) || isPrivateHostname(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
 
-    if (response.status >= 300 && response.status < 400) {
-      let location = response.headers.get('location');
-      if (location && thumbPx > 0) location = resizeCoverForThumb(location, thumbPx);
-      return location || fetchUrl;
-    }
+async function resolveMetingMediaUrl(query, depth = 0) {
+  if (depth > 5) throw new Error('Meting 媒体地址解析过深');
 
-    const text = (await response.text()).trim();
-    if (text.startsWith('http')) {
-      let direct = text.startsWith('@') ? text.slice(1) : text;
-      if (thumbPx > 0) direct = resizeCoverForThumb(direct, thumbPx);
-      return direct;
+  const params = { server: query.server, type: query.type, id: query.id };
+  if (query.quality) params.quality = query.quality;
+
+  const response = await fetchMeting(buildMetingUrl(params), { redirect: 'manual' }, 15000);
+
+  if (response.status >= 300 && response.status < 400) {
+    const location = normalizeMetingResolvedUrl(response.headers.get('location'));
+    if (!location) throw new Error('Meting 返回空重定向');
+    const nested = parseMetingMediaQuery(location);
+    if (nested && isUnresolvedMetingMediaUrl(location)) {
+      return resolveMetingMediaUrl(nested, depth + 1);
     }
-  } catch (err) {
-    console.error('Meting pic resolve error:', err.message);
+    return location;
   }
 
-  return fetchUrl;
+  const text = normalizeMetingResolvedUrl(await response.text());
+  if (!text.startsWith('http')) throw new Error('Meting 未返回有效媒体地址');
+
+  const nested = parseMetingMediaQuery(text);
+  if (nested && isUnresolvedMetingMediaUrl(text)) {
+    return resolveMetingMediaUrl(nested, depth + 1);
+  }
+
+  return text;
+}
+
+/** media-proxy 误收到 Meting API 地址时，先解析为真实 CDN 地址 */
+async function resolveMediaProxyFetchUrl(fetchUrl, thumbPx = 0) {
+  const query = parseMetingMediaQuery(fetchUrl);
+  if (!query) return fetchUrl;
+
+  try {
+    const resolved = await resolveMetingMediaUrl(query);
+    if (query.type === 'pic' && thumbPx > 0) {
+      return resizeCoverForThumb(resolved, thumbPx);
+    }
+    return resolved;
+  } catch (err) {
+    console.error(`Meting ${query.type} resolve error:`, err.message);
+    return fetchUrl;
+  }
+}
+
+async function finalizeMetingTextResponse(body, metingType) {
+  const normalized = normalizeMetingResolvedUrl(body);
+  if (metingType !== 'url' || !normalized.startsWith('http')) return normalized;
+  if (!isUnresolvedMetingMediaUrl(normalized)) return normalized;
+
+  const nested = parseMetingMediaQuery(normalized);
+  if (!nested || nested.type !== 'url') return normalized;
+  return resolveMetingMediaUrl(nested);
 }
 
 async function proxyMetingResponse(targetUrl, res, thumbPx = 0, metingType = '') {
@@ -411,7 +473,7 @@ async function proxyMetingResponse(targetUrl, res, thumbPx = 0, metingType = '')
     if (location) {
       // type=url/lrc 必须返回文本 URL，不能把浏览器重定向到第三方 CDN（fetch 会触发 CORS）
       if (metingType === 'url' || metingType === 'lrc') {
-        const body = location.startsWith('@') ? location.slice(1) : location;
+        const body = await finalizeMetingTextResponse(location, metingType);
         return res.type('text').send(body);
       }
       return res.redirect(response.status, location);
@@ -420,6 +482,11 @@ async function proxyMetingResponse(targetUrl, res, thumbPx = 0, metingType = '')
 
   const contentType = response.headers.get('content-type') || '';
   const text = await response.text();
+
+  if (metingType === 'url' || metingType === 'lrc') {
+    const body = await finalizeMetingTextResponse(text, metingType);
+    return res.type('text').send(body);
+  }
 
   if (contentType.includes('application/json') || text.startsWith('[') || text.startsWith('{')) {
     try {
@@ -578,12 +645,12 @@ app.get('/api/media-proxy', async (req, res) => {
     return res.status(400).json({ error: '不支持的协议' });
   }
 
-  if (isPrivateHostname(parsed.hostname)) {
+  if (isPrivateHostname(parsed.hostname) && !isMetingApiHostname(parsed.hostname)) {
     return res.status(403).json({ error: '禁止访问内网地址' });
   }
 
   try {
-    if (parseMetingPicQuery(raw)) {
+    if (parseMetingMediaQuery(raw)) {
       fetchUrl = await resolveMediaProxyFetchUrl(raw, thumbPx);
     } else if (thumbPx > 0) {
       fetchUrl = resizeCoverForThumb(raw, thumbPx);

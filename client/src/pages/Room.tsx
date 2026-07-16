@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 
-import { Search, Loader2, Copy, Check, LogOut, X, Heart, Plus, Download, ListMusic, Upload, History, ListPlus, Pencil, Lock, LockOpen, ChevronLeft, ChevronRight, SlidersHorizontal, Shield, Maximize2 } from 'lucide-react';
+import { Search, Loader2, Copy, Check, LogOut, X, Heart, Plus, Download, ListMusic, Upload, History, ListPlus, Pencil, Lock, LockOpen, ChevronLeft, ChevronRight, SlidersHorizontal, Shield, Maximize2, Smartphone } from 'lucide-react';
 
 import { searchAllSongs, getAvailableSources, type SearchFilterMode } from '../api/music';
 import { importPlaylist, searchPlaylists, type PlaylistSearchItem, type PlaylistPlatform, type PlaylistChannelFilter as PlaylistChannelFilterMode } from '../api/music/playlist';
@@ -63,6 +63,7 @@ import ChatPanel from '../components/ChatPanel';
 import PureModeChatDock from '../components/PureModeChatDock';
 import HotSongPanel from '../components/HotSongPanel';
 import RecommendedPlaylistsDrawer from '../components/RecommendedPlaylistsDrawer';
+import ClientDownloadModal from '../components/ClientDownloadModal';
 import FavoriteButton from '../components/FavoriteButton';
 import PageSizeSelect from '../components/PageSizeSelect';
 import { useMediaQuery } from '../hooks/useMediaQuery';
@@ -283,6 +284,7 @@ export default function Room() {
   const [searchFilterMode, setSearchFilterMode] = useState<SearchFilterMode>('smart');
   const [playlistImportOpen, setPlaylistImportOpen] = useState(false);
   const [recommendDrawerOpen, setRecommendDrawerOpen] = useState(false);
+  const [downloadModalOpen, setDownloadModalOpen] = useState(false);
   const [isPlaylistResults, setIsPlaylistResults] = useState(false);
   const [playlistSearchResults, setPlaylistSearchResults] = useState<PlaylistSearchItem[]>([]);
   const [playlistSearchPage, setPlaylistSearchPage] = useState(1);
@@ -2157,6 +2159,19 @@ export default function Room() {
 
             <div className="flex items-center gap-1 sm:gap-2">
 
+              {isMobileDevice() && (
+                <Tooltip side="bottom" content="下载客户端">
+                  <button
+                    type="button"
+                    onClick={() => setDownloadModalOpen(true)}
+                    className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-netease-muted transition-colors hover:bg-netease-card hover:text-white"
+                    aria-label="下载客户端"
+                  >
+                    <Smartphone className="h-4 w-4" />
+                  </button>
+                </Tooltip>
+              )}
+
               <Tooltip side="bottom" content={pureMode ? '退出纯净模式（电脑端右侧滑入聊天）' : '纯净模式：隐藏动效与热榜，保留搜索与播放队列；标签页低调伪装'}>
                 <button
                   type="button"
@@ -2696,6 +2711,12 @@ export default function Room() {
             onClose={() => setRecommendDrawerOpen(false)}
             onSelectPlaylist={handleRecommendPlaylistSelect}
           />,
+          document.body,
+        )}
+
+      {downloadModalOpen &&
+        createPortal(
+          <ClientDownloadModal open={downloadModalOpen} onClose={() => setDownloadModalOpen(false)} />,
           document.body,
         )}
 
