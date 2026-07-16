@@ -204,25 +204,25 @@ export default function ChatPanel({ className = '' }: { className?: string }) {
         <p className="flex-shrink-0 px-3 py-1 text-xs text-netease-red">{muteError}</p>
       )}
 
-      <div className="relative min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
         <ChatSystemToast />
         <ChatMessageList
-        ref={messageListRef}
-        roomMeta={roomMeta}
-        myUserId={myUserId}
-        mySocketId={mySocketId}
-        nickname={nickname}
-        pureMode={pureMode}
-        chatMuted={chatMuted}
-        chatPanelRef={chatPanelRef}
-        reactionPickerMessageId={reactionPickerMessageId}
-        onReactionPickerChange={setReactionPickerMessageId}
-        onReply={handleReply}
-        onMentionUser={handleMentionUser}
-        onToggleReaction={handleToggleReaction}
-        onPreviewImage={setPreviewImageUrl}
-        loadChatHistory={loadChatHistory}
-        onScrollRootChange={setChatScrollRoot}
+          ref={messageListRef}
+          roomMeta={roomMeta}
+          myUserId={myUserId}
+          mySocketId={mySocketId}
+          nickname={nickname}
+          pureMode={pureMode}
+          chatMuted={chatMuted}
+          chatPanelRef={chatPanelRef}
+          reactionPickerMessageId={reactionPickerMessageId}
+          onReactionPickerChange={setReactionPickerMessageId}
+          onReply={handleReply}
+          onMentionUser={handleMentionUser}
+          onToggleReaction={handleToggleReaction}
+          onPreviewImage={setPreviewImageUrl}
+          loadChatHistory={loadChatHistory}
+          onScrollRootChange={setChatScrollRoot}
         />
       </div>
 
