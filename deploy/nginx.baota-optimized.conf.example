@@ -127,6 +127,7 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header iqp $http_iqp;
         proxy_buffering off;
         proxy_read_timeout 86400;
         proxy_send_timeout 86400;
@@ -140,6 +141,7 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header iqp $http_iqp;
         proxy_set_header Range $http_range;
         proxy_set_header If-Range $http_if_range;
         proxy_buffering off;
@@ -156,6 +158,7 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header iqp $http_iqp;
         proxy_connect_timeout 60s;
         proxy_send_timeout 600s;
         proxy_read_timeout 600s;
@@ -168,6 +171,7 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header iqp $http_iqp;
         proxy_read_timeout 600s;
         proxy_send_timeout 600s;
     }
@@ -179,6 +183,7 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header iqp $http_iqp;
     }
 
     location ^~ /cgi-bin/ {
@@ -188,6 +193,7 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header iqp $http_iqp;
     }
 
     location = /robots.txt {
@@ -196,6 +202,7 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header iqp $http_iqp;
     }
 
     location = /sitemap.xml {
@@ -204,6 +211,7 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header iqp $http_iqp;
     }
 
     # ★ 静态直出（资源带 content hash，可长期缓存；HTML 勿缓存）

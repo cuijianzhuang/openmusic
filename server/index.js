@@ -224,7 +224,7 @@ function getHeaderIp(headers, name) {
   return normalizeClientIp(value);
 }
 
-/** CDN 回源自定义客户端 IP 头，默认 iqp；可用 CLIENT_IP_HEADER 覆盖 */
+/** EdgeOne 等 CDN 回源自定义客户端 IP 头，默认 iqp；可用 CLIENT_IP_HEADER 覆盖 */
 const CLIENT_IP_HEADER = String(process.env.CLIENT_IP_HEADER || 'iqp').trim().toLowerCase() || 'iqp';
 
 function getClientIpFromHeaders(headers = {}, remoteAddress = '') {
@@ -234,7 +234,7 @@ function getClientIpFromHeaders(headers = {}, remoteAddress = '') {
     return normalizeClientIp(remoteAddress || '');
   }
 
-  // CDN 自定义头（如 iqp）携带真实客户端 IP，优先于 Nginx 写入的边缘节点 X-Real-IP
+  // CDN 自定义头（EdgeOne 默认 iqp）携带真实客户端 IP，优先于 Nginx 写入的边缘节点 X-Real-IP
   const customIp = getHeaderIp(headers, CLIENT_IP_HEADER);
   if (customIp) return customIp;
 

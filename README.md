@@ -82,7 +82,6 @@ METING_API_AUTH=你的meting_token
 |------|------|
 | `CYAPI_KEY` | 🔵 可选；蓝点搜索 / 空队列随机推荐（[迟言 API](https://cyapi.top/)） |
 | `REDIS_URL` | 🗄️ 可选；房间与热榜持久化，**强烈推荐** |
-| `CLIENT_IP_HEADER` | 🌍 CDN 回源客户端 IP 头，默认 `iqp`（优先于 `X-Real-IP`，用于限流与定位） |
 | `QINIU_*` | 🖼️ 可选；聊天发图 |
 | `APIHZ_IMG_*` | 😺 可选；聊天表情包搜索 |
 
@@ -190,11 +189,10 @@ location /socket.io/ {
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Real-IP $remote_addr;
-    # CDN 自定义客户端 IP 头（默认 iqp）请原样转发，勿剥离
 }
 ```
 
-- 🌍 限流与 IP 归属地：优先读 `CLIENT_IP_HEADER`（默认 `iqp`），再回退 `X-Real-IP` / `X-Forwarded-For`
+- 🌍 限流与 IP 归属地：依赖 Nginx 正确转发 `X-Real-IP` / `X-Forwarded-For`（`TRUST_PROXY=1`）
 - 🆕 发版：编辑 `release-notes.json` 或执行 `npm run package:build`；CDN 勿长期缓存 `index.html` 与 `/api/*`
 - 🔍 `/sitemap.xml`、`/robots.txt` 由服务端动态生成（优先 `CLIENT_URL`）
 - 📄 完整 Nginx / 宝塔示例：[deploy/nginx.conf.example](deploy/nginx.conf.example)、[deploy/DEPLOY-BAOTA.md](deploy/DEPLOY-BAOTA.md)

@@ -24,6 +24,11 @@ interface DisguiseSnapshot {
 }
 
 let disguiseSnapshot: DisguiseSnapshot | null = null;
+let disguiseActive = false;
+
+export function isPureModeDisguiseActive(): boolean {
+  return disguiseActive;
+}
 
 function pickDisguiseTitle(): string {
   const index = Math.floor(Math.random() * DISGUISE_TITLES.length);
@@ -86,10 +91,15 @@ export function applyPureModeDisguise(): void {
 
   const themeMeta = getThemeColorMeta();
   if (themeMeta) themeMeta.content = DISGUISE_THEME_COLOR;
+
+  disguiseActive = true;
 }
 
 export function clearPureModeDisguise(restoreTitle?: string): void {
-  if (typeof document === 'undefined' || !disguiseSnapshot) return;
+  if (typeof document === 'undefined' || !disguiseSnapshot) {
+    disguiseActive = false;
+    return;
+  }
 
   document.title = restoreTitle ?? disguiseSnapshot.title;
 
@@ -100,4 +110,5 @@ export function clearPureModeDisguise(restoreTitle?: string): void {
   if (themeMeta) themeMeta.content = disguiseSnapshot.themeColor;
 
   disguiseSnapshot = null;
+  disguiseActive = false;
 }

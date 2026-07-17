@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { isPureModeDisguiseActive } from './roomPureMode';
 
 export const SITE_NAME = 'OpenMusic';
 
@@ -92,7 +93,10 @@ export function applyPageSeo(options: PageSeoOptions = {}) {
   const image = options.image || (origin ? `${origin}/og-cover.png` : '/og-cover.png');
   const robots = options.noindex ? 'noindex, nofollow' : 'index, follow';
 
-  document.title = title;
+  // 纯净模式伪装中：SEO 仍更新 meta，但不覆盖标签页标题
+  if (!isPureModeDisguiseActive()) {
+    document.title = title;
+  }
   upsertMeta('description', description);
   upsertMeta('keywords', DEFAULT_KEYWORDS);
   upsertMeta('robots', robots);
