@@ -5,6 +5,7 @@ import {
   medianGap,
   normalizeMusicTempoBeats,
 } from './musicTempoAnalyzer';
+import { resolveSignedApiUrl } from '../../../lib/signedApiUrl';
 
 const HOP_SEC = 0.01;
 
@@ -135,7 +136,8 @@ export async function analyzeAudioBeatMap(
 
   if (signal?.aborted) return null;
   progress?.('下载音频…');
-  const resp = await fetch(audioUrl, { signal, credentials: 'same-origin' });
+  const signedUrl = (await resolveSignedApiUrl(audioUrl)) || audioUrl;
+  const resp = await fetch(signedUrl, { signal, credentials: 'same-origin' });
   if (!resp.ok) return null;
   const ab = await resp.arrayBuffer();
   if (signal?.aborted) return null;

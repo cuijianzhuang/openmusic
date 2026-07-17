@@ -24,6 +24,7 @@ import {
   rememberRoomPassword,
   stripRoomPasswordFromSearch,
 } from '../lib/roomPassword';
+import { useSignedApiUrl } from '../lib/signedApiUrl';
 
 export default function TvDisplay() {
   const { roomId } = useParams<{ roomId: string }>();
@@ -33,6 +34,8 @@ export default function TvDisplay() {
   const current = room?.current ?? null;
   const isPlaying = room?.isPlaying ?? false;
   const queueLength = room?.queue.length ?? 0;
+  const rawCoverUrl = current ? getCoverUrl(current, 'medium') : null;
+  const signedCoverUrl = useSignedApiUrl(rawCoverUrl);
   const { joinRoom } = useSocket();
   const setLrcDuration = useAudioStore((s) => s.setLrcDuration);
 
@@ -186,13 +189,13 @@ export default function TvDisplay() {
       </div>
     );
   } else {
-    const coverUrl = getCoverUrl(current, 'medium');
+    const coverUrl = rawCoverUrl || '';
     content = (
       <div className="fixed inset-0 z-50 flex flex-col animate-fade-in select-none">
         <TvCoverBackground coverUrl={coverUrl} loaded={bgLoaded} />
         <img
           ref={bgProbeRef}
-          src={coverUrl}
+          src={signedCoverUrl || ''}
           alt=""
           className="hidden"
           loading="eager"

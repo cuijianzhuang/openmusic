@@ -1,4 +1,5 @@
 import { memo, useId } from 'react';
+import { useSignedApiUrl } from '../lib/signedApiUrl';
 
 interface Props {
   coverUrl: string;
@@ -19,6 +20,7 @@ const ARM_PIVOT = `${(HINGE_CX / 140) * 100}% ${(HINGE_CY / 100) * 100}%`;
 
 function VinylPlayer({ coverUrl, isPlaying, className = '', size = 'default' }: Props) {
   const gradId = useId().replace(/:/g, '');
+  const signedCover = useSignedApiUrl(coverUrl);
 
   return (
     <div className={`relative pt-[10%] sm:pt-[12%] lg:pt-[14%] ${className}`}>
@@ -69,7 +71,7 @@ function VinylPlayer({ coverUrl, isPlaying, className = '', size = 'default' }: 
 
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="w-[62%] h-[62%] rounded-full overflow-hidden ring-2 ring-black/50 shadow-inner">
-              <img src={coverUrl} alt="" className="w-full h-full object-cover" draggable={false} loading="eager" decoding="async" />
+              <img src={signedCover || ''} alt="" className="w-full h-full object-cover" draggable={false} loading="eager" decoding="async" />
             </div>
             <div className="absolute w-[4%] h-[4%] rounded-full bg-[#111] ring-1 ring-white/10 z-10" />
           </div>

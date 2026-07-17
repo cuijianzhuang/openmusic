@@ -10,6 +10,7 @@ import { shouldProxySongPlaybackUrl } from '../../lib/roomVisualPreset';
 import { getUserPlaybackQuality } from './quality';
 import { resizeCoverUrl, type CoverSize } from '../../lib/coverUrl';
 import { requireSessionBootstrap } from '../../lib/sessionBootstrap';
+import { signApiUrl } from '../../lib/signedApiUrl';
 
 function getProvider(source: MusicSource) {
   return providers[source];
@@ -78,7 +79,11 @@ export async function getSongUrl(
   const quality = qualityOverride ?? getUserPlaybackQuality(source);
   const url = await getProvider(source).getSongUrl({ ...song, source }, quality);
   const useProxy = options?.proxy ?? shouldProxyPlaybackUrl(url, shouldProxySongPlaybackUrl());
-  return useProxy ? toProxiedMediaUrl(url) : url;
+  const resolved = useProxy ? toProxiedMediaUrl(url) : url;
+  if (resolved.startsWith('/api/')) {
+    return signApiUrl(resolved);
+  }
+  return resolved;
 }
 
 export {

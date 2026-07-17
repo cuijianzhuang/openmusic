@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { getCoverUrl } from '../api/music';
 import { getCoverPixelSize, getFallbackCoverUrl, type CoverSize } from '../lib/coverUrl';
+import { useSignedApiUrl } from '../lib/signedApiUrl';
 import type { Song } from '../types';
 
 interface Props {
@@ -30,7 +31,8 @@ export default function SongCover({
   }, [identity]);
 
   const raw = getCoverUrl(song, size);
-  const src = failed || !raw ? getFallbackCoverUrl() : raw;
+  const signed = useSignedApiUrl(raw);
+  const src = failed || !signed ? getFallbackCoverUrl() : signed;
   const pixelSize = getCoverPixelSize(size);
 
   return (

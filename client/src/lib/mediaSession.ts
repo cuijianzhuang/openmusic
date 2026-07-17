@@ -1,6 +1,8 @@
 import type { QueueItem } from '../types';
 import { getCoverUrl } from '../api/music';
 import { readRoomPureMode } from './roomPureMode';
+import { needsApiSign } from './apiSign';
+import { signApiUrl } from './signedApiUrl';
 
 export type MediaSessionPlaybackState = 'none' | 'paused' | 'playing';
 
@@ -49,7 +51,7 @@ function metadataKey(song: Pick<QueueItem, 'queueId' | 'name' | 'artist' | 'pic'
   return `${song.queueId}|${song.name}|${song.artist}|${song.pic || ''}|${readRoomPureMode() ? '1' : '0'}`;
 }
 
-function buildArtwork(song: Pick<QueueItem, 'id' | 'source' | 'pic'>): MediaImage[] {
+async function buildArtwork(song: Pick<QueueItem, 'id' | 'source' | 'pic'>): Promise<MediaImage[]> {
   const sizes: Array<{ size: 'tiny' | 'thumb' | 'medium' | 'full'; dims: string }> = [
     { size: 'tiny', dims: '96x96' },
     { size: 'thumb', dims: '128x128' },
@@ -60,7 +62,11 @@ function buildArtwork(song: Pick<QueueItem, 'id' | 'source' | 'pic'>): MediaImag
   const artwork: MediaImage[] = [];
 
   for (const entry of sizes) {
-    const src = toAbsoluteUrl(getCoverUrl(song, entry.size));
+    let src = toAbsoluteUrl(getCoverUrl(song, entry.size));
+    if (src && needsApiSign(src)) {
+      const parsed = new URL(src);
+      src = toAbsoluteUrl(await signApiUrl(`${parsed.pathname}${parsed.search}`));
+    }
     if (!src || seen.has(src)) continue;
     seen.add(src);
     artwork.push({
@@ -97,16 +103,31 @@ export function updateMediaSessionMetadata(
   }
 
   const pure = readRoomPureMode();
-  try {
-    session.metadata = new MediaMetadata({
-      title: pure ? '正在播放' : (song.name || '未知歌曲'),
-      artist: pure ? '' : (song.artist || '未知歌手'),
-      album: pure ? 'OpenMusic' : (song.album || 'OpenMusic'),
-      artwork: pure ? [] : buildArtwork(song),
-    });
-  } catch {
-    // MediaMetadata / artwork may fail on some WebViews.
-  }
+  const metadataKeySnapshot = key;
+  void buildArtwork(song).then((artwork) => {
+    if (metadataKeySnapshot !== lastMetadataKey) return;
+    try {
+      session.metadata = new MediaMetadata({
+        title: pure ? '正在播放' : (song.name || '未知歌曲'),
+        artist: pure ? '' : (song.artist || '未知歌手'),
+        album: pure ? 'OpenMusic' : (song.album || 'OpenMusic'),
+        artwork: pure ? [] : artwork,
+      });
+    } catch {
+      // MediaMetadata / artwork may fail on some WebViews.
+    }
+  }).catch(() => {
+    try {
+      session.metadata = new MediaMetadata({
+        title: pure ? '正在播放' : (song.name || '未知歌曲'),
+        artist: pure ? '' : (song.artist || '未知歌手'),
+        album: pure ? 'OpenMusic' : (song.album || 'OpenMusic'),
+        artwork: [],
+      });
+    } catch {
+      // ignore
+    }
+  });
 }
 
 export function updateMediaSessionPlaybackState(state: MediaSessionPlaybackState): void {

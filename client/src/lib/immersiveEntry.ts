@@ -1,4 +1,5 @@
 import { getCoverUrl } from '../api/music';
+import { resolveSignedApiUrl } from './signedApiUrl';
 import type { QueueItem } from '../types';
 import type { RoomVisualMode } from './roomVisualPreset';
 import {
@@ -161,7 +162,7 @@ export async function prepareImmersiveEnter(options: PrepareImmersiveEnterOption
   const tasks: Promise<unknown>[] = [preloadImmersiveBackground(mode)];
 
   if (coverUrl) {
-    tasks.push(preloadImage(coverUrl));
+    tasks.push(resolveSignedApiUrl(coverUrl).then((signed) => preloadImage(signed || coverUrl)));
   }
 
   if (needsProxyReload && song) {

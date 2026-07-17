@@ -17,6 +17,12 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import {
+  deriveApiSignKey,
+  verifyApiSign,
+  isPublicApiPath,
+  isApiSignRequired,
+} from './apiSign.js';
+import {
   collectDeviceIdsForUser,
   getUserIdForDevice,
   isAccessBanned,
@@ -174,6 +180,9 @@ const io = new Server(httpServer, {
     threshold: 262144,
   },
   httpCompression: true,
+  // 人多时事件循环偶发阻塞，放宽 ping 超时减少误判断连
+  pingInterval: 25_000,
+  pingTimeout: 60_000,
 });
 
 app.use(cors({ origin: corsOrigin }));
@@ -193,6 +202,31 @@ app.use(express.json({
     req.rawBody = buf;
   },
 }));
+
+/** 受保护 API：会话校验 + 请求签名校验 */
+const API_ACCESS_DENIED = '请求无效，请刷新页面后重试';
+
+app.use((req, res, next) => {
+  if (!req.path.startsWith('/api/')) return next();
+  if (isPublicApiPath(req)) return next();
+
+  const identity = resolveIdentityFromRequest(req);
+  if (!identity?.userId) {
+    return res.status(403).json({ error: API_ACCESS_DENIED });
+  }
+
+  req.apiIdentity = identity;
+
+  if (isApiSignRequired()) {
+    const signKey = deriveApiSignKey(CLIENT_ID_SECRET, identity.userId, identity.iat);
+    const result = verifyApiSign(req, signKey, identity.userId);
+    if (!result.ok) {
+      return res.status(403).json({ error: API_ACCESS_DENIED });
+    }
+  }
+
+  next();
+});
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = 10000) {
   const controller = new AbortController();
@@ -988,12 +1022,21 @@ function resolveIdentityFromRequest(req) {
 }
 
 function requireSessionIdentity(req, res) {
-  const identity = resolveIdentityFromRequest(req);
+  const identity = req.apiIdentity || resolveIdentityFromRequest(req);
   if (!identity?.userId) {
     res.status(401).json({ error: '会话未就绪，请刷新页面后重试' });
     return null;
   }
   return identity;
+}
+
+function sendBootstrapResponse(res, userId, iat, token, deviceId = null) {
+  setIdentityCookieHeaders(res, userId, token, deviceId);
+  const payload = { clientId: userId };
+  if (isApiSignRequired()) {
+    payload.apiSignKey = deriveApiSignKey(CLIENT_ID_SECRET, userId, iat);
+  }
+  return res.json(payload);
 }
 
 function proxyLimitKey(kind, req) {
@@ -1013,11 +1056,9 @@ app.post('/api/session/bootstrap', async (req, res) => {
     const deviceId = cookieDeviceId || bodyDeviceId || createServerClientId();
     await linkDeviceToUser(deviceId, existing.userId);
     const shouldRenew = existing.expiresAt - now <= SESSION_RENEW_WITHIN_SEC;
-    const token = shouldRenew
-      ? signClientId(existing.userId)
-      : signClientId(existing.userId, existing.iat);
-    setIdentityCookieHeaders(res, existing.userId, token, deviceId);
-    return res.json({ clientId: existing.userId });
+    const signIat = shouldRenew ? now : existing.iat;
+    const token = signClientId(existing.userId, signIat);
+    return sendBootstrapResponse(res, existing.userId, signIat, token, deviceId);
   }
 
   // 无身份 Cookie：仅允许 HttpOnly openmusic_did 恢复同一 userId
@@ -1025,16 +1066,22 @@ app.post('/api/session/bootstrap', async (req, res) => {
     const boundUserId = await getUserIdForDevice(cookieDeviceId);
     if (boundUserId) {
       await linkDeviceToUser(cookieDeviceId, boundUserId);
-      setIdentityCookieHeaders(res, boundUserId, signClientId(boundUserId), cookieDeviceId);
-      return res.json({ clientId: boundUserId });
+      const signIat = now;
+      return sendBootstrapResponse(
+        res,
+        boundUserId,
+        signIat,
+        signClientId(boundUserId, signIat),
+        cookieDeviceId,
+      );
     }
   }
 
   const userId = createServerClientId();
   const deviceId = cookieDeviceId || createServerClientId();
   await linkDeviceToUser(deviceId, userId);
-  setIdentityCookieHeaders(res, userId, signClientId(userId), deviceId);
-  return res.json({ clientId: userId });
+  const signIat = now;
+  return sendBootstrapResponse(res, userId, signIat, signClientId(userId, signIat), deviceId);
 });
 
 app.get('/api/rooms', (_req, res) => {
@@ -1296,8 +1343,12 @@ function clearPendingRoomBroadcast(normalized) {
 }
 
 function flushRoomBroadcast(normalized) {
+  const pending = pendingRoomBroadcasts.get(normalized);
+  const excludeSocketIds = pending?.excludeSocketIds?.size
+    ? [...pending.excludeSocketIds]
+    : undefined;
   clearPendingRoomBroadcast(normalized);
-  doBroadcastRoomUpdate(normalized);
+  doBroadcastRoomUpdate(normalized, { excludeSocketIds });
 }
 
 /**
@@ -1310,22 +1361,26 @@ function broadcastRoomUpdate(roomId, options = {}) {
 
   if (options.immediate) {
     clearPendingRoomBroadcast(normalized);
-    doBroadcastRoomUpdate(normalized);
+    doBroadcastRoomUpdate(normalized, options);
     return;
   }
 
   let pending = pendingRoomBroadcasts.get(normalized);
   if (!pending) {
-    pending = { timer: null, maxTimer: null };
+    pending = { timer: null, maxTimer: null, excludeSocketIds: new Set() };
     pendingRoomBroadcasts.set(normalized, pending);
     pending.maxTimer = setTimeout(() => flushRoomBroadcast(normalized), ROOM_BROADCAST_MAX_WAIT_MS);
+  }
+
+  if (options.excludeSocketIds?.length) {
+    for (const sid of options.excludeSocketIds) pending.excludeSocketIds.add(sid);
   }
 
   if (pending.timer) clearTimeout(pending.timer);
   pending.timer = setTimeout(() => flushRoomBroadcast(normalized), ROOM_BROADCAST_DEBOUNCE_MS);
 }
 
-function doBroadcastRoomUpdate(roomId) {
+function doBroadcastRoomUpdate(roomId, options = {}) {
   const normalized = roomId?.toUpperCase();
   if (!normalized) return;
   const sockets = io.sockets.adapter.rooms.get(normalized);
@@ -1333,6 +1388,10 @@ function doBroadcastRoomUpdate(roomId) {
 
   const prepared = prepareRoomBroadcast(normalized);
   if (!prepared) return;
+
+  const excludeSids = options.excludeSocketIds?.length
+    ? new Set(options.excludeSocketIds)
+    : null;
 
   const muteAll = Boolean(prepared.room.muteAll);
   const basePayload = {
@@ -1342,6 +1401,7 @@ function doBroadcastRoomUpdate(roomId) {
 
   const personalized = [];
   for (const sid of sockets) {
+    if (excludeSids?.has(sid)) continue;
     const viewerId = socketToUserId.get(sid);
     const payload = roomUpdateForViewer(prepared, viewerId);
     if (!payload) continue;
@@ -1358,11 +1418,15 @@ function doBroadcastRoomUpdate(roomId) {
 
   // 绝大多数成员载荷一致：整房一次 emit，仅房主/管理员/被禁言者补一次私信
   if (personalized.length === 0) {
-    io.to(normalized).emit('room_update', basePayload);
+    let target = io.to(normalized);
+    if (excludeSids) {
+      for (const sid of excludeSids) target = target.except(sid);
+    }
+    target.emit('room_update', basePayload);
     return;
   }
 
-  if (personalized.length >= sockets.size) {
+  if (personalized.length >= sockets.size - (excludeSids?.size || 0)) {
     for (const entry of personalized) {
       io.to(entry.sid).emit('room_update', entry.payload);
     }
@@ -1373,6 +1437,9 @@ function doBroadcastRoomUpdate(roomId) {
   let target = io.to(normalized);
   for (const sid of personalSids) {
     target = target.except(sid);
+  }
+  if (excludeSids) {
+    for (const sid of excludeSids) target = target.except(sid);
   }
   target.emit('room_update', basePayload);
 
@@ -1569,7 +1636,8 @@ io.on('connection', (socket) => {
     });
 
     setImmediate(() => {
-      broadcastRoomUpdate(id);
+      // 进房 ACK 已含完整快照，排除本人避免再收一次 40KB+ room_update
+      broadcastRoomUpdate(id, { excludeSocketIds: [socket.id] });
       if (welcomeMessage) {
         socket.to(id).emit('chat_message', welcomeMessage);
       }

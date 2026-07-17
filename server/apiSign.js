@@ -1,0 +1,154 @@
+import { createHash, createHmac, timingSafeEqual } from 'crypto';
+
+const SIGN_WINDOW_SEC = Math.max(30, Number(process.env.API_SIGN_WINDOW_SEC) || 300);
+const NONCE_TTL_MS = SIGN_WINDOW_SEC * 1000;
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const API_SIGN_REQUIRED = process.env.API_SIGN_REQUIRED !== undefined
+  ? process.env.API_SIGN_REQUIRED !== '0' && process.env.API_SIGN_REQUIRED !== 'false'
+  : IS_PRODUCTION;
+
+const SIGN_QUERY_KEYS = new Set(['om_ts', 'om_nonce', 'om_sign']);
+const MEDIA_PATHS = new Set(['/api/meting', '/api/media-proxy']);
+const API_ACCESS_DENIED = '请求无效，请刷新页面后重试';
+
+/** @type {Map<string, number>} */
+const usedNonces = new Map();
+
+let nonceCleanupTimer = null;
+
+function scheduleNonceCleanup() {
+  if (nonceCleanupTimer) return;
+  nonceCleanupTimer = setInterval(() => {
+    const now = Date.now();
+    for (const [key, expiresAt] of usedNonces) {
+      if (expiresAt <= now) usedNonces.delete(key);
+    }
+  }, 60_000);
+  if (typeof nonceCleanupTimer.unref === 'function') nonceCleanupTimer.unref();
+}
+
+export function isApiSignRequired() {
+  return API_SIGN_REQUIRED;
+}
+
+export function isPublicApiPath(req) {
+  const path = req.path || '';
+  if (path === '/api/health' || path === '/api/app-version') return true;
+  if (path === '/api/session/bootstrap' && req.method === 'POST') return true;
+  return false;
+}
+
+export function deriveApiSignKey(clientIdSecret, userId, iat) {
+  return createHmac('sha256', clientIdSecret)
+    .update(`om-api-sign:${userId}:${iat}`)
+    .digest('base64url');
+}
+
+function hashBody(req) {
+  if (req.method === 'GET' || req.method === 'HEAD') return '';
+  const raw = req.rawBody;
+  if (!raw || !raw.length) return '';
+  return createHash('sha256').update(raw).digest('hex');
+}
+
+export function canonicalApiQuery(query = {}) {
+  const entries = [];
+  for (const [key, value] of Object.entries(query)) {
+    if (SIGN_QUERY_KEYS.has(key)) continue;
+    if (value === undefined || value === null) continue;
+    if (Array.isArray(value)) {
+      for (const item of value) entries.push([key, String(item)]);
+    } else {
+      entries.push([key, String(value)]);
+    }
+  }
+  entries.sort((a, b) => a[0].localeCompare(b[0]));
+  return entries.map(([k, v]) => `${k}=${v}`).join('&');
+}
+
+function extractSignParts(req) {
+  const ts = req.headers['x-om-ts'] || req.query?.om_ts;
+  const nonce = req.headers['x-om-nonce'] || req.query?.om_nonce;
+  const sign = req.headers['x-om-sign'] || req.query?.om_sign;
+  return {
+    ts: String(ts || '').trim(),
+    nonce: String(nonce || '').trim(),
+    sign: String(sign || '').trim(),
+  };
+}
+
+function shouldConsumeNonce(req) {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return true;
+  return !MEDIA_PATHS.has(req.path || '');
+}
+
+function consumeNonce(userId, nonce) {
+  scheduleNonceCleanup();
+  const key = `${userId}:${nonce}`;
+  if (usedNonces.has(key)) return false;
+  usedNonces.set(key, Date.now() + NONCE_TTL_MS);
+  return true;
+}
+
+function buildSignPayload(req, timestamp, nonce) {
+  return [
+    req.method.toUpperCase(),
+    req.path,
+    canonicalApiQuery(req.query),
+    hashBody(req),
+    String(timestamp),
+    String(nonce),
+  ].join('\n');
+}
+
+function verifySignature(signKey, payload, providedSign) {
+  const expected = createHmac('sha256', signKey).update(payload).digest('base64url');
+  try {
+    const a = Buffer.from(expected);
+    const b = Buffer.from(providedSign);
+    if (a.length !== b.length) return false;
+    return timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * @returns {{ ok: true } | { ok: false, error: string }}
+ */
+export function verifyApiSign(req, signKey, userId) {
+  if (!API_SIGN_REQUIRED) return { ok: true };
+
+  const { ts, nonce, sign } = extractSignParts(req);
+  if (!ts || !nonce || !sign) {
+    return { ok: false, error: API_ACCESS_DENIED };
+  }
+
+  const timestamp = Number(ts);
+  if (!Number.isFinite(timestamp) || timestamp <= 0) {
+    return { ok: false, error: API_ACCESS_DENIED };
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  if (timestamp > now + 60) {
+    return { ok: false, error: API_ACCESS_DENIED };
+  }
+  if (now - timestamp > SIGN_WINDOW_SEC) {
+    return { ok: false, error: API_ACCESS_DENIED };
+  }
+
+  if (nonce.length < 8 || nonce.length > 128) {
+    return { ok: false, error: API_ACCESS_DENIED };
+  }
+
+  const payload = buildSignPayload(req, timestamp, nonce);
+  if (!verifySignature(signKey, payload, sign)) {
+    return { ok: false, error: API_ACCESS_DENIED };
+  }
+
+  if (shouldConsumeNonce(req) && !consumeNonce(userId, nonce)) {
+    return { ok: false, error: API_ACCESS_DENIED };
+  }
+
+  return { ok: true };
+}

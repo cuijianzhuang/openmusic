@@ -16,6 +16,7 @@ import {
 } from './lib/shaders';
 import { roomVisualFxLive } from '../../lib/roomVisualFxLive';
 import { toProxiedMediaUrl } from '../../lib/mediaProxyUrl';
+import { useSignedApiUrl } from '../../lib/signedApiUrl';
 import { effectiveBloomStrength, syncGalaxyFxUniforms } from './lib/syncVisualUniforms';
 import { buildCoverEdgeTexture } from './lib/buildCoverEdgeTexture';
 import {
@@ -399,6 +400,7 @@ interface Props {
 }
 
 export default function GalaxyParticles({ coverUrl, preset, isPlaying }: Props) {
+  const signedCover = useSignedApiUrl(coverUrl);
   const [particleGrid, setParticleGrid] = useState(() =>
     gridForResolution(roomVisualFxLive.current.coverResolution),
   );
@@ -615,7 +617,7 @@ export default function GalaxyParticles({ coverUrl, preset, isPlaying }: Props) 
       if (prevEdge && prevEdge !== nextEdge && prevEdge !== prevEdgeTex.current) prevEdge.dispose();
     };
 
-    if (!coverUrl) {
+    if (!signedCover) {
       coverImageCacheRef.current = null;
       uniforms.uHasDepth.value = 0;
       uniforms.uAiBoost.value = 0;
@@ -646,7 +648,7 @@ export default function GalaxyParticles({ coverUrl, preset, isPlaying }: Props) 
       uniforms.uHasCover.value = 0;
       uniforms.uHasDepth.value = 0;
     };
-    img.src = toProxiedMediaUrl(coverUrl);
+    img.src = toProxiedMediaUrl(signedCover);
 
     return () => {
       cancelled = true;
@@ -657,7 +659,7 @@ export default function GalaxyParticles({ coverUrl, preset, isPlaying }: Props) 
       img.onload = null;
       img.onerror = null;
     };
-  }, [backCoverLayer, coverUrl, floatLayer, preset, uniforms]);
+  }, [backCoverLayer, signedCover, floatLayer, preset, uniforms]);
 
   useFrame((state, delta) => {
     updateGalaxyParticlePointerFrame(state.camera);

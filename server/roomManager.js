@@ -647,6 +647,35 @@ function rememberUserNickname(room, userId, nickname) {
   room.userNicknames.set(userId, nick);
 }
 
+/** 管理端广播/进房 ACK 仅需当前相关用户昵称，避免历史访客 Map（可上千条）撑爆载荷 */
+function serializeUserNicknamesForViewer(room) {
+  const map = room.userNicknames;
+  if (!map?.size) return undefined;
+
+  const needed = new Set();
+  for (const user of room.users.values()) {
+    if (user?.id) needed.add(user.id);
+  }
+  for (const id of getOrderedAdminIds(room)) needed.add(id);
+  if (room.creatorId) needed.add(room.creatorId);
+  if (room.ownerId) needed.add(room.ownerId);
+  for (const id of room.mutedUserIds || []) needed.add(id);
+  if (room.memberTiers && typeof room.memberTiers === 'object') {
+    for (const id of Object.keys(room.memberTiers)) needed.add(id);
+  }
+  for (const item of room.queue || []) {
+    if (item?.requestedById) needed.add(item.requestedById);
+  }
+  if (room.current?.requestedById) needed.add(room.current.requestedById);
+
+  const out = {};
+  for (const id of needed) {
+    const nick = map.get(id);
+    if (nick) out[id] = nick;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 function resolveStoredNickname(room, userId) {
   const online = room.users.get(userId);
   if (online?.nickname) return online.nickname;
@@ -3301,7 +3330,7 @@ function serializeRoom(room, options = {}) {
     creatorId: room.creatorId ?? null,
     adminIds: getOrderedAdminIds(room),
     autoPromotedAdminIds: getOrderedAutoPromotedAdminIds(room),
-    userNicknames: viewerCanModerate ? Object.fromEntries(room.userNicknames || []) : undefined,
+    userNicknames: viewerCanModerate ? serializeUserNicknamesForViewer(room) : undefined,
     queue: room.queue.map(serializeQueueItemForRoom).filter(Boolean),
     current: serializeQueueItemForRoom(room.current),
     isPlaying: room.isPlaying,
@@ -3389,7 +3418,7 @@ export function prepareRoomBroadcast(roomId) {
 
   const moderatorExtras = {
     mutedUserIds: Array.from(room.mutedUserIds || []),
-    userNicknames: Object.fromEntries(room.userNicknames || []),
+    userNicknames: serializeUserNicknamesForViewer(room),
     bannedSongs: serializeBannedSongs(room.bannedSongs),
   };
 

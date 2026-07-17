@@ -307,7 +307,8 @@ function scheduleRoomRejoin(trigger: string) {
   if (!shouldMaintainRoomSession()) return;
   if (reconnectTimer != null) return;
 
-  const delay = Math.min(800 + reconnectAttempt * 500, 8000);
+  const jitter = Math.floor(Math.random() * 600);
+  const delay = Math.min(800 + reconnectAttempt * 500, 8000) + jitter;
   reconnectAttempt += 1;
   useRoomStore.getState().setReconnecting(true);
   debugLog('room_rejoin_scheduled', debugLine({ trigger, delay, attempt: reconnectAttempt }));
@@ -398,9 +399,7 @@ function handleSocketDisconnect(reason: string) {
 
   if (!shouldMaintainRoomSession()) return;
 
-  resetSessionBootstrap();
-  clearReconnectSchedule();
-  reconnectAttempt = 0;
+  // 普通断线不等于会话失效；40+ 人同时 bootstrap + join 会打爆服务端
   useRoomStore.getState().setReconnecting(true);
 
   if (reason === 'io server disconnect') {
@@ -408,8 +407,7 @@ function handleSocketDisconnect(reason: string) {
     socketConnectRequested = true;
     s.connect();
   }
-
-  scheduleRoomRejoin(`disconnect:${reason}`);
+  // 依赖 Socket.IO 自动重连，成功后由 connect 事件触发 attemptRoomRejoin
 }
 
 

@@ -1,4 +1,5 @@
 import { memo } from 'react';
+import { useSignedApiUrl } from '../../lib/signedApiUrl';
 
 interface Props {
   coverUrl: string;
@@ -6,18 +7,20 @@ interface Props {
 }
 
 function TvCoverBackground({ coverUrl, loaded }: Props) {
+  const signedCover = useSignedApiUrl(coverUrl);
+  const displayUrl = signedCover || '';
   return (
     <>
       <div
         className="absolute inset-0 bg-cover bg-center scale-110 contain-strict"
         style={{
-          backgroundImage: loaded ? `url(${coverUrl})` : undefined,
+          backgroundImage: loaded && displayUrl ? `url(${displayUrl})` : undefined,
           filter: 'blur(36px) brightness(0.35)',
           willChange: loaded ? 'auto' : 'opacity',
         }}
       />
       <img
-        src={coverUrl}
+        src={displayUrl}
         alt=""
         className="hidden"
         loading="eager"

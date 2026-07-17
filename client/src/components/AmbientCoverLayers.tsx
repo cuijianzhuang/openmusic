@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { measureCoverLuminance, tuneCoverBackdrop, type CoverBackdropTuning } from '../lib/coverBackdrop';
 import { toProxiedMediaUrl } from '../lib/mediaProxyUrl';
+import { useSignedApiUrl } from '../lib/signedApiUrl';
 
 interface Props {
   coverUrl: string;
@@ -10,7 +11,8 @@ interface Props {
 export default function AmbientCoverLayers({ coverUrl, className = 'absolute inset-0' }: Props) {
   const [loaded, setLoaded] = useState(false);
   const [tuning, setTuning] = useState<CoverBackdropTuning>(() => tuneCoverBackdrop(null));
-  const displayUrl = useMemo(() => toProxiedMediaUrl(coverUrl), [coverUrl]);
+  const signedCover = useSignedApiUrl(coverUrl);
+  const displayUrl = useMemo(() => (signedCover ? toProxiedMediaUrl(signedCover) : ''), [signedCover]);
 
   useEffect(() => {
     setLoaded(false);

@@ -1,3 +1,5 @@
+import { resolveSignedApiUrl } from './signedApiUrl';
+
 export type PlaybackErrorClass = 'temporary' | 'service';
 
 const SERVICE_HTTP_STATUSES = new Set([403, 404, 502]);
@@ -22,22 +24,25 @@ export function isServiceHttpStatus(status: number): boolean {
 }
 
 async function probeMediaUrlStatus(url: string): Promise<number | null> {
+  const probeUrl = (await resolveSignedApiUrl(url)) || url;
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), URL_PROBE_TIMEOUT_MS);
   try {
-    const head = await fetch(url, {
+    const head = await fetch(probeUrl, {
       method: 'HEAD',
       signal: controller.signal,
       cache: 'no-store',
+      credentials: 'include',
     });
     return head.status;
   } catch {
     try {
-      const ranged = await fetch(url, {
+      const ranged = await fetch(probeUrl, {
         method: 'GET',
         headers: { Range: 'bytes=0-0' },
         signal: controller.signal,
         cache: 'no-store',
+        credentials: 'include',
       });
       return ranged.status;
     } catch {

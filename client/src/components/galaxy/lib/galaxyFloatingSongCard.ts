@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { toProxiedMediaUrl } from '../../../lib/mediaProxyUrl';
+import { needsApiSign } from '../../../lib/apiSign';
+import { signApiUrl } from '../../../lib/signedApiUrl';
 
 export type FloatingSongCardActionId = 'favorite' | 'like' | 'jump' | 'remove' | 'ban';
 
@@ -163,7 +165,13 @@ function requestCover(url: string, onReady: () => void): void {
   img.onerror = () => {
     coverCache.set(url, 'failed');
   };
-  img.src = toProxiedMediaUrl(url);
+  void (async () => {
+    let loadUrl = toProxiedMediaUrl(url);
+    if (needsApiSign(loadUrl)) {
+      loadUrl = await signApiUrl(loadUrl);
+    }
+    img.src = loadUrl;
+  })();
 }
 
 function paintShelfCardChrome(

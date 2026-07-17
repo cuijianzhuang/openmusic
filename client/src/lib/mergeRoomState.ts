@@ -56,5 +56,12 @@ export function mergeRoomState(incoming: RoomState, current: RoomState | null): 
     merged.mutedUserIds = current.mutedUserIds;
   }
 
+  // 广播只带当前相关昵称子集，与已有 Map 合并而非整包替换
+  if (incoming.userNicknames && current.userNicknames) {
+    merged.userNicknames = { ...current.userNicknames, ...incoming.userNicknames };
+  } else if (!incoming.userNicknames && current.userNicknames) {
+    merged.userNicknames = current.userNicknames;
+  }
+
   return merged;
 }

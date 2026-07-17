@@ -1,6 +1,7 @@
 import { fetchWithTimeout } from '../api/http';
 import { rememberClientId } from './clientId';
 import { getDeviceId } from './deviceId';
+import { setApiSignKey } from './apiSign';
 
 let bootstrapPromise: Promise<string | null> | null = null;
 
@@ -9,14 +10,14 @@ async function requestSessionBootstrap(): Promise<string | null> {
     '/api/session/bootstrap',
     {
       method: 'POST',
-      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ deviceId: getDeviceId() }),
     },
     8000,
   );
   if (!res.ok) return null;
-  const data = (await res.json()) as { clientId?: string };
+  const data = (await res.json()) as { clientId?: string; apiSignKey?: string };
+  if (data.apiSignKey) setApiSignKey(data.apiSignKey);
   if (data.clientId) rememberClientId(data.clientId);
   return data.clientId || null;
 }
@@ -58,4 +59,5 @@ export async function requireSessionBootstrap(force = false): Promise<string> {
 
 export function resetSessionBootstrap(): void {
   bootstrapPromise = null;
+  setApiSignKey(null);
 }
