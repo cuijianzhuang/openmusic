@@ -167,8 +167,10 @@ export async function fetchMetingApi(query, options = {}, timeoutMs = 10000) {
   }
 
   const isSearch = String(query?.type || '') === 'search';
+  const isUrl = String(query?.type || '') === 'url';
   let lastError = null;
   let emptySearchResponse = null;
+  let emptyUrlResponse = null;
   for (const upstream of candidates) {
     try {
       const response = upstream.style === 'chksz'
@@ -181,6 +183,20 @@ export async function fetchMetingApi(query, options = {}, timeoutMs = 10000) {
         continue;
       }
       markSuccess(upstream);
+      // VIP/付费歌曲在部分标准 Meting 上游会返回 HTTP 200，但正文为空、null
+      // 或空数组。它不是可播放结果，应继续尝试 ChKSz 等后续上游。
+      if (isUrl && response.status === 200) {
+        try {
+          const text = typeof response.clone === 'function' ? await response.clone().text() : await response.text();
+          const normalized = String(text || '').trim().replace(/^['"]|['"]$/g, '').trim();
+          if (!normalized || normalized === 'null' || normalized === '[]' || normalized === '{}') {
+            emptyUrlResponse = response;
+            continue;
+          }
+        } catch {
+          // 无法读取时按原响应返回，交由调用方处理
+        }
+      }
       // 搜索返回空数组（上游临时限流/曲库缺失时常见）：不算失败，但换下一个上游再试；
       // 全部为空才把空结果返回给调用方（response.text 为缓冲实现，可重复读取）
       if (isSearch && response.status === 200) {
@@ -207,6 +223,7 @@ export async function fetchMetingApi(query, options = {}, timeoutMs = 10000) {
     }
   }
   if (emptySearchResponse) return emptySearchResponse;
+  if (emptyUrlResponse) return emptyUrlResponse;
   throw lastError || new Error('所有 Meting 上游均不可用');
 }
 

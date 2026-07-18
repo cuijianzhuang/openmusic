@@ -274,8 +274,12 @@ export function setRuntimeConfig(raw = {}) {
   }
 
   for (const field of Object.keys(current)) {
+    // 管理后台提交结构化音源列表时，旧的扁平字段只是回显兼容值，
+    // 不能覆盖上面刚由 metingSources 合并出的新列表。
+    if (Array.isArray(raw.metingSources) && (field === 'metingApiUrl' || field === 'metingApiAuth')) {
+      continue;
+    }
     if (SECRET_FIELDS.has(field)) {
-      if (field === 'metingApiAuth' && Array.isArray(raw.metingSources)) continue;
       if (clearSecrets.has(field)) next[field] = '';
       else if (typeof raw[field] === 'string' && raw[field].trim()) next[field] = raw[field].trim();
     } else if (Object.hasOwn(raw, field)) {

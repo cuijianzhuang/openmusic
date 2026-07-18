@@ -13,6 +13,7 @@ const scrypt = promisify(scryptCallback);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ENV_PATH = path.join(__dirname, '.env');
 const LOCK_PATH = path.join(__dirname, 'setup.lock');
+const RUNTIME_CONFIG_PATH = path.join(__dirname, 'runtimeConfig.json');
 const ADMIN_CREDENTIALS_KEY = 'openmusic:admin:credentials';
 const attempts = new Map();
 
@@ -196,6 +197,25 @@ function updateEnvFile(values) {
   }
 }
 
+/** 重新安装时让新生成的 Meting 环境配置优先生效，保留其它后台运行配置。 */
+function clearPersistedMetingOverrides() {
+  if (!fs.existsSync(RUNTIME_CONFIG_PATH)) return;
+  let config;
+  try {
+    config = JSON.parse(fs.readFileSync(RUNTIME_CONFIG_PATH, 'utf8'));
+  } catch {
+    return;
+  }
+  if (!config || typeof config !== 'object' || Array.isArray(config)) return;
+  if (!Object.hasOwn(config, 'metingApiUrl') && !Object.hasOwn(config, 'metingApiAuth')) return;
+  delete config.metingApiUrl;
+  delete config.metingApiAuth;
+  fs.writeFileSync(RUNTIME_CONFIG_PATH, `${JSON.stringify(config, null, 2)}\n`, {
+    encoding: 'utf8',
+    mode: 0o600,
+  });
+}
+
 async function createBootstrapCredentials(client, username, password, { mustChange = true } = {}) {
   const salt = randomBytes(16).toString('hex');
   const hash = (await scrypt(password, salt, 32)).toString('hex');
@@ -330,6 +350,7 @@ export function mountSetupApi(app) {
         METING_API_AUTH: metingApiAuth,
         SETUP_NONCE: setupNonce,
       });
+      clearPersistedMetingOverrides();
       const pathResult = setAdminEntryPath(adminPath, { requireCustom: true });
       if (!pathResult.success) throw new Error(pathResult.error);
       writeSetupLock({ siteUrl: siteUrl || '', adminPath });
