@@ -289,6 +289,24 @@ export function mountSetupApi(app) {
     if (metingApiUrl === null) {
       return res.status(400).json({ error: 'Meting 音源地址无效（http/https，多个用英文逗号分隔）' });
     }
+    const chkszApiUrl = validateMetingUrl(req.body?.chkszApiUrl);
+    if (chkszApiUrl === null) {
+      return res.status(400).json({ error: 'ChKSz 音源地址无效（须为 http/https 地址）' });
+    }
+    const metingSources = metingApiUrl
+      ? metingApiUrl.split(',').map((url) => url.trim()).filter(Boolean)
+      : [];
+    if (chkszApiUrl) {
+      for (const url of chkszApiUrl.split(',').map((item) => item.trim()).filter(Boolean)) {
+        const normalizedUrl = url.toLowerCase().startsWith('chksz:') ? url.slice(6).trim() : url;
+        const key = normalizedUrl.replace(/\/+$/, '').toLowerCase();
+        const exists = metingSources.some((item) => {
+          const normalizedItem = item.toLowerCase().startsWith('chksz:') ? item.slice(6).trim() : item;
+          return normalizedItem.replace(/\/+$/, '').toLowerCase() === key;
+        });
+        if (!exists) metingSources.push(`chksz:${normalizedUrl}`);
+      }
+    }
     const metingApiAuth = cleanText(req.body?.metingApiAuth, 1024);
     if (metingApiAuth === null) return res.status(400).json({ error: 'Meting 令牌无效' });
 
@@ -308,7 +326,7 @@ export function mountSetupApi(app) {
         CLIENT_ID_SECRET: clientSecret,
         TRUST_PROXY: req.body?.trustProxy === false ? '0' : '1',
         DEPLOYMENT_MODE: req.body?.testMode === true ? 'test' : 'production',
-        METING_API_URL: metingApiUrl,
+        METING_API_URL: metingSources.join(','),
         METING_API_AUTH: metingApiAuth,
         SETUP_NONCE: setupNonce,
       });

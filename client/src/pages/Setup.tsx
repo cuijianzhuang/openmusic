@@ -46,6 +46,7 @@ export default function Setup() {
   const [password, setPassword] = useState('');
   const [database, setDatabase] = useState('0');
   const [metingApiUrl, setMetingApiUrl] = useState('http://127.0.0.1:3000');
+  const [chkszApiUrl, setChkszApiUrl] = useState('https://api.chksz.com');
   const [metingApiAuth, setMetingApiAuth] = useState('');
   const [adminPath, setAdminPath] = useState(() => randomAdminPath());
   const [testing, setTesting] = useState(false);
@@ -109,6 +110,7 @@ export default function Setup() {
         testMode,
         adminPath: adminPath.trim(),
         metingApiUrl: metingApiUrl.trim(),
+        chkszApiUrl: chkszApiUrl.trim(),
         metingApiAuth: metingApiAuth.trim(),
         redis,
       });
@@ -279,10 +281,16 @@ export default function Setup() {
           </div>
           <div className="space-y-3 p-4">
             <SetupField
-              label="Meting 地址"
+              label="标准 Meting 地址"
               value={metingApiUrl}
               onChange={setMetingApiUrl}
               placeholder="http://127.0.0.1:3000"
+            />
+            <SetupField
+              label="ChKSz 地址（可选）"
+              value={chkszApiUrl}
+              onChange={setChkszApiUrl}
+              placeholder="https://api.chksz.com"
             />
             <SetupField
               label="Meting 令牌（auth，可选）"
@@ -290,7 +298,7 @@ export default function Setup() {
               onChange={setMetingApiAuth}
             />
             <p className="text-xs text-netease-muted">
-              多个上游用英文逗号分隔自动负载均衡；留空可稍后在管理后台「运行配置」里填写。迟言 / 七牛 / 接口盒子等可选服务也在后台配置。
+              两类音源会同时保存并参与轮询与故障切换；ChKSz 通常无需 Auth。任一项可留空，也可稍后在管理后台「运行配置」中增删更多音源。
             </p>
           </div>
         </div>
