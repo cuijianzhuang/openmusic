@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
-  Activity, Clock, Database, KeyRound, Loader2, LogOut, MemoryStick,
-  Music, RefreshCw, ShieldCheck, Trash2, Users, Wifi,
+  Activity, Clock, Database, KeyRound, Link2, Loader2, LogOut, MemoryStick,
+  Music, RefreshCw, ScrollText, ShieldCheck, Trash2, Users, Wifi,
 } from 'lucide-react';
-
-const TOKEN_KEY = 'om_admin_token';
 
 interface MetingUpstreamStatus {
   url: string;
@@ -16,6 +15,17 @@ interface MetingUpstreamStatus {
   lastError: string;
 }
 
+interface AdminAuditEntry {
+  at: number;
+  action: string;
+  ip: string;
+  roomId?: string;
+  name?: string;
+  kicked?: number;
+  error?: string;
+  path?: string;
+}
+
 interface AdminOverview {
   roomCount: number;
   onlineUsers: number;
@@ -25,6 +35,8 @@ interface AdminOverview {
   memoryRssMb: number;
   redisEnabled: boolean;
   metingUpstreams: MetingUpstreamStatus[];
+  entryPath?: string;
+  auditLog?: AdminAuditEntry[];
 }
 
 interface AdminRoom {
@@ -41,19 +53,21 @@ interface AdminRoom {
 }
 
 async function adminFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const token = sessionStorage.getItem(TOKEN_KEY) || '';
   const res = await fetch(path, {
     ...options,
+    credentials: 'same-origin',
     headers: {
       'Content-Type': 'application/json',
-      'x-admin-token': token,
       ...(options.headers || {}),
     },
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    if (res.status === 401) sessionStorage.removeItem(TOKEN_KEY);
-    throw new Error((data as { error?: string }).error || `请求失败（${res.status}）`);
+    const err = new Error((data as { error?: string }).error || `请求失败（${res.status}）`) as Error & {
+      status?: number;
+    };
+    err.status = res.status;
+    throw err;
   }
   return data as T;
 }
@@ -65,6 +79,45 @@ function formatUptime(sec: number) {
   if (d > 0) return `${d}天${h}时`;
   if (h > 0) return `${h}时${m}分`;
   return `${m}分`;
+}
+
+function formatAuditTime(at: number) {
+  try {
+    return new Date(at).toLocaleString('zh-CN', { hour12: false });
+  } catch {
+    return String(at);
+  }
+}
+
+function formatAuditAction(entry: AdminAuditEntry) {
+  switch (entry.action) {
+    case 'login_ok':
+      return '登录成功';
+    case 'login_fail':
+      return '登录失败';
+    case 'logout':
+      return '退出登录';
+    case 'set_entry_path':
+      return `更新登录地址 ${entry.path || ''}`;
+    case 'destroy_room':
+      return `解散房间 ${entry.roomId || ''}${entry.name ? `（${entry.name}）` : ''}${
+        typeof entry.kicked === 'number' ? ` · 踢出 ${entry.kicked}` : ''
+      }`;
+    case 'destroy_room_fail':
+      return `解散失败 ${entry.roomId || ''}${entry.error ? `：${entry.error}` : ''}`;
+    default:
+      return entry.action;
+  }
+}
+
+/** 与服务端 createRandomAdminEntryPath 一致：12 字节 base64url */
+function createRandomEntryPath() {
+  const bytes = new Uint8Array(12);
+  crypto.getRandomValues(bytes);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 1) bin += String.fromCharCode(bytes[i]!);
+  const b64 = btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+  return `/${b64}`;
 }
 
 function StatCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: React.ReactNode }) {
@@ -87,14 +140,10 @@ function LoginForm({ onLoggedIn }: { onLoggedIn: () => void }) {
     setBusy(true);
     setError('');
     try {
-      const res = await fetch('/api/admin/login', {
+      await adminFetch('/api/admin/login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key: key.trim() }),
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `登录失败（${res.status}）`);
-      sessionStorage.setItem(TOKEN_KEY, data.token);
       onLoggedIn();
     } catch (err) {
       setError(err instanceof Error ? err.message : '登录失败');
@@ -119,6 +168,7 @@ function LoginForm({ onLoggedIn }: { onLoggedIn: () => void }) {
             onChange={(e) => setKey(e.target.value)}
             placeholder="管理密钥"
             autoFocus
+            autoComplete="current-password"
             className="w-full bg-transparent py-2.5 text-sm text-white outline-none placeholder:text-netease-muted/60"
           />
         </div>
@@ -137,17 +187,42 @@ function LoginForm({ onLoggedIn }: { onLoggedIn: () => void }) {
 }
 
 export default function Admin() {
-  const [loggedIn, setLoggedIn] = useState(() => Boolean(sessionStorage.getItem(TOKEN_KEY)));
+  const navigate = useNavigate();
+  // null = 正在用 HttpOnly Cookie 探测会话；不把 token 放进 JS 可读存储
+  const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [rooms, setRooms] = useState<AdminRoom[]>([]);
   const [error, setError] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [entryPathDraft, setEntryPathDraft] = useState('/admin');
+  const [savingPath, setSavingPath] = useState(false);
+  const [pathHint, setPathHint] = useState('');
   const loadingRef = useRef(false);
+  const savedEntryPathRef = useRef<string | null>(null);
 
-  const logout = useCallback(() => {
-    sessionStorage.removeItem(TOKEN_KEY);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        await adminFetch('/api/admin/session');
+        if (!cancelled) setLoggedIn(true);
+      } catch {
+        if (!cancelled) setLoggedIn(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const logout = useCallback(async () => {
+    try {
+      await adminFetch('/api/admin/logout', { method: 'POST' });
+    } catch {
+      // 即使请求失败也清本地 UI 状态
+    }
     setLoggedIn(false);
     setOverview(null);
     setRooms([]);
@@ -164,11 +239,25 @@ export default function Admin() {
       ]);
       setOverview(ov);
       setRooms(rm.rooms);
+      if (ov.entryPath) {
+        // 仅在未编辑草稿时同步，避免轮询刷新冲掉正在改的地址
+        setEntryPathDraft((draft) => {
+          if (savedEntryPathRef.current === null || draft === savedEntryPathRef.current) {
+            savedEntryPathRef.current = ov.entryPath!;
+            return ov.entryPath!;
+          }
+          return draft;
+        });
+        if (savedEntryPathRef.current === null) savedEntryPathRef.current = ov.entryPath;
+      }
       setError('');
     } catch (err) {
       const message = err instanceof Error ? err.message : '加载失败';
       setError(message);
-      if (!sessionStorage.getItem(TOKEN_KEY)) setLoggedIn(false);
+      const status = err && typeof err === 'object' && 'status' in err
+        ? Number((err as { status?: number }).status)
+        : 0;
+      if (status === 401 || status === 503) setLoggedIn(false);
     } finally {
       loadingRef.current = false;
       setRefreshing(false);
@@ -195,9 +284,48 @@ export default function Admin() {
     }
   }, [refresh]);
 
+  const randomizeEntryPath = useCallback(() => {
+    setEntryPathDraft(createRandomEntryPath());
+    setPathHint('已生成随机地址，点击保存后生效');
+  }, []);
+
+  const saveEntryPath = useCallback(async () => {
+    if (savingPath) return;
+    setSavingPath(true);
+    setPathHint('');
+    try {
+      const res = await adminFetch<{ entryPath: string }>('/api/admin/entry-path', {
+        method: 'PUT',
+        body: JSON.stringify({ path: entryPathDraft.trim() }),
+      });
+      savedEntryPathRef.current = res.entryPath;
+      setEntryPathDraft(res.entryPath);
+      setOverview((prev) => (prev ? { ...prev, entryPath: res.entryPath } : prev));
+      setPathHint('已保存，请收藏新地址');
+      if (window.location.pathname !== res.entryPath) {
+        navigate(res.entryPath, { replace: true });
+      }
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '保存登录地址失败');
+    } finally {
+      setSavingPath(false);
+    }
+  }, [entryPathDraft, navigate, refresh, savingPath]);
+
+  if (loggedIn === null) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-netease-dark text-netease-muted">
+        <Loader2 className="h-5 w-5 animate-spin" />
+      </div>
+    );
+  }
+
   if (!loggedIn) {
     return <LoginForm onLoggedIn={() => setLoggedIn(true)} />;
   }
+
+  const auditLog = overview?.auditLog || [];
 
   return (
     <div className="min-h-screen bg-netease-dark px-4 py-6 text-white sm:px-8">
@@ -216,7 +344,7 @@ export default function Admin() {
               刷新
             </button>
             <button
-              onClick={logout}
+              onClick={() => void logout()}
               className="flex items-center gap-1.5 rounded-lg border border-white/10 px-3 py-1.5 text-xs text-netease-muted transition-colors hover:bg-white/5 hover:text-white"
             >
               <LogOut className="h-3.5 w-3.5" />
@@ -230,6 +358,58 @@ export default function Admin() {
             {error}
           </div>
         )}
+
+        <div className="mt-5 rounded-2xl border border-white/10 bg-white/5">
+          <div className="flex items-center gap-2 border-b border-white/10 px-4 py-3 text-sm font-medium">
+            <Link2 className="h-4 w-4 text-netease-muted" />
+            登录地址
+          </div>
+          <div className="space-y-3 px-4 py-3">
+            <p className="text-xs text-netease-muted">
+              修改后旧地址将无法打开管理页，请务必保存并收藏新链接
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex min-w-0 flex-1 items-center gap-1 rounded-xl border border-white/10 bg-black/20 px-2">
+                <span className="shrink-0 select-none pl-1 text-xs text-netease-muted">
+                  {typeof window !== 'undefined' ? window.location.origin : ''}
+                </span>
+                <input
+                  value={entryPathDraft}
+                  onChange={(e) => {
+                    setEntryPathDraft(e.target.value);
+                    setPathHint('');
+                  }}
+                  spellCheck={false}
+                  placeholder="/admin"
+                  className="min-w-0 flex-1 bg-transparent py-2.5 font-mono text-sm text-white outline-none placeholder:text-netease-muted/60"
+                />
+                <button
+                  type="button"
+                  onClick={randomizeEntryPath}
+                  title="随机生成登录地址"
+                  aria-label="随机生成登录地址"
+                  className="shrink-0 rounded-lg p-2 text-netease-muted transition-colors hover:bg-white/10 hover:text-white"
+                >
+                  <RefreshCw className="h-4 w-4" />
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => void saveEntryPath()}
+                disabled={savingPath || !entryPathDraft.trim() || entryPathDraft === overview?.entryPath}
+                className="rounded-xl bg-netease-red px-4 py-2.5 text-sm font-medium text-white transition-opacity disabled:opacity-40"
+              >
+                {savingPath ? <Loader2 className="h-4 w-4 animate-spin" /> : '保存'}
+              </button>
+            </div>
+            {pathHint && <p className="text-xs text-emerald-400/90">{pathHint}</p>}
+            {overview?.entryPath && (
+              <p className="break-all font-mono text-[11px] text-netease-muted">
+                当前生效：{typeof window !== 'undefined' ? window.location.origin : ''}{overview.entryPath}
+              </p>
+            )}
+          </div>
+        </div>
 
         {overview && (
           <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -333,6 +513,26 @@ export default function Admin() {
                       </button>
                     )}
                   </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="mt-6 rounded-2xl border border-white/10 bg-white/5">
+          <div className="flex items-center gap-2 border-b border-white/10 px-4 py-3 text-sm font-medium">
+            <ScrollText className="h-4 w-4 text-netease-muted" />
+            操作审计（{auditLog.length}，进程内最近记录）
+          </div>
+          {auditLog.length === 0 ? (
+            <div className="px-4 py-8 text-center text-sm text-netease-muted">暂无操作记录</div>
+          ) : (
+            <div className="divide-y divide-white/5">
+              {auditLog.map((entry, idx) => (
+                <div key={`${entry.at}-${entry.action}-${idx}`} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-4 py-2.5 text-xs">
+                  <span className="shrink-0 font-mono text-netease-muted">{formatAuditTime(entry.at)}</span>
+                  <span className="min-w-0 flex-1 text-white/90">{formatAuditAction(entry)}</span>
+                  {entry.ip && <span className="font-mono text-netease-muted">{entry.ip}</span>}
                 </div>
               ))}
             </div>
