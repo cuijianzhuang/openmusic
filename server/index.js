@@ -261,8 +261,11 @@ function getHeaderIp(headers, name) {
   return normalizeClientIp(value);
 }
 
-/** EdgeOne 等 CDN 回源自定义客户端 IP 头，默认 iqp；可用 CLIENT_IP_HEADER 覆盖 */
-const CLIENT_IP_HEADER = String(process.env.CLIENT_IP_HEADER || 'iqp').trim().toLowerCase() || 'iqp';
+/**
+ * CDN 回源真实客户端 IP 头（有 CDN 时必填）。
+ * Cloudflare: CF-Connecting-IP；EdgeOne: iqp
+ */
+const CLIENT_IP_HEADER = String(process.env.CLIENT_IP_HEADER || '').trim().toLowerCase();
 
 function getClientIpFromHeaders(headers = {}, remoteAddress = '') {
   // 未接反代时只用 socket 地址，避免客户端伪造 XFF 绕过限流
@@ -271,9 +274,11 @@ function getClientIpFromHeaders(headers = {}, remoteAddress = '') {
     return normalizeClientIp(remoteAddress || '');
   }
 
-  // CDN 自定义头（EdgeOne 默认 iqp）携带真实客户端 IP，优先于 Nginx 写入的边缘节点 X-Real-IP
-  const customIp = getHeaderIp(headers, CLIENT_IP_HEADER);
-  if (customIp) return customIp;
+  // CDN 配置头优先于 Nginx 写入的边缘节点 X-Real-IP
+  if (CLIENT_IP_HEADER) {
+    const customIp = getHeaderIp(headers, CLIENT_IP_HEADER);
+    if (customIp) return customIp;
+  }
 
   // Nginx 覆盖写入的 X-Real-IP 优先于可被伪造的 XFF 首段
   const realIp = getHeaderIp(headers, 'x-real-ip');
@@ -293,8 +298,8 @@ function getClientIpFromHeaders(headers = {}, remoteAddress = '') {
 function logIpDebug(scope, headers, remoteAddress, resolvedIp) {
   if (process.env.DEBUG_IP !== '1') return;
   console.log(`[ip-debug:${scope}]`, {
-    clientIpHeader: CLIENT_IP_HEADER,
-    customIp: headers?.[CLIENT_IP_HEADER],
+    clientIpHeader: CLIENT_IP_HEADER || '(unset)',
+    customIp: CLIENT_IP_HEADER ? headers?.[CLIENT_IP_HEADER] : undefined,
     xff: headers?.['x-forwarded-for'],
     realIp: headers?.['x-real-ip'],
     remoteAddress,
@@ -394,7 +399,14 @@ function attachUserLocation(roomId, userId, ip) {
 
   void lookupIpLocation(ip).then((location) => {
     // 仅更新内存字段，不触发全房 room_update（进房风暴时定位二次广播是卡顿主因之一）
-    updateUserLocation(roomId, userId, location);
+    const changed = updateUserLocation(roomId, userId, location);
+    // 轻量推送：进房 ACK 时定位尚未解析完，客户端会一直显示「未知」
+    if (changed && location) {
+      const normalizedRoomId = String(roomId || '').toUpperCase();
+      if (normalizedRoomId) {
+        io.to(normalizedRoomId).emit('user_location', { userId, location });
+      }
+    }
   }).catch(() => {});
 }
 

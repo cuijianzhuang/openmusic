@@ -194,7 +194,7 @@ location /socket.io/ {
 }
 ```
 
-- 🌍 限流与 IP 归属地：依赖 Nginx 正确转发 `X-Real-IP` / `X-Forwarded-For`（`TRUST_PROXY=1`）
+- 🌍 限流与 IP 归属地：`TRUST_PROXY=1`；有 CDN 时设置 `CLIENT_IP_HEADER`（Cloudflare：`CF-Connecting-IP`；EdgeOne：`iqp`），并由 Nginx 透传该头
 - 🆕 发版：编辑 `release-notes.json` 或执行 `npm run package:build`；CDN 勿长期缓存 `index.html` 与 `/api/*`
 - 🔍 `/sitemap.xml`、`/robots.txt` 由服务端动态生成（优先 `CLIENT_URL`）
 - 📄 完整 Nginx / 宝塔示例：[deploy/nginx.conf.example](deploy/nginx.conf.example)、[deploy/DEPLOY-BAOTA.md](deploy/DEPLOY-BAOTA.md)

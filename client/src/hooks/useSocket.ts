@@ -545,7 +545,20 @@ let prefetchDebounceTimer = 0;
       );
     };
 
-
+    const onUserLocation = ({ userId, location }: { userId?: string; location?: string }) => {
+      const nextLocation = String(location || '').trim();
+      const targetUserId = String(userId || '').trim();
+      if (!targetUserId || !nextLocation) return;
+      const { room } = useRoomStore.getState();
+      if (!room?.users?.length) return;
+      let changed = false;
+      const users = room.users.map((user) => {
+        if (user.id !== targetUserId || user.location === nextLocation) return user;
+        changed = true;
+        return { ...user, location: nextLocation };
+      });
+      if (changed) useRoomStore.getState().setRoom({ ...room, users });
+    };
 
     s.on('room_update', onRoomUpdate);
 
@@ -558,6 +571,8 @@ let prefetchDebounceTimer = 0;
     s.on('chat_message_recall', onChatMessageRecall);
 
     s.on('chat_reaction_update', onChatReactionUpdate);
+
+    s.on('user_location', onUserLocation);
 
     s.on('kicked', onKicked);
 
