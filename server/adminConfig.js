@@ -91,6 +91,27 @@ export function mustChangeAdminEntryPath() {
 }
 
 /**
+ * 兼容没有 adminConfig.json 的旧站点：保留原 /admin 入口，并标记为已配置，
+ * 避免升级后被当成新站强制重新设置。已有配置文件绝不覆盖。
+ */
+export function migrateLegacyAdminEntryConfig() {
+  if (fs.existsSync(CONFIG_PATH)) return;
+  try {
+    const payload = { entryPath: DEFAULT_ENTRY_PATH, entryPathCustomized: true };
+    fs.writeFileSync(CONFIG_PATH, `${JSON.stringify(payload, null, 2)}\n`, {
+      encoding: 'utf8',
+      mode: 0o600,
+      flag: 'wx',
+    });
+    cached = { mtimeMs: fs.statSync(CONFIG_PATH).mtimeMs, ...payload };
+  } catch (err) {
+    if (err?.code !== 'EEXIST') {
+      console.warn('admin-config: 旧站点入口兼容标记写入失败:', err?.message || err);
+    }
+  }
+}
+
+/**
  * @param {string} raw
  * @param {{ requireCustom?: boolean }} [opts] 初始安全设置阶段禁止继续使用 /admin
  */

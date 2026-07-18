@@ -3,7 +3,11 @@ import path from 'path';
 import { createHash, randomBytes, scrypt as scryptCallback } from 'crypto';
 import { promisify } from 'util';
 import { fileURLToPath } from 'url';
-import { sanitizeAdminEntryPath, setAdminEntryPath } from './adminConfig.js';
+import {
+  migrateLegacyAdminEntryConfig,
+  sanitizeAdminEntryPath,
+  setAdminEntryPath,
+} from './adminConfig.js';
 
 const scrypt = promisify(scryptCallback);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -13,11 +17,10 @@ const ADMIN_CREDENTIALS_KEY = 'openmusic:admin:credentials';
 const attempts = new Map();
 
 function hasLegacyConfiguration() {
-  const redisConfigured = Boolean(
+  return Boolean(
     String(process.env.REDIS_URL || '').trim()
     || String(process.env.REDIS_HOST || '').trim(),
   );
-  return redisConfigured && Boolean(String(process.env.ADMIN_KEY || '').trim());
 }
 
 function writeSetupLock(detail = {}) {
@@ -33,10 +36,14 @@ function writeSetupLock(detail = {}) {
   });
 }
 
-/** 老版本已通过环境变量部署时自动加锁，避免升级后暴露安装接口。 */
+/**
+ * 兼容升级前没有 setup.lock 的站点：
+ * 只要已有 Redis 环境配置，就说明站点已经按旧流程部署，不能重新进入安装向导。
+ */
 export function migrateLegacySetupLock() {
   if (fs.existsSync(LOCK_PATH) || !hasLegacyConfiguration()) return;
   try {
+    migrateLegacyAdminEntryConfig();
     writeSetupLock({ migrated: true });
   } catch (err) {
     if (err?.code !== 'EEXIST') {
@@ -46,7 +53,8 @@ export function migrateLegacySetupLock() {
 }
 
 export function isSetupRequired() {
-  return !fs.existsSync(LOCK_PATH);
+  // 即使运行目录暂时不可写、无法补建锁，也必须阻止旧站点暴露安装接口。
+  return !fs.existsSync(LOCK_PATH) && !hasLegacyConfiguration();
 }
 
 function clientIp(req) {
