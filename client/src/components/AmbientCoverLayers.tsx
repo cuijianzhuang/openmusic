@@ -11,12 +11,17 @@ interface Props {
 export default function AmbientCoverLayers({ coverUrl, className = 'absolute inset-0' }: Props) {
   const [loaded, setLoaded] = useState(false);
   const [tuning, setTuning] = useState<CoverBackdropTuning>(() => tuneCoverBackdrop(null));
-  const signedCover = useSignedApiUrl(coverUrl);
-  const displayUrl = useMemo(() => (signedCover ? toProxiedMediaUrl(signedCover) : ''), [signedCover]);
+  // The proxy endpoint itself is protected by API signing. Build the local proxy
+  // URL first so the signature covers /api/media-proxy and its `url` query.
+  const proxiedCover = useMemo(() => toProxiedMediaUrl(coverUrl), [coverUrl]);
+  const signedCover = useSignedApiUrl(proxiedCover);
+  const displayUrl = signedCover || '';
 
   useEffect(() => {
     setLoaded(false);
     setTuning(tuneCoverBackdrop(null));
+
+    if (!displayUrl) return;
 
     const probe = new Image();
     probe.crossOrigin = 'anonymous';

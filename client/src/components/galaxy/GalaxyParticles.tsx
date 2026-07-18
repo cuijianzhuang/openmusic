@@ -400,7 +400,11 @@ interface Props {
 }
 
 export default function GalaxyParticles({ coverUrl, preset, isPlaying }: Props) {
-  const signedCover = useSignedApiUrl(coverUrl);
+  const proxiedCover = useMemo(
+    () => (coverUrl ? toProxiedMediaUrl(coverUrl) : null),
+    [coverUrl],
+  );
+  const signedCover = useSignedApiUrl(proxiedCover);
   const [particleGrid, setParticleGrid] = useState(() =>
     gridForResolution(roomVisualFxLive.current.coverResolution),
   );
@@ -648,7 +652,7 @@ export default function GalaxyParticles({ coverUrl, preset, isPlaying }: Props) 
       uniforms.uHasCover.value = 0;
       uniforms.uHasDepth.value = 0;
     };
-    img.src = toProxiedMediaUrl(signedCover);
+    img.src = signedCover;
 
     return () => {
       cancelled = true;
