@@ -2041,6 +2041,7 @@ export default function Room() {
         isOwner={isOwner}
         canModerate={canModerate}
         fmMode={normalizeFmMode(room?.neteaseFmMode)}
+        fmModeBeforeOff={room?.fmModeBeforeOff}
         fmSaving={fmSaving}
         announcementEnabled={Boolean(room?.announcementEnabled)}
         announcementText={room?.announcementText || ''}

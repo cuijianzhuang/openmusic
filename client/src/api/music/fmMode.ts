@@ -1,5 +1,8 @@
 export const DEFAULT_FM_MODE = 'DEFAULT';
 
+/** 关闭漫游：队列放空后停止播放，不自动推荐（不作为列表选项展示） */
+export const FM_MODE_OFF = 'OFF';
+
 export interface FmModeOption {
   value: string;
   label: string;
@@ -16,9 +19,12 @@ export const NETEASE_FM_MODE_OPTIONS: FmModeOption[] = [
   { value: 'aidj', label: 'AI DJ', description: 'AI 串烧混剪，曲间带过渡衔接' },
 ];
 
-const FM_MODE_VALUES = new Set(NETEASE_FM_MODE_OPTIONS.map((o) => o.value));
+const FM_MODE_VALUES = new Set([...NETEASE_FM_MODE_OPTIONS.map((o) => o.value), FM_MODE_OFF]);
 
-const FM_MODE_LABEL_MAP = new Map(NETEASE_FM_MODE_OPTIONS.map((o) => [o.value, o.label]));
+const FM_MODE_LABEL_MAP = new Map([
+  ...NETEASE_FM_MODE_OPTIONS.map((o) => [o.value, o.label] as [string, string]),
+  [FM_MODE_OFF, '已关闭'] as [string, string],
+]);
 
 export function normalizeFmMode(input: string | null | undefined): string {
   const raw = String(input || '').trim();

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Minus, Plus, Sparkles, X } from 'lucide-react';
-import { NETEASE_FM_MODE_OPTIONS, getFmModeLabel, normalizeFmMode } from '../api/music/fmMode';
+import { NETEASE_FM_MODE_OPTIONS, getFmModeLabel, normalizeFmMode, FM_MODE_OFF, DEFAULT_FM_MODE } from '../api/music/fmMode';
 import type { BannedSong } from '../types';
 import type { DislikeSkipMode } from '../lib/dislikeSkip';
 import SourceBadge from './SourceBadge';
@@ -53,6 +53,7 @@ interface Props {
   isOwner: boolean;
   canModerate: boolean;
   fmMode: string;
+  fmModeBeforeOff?: string;
   fmSaving?: boolean;
   announcementEnabled: boolean;
   announcementText: string;
@@ -184,6 +185,7 @@ export default function RoomSettingsModal({
   isOwner,
   canModerate,
   fmMode,
+  fmModeBeforeOff,
   fmSaving = false,
   announcementEnabled,
   announcementText,
@@ -350,15 +352,22 @@ export default function RoomSettingsModal({
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           {activeTab === 'fm' && isOwner && (
             <section>
-              <p className="mb-3 text-xs text-netease-muted">
-                队列为空时通过私人漫游自动推荐下一首
-              </p>
-              <div className="space-y-1.5">
+              <Toggle
+                checked={currentFm !== FM_MODE_OFF}
+                disabled={fmSaving}
+                onChange={(next) => {
+                  const restored = normalizeFmMode(fmModeBeforeOff);
+                  onSaveFmMode(next ? (restored === FM_MODE_OFF ? DEFAULT_FM_MODE : restored) : FM_MODE_OFF);
+                }}
+                label="自动漫游"
+                description="队列为空时通过私人漫游自动推荐下一首"
+              />
+              <div className={`mt-3 space-y-1.5 ${currentFm === FM_MODE_OFF ? 'opacity-40' : ''}`}>
                 {NETEASE_FM_MODE_OPTIONS.map((opt) => (
                   <button
                     key={opt.value}
                     type="button"
-                    disabled={fmSaving}
+                    disabled={fmSaving || currentFm === FM_MODE_OFF}
                     onClick={() => onSaveFmMode(opt.value)}
                     className={`w-full rounded-xl border px-3 py-2 text-left transition-colors disabled:opacity-50 ${
                       currentFm === opt.value

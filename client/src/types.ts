@@ -173,6 +173,8 @@ export interface RoomState {
   audioQuality?: RoomAudioQuality;
   /** 队列为空时私人漫游推荐模式 */
   neteaseFmMode?: string;
+  /** 漫游关闭前的模式，重新开启时恢复 */
+  fmModeBeforeOff?: string;
   /** 公告是否开启 */
   announcementEnabled?: boolean;
   /** 公告内容 */

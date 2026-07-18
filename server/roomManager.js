@@ -1,6 +1,6 @@
 import { customAlphabet } from 'nanoid';
 import { scryptSync, randomBytes, timingSafeEqual } from 'crypto';
-import { fetchMetingFmSong, normalizeFmMode, DEFAULT_FM_MODE } from './metingFm.js';
+import { fetchMetingFmSong, normalizeFmMode, DEFAULT_FM_MODE, FM_MODE_OFF } from './metingFm.js';
 import {
   initRoomStorage,
   isRedisEnabled,
@@ -276,6 +276,7 @@ function snapshotRoomForStorage(room) {
     userNicknames: Object.fromEntries(room.userNicknames || []),
     audioQuality: room.audioQuality ?? { netease: 'hires', tencent: 'lossless' },
     neteaseFmMode: normalizeFmMode(room.neteaseFmMode),
+    fmModeBeforeOff: normalizeFmMode(room.fmModeBeforeOff),
     announcementEnabled: Boolean(room.announcementEnabled),
     announcementText: String(room.announcementText || '').slice(0, MAX_ANNOUNCEMENT_LENGTH),
     chatHistoryVisibleOnJoin: Boolean(room.chatHistoryVisibleOnJoin),
@@ -331,6 +332,8 @@ function restoreRoomFromStorage(data) {
   room.userNicknames = new Map(Object.entries(data.userNicknames || {}));
   room.audioQuality = normalizeRoomAudioQuality(data.audioQuality);
   room.neteaseFmMode = normalizeFmMode(data.neteaseFmMode);
+  const fmModeBeforeOff = normalizeFmMode(data.fmModeBeforeOff);
+  room.fmModeBeforeOff = fmModeBeforeOff === FM_MODE_OFF ? DEFAULT_FM_MODE : fmModeBeforeOff;
   room.announcementEnabled = Boolean(data.announcementEnabled);
   room.announcementText = String(data.announcementText || '').slice(0, MAX_ANNOUNCEMENT_LENGTH);
   room.chatHistoryVisibleOnJoin = Boolean(data.chatHistoryVisibleOnJoin);
@@ -501,6 +504,7 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
       tencent: 'lossless',
     },
     neteaseFmMode: DEFAULT_FM_MODE,
+    fmModeBeforeOff: DEFAULT_FM_MODE,
     announcementEnabled: false,
     announcementText: '',
     /** 进房是否可查看历史聊天；默认关闭（仅看进房后的消息） */
@@ -1401,6 +1405,10 @@ export function setRoomFmMode(roomId, actorId, mode, connectionId = null) {
     return { room: serializeRoom(room) };
   }
 
+  // 记住关闭前的模式，重新开启时恢复
+  if (nextMode === FM_MODE_OFF && room.neteaseFmMode !== FM_MODE_OFF) {
+    room.fmModeBeforeOff = normalizeFmMode(room.neteaseFmMode);
+  }
   room.neteaseFmMode = nextMode;
   clearNextRandom(room);
   persistRoom(room);
@@ -2309,6 +2317,11 @@ async function ensureNextRandom(room) {
     clearNextRandom(room);
     return;
   }
+  // 漫游已关闭：不预取，队列放空后自然停止
+  if ((room.neteaseFmMode || DEFAULT_FM_MODE) === FM_MODE_OFF) {
+    clearNextRandom(room);
+    return;
+  }
   if (room.nextRandom || room.nextRandomPromise) return;
 
   room.nextRandomPromise = (async () => {
@@ -2448,7 +2461,8 @@ async function playNextUnlocked(room, options = {}) {
   room.isPlaying = false;
   room.currentTime = 0;
   room.startedAt = null;
-  room.randomLoading = true;
+  // 漫游关闭时干净停机，不进入"漫游加载中"重试
+  room.randomLoading = (room.neteaseFmMode || DEFAULT_FM_MODE) !== FM_MODE_OFF;
   bumpPlaybackState(room);
 }
 
@@ -3361,6 +3375,7 @@ function serializeRoom(room, options = {}) {
     randomLoading: Boolean(room.randomLoading),
     audioQuality: normalizeRoomAudioQuality(room.audioQuality),
     neteaseFmMode: normalizeFmMode(room.neteaseFmMode),
+    fmModeBeforeOff: normalizeFmMode(room.fmModeBeforeOff),
     announcementEnabled: Boolean(room.announcementEnabled),
     announcementText: String(room.announcementText || '').slice(0, MAX_ANNOUNCEMENT_LENGTH),
     chatHistoryVisibleOnJoin: Boolean(room.chatHistoryVisibleOnJoin),
@@ -3413,6 +3428,7 @@ export function prepareRoomBroadcast(roomId) {
     randomLoading: Boolean(room.randomLoading),
     audioQuality: normalizeRoomAudioQuality(room.audioQuality),
     neteaseFmMode: normalizeFmMode(room.neteaseFmMode),
+    fmModeBeforeOff: normalizeFmMode(room.fmModeBeforeOff),
     announcementEnabled: Boolean(room.announcementEnabled),
     announcementText: String(room.announcementText || '').slice(0, MAX_ANNOUNCEMENT_LENGTH),
     chatHistoryVisibleOnJoin: Boolean(room.chatHistoryVisibleOnJoin),
