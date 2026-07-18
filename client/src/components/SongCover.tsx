@@ -15,6 +15,8 @@ function coverIdentity(song: Pick<Song, 'id' | 'source' | 'pic'>): string {
   return `${song.source || 'netease'}:${song.id}:${song.pic || ''}`;
 }
 
+type LoadStage = 'primary' | 'proxy' | 'failed';
+
 export default function SongCover({
   song,
   size = 'thumb',
@@ -22,18 +24,24 @@ export default function SongCover({
   eager = false,
 }: Props) {
   const identity = coverIdentity(song);
-  const [failedFor, setFailedFor] = useState<string | null>(null);
-  const failed = failedFor === identity;
+  const [stageFor, setStageFor] = useState<{ id: string; stage: LoadStage } | null>(null);
+  const stage: LoadStage = stageFor?.id === identity ? stageFor.stage : 'primary';
 
   // 切歌后必须清掉失败态，否则底栏单例封面会一直卡在黑底占位
   useEffect(() => {
-    setFailedFor(null);
+    setStageFor(null);
   }, [identity]);
 
   const raw = getCoverUrl(song, size);
-  const signed = useSignedApiUrl(raw);
-  const src = failed || !signed ? getFallbackCoverUrl() : signed;
   const pixelSize = getCoverPixelSize(size);
+
+  // 外链封面加载失败（如混合内容拦截、CDN 不支持 https）时改走同源代理兜底
+  const proxyUrl = /^https?:\/\//i.test(raw)
+    ? `/api/media-proxy?url=${encodeURIComponent(raw)}${pixelSize ? `&size=${pixelSize}` : ''}`
+    : null;
+  const target = stage === 'proxy' && proxyUrl ? proxyUrl : raw;
+  const signed = useSignedApiUrl(target);
+  const src = stage === 'failed' || !signed ? getFallbackCoverUrl() : signed;
 
   return (
     <img
@@ -47,7 +55,12 @@ export default function SongCover({
       decoding="async"
       referrerPolicy="no-referrer"
       {...(eager ? { fetchpriority: 'high' } : {})}
-      onError={() => setFailedFor(identity)}
+      onError={() => {
+        setStageFor({
+          id: identity,
+          stage: stage === 'primary' && proxyUrl ? 'proxy' : 'failed',
+        });
+      }}
     />
   );
 }

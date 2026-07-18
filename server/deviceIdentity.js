@@ -3,7 +3,7 @@ import { getRedisClient, isRedisEnabled } from './roomStorage.js';
 const DEVICE_USER_PREFIX = 'openmusic:device:';
 const USER_DEVICES_PREFIX = 'openmusic:user_devices:';
 
-/** deviceId -> userId（内存回退，与 Redis 同步写入） */
+/** deviceId -> userId（进程内热缓存；持久化只写 Redis） */
 const deviceToUser = new Map();
 /** userId -> Set<deviceId> */
 const userToDevices = new Map();
@@ -30,9 +30,11 @@ function rememberDeviceBinding(deviceId, userId) {
 }
 
 async function persistDeviceBinding(deviceId, userId) {
-  if (!isRedisEnabled()) return;
   const client = getRedisClient();
-  if (!client) return;
+  if (!client) {
+    console.error('Redis: 不可用，设备身份绑定未持久化');
+    return;
+  }
 
   const did = sanitizeDeviceId(deviceId);
   const uid = sanitizeDeviceId(userId);

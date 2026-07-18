@@ -1,7 +1,10 @@
-# 基于你当前宝塔配置修改：静态 Nginx 直出，动态回 Node
+# 基于宝塔站点配置修改：静态 Nginx 直出，动态回 Node
 # 前端：/www/sjbmusic/client/dist
 # 后端：/www/sjbmusic/server → 127.0.0.1:4000
+# 请按实际域名与部署路径替换 m.qqovo.cn、/www/sjbmusic
 # 保存后执行：nginx -t && nginx -s reload
+#
+# 精简通用版见 nginx.conf.example
 
 proxy_cache_path /www/sjbmusic/proxy_cache_dir levels=1:2 keys_zone=m_qqovo_cn_cache:20m inactive=1d max_size=5g;
 
@@ -48,16 +51,13 @@ server {
     ssl_session_tickets on;
     ssl_session_cache shared:SSL:10m;
     ssl_session_timeout 10m;
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
-    # 宽松基线：不挡音频/封面 CDN；若需收紧可改为 report-only 观察后再 enforce
-    # add_header Content-Security-Policy-Report-Only "default-src 'self'; media-src 'self' https: blob:; img-src 'self' https: data: blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' wss: https:;" always;
+    add_header Strict-Transport-Security "max-age=31536000";
     add_header Alt-Svc 'quic=":443"; h3=":443"; h3-29=":443"; h3-27=":443";h3-25=":443"; h3-T050=":443"; h3-Q050=":443";h3-Q049=":443";h3-Q048=":443"; h3-Q046=":443"; h3-Q043=":443"';
     error_page 497 https://$host$request_uri;
     #SSL-END
+	#引用重定向规则，注释后配置的重定向代理将无效
+	include /www/server/panel/vhost/nginx/redirect/m.qqovo.cn/*.conf;
+	
 
     #REDIRECT START
     #REDIRECT END
@@ -128,13 +128,12 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header iqp $http_iqp;
-        proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
         proxy_buffering off;
         proxy_read_timeout 86400;
         proxy_send_timeout 86400;
     }
 
-    # 必须写在 /api 前面；酷狗 HTTP 音链经此流式转发，禁止缓冲
+    # 必须写在 /api 前面
     location ^~ /api/media-proxy {
         proxy_pass http://127.0.0.1:4000;
         proxy_http_version 1.1;
@@ -143,8 +142,6 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header iqp $http_iqp;
-        proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
         proxy_set_header Range $http_range;
         proxy_set_header If-Range $http_if_range;
         proxy_buffering off;
@@ -154,7 +151,6 @@ server {
         gzip off;
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
-        # 若 EdgeOne 在 Nginx 前：控制台须将 /api/* 设为动态回源、不缓存
     }
 
     location ^~ /api/ {
@@ -164,8 +160,6 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header iqp $http_iqp;
-        proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
         proxy_connect_timeout 60s;
         proxy_send_timeout 600s;
         proxy_read_timeout 600s;
@@ -178,8 +172,6 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header iqp $http_iqp;
-        proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
         proxy_read_timeout 600s;
         proxy_send_timeout 600s;
     }
@@ -191,8 +183,6 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header iqp $http_iqp;
-        proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
     }
 
     location ^~ /cgi-bin/ {
@@ -202,8 +192,6 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header iqp $http_iqp;
-        proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
     }
 
     location = /robots.txt {
@@ -212,8 +200,6 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header iqp $http_iqp;
-        proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
     }
 
     location = /sitemap.xml {
@@ -222,22 +208,14 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header iqp $http_iqp;
-        proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
     }
 
-    # ★ 静态直出（资源带 content hash，可长期缓存；HTML 勿缓存）
-    # EdgeOne：/api/* 建议动态回源；发版后至少刷新 HTML / 首页缓存
-    # 优先使用构建产物的 .gz / .br（vite-plugin-compression2）
-    gzip_static on;
-    # 若 Nginx 已装 brotli 模块可取消下一行注释：
-    # brotli_static on;
-
+    # ★ 静态直出（本项目 assets 固定文件名，禁止长期缓存）
     location ^~ /assets/ {
-        expires 7d;
-        add_header Cache-Control "public, max-age=604800, immutable" always;
-        access_log off;
-        try_files $uri =404;
+    expires 1d;
+    add_header Cache-Control "public, max-age=86400" always;
+    access_log off;
+    try_files $uri =404;
     }
 
     location ^~ /qface/ {

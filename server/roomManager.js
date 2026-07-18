@@ -2,6 +2,7 @@ import { customAlphabet } from 'nanoid';
 import { scryptSync, randomBytes, timingSafeEqual } from 'crypto';
 import { fetchMetingFmSong, normalizeFmMode, DEFAULT_FM_MODE, FM_MODE_OFF } from './metingFm.js';
 import {
+  getRedisClient,
   initRoomStorage,
   isRedisEnabled,
   loadAllRoomsFromStorage,
@@ -21,22 +22,15 @@ import {
 import { deleteRoomChatImages, validateChatImageForRoom, validateExternalChatImage } from './qiniuOss.js';
 import { isLocalStickerImageKey, validateLocalStickerImage } from './localSticker.js';
 import { collectDeviceIdsForUser, isAccessBanned } from './deviceIdentity.js';
+import { getRuntimeConfig } from './runtimeConfig.js';
 
 const generateRoomId = customAlphabet('ABCDEFGHJKLMNPQRSTUVWXYZ23456789', 6);
 const generateId = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz', 12);
 
-const DEFAULT_ROOM_EMPTY_TTL_MS = 10 * 60 * 1000;
-function parseEnvIntMs(name, fallbackMs) {
-  const raw = process.env[name];
-  if (raw == null) return fallbackMs;
-  const n = Number(raw);
-  if (!Number.isFinite(n)) return fallbackMs;
-  // clamp to [0, 24h]
-  return Math.max(0, Math.min(n, 24 * 60 * 60 * 1000));
-}
-
 // 房间无人时销毁延迟（毫秒），用于减少“退出再进设置丢失/房间被清理”的情况
-const ROOM_EMPTY_TTL_MS = parseEnvIntMs('ROOM_EMPTY_TTL_MS', DEFAULT_ROOM_EMPTY_TTL_MS);
+const PROTECTED_ROOMS_REDIS_KEY = 'openmusic:admin:protected_rooms';
+/** 管理后台设置的保活房间；Redis 可用时跨重启持久化 */
+const protectedRoomIds = new Set();
 const DEFAULT_QUEUE_MAX_LENGTH = 200;
 const ALLOWED_QUEUE_MAX_LENGTHS = [50, 100, 200];
 const ALLOWED_SONG_REQUEST_COOLDOWNS_SEC = [0, 10, 30, 60, 120];
@@ -229,9 +223,10 @@ function scheduleRoomDestroy(roomId) {
   if (!room) return;
 
   cancelRoomDestroy(room);
+  if (protectedRoomIds.has(roomId)) return;
   room.destroyTimer = setTimeout(() => {
     const current = rooms.get(roomId);
-    if (current && current.users.size === 0) {
+    if (current && current.users.size === 0 && !protectedRoomIds.has(roomId)) {
       clearAllPendingLeaveClears(current);
       clearSkipRequestExpiryTimersForRoom(roomId);
       void deleteRoomChatImages(roomId).finally(() => {
@@ -240,7 +235,7 @@ function scheduleRoomDestroy(roomId) {
         void deleteRoomFromStorage(roomId);
       });
     }
-  }, ROOM_EMPTY_TTL_MS);
+  }, getRuntimeConfig().roomEmptyTtlMs);
 }
 
 function snapshotRoomForStorage(room) {
@@ -408,6 +403,15 @@ function isRoomVisibleInLobby(room) {
 
 export async function initRooms() {
   await initRoomStorage();
+  const redis = getRedisClient();
+  if (redis) {
+    try {
+      const ids = await redis.sMembers(PROTECTED_ROOMS_REDIS_KEY);
+      for (const id of ids) protectedRoomIds.add(String(id).toUpperCase());
+    } catch (err) {
+      console.error('Redis: 读取保活房间列表失败:', err.message);
+    }
+  }
   const stored = await loadAllRoomsFromStorage();
 
   for (const data of stored) {
@@ -1109,7 +1113,13 @@ export function listRooms() {
   cachedListRooms = Array.from(rooms.values())
     .filter(isRoomVisibleInLobby)
     .map(serializeRoomSummary)
-    .sort((a, b) => b.userCount - a.userCount || b.createdAt - a.createdAt);
+    .sort((a, b) => {
+      // 大厅：人数多的靠前，无密码上锁一律最后
+      const aLocked = a.isLocked && !a.hasPassword ? 1 : 0;
+      const bLocked = b.isLocked && !b.hasPassword ? 1 : 0;
+      if (aLocked !== bLocked) return aLocked - bLocked;
+      return b.userCount - a.userCount || b.createdAt - a.createdAt;
+    });
   cachedListRoomsAt = now;
   return cachedListRooms;
 }
@@ -1125,7 +1135,12 @@ export function listRoomsForAdmin() {
       id: room.id,
       name: room.name,
       userCount: room.users.size,
-      users: Array.from(room.users.values()).map((u) => ({ id: u.id, nickname: u.nickname })),
+      users: Array.from(room.users.values()).map((u) => ({
+        id: u.id,
+        nickname: u.nickname,
+        clientIp: u.clientIp || '',
+        deviceId: u.deviceId || '',
+      })),
       hasPassword: Boolean(room.passwordHash),
       isLocked: Boolean(room.isLocked),
       isPlaying: room.isPlaying,
@@ -1134,8 +1149,40 @@ export function listRoomsForAdmin() {
         : null,
       queueLength: room.queue.length,
       createdAt: room.createdAt,
+      protectedFromDestroy: protectedRoomIds.has(room.id),
     }))
     .sort((a, b) => b.userCount - a.userCount || b.createdAt - a.createdAt);
+}
+
+/** 管理后台：设置房间是否跳过无人超时销毁。 */
+export async function setRoomProtectedFromDestroy(roomId, enabled) {
+  const id = String(roomId || '').trim().toUpperCase();
+  const room = rooms.get(id);
+  if (!room) return { success: false, error: '房间不存在' };
+
+  const next = Boolean(enabled);
+  const redis = getRedisClient();
+  if (redis) {
+    try {
+      if (next) await redis.sAdd(PROTECTED_ROOMS_REDIS_KEY, id);
+      else await redis.sRem(PROTECTED_ROOMS_REDIS_KEY, id);
+    } catch (err) {
+      console.error(`Redis: 更新房间 ${id} 保活状态失败:`, err.message);
+      return { success: false, error: 'Redis 保存失败，请稍后重试' };
+    }
+  }
+
+  if (next) {
+    protectedRoomIds.add(id);
+    cancelRoomDestroy(room);
+    // 确保空房也已有持久化快照，重启后可以恢复。
+    persistRoom(room);
+  } else {
+    protectedRoomIds.delete(id);
+    if (room.users.size === 0) scheduleRoomDestroy(id);
+  }
+
+  return { success: true, roomId: id, protectedFromDestroy: next };
 }
 
 // 管理后台：立即解散房间（调用方负责先踢出房内 socket）
@@ -1147,6 +1194,12 @@ export function adminDestroyRoom(roomId) {
   cancelRoomDestroy(room);
   clearAllPendingLeaveClears(room);
   clearSkipRequestExpiryTimersForRoom(id);
+  protectedRoomIds.delete(id);
+  const redis = getRedisClient();
+  if (redis) {
+    void redis.sRem(PROTECTED_ROOMS_REDIS_KEY, id)
+      .catch((err) => console.error(`Redis: 清理房间 ${id} 保活状态失败:`, err.message));
+  }
   rooms.delete(id);
   invalidateRoomsListCache();
   deleteRoomChatImages(id)
@@ -1154,6 +1207,49 @@ export function adminDestroyRoom(roomId) {
     .then(() => deleteRoomFromStorage(id))
     .catch((err) => console.error(`删除房间 ${id} 存储失败:`, err));
   return { success: true, name };
+}
+
+/**
+ * 管理后台：向所有活跃房间广播持久化系统通知（落盘进聊天历史，样式同撤回提示行）。
+ * @returns {{ success: boolean, error?: string, roomCount?: number, deliveries?: Array<{ roomId: string, message: object, toast: object }> }}
+ */
+export function broadcastAdminSystemMessage(text) {
+  const content = String(text || '').trim().slice(0, 300);
+  if (!content) return { success: false, error: '广播内容不能为空' };
+
+  const deliveries = [];
+  for (const room of rooms.values()) {
+    const message = {
+      id: generateId(),
+      userId: 'system',
+      nickname: '站点通知',
+      text: content,
+      kind: 'recall',
+      mentions: [],
+      replyTo: null,
+      timestamp: Date.now(),
+    };
+    room.messages.push(message);
+    if (room.messages.length > MAX_CHAT_MESSAGES) {
+      room.messages.splice(0, room.messages.length - MAX_CHAT_MESSAGES);
+    }
+    persistRoom(room);
+
+    const wire = serializeChatMessage(message);
+    deliveries.push({
+      roomId: room.id,
+      message: wire,
+      // 额外发一条短暂 toast，不进历史
+      toast: {
+        ...wire,
+        id: `${wire.id}-toast`,
+        kind: 'system',
+        nickname: '系统',
+      },
+    });
+  }
+
+  return { success: true, roomCount: deliveries.length, deliveries };
 }
 
 export function getRoomPublic(roomId) {
@@ -1273,6 +1369,7 @@ export function addUser(roomId, userId, nickname, options = {}) {
     connectionIds,
     location: String(options.location || existing?.location || '').trim().slice(0, 12),
     clientIp,
+    deviceId: options.deviceId || existing?.deviceId || null,
     chatVisibleSince,
   });
   rememberUserNickname(room, userId, resolvedNickname);

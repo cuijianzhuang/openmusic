@@ -6,6 +6,7 @@ const Home = lazy(() => import('./pages/Home'));
 const Room = lazy(() => import('./pages/Room'));
 const TvDisplay = lazy(() => import('./pages/TvDisplay'));
 const Admin = lazy(() => import('./pages/Admin'));
+const Setup = lazy(() => import('./pages/Setup'));
 
 function RouteFallback() {
   return (
@@ -18,6 +19,21 @@ function RouteFallback() {
   );
 }
 
+function NotFound() {
+  return (
+    <div className="flex h-full min-h-[50vh] flex-col items-center justify-center gap-2 bg-netease-dark text-netease-muted">
+      <p className="text-sm">页面不存在</p>
+      <a href="/" className="text-xs text-netease-red hover:underline">返回首页</a>
+    </div>
+  );
+}
+
+/** 与服务端 sanitizeAdminEntryPath 对齐：仅合法形态才打 gate，避免 * 通配放大探测 */
+function looksLikeAdminEntryPath(pathname: string): boolean {
+  if (pathname === '/admin') return true;
+  return /^\/[A-Za-z0-9_-]{8,64}$/.test(pathname);
+}
+
 /** 仅当当前 pathname 匹配服务端配置的管理入口时渲染后台 */
 function AdminGate() {
   const location = useLocation();
@@ -26,11 +42,18 @@ function AdminGate() {
   useEffect(() => {
     let cancelled = false;
     const path = location.pathname;
-    // 静态资源 / 带扩展名的路径不当作管理入口
-    if (path.includes('.') || path.startsWith('/assets') || path.startsWith('/qface') || path.startsWith('/vendor')) {
+
+    if (
+      path.includes('.')
+      || path.startsWith('/assets')
+      || path.startsWith('/qface')
+      || path.startsWith('/vendor')
+      || !looksLikeAdminEntryPath(path)
+    ) {
       setMatch(false);
       return;
     }
+
     setMatch(null);
     (async () => {
       try {
@@ -52,28 +75,45 @@ function AdminGate() {
   }, [location.pathname]);
 
   if (match === null) return <RouteFallback />;
-  if (!match) {
-    return (
-      <div className="flex h-full min-h-[50vh] flex-col items-center justify-center gap-2 bg-netease-dark text-netease-muted">
-        <p className="text-sm">页面不存在</p>
-        <a href="/" className="text-xs text-netease-red hover:underline">返回首页</a>
-      </div>
-    );
-  }
+  if (!match) return <NotFound />;
   return <Admin />;
 }
 
 export default function App() {
+  const [setupRequired, setSetupRequired] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/setup/status', { credentials: 'same-origin', cache: 'no-store' })
+      .then((response) => response.json())
+      .then((data) => {
+        if (!cancelled) setSetupRequired(Boolean(data.setupRequired));
+      })
+      .catch(() => {
+        // 兼容尚未升级 setup API 的服务端，不阻断正常页面。
+        if (!cancelled) setSetupRequired(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (setupRequired === null) return <RouteFallback />;
+
   return (
     <div className="h-full">
-      <AppUpdateGate />
+      {!setupRequired && <AppUpdateGate />}
       <Suspense fallback={<RouteFallback />}>
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/room/:roomId" element={<Room />} />
-          <Route path="/tv/:roomId" element={<TvDisplay />} />
-          <Route path="*" element={<AdminGate />} />
-        </Routes>
+        {setupRequired ? (
+          <Setup />
+        ) : (
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/room/:roomId" element={<Room />} />
+            <Route path="/tv/:roomId" element={<TvDisplay />} />
+            <Route path="*" element={<AdminGate />} />
+          </Routes>
+        )}
       </Suspense>
     </div>
   );

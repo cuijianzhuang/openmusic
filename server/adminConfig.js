@@ -23,6 +23,7 @@ const RESERVED_PREFIXES = [
 let cached = {
   mtimeMs: -1,
   entryPath: DEFAULT_ENTRY_PATH,
+  entryPathCustomized: false,
 };
 
 function normalizeEntryPath(raw) {
@@ -48,40 +49,67 @@ export function sanitizeAdminEntryPath(raw) {
   return p;
 }
 
-function readFromDisk() {
+function readConfigFromDisk() {
   try {
-    if (!fs.existsSync(CONFIG_PATH)) return DEFAULT_ENTRY_PATH;
+    if (!fs.existsSync(CONFIG_PATH)) {
+      return { entryPath: DEFAULT_ENTRY_PATH, entryPathCustomized: false };
+    }
     const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-    return sanitizeAdminEntryPath(raw.entryPath) || DEFAULT_ENTRY_PATH;
+    const entryPath = sanitizeAdminEntryPath(raw.entryPath) || DEFAULT_ENTRY_PATH;
+    // 已是非默认路径则视为已自定义；否则看显式标记
+    const entryPathCustomized = entryPath !== DEFAULT_ENTRY_PATH
+      ? true
+      : Boolean(raw.entryPathCustomized);
+    return { entryPath, entryPathCustomized };
   } catch (err) {
     console.error('admin-config read error:', err?.message || err);
-    return DEFAULT_ENTRY_PATH;
+    return { entryPath: DEFAULT_ENTRY_PATH, entryPathCustomized: false };
   }
 }
 
-export function getAdminEntryPath() {
+function refreshCache() {
   let mtimeMs = 0;
   try {
     mtimeMs = fs.statSync(CONFIG_PATH).mtimeMs;
   } catch {
-    cached = { mtimeMs: 0, entryPath: DEFAULT_ENTRY_PATH };
-    return DEFAULT_ENTRY_PATH;
+    cached = { mtimeMs: 0, entryPath: DEFAULT_ENTRY_PATH, entryPathCustomized: false };
+    return cached;
   }
-  if (cached.mtimeMs === mtimeMs) return cached.entryPath;
-  const entryPath = readFromDisk();
-  cached = { mtimeMs, entryPath };
-  return entryPath;
+  if (cached.mtimeMs === mtimeMs) return cached;
+  const cfg = readConfigFromDisk();
+  cached = { mtimeMs, ...cfg };
+  return cached;
 }
 
-export function setAdminEntryPath(raw) {
+export function getAdminEntryPath() {
+  return refreshCache().entryPath;
+}
+
+/** 从未自定义过登录地址 → 首次登录强制修改（须离开默认 /admin） */
+export function mustChangeAdminEntryPath() {
+  return !refreshCache().entryPathCustomized;
+}
+
+/**
+ * @param {string} raw
+ * @param {{ requireCustom?: boolean }} [opts] 初始安全设置阶段禁止继续使用 /admin
+ */
+export function setAdminEntryPath(raw, opts = {}) {
   const entryPath = sanitizeAdminEntryPath(raw);
   if (!entryPath) {
-    return { success: false, error: '登录地址格式无效（可用 /admin，或 / 加 8–64 位字母数字_-）' };
+    return { success: false, error: '登录地址格式无效（须为 / 加 8–64 位字母数字_-）' };
   }
+  if (opts.requireCustom && entryPath === DEFAULT_ENTRY_PATH) {
+    return { success: false, error: '初始设置须将登录地址改为非 /admin 的随机路径' };
+  }
+  const prev = refreshCache();
+  // 一旦用过非默认路径即标记已自定义；之后即使改回 /admin 也不再强制
+  const entryPathCustomized = prev.entryPathCustomized || entryPath !== DEFAULT_ENTRY_PATH;
   try {
-    fs.writeFileSync(CONFIG_PATH, `${JSON.stringify({ entryPath }, null, 2)}\n`, 'utf8');
-    cached = { mtimeMs: fs.statSync(CONFIG_PATH).mtimeMs, entryPath };
-    return { success: true, entryPath };
+    const payload = { entryPath, entryPathCustomized };
+    fs.writeFileSync(CONFIG_PATH, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+    cached = { mtimeMs: fs.statSync(CONFIG_PATH).mtimeMs, entryPath, entryPathCustomized };
+    return { success: true, entryPath, entryPathCustomized };
   } catch (err) {
     console.error('admin-config write error:', err?.message || err);
     return { success: false, error: '保存失败' };

@@ -1,12 +1,13 @@
-const APIHZ_BASE_URL = (process.env.APIHZ_BASE_URL || 'https://cn.apihz.cn/api').replace(/\/$/, '');
+import { getRuntimeConfig } from './runtimeConfig.js';
+
 const DEFAULT_TIMEOUT_MS = 10000;
 
 export function getApihzId() {
-  return (process.env.APIHZ_ID || process.env.APIHZ_IMG_ID || process.env.APIHZ_MGC_ID || '').trim();
+  return getRuntimeConfig().apihzId;
 }
 
 export function getApihzKey() {
-  return (process.env.APIHZ_KEY || process.env.APIHZ_IMG_KEY || process.env.APIHZ_MGC_KEY || '').trim();
+  return getRuntimeConfig().apihzKey;
 }
 
 export function isApihzConfigured() {
@@ -15,7 +16,7 @@ export function isApihzConfigured() {
 
 export function buildApihzUrl(endpoint) {
   const path = String(endpoint || '').replace(/^\//, '');
-  return `${APIHZ_BASE_URL}/${path}`;
+  return `${getRuntimeConfig().apihzBaseUrl}/${path}`;
 }
 
 export async function fetchApihz(url, options = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {

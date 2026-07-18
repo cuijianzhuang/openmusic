@@ -13,6 +13,8 @@ import {
 } from './metingUpstream.js';
 import { mountWechatFileHelperProxy } from './wechatFileHelperProxy.js';
 import { mountAdminApi } from './adminApi.js';
+import { initAdminCredentials } from './adminCredentials.js';
+import { isSetupRequired, mountSetupApi } from './setupApi.js';
 import { buildRobotsTxt, buildSitemapXml, resolveSiteOrigin } from './seoFiles.js';
 import express from 'express';
 import cors from 'cors';
@@ -111,7 +113,7 @@ import {
 } from './cyapi.js';
 import { importNeteasePlaylist, importQqPlaylist, fetchNeteasePlaylistMetas } from './playlistImport.js';
 import { fetchNeteaseHotToplist } from './neteaseToplist.js';
-import { importFavoriteSongs, listFavoriteSongs, setFavoriteSong } from './roomStorage.js';
+import { hasRedisEnvConfig, importFavoriteSongs, listFavoriteSongs, setFavoriteSong } from './roomStorage.js';
 import {
   createChatImageUploadToken,
   isQiniuConfigured,
@@ -122,13 +124,15 @@ import {
   searchApihzStickers,
 } from './apihzSticker.js';
 import { checkApihzSensitiveWords } from './apihzSensitiveWord.js';
-import { getSiteAnnouncement } from './siteAnnouncement.js';
+import { getSiteAnnouncement, initSiteAnnouncement } from './siteAnnouncement.js';
+import { initSiteBans, isSiteBanned } from './siteBan.js';
+import { createErrorReport } from './errorReports.js';
 import { deriveChatTextGateKey, verifyChatTextGatePass } from './chatTextGate.js';
+import { getRuntimeConfig } from './runtimeConfig.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const clientDist = path.join(__dirname, '../client/dist');
 const PORT = process.env.PORT || 4000;
-const VMY_LRC_URL = (process.env.VMY_LRC_URL || 'https://api.52vmy.cn/api/music/lrc').replace(/\/$/, '');
 const DISCONNECT_GRACE_MS = 30_000;
 const AUTO_ADVANCE_INTERVAL_MS = 500;
 const CLIENT_URL = (process.env.CLIENT_URL || '').replace(/\/$/, '');
@@ -162,6 +166,12 @@ const httpServer = createServer(app);
 
 function corsOrigin(origin, callback) {
   if (!origin) {
+    callback(null, true);
+    return;
+  }
+
+  // 首次部署尚无 CLIENT_URL；安装 API 自身仍执行严格同 Host 校验。
+  if (isSetupRequired()) {
     callback(null, true);
     return;
   }
@@ -209,12 +219,15 @@ app.use(express.json({
   },
 }));
 
+mountSetupApi(app);
+
 /** 受保护 API：会话校验 + 请求签名校验 */
 const API_ACCESS_DENIED = '请求无效，请刷新页面后重试';
 
 app.use((req, res, next) => {
   if (!req.path.startsWith('/api/')) return next();
-  // 管理后台使用独立的 ADMIN_KEY 鉴权（见 adminApi.js），不走会话身份与签名
+  if (req.path.startsWith('/api/setup/')) return next();
+  // 管理后台使用独立的账号密码鉴权（见 adminApi.js / adminCredentials.js），不走会话身份与签名
   if (req.path.startsWith('/api/admin/')) return next();
   if (isPublicApiPath(req)) return next();
 
@@ -389,6 +402,7 @@ const limitJoinPasswordFail = createRateLimiter({ windowMs: 60_000, max: 8 });
 const limitProxyRequest = createRateLimiter({ windowMs: 60_000, max: 120 });
 const limitSocketAction = createRateLimiter({ windowMs: 60_000, max: 90 });
 const limitSocketChat = createRateLimiter({ windowMs: 60_000, max: 30 });
+const limitErrorReport = createRateLimiter({ windowMs: 10 * 60_000, max: 5 });
 
 function sanitizeClientSong(song) {
   if (!song || typeof song !== 'object') {
@@ -554,7 +568,7 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true });
 });
 
-/** 首页站点公告：配置文件热更新；no-store 防 CDN/浏览器缓存旧公告 */
+/** 首页站点公告：管理后台设置（Redis 持久化）；no-store 防 CDN/浏览器缓存旧公告 */
 app.get('/api/site-announcement', (_req, res) => {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
   res.set('Pragma', 'no-cache');
@@ -849,7 +863,7 @@ app.get('/api/music/lrc-fallback', async (req, res) => {
 
   try {
     const params = new URLSearchParams({ msg, n });
-    const response = await fetchWithTimeout(`${VMY_LRC_URL}?${params}`);
+    const response = await fetchWithTimeout(`${getRuntimeConfig().vmyLrcUrl}?${params}`);
     if (!response.ok) {
       return res.status(502).json({ error: '歌词接口请求失败' });
     }
@@ -1036,6 +1050,30 @@ app.post('/api/session/bootstrap', async (req, res) => {
   return sendBootstrapResponse(res, userId, signIat, signClientId(userId, signIat), deviceId);
 });
 
+app.post('/api/error-reports', async (req, res) => {
+  const identity = resolveIdentityFromRequest(req);
+  if (!identity?.userId) {
+    return res.status(401).json({ error: '会话未就绪，请刷新页面后重试' });
+  }
+  const ip = getRequestIp(req);
+  if (!limitErrorReport(`error-report:${ip}:${identity.userId}`)) {
+    return res.status(429).json({ error: '上报过于频繁，请稍后再试' });
+  }
+
+  const result = await createErrorReport({
+    description: req.body?.description,
+    snapshot: req.body?.snapshot,
+    events: req.body?.events,
+    meta: req.body?.meta,
+    ip,
+    userId: identity.userId,
+  });
+  if (!result.success) {
+    return res.status(400).json({ error: result.error });
+  }
+  res.json({ success: true, report: result.report });
+});
+
 app.get('/api/rooms', (_req, res) => {
   res.json(listRooms());
 });
@@ -1050,6 +1088,11 @@ app.post('/api/rooms', (req, res) => {
   const identity = resolveIdentityFromRequest(req);
   if (!identity?.userId) {
     return res.status(401).json({ error: '会话未就绪，请刷新页面后重试' });
+  }
+  const createIp = getRequestIp(req);
+  const createDeviceId = resolveDeviceIdFromCookieHeader(req.headers?.cookie || '');
+  if (isSiteBanned({ ip: createIp, deviceId: createDeviceId })) {
+    return res.status(403).json({ error: '你已被站点封禁，无法创建房间' });
   }
   const room = createRoom({ name, password, creatorId: identity.userId });
   res.json(room);
@@ -1240,6 +1283,7 @@ mountAdminApi(app, {
   socketToRoom,
   socketToUserId,
   getClientIp: (req) => getClientIpFromHeaders(req.headers, req.socket?.remoteAddress || ''),
+  allowedOrigins: ALLOWED_ORIGINS,
 });
 
 function isPrivateHostname(hostname) {
@@ -1515,6 +1559,15 @@ io.on('connection', (socket) => {
     }
 
     const deviceId = resolveDeviceIdFromCookieHeader(socket.handshake?.headers?.cookie || '');
+    // 安全限流仍使用连接来源 IP；客户端上报值仅用于成员归属展示/同端统计。
+    // 站点封禁在密码校验前检查，避免被封用户反复试密码。
+    const joinProbeIp = getClientIp(socket);
+    const siteBan = isSiteBanned({ ip: joinProbeIp, deviceId });
+    if (siteBan) {
+      callback?.({ success: false, error: '你已被站点封禁，无法进入房间' });
+      return;
+    }
+
     const joinRoomInternal = getRoomInternal(id);
     if (joinRoomInternal && isAccessBanned(joinRoomInternal, userId, deviceId)) {
       callback?.({ success: false, error: '你已被移出该房间，无法再次进入' });
@@ -2671,9 +2724,27 @@ setInterval(() => {
 
 await initRooms();
 
+const setupRequired = isSetupRequired();
+if (!isRedisEnabled()) {
+  if (setupRequired && !hasRedisEnvConfig()) {
+    console.warn('🛠️ OpenMusic 尚未初始化，请访问 /setup 完成首次部署（需配置 Redis）');
+  } else {
+    console.error('❌ Redis 为必需依赖：未连接时无法启动。请检查 REDIS_URL / REDIS_HOST 后重试。');
+    process.exit(1);
+  }
+} else {
+  await initSiteAnnouncement();
+  await initSiteBans();
+  if (!setupRequired) {
+    await initAdminCredentials();
+  } else {
+    console.warn('🛠️ OpenMusic 尚未初始化，请访问 /setup 完成首次部署');
+  }
+}
+
 httpServer.listen(PORT, () => {
   console.log(`🎵 OpenMusic 服务运行在 http://localhost:${PORT}`);
   console.log(`📡 Meting API: ${getMetingUpstreamBases().join(', ') || '未配置'}`);
   console.log(`🎤 Cyapi (绿点/蓝点): ${isCyapiConfigured() ? '已配置' : '未配置'}`);
-  console.log(`💾 房间存储: ${isRedisEnabled() ? 'Redis' : '内存'}`);
+  console.log(`💾 持久化存储: ${isRedisEnabled() ? 'Redis' : '未连接（仅安装向导）'}`);
 });

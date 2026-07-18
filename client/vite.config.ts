@@ -129,12 +129,15 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': 'http://localhost:4000',
-      '/wx-proxy': 'http://localhost:4000',
-      '/cgi-bin': 'http://localhost:4000',
+      // changeOrigin 必须为 false：保留 Host: localhost:5173，
+      // 服务端管理接口按 Origin 与 Host 同源放行本地调试请求
+      '/api': { target: 'http://localhost:4000', changeOrigin: false },
+      '/wx-proxy': { target: 'http://localhost:4000', changeOrigin: false },
+      '/cgi-bin': { target: 'http://localhost:4000', changeOrigin: false },
       '/socket.io': {
         target: 'http://localhost:4000',
         ws: true,
+        changeOrigin: false,
       },
     },
   },

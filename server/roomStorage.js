@@ -63,10 +63,20 @@ export function getRedisClient() {
   return enabled ? redisClient : null;
 }
 
+/** .env 中是否配置了 Redis 连接（未配置视为首次部署，进入安装向导） */
+export function hasRedisEnvConfig() {
+  return Boolean(
+    (process.env.REDIS_URL || '').trim()
+    || (process.env.REDIS_HOST || '').trim(),
+  );
+}
+
 export async function initRoomStorage() {
+  if (redisClient) return enabled;
+
   const options = buildRedisOptions();
   if (!options) {
-    console.log('Redis: 未配置（REDIS_URL 或 REDIS_HOST），房间数据仅保存在内存');
+    console.log('Redis: 未配置（REDIS_URL 或 REDIS_HOST）');
     return false;
   }
 
@@ -78,10 +88,10 @@ export async function initRoomStorage() {
     });
     await redisClient.connect();
     enabled = true;
-    console.log(`Redis: 已连接 ${describeRedisTarget(options)}，房间数据将持久化`);
+    console.log(`Redis: 已连接 ${describeRedisTarget(options)}`);
     return true;
   } catch (err) {
-    console.error('Redis: 连接失败，回退到内存存储 —', err.message);
+    console.error('Redis: 连接失败 —', err.message);
     redisClient = null;
     enabled = false;
     return false;
@@ -141,7 +151,6 @@ export async function deleteRoomFromStorage(roomId) {
 
 const FAVORITES_PREFIX = 'openmusic:favorites:';
 const MAX_FAVORITES = 5000;
-const memoryFavorites = new Map();
 
 function favoriteKey(userId) {
   return `${FAVORITES_PREFIX}${userId}`;
@@ -173,7 +182,7 @@ function normalizeFavoriteSong(song) {
 }
 
 async function readFavorites(userId) {
-  if (!enabled || !redisClient) return memoryFavorites.get(userId) || [];
+  if (!enabled || !redisClient) return [];
   const raw = await redisClient.get(favoriteKey(userId));
   if (!raw) return [];
   try {
@@ -190,10 +199,7 @@ function capFavorites(items) {
 
 async function writeFavorites(userId, items) {
   const capped = capFavorites(items);
-  if (!enabled || !redisClient) {
-    memoryFavorites.set(userId, capped);
-    return;
-  }
+  if (!enabled || !redisClient) throw new Error('Redis 不可用，收藏无法保存');
   await redisClient.set(favoriteKey(userId), JSON.stringify(capped));
 }
 
@@ -219,7 +225,11 @@ export async function setFavoriteSong(userId, song, favorite) {
     next = items.filter((item) => songFavoriteId(item) !== favId);
   }
 
-  await writeFavorites(id, next);
+  try {
+    await writeFavorites(id, next);
+  } catch (err) {
+    return { error: err.message || '收藏保存失败' };
+  }
   return { favorites: next, favorite: Boolean(favorite) };
 }
 
@@ -251,6 +261,10 @@ export async function importFavoriteSongs(userId, songs) {
 
   const dropped = Math.max(0, uniqueTotal - next.length);
 
-  await writeFavorites(id, next);
+  try {
+    await writeFavorites(id, next);
+  } catch (err) {
+    return { error: err.message || '收藏保存失败' };
+  }
   return { favorites: next, imported: added, dropped, maxFavorites: MAX_FAVORITES };
 }

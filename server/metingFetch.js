@@ -1,9 +1,10 @@
 import https from 'node:https';
 import http from 'node:http';
+import { getRuntimeConfig } from './runtimeConfig.js';
 
-// 支持逗号分隔的多上游（与 metingUpstream.js 的解析保持一致）
-const metingHosts = new Set(
-  String(process.env.METING_API_URL || '')
+function getMetingHosts() {
+  return new Set(
+    String(getRuntimeConfig().metingApiUrl || '')
     .split(',')
     .map((s) => {
       let base = s.trim();
@@ -23,11 +24,13 @@ const metingHosts = new Set(
       }
     })
     .filter(Boolean),
-);
+  );
+}
 
 const insecureHttpsAgent = new https.Agent({ rejectUnauthorized: false });
 
 function isMetingUrl(url) {
+  const metingHosts = getMetingHosts();
   if (metingHosts.size === 0) return false;
   try {
     return metingHosts.has(new URL(url).hostname);

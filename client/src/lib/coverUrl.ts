@@ -85,8 +85,25 @@ function resizeDirectCoverUrl(url: string, px: number): string {
   return url;
 }
 
+/**
+ * HTTPS 页面上的 http 封面直链会被手机浏览器按混合内容拦截（桌面 Chrome 会自动升级图片协议，
+ * 手机端多数浏览器不会，表现为热榜/队列封面整片空白）。
+ * 网易/QQ 等音乐 CDN 支持 https，直接升协议；酷狗部分节点 https 证书不可靠（与服务端
+ * preferHttpsMediaUrl 保持一致），改走同源 media-proxy。
+ */
+export function upgradeInsecureCoverUrl(url: string): string {
+  if (!/^http:\/\//i.test(url)) return url;
+  if (typeof window === 'undefined' || window.location.protocol !== 'https:') return url;
+  if (/kugou\.com/i.test(url)) {
+    return `/api/media-proxy?url=${encodeURIComponent(url)}`;
+  }
+  return `https://${url.slice('http://'.length)}`;
+}
+
 export function resizeCoverUrl(url: string, size: CoverSize = 'full'): string {
   if (!url) return url;
+
+  url = upgradeInsecureCoverUrl(url);
 
   // 任意尺寸都先去掉 NetEase ?param=NyN，避免原图链自带缩略参数导致不显示
   let next = /music\.126\.net|126\.net|param=\d+y\d+/i.test(url) ? stripNeteaseParam(url) : url;

@@ -11,7 +11,7 @@ import type { RoomSummary } from '../types';
 import { createRandomNickname } from '../lib/randomNickname';
 import { usePageSeo } from '../lib/seo';
 import { partitionRoomsByRecent } from '../lib/recentRooms';
-import { areRoomListsEqual } from '../lib/roomListCompare';
+import { areRoomListsEqual, isLobbyHardLocked, sortLobbyRooms } from '../lib/roomListCompare';
 import { isMobileDevice } from '../lib/audioUnlock';
 import { ANDROID_APK_URL } from '../lib/androidDownload';
 import { IOS_IPA_URL } from '../lib/iosDownload';
@@ -63,18 +63,19 @@ const RoomCard = memo(function RoomCard({
   isRecent?: boolean;
 }) {
   const isActive = room.isPlaying && room.currentSong;
+  const hardLocked = isLobbyHardLocked(room);
 
-  return (
-    <button
-      type="button"
-      onClick={() => onJoin(room)}
-      className={`group relative w-full text-left rounded-2xl border transition-all duration-300 overflow-hidden
-        ${isActive
-          ? 'border-netease-red/40 bg-gradient-to-br from-netease-red/10 via-[#1a1a1a] to-[#141414] shadow-lg shadow-netease-red/5 hover:shadow-netease-red/15 hover:border-netease-red/60'
-          : 'border-white/8 bg-[#161616]/90 hover:border-white/20 hover:bg-[#1c1c1c]'
-        }`}
-    >
-      {isActive && (
+  const cardClassName = `group relative w-full text-left rounded-2xl border transition-all duration-300 overflow-hidden
+    ${hardLocked
+      ? 'border-white/6 bg-[#141414]/80 opacity-70 cursor-not-allowed'
+      : isActive
+        ? 'border-netease-red/40 bg-gradient-to-br from-netease-red/10 via-[#1a1a1a] to-[#141414] shadow-lg shadow-netease-red/5 hover:shadow-netease-red/15 hover:border-netease-red/60'
+        : 'border-white/8 bg-[#161616]/90 hover:border-white/20 hover:bg-[#1c1c1c]'
+    }`;
+
+  const body = (
+    <>
+      {isActive && !hardLocked && (
         <div className="absolute inset-0 bg-gradient-to-r from-netease-red/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
       )}
 
@@ -87,7 +88,7 @@ const RoomCard = memo(function RoomCard({
                 最近
               </span>
             )}
-            <h3 className="text-base font-semibold text-white truncate group-hover:text-netease-red transition-colors">
+            <h3 className={`text-base font-semibold truncate transition-colors ${hardLocked ? 'text-white/70' : 'text-white group-hover:text-netease-red'}`}>
               {room.name}
             </h3>
             {room.hasPassword && (
@@ -95,8 +96,8 @@ const RoomCard = memo(function RoomCard({
                 <Lock className="w-3.5 h-3.5" />
               </span>
             )}
-            {room.isLocked && !room.hasPassword && (
-              <Tooltip content="已上锁">
+            {hardLocked && (
+              <Tooltip content="已上锁，无法进入">
                 <span className="flex-shrink-0 p-1 rounded-md bg-red-500/10 text-red-400/90">
                   <Lock className="w-3.5 h-3.5" />
                 </span>
@@ -113,7 +114,7 @@ const RoomCard = memo(function RoomCard({
           {room.currentSong ? (
             <div>
               <div className="flex items-center gap-2 mb-1">
-                {room.isPlaying && <PlayingBars />}
+                {room.isPlaying && !hardLocked && <PlayingBars />}
                 <span className="text-[10px] uppercase tracking-wider text-netease-red/80 font-medium">
                   {room.isPlaying ? '正在播放' : '已暂停'}
                 </span>
@@ -138,12 +139,37 @@ const RoomCard = memo(function RoomCard({
             <ListMusic className="w-3.5 h-3.5" />
             队列 {room.queueLength} 首
           </span>
-          <span className="flex items-center gap-1 text-xs text-netease-red/80 opacity-0 group-hover:opacity-100 transition-opacity font-medium">
-            进入
-            <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
-          </span>
+          {hardLocked ? (
+            <span className="flex items-center gap-1 text-xs text-red-400/70 font-medium">
+              <Lock className="w-3.5 h-3.5" />
+              已上锁
+            </span>
+          ) : (
+            <span className="flex items-center gap-1 text-xs text-netease-red/80 opacity-0 group-hover:opacity-100 transition-opacity font-medium">
+              进入
+              <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+            </span>
+          )}
         </div>
       </div>
+    </>
+  );
+
+  if (hardLocked) {
+    return (
+      <div className={cardClassName} aria-disabled="true">
+        {body}
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => onJoin(room)}
+      className={cardClassName}
+    >
+      {body}
     </button>
   );
 });
@@ -308,20 +334,22 @@ export default function Home() {
   };
 
   const handleRoomCardClick = useCallback((room: RoomSummary) => {
+    if (isLobbyHardLocked(room)) return;
     const trimmed = nickname.trim();
     if (!trimmed) {
-      const generated = createRandomNickname();
-      setNickname(generated);
+      setNickname(createRandomNickname());
     }
     setError('');
-    // 密码房也先直接进：原创建者免密；其他人由房间页再弹密码
     navigate(`/room/${room.id}`);
   }, [nickname, navigate, setNickname]);
 
-  const { recent: recentRooms, others: otherRooms } = useMemo(
-    () => partitionRoomsByRecent(rooms),
-    [rooms],
-  );
+  const { recent: recentRooms, others: otherRooms } = useMemo(() => {
+    const { recent, others } = partitionRoomsByRecent(rooms);
+    return {
+      recent: sortLobbyRooms(recent),
+      others: sortLobbyRooms(others),
+    };
+  }, [rooms]);
 
   const inputCls = 'w-full bg-[#0d0d0d] border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm placeholder:text-white/30 focus:outline-none focus:border-netease-red/50 transition-colors';
 
