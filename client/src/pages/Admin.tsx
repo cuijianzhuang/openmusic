@@ -20,6 +20,15 @@ interface MetingUpstreamStatus {
   lastProbeOk?: boolean | null;
 }
 
+interface LrcapiUpstreamStatus {
+  url: string;
+  healthy: boolean;
+  cooldownRemainingSec: number;
+  okCount: number;
+  failCount: number;
+  lastError: string;
+}
+
 interface AdminAuditEntry {
   at: number;
   action: string;
@@ -63,6 +72,7 @@ interface RuntimeConfig {
   cyapiBase: string;
   cyapiKey: string;
   vmyLrcUrl: string;
+  lrcapiUrl: string;
   qiniuAccessKey: string;
   qiniuSecretKey: string;
   qiniuBucket: string;
@@ -117,6 +127,7 @@ interface AdminOverview {
   memoryRssMb: number;
   redisEnabled: boolean;
   metingUpstreams: MetingUpstreamStatus[];
+  lrcapiUpstreams: LrcapiUpstreamStatus[];
   entryPath?: string;
   adminUsername?: string;
   credentialsPersisted?: boolean;
@@ -724,9 +735,15 @@ const RUNTIME_FIELD_GROUPS: RuntimeFieldGroup[] = [
   {
     id: 'lyrics',
     title: '歌词备用',
-    purpose: '主音源拿不到歌词时，按歌名向该接口兜底拉取。一般保持默认即可。',
+    purpose: '主音源拿不到歌词时按标题/歌手/专辑向 LrcAPI 兜底拉取，仍未命中再按歌名兜底至 52vmy。',
     fields: [
-      { key: 'vmyLrcUrl', label: '备用歌词 API', placeholder: 'https://api.52vmy.cn/api/music/lrc' },
+      {
+        key: 'lrcapiUrl',
+        label: 'LrcAPI 地址',
+        placeholder: 'https://api.lrc.cx',
+        tip: '支持英文逗号分隔多个地址做负载均衡（轮询 + 故障 60s 冷却自动切换）；置空禁用该级兜底',
+      },
+      { key: 'vmyLrcUrl', label: '备用歌词 API（按歌名）', placeholder: 'https://api.52vmy.cn/api/music/lrc' },
     ],
   },
   {
@@ -1815,6 +1832,29 @@ export default function Admin() {
                       {up.disabled ? '启用' : '临时禁用'}
                     </button>
                   </div>
+                  {up.lastError && (
+                    <span className="w-full truncate pl-6 text-[11px] text-red-400/80">{up.lastError}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {overview && overview.lrcapiUpstreams.length > 0 && (
+          <div className="rounded-2xl border border-white/10 bg-white/5">
+            <div className="border-b border-white/10 px-4 py-3 text-sm font-medium">
+              LrcAPI 歌词上游（{overview.lrcapiUpstreams.filter((u) => u.healthy).length}/{overview.lrcapiUpstreams.length} 健康）
+            </div>
+            <div className="divide-y divide-white/5">
+              {overview.lrcapiUpstreams.map((up) => (
+                <div key={up.url} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5">
+                  <span className={`h-2 w-2 shrink-0 rounded-full ${up.healthy ? 'bg-emerald-400' : 'bg-red-400'}`} />
+                  <span className="min-w-0 flex-1 truncate font-mono text-xs">{up.url}</span>
+                  <span className="text-xs text-netease-muted">
+                    成功 {up.okCount} · 失败 {up.failCount}
+                    {!up.healthy && ` · 冷却 ${up.cooldownRemainingSec}s`}
+                  </span>
                   {up.lastError && (
                     <span className="w-full truncate pl-6 text-[11px] text-red-400/80">{up.lastError}</span>
                   )}

@@ -14,6 +14,9 @@ client/.env.capacitor
 server/downloads/*.apk
 server/downloads/*.ipa
 
+# Docker 部署持久化目录（deploy/deploy.sh docker 生成）
+/data/
+
 # Capacitor / Android 本地构建产物
 client/android/.gradle/
 client/android/app/build/

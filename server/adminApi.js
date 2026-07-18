@@ -16,6 +16,7 @@ import {
   resetMetingUpstreamCooldown,
   setMetingUpstreamDisabled,
 } from './metingUpstream.js';
+import { getLrcapiUpstreamStatus } from './lrcapiUpstream.js';
 import {
   getAdminEntryPath,
   setAdminEntryPath,
@@ -475,6 +476,7 @@ export function mountAdminApi(app, { io, socketToRoom, socketToUserId, getClient
       memoryRssMb: Math.round(mem.rss / 1024 / 1024),
       redisEnabled: isRedisEnabled(),
       metingUpstreams: getMetingUpstreamStatus(),
+      lrcapiUpstreams: getLrcapiUpstreamStatus(),
       entryPath: getAdminEntryPath(),
       adminUsername: getAdminUsername(),
       credentialsPersisted: isAdminCredentialsPersisted(),
