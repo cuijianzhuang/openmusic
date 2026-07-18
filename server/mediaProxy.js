@@ -42,6 +42,7 @@ function isQqMusicHost(host) {
   return hostMatchesAnyDomain(host, [
     'qq.com',
     'gtimg.com',
+    'gtimg.cn',
     'tencentmusic.com',
   ]);
 }
