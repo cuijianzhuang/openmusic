@@ -78,6 +78,8 @@ METING_API_URL=http://127.0.0.1:3000
 METING_API_AUTH=你的meting_token
 ```
 
+> 💡 `METING_API_URL` 支持英文逗号分隔多个上游，自动做**轮询负载均衡**：请求失败或返回 5xx 的上游进入 60s 冷却并切换下一个。`METING_API_AUTH` 同样逗号分隔与之一一对应（只填一个则应用到所有上游）。
+
 | 变量 | 说明 |
 |------|------|
 | `CYAPI_KEY` | 🔵 可选；蓝点搜索、空队列随机推荐、聊天图片审核（[迟言 API](https://cyapi.top/)） |

@@ -1,12 +1,18 @@
 import './loadEnv.js';
 import { resizeCoverForThumb } from './coverUrl.js';
 import {
-  isAllowedMediaHostname,
   isBlockedMediaHostname,
   serveUpstreamMedia,
 } from './mediaProxy.js';
-import { fetchMeting, formatMetingFetchError } from './metingFetch.js';
+import { formatMetingFetchError } from './metingFetch.js';
+import {
+  fetchMetingApi,
+  isMetingApiHostname,
+  getMetingUpstreamBases,
+  getMetingUpstreamStatus,
+} from './metingUpstream.js';
 import { mountWechatFileHelperProxy } from './wechatFileHelperProxy.js';
+import { mountAdminApi } from './adminApi.js';
 import { buildRobotsTxt, buildSitemapXml, resolveSiteOrigin } from './seoFiles.js';
 import express from 'express';
 import cors from 'cors';
@@ -120,8 +126,6 @@ import { checkApihzSensitiveWords } from './apihzSensitiveWord.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const clientDist = path.join(__dirname, '../client/dist');
 const PORT = process.env.PORT || 4000;
-const METING_API_URL = (process.env.METING_API_URL ).replace(/\/$/, '');
-const METING_API_AUTH = process.env.METING_API_AUTH || '';
 const VMY_LRC_URL = (process.env.VMY_LRC_URL || 'https://api.52vmy.cn/api/music/lrc').replace(/\/$/, '');
 const DISCONNECT_GRACE_MS = 30_000;
 const AUTO_ADVANCE_INTERVAL_MS = 500;
@@ -208,6 +212,8 @@ const API_ACCESS_DENIED = '请求无效，请刷新页面后重试';
 
 app.use((req, res, next) => {
   if (!req.path.startsWith('/api/')) return next();
+  // 管理后台使用独立的 ADMIN_KEY 鉴权（见 adminApi.js），不走会话身份与签名
+  if (req.path.startsWith('/api/admin/')) return next();
   if (isPublicApiPath(req)) return next();
 
   const identity = resolveIdentityFromRequest(req);
@@ -465,26 +471,7 @@ function sanitizeClientSong(song) {
   return { song: sanitized };
 }
 
-function buildMetingUrl(query) {
-  const params = new URLSearchParams(query);
-  if (METING_API_AUTH && !params.has('auth')) {
-    params.set('auth', METING_API_AUTH);
-  }
-  return `${METING_API_URL}/api?${params.toString()}`;
-}
-
-function getMetingApiHostname() {
-  try {
-    return METING_API_URL ? new URL(METING_API_URL).hostname.toLowerCase() : '';
-  } catch {
-    return '';
-  }
-}
-
-function isMetingApiHostname(hostname) {
-  const metingHost = getMetingApiHostname();
-  return Boolean(metingHost && String(hostname || '').toLowerCase() === metingHost);
-}
+// buildMetingUrl / isMetingApiHostname 已迁移至 metingUpstream.js（多上游负载均衡）
 
 function parseMetingMediaQuery(url) {
   try {
@@ -529,7 +516,7 @@ async function resolveMetingMediaUrl(query, depth = 0) {
   const params = { server: query.server, type: query.type, id: query.id };
   if (query.quality) params.quality = query.quality;
 
-  const response = await fetchMeting(buildMetingUrl(params), { redirect: 'manual' }, 15000);
+  const response = await fetchMetingApi(params, { redirect: 'manual' }, 15000);
 
   if (response.status >= 300 && response.status < 400) {
     const location = normalizeMetingResolvedUrl(response.headers.get('location'));
@@ -579,8 +566,8 @@ async function finalizeMetingTextResponse(body, metingType) {
   return resolveMetingMediaUrl(nested);
 }
 
-async function proxyMetingResponse(targetUrl, res, thumbPx = 0, metingType = '') {
-  const response = await fetchMeting(targetUrl, { redirect: 'manual' });
+async function proxyMetingResponse(metingQuery, res, thumbPx = 0, metingType = '') {
+  const response = await fetchMetingApi(metingQuery, { redirect: 'manual' });
 
   if (response.status >= 300 && response.status < 400) {
     let location = response.headers.get('location');
@@ -694,8 +681,7 @@ app.get('/api/music/netease/playlists/search', async (req, res) => {
   if (!keyword) return res.json({ playlists: [], total: 0, page, limit });
 
   try {
-    const targetUrl = buildMetingUrl({ server: 'netease', type: 'search_playlist', id: keyword });
-    const response = await fetchMeting(targetUrl, {}, 10000);
+    const response = await fetchMetingApi({ server: 'netease', type: 'search_playlist', id: keyword }, {}, 10000);
     if (!response.ok) return res.status(response.status).json({ error: '红点歌单搜索失败' });
     const data = await response.json();
     const playlists = Array.isArray(data) ? data : [];
@@ -758,7 +744,7 @@ app.get('/api/meting', async (req, res) => {
     const thumbPx = parseInt(String(req.query.size || ''), 10) || 0;
     const query = { ...req.query };
     delete query.size;
-    await proxyMetingResponse(buildMetingUrl(query), res, thumbPx, String(query.type || ''));
+    await proxyMetingResponse(query, res, thumbPx, String(query.type || ''));
   } catch (err) {
     console.error('Meting proxy error:', formatMetingFetchError(err));
     res.status(502).json({ error: '无法连接 Meting API，请检查 METING_API_URL 配置' });
@@ -786,11 +772,6 @@ app.get('/api/media-proxy', async (req, res) => {
     return res.status(400).json({ error: '不支持的协议' });
   }
 
-  const metingHost = getMetingApiHostname();
-  const extraHosts = metingHost ? [metingHost] : [];
-  const hostAllowed =
-    isMetingApiHostname(parsed.hostname)
-    || isAllowedMediaHostname(parsed.hostname, extraHosts);
   if (isBlockedMediaHostname(parsed.hostname) && !isMetingApiHostname(parsed.hostname)) {
     return res.status(403).json({ error: '禁止访问内网地址' });
   }
@@ -1294,6 +1275,13 @@ app.get('*', (req, res, next) => {
 
 const socketToRoom = new Map();
 const socketToUserId = new Map();
+
+mountAdminApi(app, {
+  io,
+  socketToRoom,
+  socketToUserId,
+  getClientIp: (req) => getClientIpFromHeaders(req.headers, req.socket?.remoteAddress || ''),
+});
 
 function isPrivateHostname(hostname) {
   return isBlockedMediaHostname(hostname);
@@ -2704,7 +2692,7 @@ await initRooms();
 
 httpServer.listen(PORT, () => {
   console.log(`🎵 OpenMusic 服务运行在 http://localhost:${PORT}`);
-  console.log(`📡 Meting API: ${METING_API_URL}`);
+  console.log(`📡 Meting API: ${getMetingUpstreamBases().join(', ') || '未配置'}`);
   console.log(`🎤 Cyapi (绿点/蓝点): ${isCyapiConfigured() ? '已配置' : '未配置'}`);
   console.log(`💾 房间存储: ${isRedisEnabled() ? 'Redis' : '内存'}`);
 });

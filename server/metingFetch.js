@@ -1,21 +1,28 @@
 import https from 'node:https';
 import http from 'node:http';
 
-const METING_API_URL = (process.env.METING_API_URL || '').replace(/\/$/, '');
-
-let metingHost = '';
-try {
-  metingHost = METING_API_URL ? new URL(METING_API_URL).hostname : '';
-} catch {
-  metingHost = '';
-}
+// 支持逗号分隔的多上游（与 metingUpstream.js 的解析保持一致）
+const metingHosts = new Set(
+  String(process.env.METING_API_URL || '')
+    .split(',')
+    .map((s) => s.trim().replace(/\/$/, ''))
+    .filter(Boolean)
+    .map((base) => {
+      try {
+        return new URL(base).hostname;
+      } catch {
+        return '';
+      }
+    })
+    .filter(Boolean),
+);
 
 const insecureHttpsAgent = new https.Agent({ rejectUnauthorized: false });
 
 function isMetingUrl(url) {
-  if (!metingHost) return false;
+  if (metingHosts.size === 0) return false;
   try {
-    return new URL(url).hostname === metingHost;
+    return metingHosts.has(new URL(url).hostname);
   } catch {
     return false;
   }

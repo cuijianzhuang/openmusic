@@ -5,6 +5,7 @@ import AppUpdateGate from './components/AppUpdateGate';
 const Home = lazy(() => import('./pages/Home'));
 const Room = lazy(() => import('./pages/Room'));
 const TvDisplay = lazy(() => import('./pages/TvDisplay'));
+const Admin = lazy(() => import('./pages/Admin'));
 
 function RouteFallback() {
   return (
@@ -26,6 +27,7 @@ export default function App() {
           <Route path="/" element={<Home />} />
           <Route path="/room/:roomId" element={<Room />} />
           <Route path="/tv/:roomId" element={<TvDisplay />} />
+          <Route path="/admin" element={<Admin />} />
         </Routes>
       </Suspense>
     </div>

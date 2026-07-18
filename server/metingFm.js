@@ -1,7 +1,5 @@
-import { fetchMeting, formatMetingFetchError } from './metingFetch.js';
-
-const METING_API_URL = (process.env.METING_API_URL ).replace(/\/$/, '');
-const METING_API_AUTH = process.env.METING_API_AUTH || '';
+import { formatMetingFetchError } from './metingFetch.js';
+import { fetchMetingApi } from './metingUpstream.js';
 
 export const DEFAULT_FM_MODE = 'DEFAULT';
 
@@ -20,9 +18,6 @@ const FM_MODES = new Set([
   FM_MODE_OFF,
 ]);
 
-async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
-  return fetchMeting(url, options, timeoutMs);
-}
 
 export function normalizeFmMode(input) {
   const raw = String(input || '').trim();
@@ -31,14 +26,13 @@ export function normalizeFmMode(input) {
   return DEFAULT_FM_MODE;
 }
 
-function buildFmUrl(mode) {
-  const params = new URLSearchParams({ server: 'netease', type: 'fm' });
+function buildFmQuery(mode) {
+  const query = { server: 'netease', type: 'fm' };
   const normalized = normalizeFmMode(mode);
   if (normalized && normalized !== 'DEFAULT') {
-    params.set('id', normalized);
+    query.id = normalized;
   }
-  if (METING_API_AUTH) params.set('auth', METING_API_AUTH);
-  return `${METING_API_URL}/api?${params.toString()}`;
+  return query;
 }
 
 function extractIdFromUrl(url) {
@@ -79,13 +73,25 @@ function normalizeFmSong(raw) {
 }
 
 const MAX_FM_RETRIES = 5;
+const FM_RETRY_BACKOFF_MS = 800;
+// FM 整体失败后的熔断窗口：空队列的房间会以自动推进节奏反复预取，
+// 上游长期不可用时避免每个 tick 都打满 5 次重试
+const FM_FAILURE_COOLDOWN_MS = 30_000;
+let fmFailureCooldownUntil = 0;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 /** 网易云私人漫游（Meting type=fm） */
 export async function fetchMetingFmSong(fmMode = DEFAULT_FM_MODE) {
   if (normalizeFmMode(fmMode) === FM_MODE_OFF) return null;
+  if (Date.now() < fmFailureCooldownUntil) return null;
+
   for (let i = 0; i < MAX_FM_RETRIES; i += 1) {
+    if (i > 0) await sleep(FM_RETRY_BACKOFF_MS * i);
     try {
-      const response = await fetchWithTimeout(buildFmUrl(fmMode));
+      const response = await fetchMetingApi(buildFmQuery(fmMode), {}, 12000);
       if (!response.ok) continue;
 
       const text = await response.text();
@@ -99,10 +105,16 @@ export async function fetchMetingFmSong(fmMode = DEFAULT_FM_MODE) {
       }
 
       const song = normalizeFmSong(data);
-      if (song) return song;
+      if (song) {
+        fmFailureCooldownUntil = 0;
+        return song;
+      }
     } catch (err) {
       console.error('Meting FM error:', formatMetingFetchError(err));
     }
   }
+
+  fmFailureCooldownUntil = Date.now() + FM_FAILURE_COOLDOWN_MS;
+  console.error(`Meting FM 连续 ${MAX_FM_RETRIES} 次失败，${FM_FAILURE_COOLDOWN_MS / 1000}s 内暂停漫游预取`);
   return null;
 }

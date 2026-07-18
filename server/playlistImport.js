@@ -1,25 +1,11 @@
-import { fetchMeting } from './metingFetch.js';
-
-const METING_API_URL = (process.env.METING_API_URL ).replace(/\/$/, '');
-const METING_API_AUTH = process.env.METING_API_AUTH || '';
+import { fetchMetingApi } from './metingUpstream.js';
 
 const NETEASE_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
   Referer: 'https://music.163.com/',
 };
 
-function buildMetingUrl(query) {
-  const params = new URLSearchParams(query);
-  if (METING_API_AUTH && !params.has('auth')) {
-    params.set('auth', METING_API_AUTH);
-  }
-  return `${METING_API_URL}/api?${params.toString()}`;
-}
-
 async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
-  if (String(url || '').startsWith(METING_API_URL)) {
-    return fetchMeting(url, options, timeoutMs);
-  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -136,8 +122,11 @@ export async function fetchNeteasePlaylistMetas(playlistIds) {
 }
 
 async function fetchMetingPlaylist(server, playlistId) {
-  const url = buildMetingUrl({ server, type: 'playlist', id: playlistId });
-  const response = await fetchWithTimeout(url, { headers: NETEASE_HEADERS }, 60000);
+  const response = await fetchMetingApi(
+    { server, type: 'playlist', id: playlistId },
+    { headers: NETEASE_HEADERS },
+    60000,
+  );
   if (!response.ok) throw new Error('歌单请求失败');
 
   const data = await response.json();
