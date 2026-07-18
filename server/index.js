@@ -16,6 +16,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
+import { isIP } from 'net';
 import {
   deriveApiSignKey,
   verifyApiSign,
@@ -89,7 +90,6 @@ import {
   kickUser,
   transferOwner,
   setRoomAdmin,
-  updateUserLocation,
   reportTrackDuration,
   setOnRoomPrefetchReady,
   setOnRoomStructureChanged,
@@ -116,6 +116,8 @@ import {
   searchApihzStickers,
 } from './apihzSticker.js';
 import { checkApihzSensitiveWords } from './apihzSensitiveWord.js';
+import { getSiteAnnouncement } from './siteAnnouncement.js';
+import { deriveChatTextGateKey, verifyChatTextGatePass } from './chatTextGate.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const clientDist = path.join(__dirname, '../client/dist');
@@ -253,6 +255,11 @@ function normalizeClientIp(raw) {
   return ip;
 }
 
+function normalizeReportedClientIp(raw) {
+  const ip = normalizeClientIp(String(raw || '').slice(0, 64));
+  return isIP(ip) ? ip : '';
+}
+
 function getHeaderIp(headers, name) {
   const key = String(name || '').toLowerCase();
   if (!key) return '';
@@ -335,8 +342,6 @@ function isPrivateIp(ip) {
     || /^fe80:/i.test(ip)
   );
 }
-const ipLocationCache = new Map();
-const IP_LOCATION_CACHE_TTL_MS = 1000 * 60 * 60 * 24;
 
 function normalizeLocationName(value) {
   const text = String(value || '').trim();
@@ -347,67 +352,9 @@ function normalizeLocationName(value) {
     .slice(0, 12);
 }
 
-function parseBaiduIpLocation(value) {
-  const text = String(value || '').trim();
-  if (!text || text === '-') return '';
-
-  const area = text.split(/\s+/)[0] || '';
-  const match = area.match(/(.*?省|北京市|上海市|天津市|重庆市|.*?自治区|.*?特别行政区)/u);
-  if (match?.[0]) return normalizeLocationName(match[0]);
-
-  return normalizeLocationName(area);
-}
-
 function fallbackLocationForIp(ip) {
   if (!ip || isPrivateIp(ip)) return '本地';
   return '未知';
-}
-
-async function lookupIpLocation(ip) {
-  const normalized = normalizeClientIp(ip);
-  if (!normalized || isPrivateIp(normalized)) return fallbackLocationForIp(normalized);
-
-  const cached = ipLocationCache.get(normalized);
-  if (cached && Date.now() - cached.updatedAt < IP_LOCATION_CACHE_TTL_MS) {
-    return cached.location;
-  }
-
-  let location = '未知';
-  try {
-    const response = await fetchWithTimeout(
-      `https://opendata.baidu.com/api.php?query=${encodeURIComponent(normalized)}&co=&resource_id=6006&oe=utf8`,
-      {},
-      1200,
-    );
-    if (response.ok) {
-      const data = await response.json();
-      if (String(data?.status) === '0') {
-        location = parseBaiduIpLocation(data?.data?.[0]?.location) || location;
-      }
-    }
-  } catch {
-    location = fallbackLocationForIp(normalized);
-  }
-
-  ipLocationCache.set(normalized, { location, updatedAt: Date.now() });
-  return location;
-}
-
-function attachUserLocation(roomId, userId, ip) {
-  const initialLocation = fallbackLocationForIp(ip);
-  updateUserLocation(roomId, userId, initialLocation);
-
-  void lookupIpLocation(ip).then((location) => {
-    // 仅更新内存字段，不触发全房 room_update（进房风暴时定位二次广播是卡顿主因之一）
-    const changed = updateUserLocation(roomId, userId, location);
-    // 轻量推送：进房 ACK 时定位尚未解析完，客户端会一直显示「未知」
-    if (changed && location) {
-      const normalizedRoomId = String(roomId || '').toUpperCase();
-      if (normalizedRoomId) {
-        io.to(normalizedRoomId).emit('user_location', { userId, location });
-      }
-    }
-  }).catch(() => {});
 }
 
 const VALID_SOURCES = new Set(['netease', 'tencent', 'kugou']);
@@ -618,6 +565,13 @@ async function proxyMetingResponse(targetUrl, res, thumbPx = 0, metingType = '')
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true });
+});
+
+/** 首页站点公告：配置文件热更新；no-store 防 CDN/浏览器缓存旧公告 */
+app.get('/api/site-announcement', (_req, res) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+  res.set('Pragma', 'no-cache');
+  res.json(getSiteAnnouncement());
 });
 
 /** 前端更新检测：走 /api 绕过 EdgeOne 静态缓存；no-store 防中间层缓存 */
@@ -1044,7 +998,11 @@ function requireSessionIdentity(req, res) {
 
 function sendBootstrapResponse(res, userId, iat, token, deviceId = null) {
   setIdentityCookieHeaders(res, userId, token, deviceId);
-  const payload = { clientId: userId };
+  const payload = {
+    clientId: userId,
+    // 聊天文本门禁密令密钥：始终下发，供前端敏感词检测通过后签发密令
+    chatTextGateKey: deriveChatTextGateKey(CLIENT_ID_SECRET, userId, iat),
+  };
   if (isApiSignRequired()) {
     payload.apiSignKey = deriveApiSignKey(CLIENT_ID_SECRET, userId, iat);
   }
@@ -1527,7 +1485,14 @@ async function advanceEndedRoomNow(roomId, expectedQueueId = '') {
 }
 
 io.on('connection', (socket) => {
-  socket.on('join_room', ({ roomId, nickname, password, readOnly }, callback) => {
+  socket.on('join_room', ({
+    roomId,
+    nickname,
+    password,
+    readOnly,
+    clientIp: reportedClientIp,
+    clientLocation,
+  } = {}, callback) => {
     const id = roomId?.toUpperCase();
     if (!roomExists(id)) {
       callback?.({ success: false, error: '房间不存在' });
@@ -1598,11 +1563,13 @@ io.on('connection', (socket) => {
       ),
     );
 
-    const clientIp = getClientIp(socket);
+    // 安全限流仍使用连接来源 IP；客户端上报值仅用于成员归属展示/同端统计。
+    const clientIp = normalizeReportedClientIp(reportedClientIp) || getClientIp(socket);
+    const location = normalizeLocationName(clientLocation) || fallbackLocationForIp(clientIp);
     const joinedRoom = addUser(id, userId, nickname, {
       readOnly: Boolean(readOnly),
       connectionId: socket.id,
-      location: fallbackLocationForIp(clientIp),
+      location,
       deviceId: deviceId || undefined,
       clientIp: clientIp || undefined,
     });
@@ -1618,7 +1585,6 @@ io.on('connection', (socket) => {
     socketToRoom.set(socket.id, id);
     socketToUserId.set(socket.id, userId);
     socket.join(id);
-    attachUserLocation(id, userId, clientIp);
 
     const welcomeMessage = hadActiveSession ? null : postMemberWelcomeMessage(id, userId);
 
@@ -2390,7 +2356,7 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
-  socket.on('send_chat', async ({ text, mentions, replyTo, imageUrl, imageKey, asSticker }, callback) => {
+  socket.on('send_chat', async ({ text, mentions, replyTo, imageUrl, imageKey, asSticker, textGatePass }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
     if (rejectRateLimited(socket, limitSocketChat, 'send_chat', callback)) return;
 
@@ -2402,10 +2368,19 @@ io.on('connection', (socket) => {
 
     const textContent = String(text || '').trim();
     if (textContent) {
-      const sensitive = await checkApihzSensitiveWords(textContent);
-      if (!sensitive.ok) {
-        callback?.({ success: false, error: sensitive.error });
-        return;
+      const identity = resolveIdentityFromCookies(socket.handshake?.headers?.cookie || '');
+      const gateOk = Boolean(
+        identity
+        && identity.userId === getSocketUserId(socket)
+        && verifyChatTextGatePass(CLIENT_ID_SECRET, identity, textContent, textGatePass),
+      );
+      // 前端密令有效则跳过慢速敏感词接口；否则走服务端兜底
+      if (!gateOk) {
+        const sensitive = await checkApihzSensitiveWords(textContent);
+        if (!sensitive.ok) {
+          callback?.({ success: false, error: sensitive.error });
+          return;
+        }
       }
     }
 

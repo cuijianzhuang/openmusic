@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { filterDisplayLyrics, LYRIC_SYNC_LEAD_SEC } from '../api/music';
 import { findActiveLyricIndex } from '../lib/lyricActiveIndex';
+import { roomVisualFxLive, subscribeRoomVisualFx } from '../lib/roomVisualFxLive';
 import type { LyricLine } from '../types';
 
 interface Props {
@@ -35,6 +36,13 @@ function Lyrics({
   const lastActiveIndexRef = useRef(-1);
   const programmaticScrollRef = useRef(false);
   const needsInstantSnapRef = useRef(true);
+  const [showTranslation, setShowTranslation] = useState(
+    () => roomVisualFxLive.current.lyricShowTranslation !== false,
+  );
+
+  useEffect(() => subscribeRoomVisualFx(() => {
+    setShowTranslation(roomVisualFxLive.current.lyricShowTranslation !== false);
+  }), []);
 
   const displayLines = useMemo(() => filterDisplayLyrics(lines), [lines]);
   const isSide = variant === 'side';
@@ -184,7 +192,7 @@ function Lyrics({
               }`}
             >
               <p>{line.text}</p>
-              {line.translation && (
+              {showTranslation && line.translation && (
                 <p className={`mt-0.5 ${isLarge ? 'text-sm lg:text-base 2xl:text-xl 3xl:text-2xl' : 'text-xs 2xl:text-sm'} ${isActive ? 'text-white/60' : 'text-white/15'}`}>
                   {line.translation}
                 </p>

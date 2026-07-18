@@ -14,7 +14,6 @@ import ChatImageLightbox from './ChatImageLightbox';
 import ChatMessageList, { type ChatMessageListHandle } from './ChatMessageList';
 import ChatInputBar, { type ChatInputBarHandle, type PendingChatImage } from './ChatInputBar';
 import ChatMutePicker from './ChatMutePicker';
-import ChatSystemToast from './ChatSystemToast';
 import { compactReplyText } from '../lib/chatPanelUtils';
 import { useChatRoomMeta, useChatRoomSlice } from '../lib/chatRoomSlice';
 import { fetchChatUploadEnabled } from '../api/chatImage';
@@ -222,7 +221,6 @@ export default function ChatPanel({ className = '' }: { className?: string }) {
       )}
 
       <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-        <ChatSystemToast />
         <ChatMessageList
           ref={messageListRef}
           roomMeta={roomMeta}

@@ -283,6 +283,11 @@ export default function ImmersiveFxSettingsPanel({
                   onChange={(particleLyrics) => onPatch({ particleLyrics })}
                 />
                 <FxMineradioToggle
+                  label="显示翻译"
+                  checked={value.lyricShowTranslation}
+                  onChange={(lyricShowTranslation) => onPatch({ lyricShowTranslation })}
+                />
+                <FxMineradioToggle
                   label="歌词溢光"
                   checked={value.lyricGlow}
                   onChange={(lyricGlow) => onPatch({ lyricGlow })}

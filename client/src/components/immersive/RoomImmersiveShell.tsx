@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { ChevronLeft, ListMusic, MessageCircle, Search, SlidersHorizontal, X } from 'lucide-react';
+import { ChevronLeft, ListMusic, Maximize2, MessageCircle, Minimize2, Search, SlidersHorizontal, X } from 'lucide-react';
+import {
+  exitDocumentFullscreen,
+  isDocumentFullscreen,
+  requestElementFullscreen,
+  subscribeFullscreenChange,
+} from '../../lib/browserFullscreen';
+import QueueSystemToast from '../QueueSystemToast';
 
 type PanelId = 'search' | 'queue' | 'chat';
 
@@ -74,6 +81,7 @@ export default function RoomImmersiveShell({
   const [fxFabAutoHide, setFxFabAutoHide] = useState(false);
   const [fxFabPeek, setFxFabPeek] = useState(true);
   const [bottomBarVisible, setBottomBarVisible] = useState(false);
+  const [isNativeFullscreen, setIsNativeFullscreen] = useState(() => isDocumentFullscreen());
   const closeTimerRef = useRef<number | null>(null);
   const bottomBarCloseTimerRef = useRef<number | null>(null);
   const fxFabPeekTimerRef = useRef<number | null>(null);
@@ -88,6 +96,30 @@ export default function RoomImmersiveShell({
   useEffect(() => {
     openPanelRef.current = openPanel;
   }, [openPanel]);
+
+  useEffect(() => {
+    const sync = () => setIsNativeFullscreen(isDocumentFullscreen());
+    sync();
+    return subscribeFullscreenChange(sync);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      void exitDocumentFullscreen();
+    };
+  }, []);
+
+  const toggleNativeFullscreen = useCallback(async () => {
+    try {
+      if (isDocumentFullscreen()) {
+        await exitDocumentFullscreen();
+      } else {
+        await requestElementFullscreen(document.documentElement);
+      }
+    } catch {
+      // 浏览器可能拒绝或需用户手势
+    }
+  }, []);
 
   const cancelBottomBarClose = useCallback(() => {
     if (bottomBarCloseTimerRef.current !== null) {
@@ -332,6 +364,19 @@ export default function RoomImmersiveShell({
       <div className="pointer-events-auto absolute right-4 top-4 z-[72] flex items-center gap-2">
         <button
           type="button"
+          onClick={() => {
+            void toggleNativeFullscreen();
+          }}
+          className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-black/25 px-3 py-1.5 text-xs text-white/70 backdrop-blur-xl transition-colors hover:bg-black/40 hover:text-white"
+          aria-label={isNativeFullscreen ? '退出浏览器全屏' : '进入浏览器全屏'}
+          aria-pressed={isNativeFullscreen}
+          title={isNativeFullscreen ? '退出全屏 (Esc)' : '浏览器原生全屏'}
+        >
+          {isNativeFullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+          <span>{isNativeFullscreen ? '退出全屏' : '全屏'}</span>
+        </button>
+        <button
+          type="button"
           onClick={onExit}
           className="rounded-xl border border-white/10 bg-black/25 px-3 py-1.5 text-xs text-white/70 backdrop-blur-xl transition-colors hover:bg-black/40 hover:text-white"
         >
@@ -409,7 +454,7 @@ export default function RoomImmersiveShell({
         onPointerLeave={handlePanelLeave}
       >
         <div className="mineradio-glass-panel m-3 flex h-[calc(100%-1.5rem)] flex-col overflow-hidden rounded-[22px]">
-          <div className="flex shrink-0 items-center justify-between border-b border-white/10 px-4 py-3">
+          <div className="relative flex shrink-0 items-center justify-between border-b border-white/10 px-4 py-3">
             <h2 className="text-sm font-medium text-white/90">播放队列</h2>
             <button
               type="button"
@@ -419,6 +464,7 @@ export default function RoomImmersiveShell({
             >
               <X className="h-4 w-4" />
             </button>
+            <QueueSystemToast />
           </div>
           <div className="min-h-0 flex-1 overflow-hidden p-2">
             {openPanel === 'queue' ? queueContent : null}

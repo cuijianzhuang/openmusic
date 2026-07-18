@@ -11,6 +11,7 @@ import { getUserPlaybackQuality } from './quality';
 import { resizeCoverUrl, type CoverSize } from '../../lib/coverUrl';
 import { requireSessionBootstrap } from '../../lib/sessionBootstrap';
 import { signApiUrl } from '../../lib/signedApiUrl';
+import { mergeLyricTranslations } from '../../lib/immersiveLyricLines';
 
 function getProvider(source: MusicSource) {
   return providers[source];
@@ -185,7 +186,7 @@ export function parseLrc(lrc: string): import('../../types').LyricLine[] {
     }
   }
 
-  return lines.sort((a, b) => a.time - b.time);
+  return mergeLyricTranslations(lines.sort((a, b) => a.time - b.time));
 }
 
 /** 过滤 LRC 中的制作信息、推广文案等非演唱歌词 */
@@ -207,6 +208,24 @@ export function filterDisplayLyrics(lines: import('../../types').LyricLine[]): i
 
 /** 歌词高亮相对播放时间略提前，减轻「歌词慢半拍」听感 */
 export const LYRIC_SYNC_LEAD_SEC = 0.28;
+
+export function getActiveLyricLine(
+  lines: import('../../types').LyricLine[],
+  currentTime: number,
+): import('../../types').LyricLine | null {
+  const displayLines = filterDisplayLyrics(lines);
+  if (displayLines.length === 0) return null;
+
+  const syncTime = currentTime + LYRIC_SYNC_LEAD_SEC;
+  const activeIndex = displayLines.findIndex((line, i) => {
+    const next = displayLines[i + 1];
+    return syncTime >= line.time && (!next || syncTime < next.time);
+  });
+
+  if (activeIndex >= 0) return displayLines[activeIndex];
+  if (syncTime < displayLines[0].time) return null;
+  return displayLines[displayLines.length - 1];
+}
 
 export function getActiveLyricPair(
   lines: import('../../types').LyricLine[],

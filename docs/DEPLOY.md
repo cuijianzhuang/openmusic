@@ -46,6 +46,24 @@ docker run -d --name meting -p 3000:3000 w3126197382/meting-api:latest
 | `CYAPI_BASE` | 可选 | 迟言 API 根地址，默认 `https://cyapi.top/API` |
 | `REDIS_URL` | 可选 | Redis 连接串 |
 | `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` 等 | 可选 | 与 `REDIS_URL` 二选一 |
+| `SITE_ANNOUNCEMENT_FILE` | 可选 | 首页公告 JSON 路径，默认 `server/siteAnnouncement.json` |
+
+### 首页站点公告
+
+编辑 `server/siteAnnouncement.json`（可参考 `server/siteAnnouncement.example.json`）：
+
+```json
+{
+  "enabled": true,
+  "id": "2026-07-18-1",
+  "title": "站点公告",
+  "text": "公告正文，支持换行"
+}
+```
+
+- `enabled=true` 且同时填写 `id`、`text` 时，首页会弹窗通知。
+- 用户点击「我知道了」后，同一 `id` 不再弹出；**发布新公告时请改 `id`**。
+- 按文件修改时间热加载，无需重启 Node。
 
 ### 传输安全说明
 

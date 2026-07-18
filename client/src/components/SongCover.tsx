@@ -46,7 +46,7 @@ export default function SongCover({
       loading={eager ? 'eager' : 'lazy'}
       decoding="async"
       referrerPolicy="no-referrer"
-      {...(eager ? { fetchPriority: 'high' as const } : {})}
+      {...(eager ? { fetchpriority: 'high' } : {})}
       onError={() => setFailedFor(identity)}
     />
   );

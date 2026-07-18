@@ -8,6 +8,9 @@ const LYRIC_GLOW_COLOR = new THREE.Color('#9cffdf');
 const LYRIC_SUN_HOT = new THREE.Color('#fff4cc');
 
 const LYRIC_CAMERA_LOCK_MAX_SCALE = 0.8;
+/** 呼吸/节拍缩放余量，避免瞬时放大后边缘被裁切 */
+const LYRIC_MESH_PULSE_PAD = 1.08;
+const LYRIC_VIEWPORT_FIT_MIN = 0.16;
 
 const lyricTiltEuler = new THREE.Euler();
 
@@ -15,13 +18,16 @@ function clampRange(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, v));
 }
 
-function lyricCameraLockFit(
+function lyricViewportFit(
   camera: THREE.PerspectiveCamera,
   currentMesh: LyricMeshGroup | null,
   layoutScale: number,
   layoutX: number,
   layoutY: number,
+  layoutTiltX: number,
+  layoutTiltY: number,
   distance: number,
+  cameraLocked: boolean,
 ): number {
   layoutScale = Math.max(0.1, layoutScale || 1);
   const fov = (camera.fov || 45) * (Math.PI / 180);
@@ -36,6 +42,7 @@ function lyricCameraLockFit(
     const meshScale = Math.max(
       currentMesh.scale?.x && Number.isFinite(currentMesh.scale.x) ? currentMesh.scale.x : 1,
       currentMesh.scale?.y && Number.isFinite(currentMesh.scale.y) ? currentMesh.scale.y : 1,
+      LYRIC_MESH_PULSE_PAD,
     );
     maxW = (d.textWorldW || d.worldW || 6.1) * meshScale;
     maxH = (d.textWorldH || d.worldH || 1.0) * meshScale;
@@ -43,13 +50,23 @@ function lyricCameraLockFit(
   maxW = maxW || 5.4;
   maxH = maxH || 0.78;
 
-  const safeW = Math.max(visibleW * 0.42, visibleW * 0.84 - Math.abs(layoutX || 0) * 1.22);
-  const safeH = Math.max(visibleH * 0.18, visibleH * 0.44 - Math.abs(layoutY || 0) * 0.82);
+  // 轻微会增加投影占用宽度，留一点斜向余量
+  const tiltPad =
+    1 +
+    Math.abs(layoutTiltX || 0) * 0.004 +
+    Math.abs(layoutTiltY || 0) * 0.006;
+  maxW *= tiltPad;
+  maxH *= tiltPad;
+
+  const widthBudget = cameraLocked ? 0.84 : 0.9;
+  const heightBudget = cameraLocked ? 0.44 : 0.52;
+  const safeW = Math.max(visibleW * 0.36, visibleW * widthBudget - Math.abs(layoutX || 0) * 1.22);
+  const safeH = Math.max(visibleH * 0.16, visibleH * heightBudget - Math.abs(layoutY || 0) * 0.82);
   const scaledW = Math.max(0.01, maxW * layoutScale);
   const scaledH = Math.max(0.01, maxH * layoutScale);
   const viewportFit = Math.min(1, safeW / scaledW, safeH / scaledH);
-  const lockScaleCap = Math.min(1, LYRIC_CAMERA_LOCK_MAX_SCALE / layoutScale);
-  return clampRange(Math.min(viewportFit, lockScaleCap), 0.42, 1);
+  const lockScaleCap = cameraLocked ? Math.min(1, LYRIC_CAMERA_LOCK_MAX_SCALE / layoutScale) : 1;
+  return clampRange(Math.min(viewportFit, lockScaleCap), LYRIC_VIEWPORT_FIT_MIN, 1);
 }
 
 export type StageLyricsRuntime = {
@@ -346,11 +363,26 @@ export function updateStageLyrics3D(params: {
   const persp = camera as THREE.PerspectiveCamera;
   const lockDistance = cameraLockDistance ?? 4.85 + layoutZ;
   const useCameraLock = spatialAnchor === 'galaxy' && fx.lyricCameraLock;
-  const lockFit =
-    useCameraLock && persp.isPerspectiveCamera
-      ? lyricCameraLockFit(persp, currentMesh, layoutScale, layoutX, layoutY, lockDistance)
-      : 1;
-  runtime.lockFitScale += (lockFit - runtime.lockFitScale) * (lockFit < runtime.lockFitScale ? 0.18 : 0.1);
+  // 无论是否开启镜头锁定，都做视口安全缩放，避免长歌词（含翻译）横向裁切
+  const lockFit = persp.isPerspectiveCamera
+    ? lyricViewportFit(
+        persp,
+        currentMesh,
+        layoutScale,
+        layoutX,
+        layoutY,
+        layoutTiltX,
+        layoutTiltY,
+        lockDistance,
+        useCameraLock,
+      )
+    : 1;
+  const fitEase = lockFit < runtime.lockFitScale ? 0.28 : 0.14;
+  runtime.lockFitScale += (lockFit - runtime.lockFitScale) * fitEase;
+  if (runtime.snapCameraLockFrames > 0) {
+    runtime.lockFitScale = lockFit;
+    runtime.snapCameraLockFrames -= 1;
+  }
   stageRoot.scale.setScalar(layoutScale * runtime.lockFitScale);
 
   // stageRoot 在星河为粒子组子节点；地形模式挂 platter 子节点，随地形旋转。

@@ -4,6 +4,15 @@ import { getDeviceId } from './deviceId';
 import { setApiSignKey } from './apiSign';
 
 let bootstrapPromise: Promise<string | null> | null = null;
+let chatTextGateKey: string | null = null;
+
+export function getChatTextGateKey(): string | null {
+  return chatTextGateKey;
+}
+
+export function setChatTextGateKey(key: string | null | undefined): void {
+  chatTextGateKey = key?.trim() || null;
+}
 
 async function requestSessionBootstrap(): Promise<string | null> {
   const res = await fetchWithTimeout(
@@ -16,8 +25,13 @@ async function requestSessionBootstrap(): Promise<string | null> {
     8000,
   );
   if (!res.ok) return null;
-  const data = (await res.json()) as { clientId?: string; apiSignKey?: string };
+  const data = (await res.json()) as {
+    clientId?: string;
+    apiSignKey?: string;
+    chatTextGateKey?: string;
+  };
   if (data.apiSignKey) setApiSignKey(data.apiSignKey);
+  setChatTextGateKey(data.chatTextGateKey);
   if (data.clientId) rememberClientId(data.clientId);
   return data.clientId || null;
 }
@@ -60,4 +74,5 @@ export async function requireSessionBootstrap(force = false): Promise<string> {
 export function resetSessionBootstrap(): void {
   bootstrapPromise = null;
   setApiSignKey(null);
+  setChatTextGateKey(null);
 }

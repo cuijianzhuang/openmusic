@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useSmoothPlaybackTime } from '../../hooks/useSmoothPlaybackTime';
 import { useTrackLyrics } from '../../hooks/useTrackLyrics';
 import { clampPlaybackTime, useTrackDuration } from '../../hooks/useTrackDuration';
@@ -31,6 +31,7 @@ export default function TopographyCenterLyrics() {
   const displayTime = clampPlaybackTime(currentTime, duration);
   const [fxRevision, setFxRevision] = useState(0);
   const [fontRevision, setFontRevision] = useState(0);
+  const [fitScale, setFitScale] = useState(1);
   const lineRef = useRef<HTMLParagraphElement>(null);
   const beatGlowRef = useRef(0);
 
@@ -41,6 +42,7 @@ export default function TopographyCenterLyrics() {
   const lyricFontKey = normalizeLyricFontKey(fx.lyricFont);
   const palette = stageLyricPaletteLive.palette;
   const enabled = fx.particleLyrics;
+  const showTranslation = fx.lyricShowTranslation !== false;
 
   useEffect(() => {
     let cancelled = false;
@@ -52,7 +54,39 @@ export default function TopographyCenterLyrics() {
     };
   }, [lyricFontKey, fx.lyricWeight, fxRevision]);
 
-  const active = getActiveLyricWithProgress(lyrics, displayTime);
+  const active = getActiveLyricWithProgress(lyrics, displayTime, showTranslation);
+
+  useLayoutEffect(() => {
+    const line = lineRef.current;
+    if (!line || !enabled || !active?.text) {
+      setFitScale(1);
+      return;
+    }
+
+    const measure = () => {
+      const el = lineRef.current;
+      if (!el) return;
+      const liveFx = roomVisualFxLive.current;
+      const userScale = Math.max(0.35, Math.min(1.65, Number(liveFx.lyricScale) || 1));
+      const depthScale = 1 + Math.max(-1.6, Math.min(1.6, Number(liveFx.lyricOffsetZ) || 0)) * 0.14;
+      const layoutScale = Math.max(0.2, userScale * depthScale);
+      const safeW = Math.max(160, window.innerWidth * 0.9);
+      const safeH = Math.max(80, window.innerHeight * 0.42);
+      const width = Math.max(1, el.scrollWidth) * layoutScale;
+      const height = Math.max(1, el.scrollHeight) * layoutScale;
+      const next = Math.min(1, safeW / width, safeH / height);
+      setFitScale(Number.isFinite(next) ? Math.max(0.35, next) : 1);
+    };
+
+    measure();
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
+    ro?.observe(line);
+    window.addEventListener('resize', measure);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [enabled, active?.text, fxRevision, fontRevision]);
 
   useEffect(() => {
     const line = lineRef.current;
@@ -95,7 +129,7 @@ export default function TopographyCenterLyrics() {
   const letterSpacing = lyricLetterSpacingPx(fx, fontSize);
   const lineHeight = lyricLineHeightFactor(fx);
   const glowBlur = topographyLyricGlowBlurPx(fx, beatGlowRef.current);
-  const layoutTransform = buildTopographyLyricTransform(fx);
+  const layoutTransform = buildTopographyLyricTransform(fx, fitScale);
   const fontWeight = lyricFontWeightValue(fx);
   const fontFamily = lyricFontStackForKey(lyricFontKey);
   const stoneClass = lyricFontKey === 'stone-song' ? ' topography-center-lyric-stone' : '';
@@ -105,7 +139,7 @@ export default function TopographyCenterLyrics() {
       <div className="topography-center-lyric-transform" style={layoutTransform}>
         <p
           ref={lineRef}
-          key={`${active.text}:${lyricFontKey}:${fontRevision}`}
+          key={`${active.text}:${active.translation || ''}:${showTranslation}:${lyricFontKey}:${fontRevision}`}
           data-lyric-font={lyricFontDataAttr(lyricFontKey)}
           className={`topography-center-lyric-line topography-center-lyric-in${fx.lyricGlowParticles ? ' topography-center-lyric-particles' : ''}${stoneClass}`}
           style={{
@@ -121,7 +155,15 @@ export default function TopographyCenterLyrics() {
             ['--lyric-glow-beat' as string]: '0',
           }}
         >
-          {active.text}
+          {active.lines.length > 1 ? (
+            active.lines.map((line) => (
+              <span key={line} className="block">
+                {line}
+              </span>
+            ))
+          ) : (
+            active.text
+          )}
         </p>
       </div>
     </div>

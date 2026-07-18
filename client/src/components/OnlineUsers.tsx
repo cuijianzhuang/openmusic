@@ -300,16 +300,16 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
                       </div>
                       <div className="mt-0.5 flex items-center gap-2 text-[10px] text-netease-muted/70">
                         {!user.offline && user.joinedAt > 0 && (
-                          <span className="inline-flex items-center gap-0.5">
+                          <span className="inline-flex flex-shrink-0 items-center gap-0.5 whitespace-nowrap">
                             <Clock className="h-3 w-3 flex-shrink-0" />
                             <span>{formatStayDuration(user.joinedAt, now)}</span>
                           </span>
                         )}
                         {!user.offline && (
-                          <>
+                          <span className="inline-flex min-w-0 items-center gap-0.5">
                             <MapPin className="h-3 w-3 flex-shrink-0" />
                             <span className="truncate">{user.location || '未知'}</span>
-                          </>
+                          </span>
                         )}
                       </div>
                     </div>

@@ -113,6 +113,8 @@ export interface RoomVisualFxSettings {
   lyricGlowParticles: boolean;
   lyricCameraLock: boolean;
   particleLyrics: boolean;
+  /** 是否显示歌词翻译（默认开启） */
+  lyricShowTranslation: boolean;
   lyricColorMode: 'auto' | 'custom';
   lyricColor: string;
   lyricHighlightMode: 'auto' | 'custom';
@@ -179,6 +181,7 @@ export const DEFAULT_ROOM_VISUAL_FX: RoomVisualFxSettings = {
   lyricGlowParticles: false,
   lyricCameraLock: false,
   particleLyrics: true,
+  lyricShowTranslation: true,
   lyricColorMode: 'auto',
   lyricColor: '#a9b8c8',
   lyricHighlightMode: 'auto',
@@ -219,6 +222,7 @@ export function defaultLyricFxPatch(): Partial<RoomVisualFxSettings> {
     lyricTiltX: DEFAULT_ROOM_VISUAL_FX.lyricTiltX,
     lyricTiltY: DEFAULT_ROOM_VISUAL_FX.lyricTiltY,
     particleLyrics: DEFAULT_ROOM_VISUAL_FX.particleLyrics,
+    lyricShowTranslation: DEFAULT_ROOM_VISUAL_FX.lyricShowTranslation,
     lyricCameraLock: DEFAULT_ROOM_VISUAL_FX.lyricCameraLock,
     lyricColorMode: DEFAULT_ROOM_VISUAL_FX.lyricColorMode,
     lyricColor: DEFAULT_ROOM_VISUAL_FX.lyricColor,
@@ -359,6 +363,7 @@ export function readRoomVisualFx(): RoomVisualFxSettings {
       lyricGlowParticles: parsed.lyricGlowParticles === true,
       lyricCameraLock: parsed.lyricCameraLock === true,
       particleLyrics: parsed.particleLyrics !== false,
+      lyricShowTranslation: parsed.lyricShowTranslation !== false,
       lyricColorMode: parsed.lyricColorMode === 'custom' ? 'custom' : 'auto',
       lyricColor: normalizeHexColor(parsed.lyricColor || '', DEFAULT_ROOM_VISUAL_FX.lyricColor),
       lyricHighlightMode: parsed.lyricHighlightMode === 'custom' ? 'custom' : 'auto',

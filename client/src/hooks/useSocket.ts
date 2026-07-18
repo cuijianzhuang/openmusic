@@ -27,6 +27,10 @@ import { requireSessionBootstrap, resetSessionBootstrap } from '../lib/sessionBo
 import { mergeRoomState } from '../lib/mergeRoomState';
 import { debugLine, debugLog, resetDriftHistogram, setDebugSocketProvider } from '../lib/debugTools';
 import { bindReportTrackDurationSocket } from '../lib/reportTrackDuration';
+import {
+  getClientNetworkInfo,
+  type ClientNetworkInfo,
+} from '../lib/clientNetworkInfo';
 
 
 
@@ -42,6 +46,7 @@ type JoinSession = {
   nickname: string;
   password?: string;
   readOnly?: boolean;
+  networkInfo?: ClientNetworkInfo;
 };
 
 let lastJoinSession: JoinSession | null = null;
@@ -156,6 +161,8 @@ function joinPayload(session: JoinSession) {
     nickname: session.nickname,
     password: session.password?.trim() || undefined,
     readOnly: Boolean(session.readOnly),
+    clientIp: session.networkInfo?.ip,
+    clientLocation: session.networkInfo?.location,
   };
 }
 
@@ -642,6 +649,7 @@ if (!connected.current && !socketConnectRequested) {
       );
 
       const runJoin = async () => {
+        session.networkInfo = await getClientNetworkInfo();
         try {
           await ensureSocketReady(false);
         } catch {
@@ -858,6 +866,7 @@ if (s.connected) {
       imageUrl?: string;
       imageKey?: string;
       asSticker?: boolean;
+      textGatePass?: string;
     } = {},
   ): Promise<{ success: boolean; error?: string }> => {
     const hasImage = Boolean(options.imageUrl);

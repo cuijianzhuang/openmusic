@@ -15,8 +15,15 @@ import { areRoomListsEqual } from '../lib/roomListCompare';
 import { isMobileDevice } from '../lib/audioUnlock';
 import { ANDROID_APK_URL } from '../lib/androidDownload';
 import { IOS_IPA_URL } from '../lib/iosDownload';
+import {
+  fetchSiteAnnouncement,
+  markSiteAnnouncementSeen,
+  shouldAutoShowSiteAnnouncement,
+  type SiteAnnouncement,
+} from '../lib/siteAnnouncement';
 import Tooltip from '../components/Tooltip';
 import ClientDownloadModal from '../components/ClientDownloadModal';
+import SiteAnnouncementPopup from '../components/SiteAnnouncementPopup';
 
 function GiteeIcon({ className }: { className?: string }) {
   return (
@@ -199,6 +206,8 @@ export default function Home() {
   const [joinCode, setJoinCode] = useState('');
   const [joinPassword, setJoinPassword] = useState('');
   const [downloadModalOpen, setDownloadModalOpen] = useState(false);
+  const [siteAnnouncement, setSiteAnnouncement] = useState<SiteAnnouncement | null>(null);
+  const [siteAnnouncementOpen, setSiteAnnouncementOpen] = useState(false);
 
   const fetchRooms = useCallback(async (silent = false) => {
     if (!silent) setRoomsLoading(true);
@@ -223,6 +232,27 @@ export default function Home() {
     const timer = setInterval(() => fetchRooms(true), 5000);
     return () => clearInterval(timer);
   }, [fetchRooms]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchSiteAnnouncement().then((announcement) => {
+      if (cancelled || !announcement) return;
+      setSiteAnnouncement(announcement);
+      if (shouldAutoShowSiteAnnouncement(announcement)) {
+        setSiteAnnouncementOpen(true);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleCloseSiteAnnouncement = useCallback(() => {
+    if (siteAnnouncement?.id) {
+      markSiteAnnouncementSeen(siteAnnouncement.id);
+    }
+    setSiteAnnouncementOpen(false);
+  }, [siteAnnouncement?.id]);
 
   const ensureNickname = () => {
     const trimmed = nickname.trim();
@@ -605,6 +635,13 @@ export default function Home() {
       )}
 
       <ClientDownloadModal open={downloadModalOpen} onClose={() => setDownloadModalOpen(false)} />
+
+      <SiteAnnouncementPopup
+        open={siteAnnouncementOpen}
+        title={siteAnnouncement?.title}
+        text={siteAnnouncement?.text || ''}
+        onClose={handleCloseSiteAnnouncement}
+      />
     </div>
   );
 }

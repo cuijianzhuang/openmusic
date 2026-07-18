@@ -9,7 +9,7 @@ import {
   type ChangeEvent,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { ImagePlus, Search, Send, Smile, X } from 'lucide-react';
+import { ImagePlus, Loader2, Search, Send, Smile, X } from 'lucide-react';
 import type { ChatMention, ChatReplyRef, RoomUser } from '../types';
 import Tooltip from './Tooltip';
 import RoleBadge from './RoleBadge';
@@ -52,10 +52,35 @@ import { uploadChatImage } from '../api/chatImage';
 import { ensureImageFile } from '../lib/imageMime';
 import { readClipboardImageFile } from '../lib/compressChatImage';
 import { getClientId } from '../lib/clientId';
+import { checkTextProfanity } from '../lib/textProfanity';
+import { requireSessionBootstrap } from '../lib/sessionBootstrap';
 
 type MentionOption =
   | { type: 'all' }
   | { type: 'user'; user: RoomUser };
+
+type SendProgress = 'idle' | 'uploading' | 'checking-text' | 'checking-image' | 'sending';
+
+function needsImageModeration(imageUrl?: string, imageKey?: string): boolean {
+  if (!String(imageUrl || '').trim()) return false;
+  // 本地表情包跳过服务端图片审核
+  return !String(imageKey || '').startsWith('local-sticker:');
+}
+
+function sendProgressLabel(progress: SendProgress): string {
+  switch (progress) {
+    case 'uploading':
+      return '正在压缩并上传…';
+    case 'checking-text':
+      return '违禁词检测中…';
+    case 'checking-image':
+      return '图片监测中…';
+    case 'sending':
+      return '发送中…';
+    default:
+      return '';
+  }
+}
 
 export type PendingChatImage = {
   url: string;
@@ -85,6 +110,7 @@ interface Props {
       imageUrl?: string;
       imageKey?: string;
       asSticker?: boolean;
+      textGatePass?: string;
     },
   ) => Promise<{ success: boolean; error?: string }>;
   onStickToBottom: () => void;
@@ -115,6 +141,7 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
   onPreviewImage,
 }, ref) {
   const [sending, setSending] = useState(false);
+  const [sendProgress, setSendProgress] = useState<SendProgress>('idle');
   const [error, setError] = useState('');
   const [showEmoji, setShowEmoji] = useState(false);
   const [showMentionPicker, setShowMentionPicker] = useState(false);
@@ -129,6 +156,7 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
 
   const inputRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const sendProgressTimerRef = useRef<number | null>(null);
   const emojiPanelRef = useRef<HTMLDivElement>(null);
   const emojiPickerPortalRef = useRef<HTMLDivElement>(null);
   const composingRef = useRef(false);
@@ -158,6 +186,53 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
     options.push(...users.map((user) => ({ type: 'user' as const, user })));
     return options.slice(0, 8);
   }, [mentionQuery, mySocketId, roomMeta.users, canControlPlayback]);
+
+  const clearSendProgressTimer = useCallback(() => {
+    if (sendProgressTimerRef.current !== null) {
+      window.clearTimeout(sendProgressTimerRef.current);
+      sendProgressTimerRef.current = null;
+    }
+  }, []);
+
+  const beginSendProgress = useCallback((options: {
+    hasText?: boolean;
+    hasImageModeration?: boolean;
+    uploading?: boolean;
+  }) => {
+    clearSendProgressTimer();
+    if (options.uploading) {
+      setSendProgress('uploading');
+      return;
+    }
+    const hasText = Boolean(options.hasText);
+    const hasImage = Boolean(options.hasImageModeration);
+    if (hasText && hasImage) {
+      // 与服务端顺序一致：先文本再图片，避免长时间无反馈
+      setSendProgress('checking-text');
+      sendProgressTimerRef.current = window.setTimeout(() => {
+        setSendProgress('checking-image');
+        sendProgressTimerRef.current = null;
+      }, 650);
+      return;
+    }
+    if (hasText) {
+      setSendProgress('checking-text');
+      return;
+    }
+    if (hasImage) {
+      setSendProgress('checking-image');
+      return;
+    }
+    setSendProgress('sending');
+  }, [clearSendProgressTimer]);
+
+  const endSendProgress = useCallback(() => {
+    clearSendProgressTimer();
+    setSendProgress('idle');
+    setSending(false);
+  }, [clearSendProgressTimer]);
+
+  useEffect(() => () => clearSendProgressTimer(), [clearSendProgressTimer]);
 
   useEffect(() => {
     if (!showEmoji) setEmojiPickerTab('faces');
@@ -282,6 +357,7 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
     if (chatMuted || uploadingImage) return;
     setError('');
     setUploadingImage(true);
+    setSendProgress('uploading');
     try {
       const uploaded = await uploadChatImage(roomMeta.id, file);
       onPendingImageChange({
@@ -293,6 +369,7 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
       setError(err instanceof Error ? err.message : '图片上传失败');
     } finally {
       setUploadingImage(false);
+      setSendProgress('idle');
       if (imageInputRef.current) imageInputRef.current.value = '';
     }
   }, [chatMuted, onPendingImageChange, roomMeta.id, uploadingImage]);
@@ -310,6 +387,7 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
 
     const mentions = buildMentions(messageText);
     const currentReplyTo = replyTo;
+    const checkImage = needsImageModeration(currentImage?.url, currentImage?.key);
 
     onStickToBottom();
     clearEditor();
@@ -317,12 +395,39 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
     clearPendingImage();
     setSending(true);
     setError('');
+    beginSendProgress({
+      hasText: Boolean(messageText),
+      hasImageModeration: checkImage,
+    });
+
+    let textGatePass: string | undefined;
+    if (messageText) {
+      try {
+        await requireSessionBootstrap(false);
+      } catch {
+        // bootstrap 失败时仍尝试发送，由服务端兜底检测
+      }
+      const gate = await checkTextProfanity(messageText, {
+        userId: mySocketId || getClientId(),
+      });
+      if (!gate.ok) {
+        insertPlainText(messageText);
+        onReplyChange(currentReplyTo);
+        if (currentImage) onPendingImageChange(currentImage);
+        setError(gate.error);
+        endSendProgress();
+        return;
+      }
+      textGatePass = gate.pass;
+      if (checkImage) beginSendProgress({ hasImageModeration: true });
+    }
 
     const res = await sendChat(messageText, {
       mentions,
       replyTo: currentReplyTo,
       imageUrl: currentImage?.url,
       imageKey: currentImage?.key,
+      textGatePass,
     });
     if (!res.success) {
       insertPlainText(messageText);
@@ -330,17 +435,17 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
       if (currentImage) onPendingImageChange(currentImage);
       setError(res.error || '发送失败');
     }
-    setSending(false);
+    endSendProgress();
   };
 
   const finishStickerSend = (currentReplyTo: ChatReplyRef | null, success: boolean, errorMessage?: string) => {
     if (!success) {
       onReplyChange(currentReplyTo);
       setError(errorMessage || '发送失败');
-      setSending(false);
+      endSendProgress();
       throw new Error(errorMessage || '发送失败');
     }
-    setSending(false);
+    endSendProgress();
     setShowEmoji(false);
     setEmojiPickerTab('faces');
   };
@@ -353,6 +458,7 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
     onReplyChange(null);
     setSending(true);
     setError('');
+    beginSendProgress({ hasImageModeration: needsImageModeration(imageUrl) });
 
     const res = await sendChat('', { imageUrl, asSticker: true, replyTo: currentReplyTo });
     finishStickerSend(currentReplyTo, res.success, res.error);
@@ -371,10 +477,12 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
       let res: { success: boolean; error?: string };
       // 已配置图床时先上传，避免数 MB 的 data URL 经 WebSocket 广播导致超时
       if (chatUploadEnabled && (imageUrl.startsWith('data:') || imageUrl.startsWith('blob:'))) {
+        beginSendProgress({ uploading: true });
         const blob = await (await fetch(imageUrl)).blob();
         const file = await ensureImageFile(blob, 'sticker');
         if (!file) throw new Error('仅支持 JPG、PNG、GIF、WebP 图片');
         const uploaded = await uploadChatImage(roomMeta.id, file);
+        beginSendProgress({ hasImageModeration: needsImageModeration(uploaded.url, uploaded.key) });
         res = await sendChat('', {
           imageUrl: uploaded.url,
           imageKey: uploaded.key,
@@ -382,6 +490,7 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
           replyTo: currentReplyTo,
         });
       } else {
+        beginSendProgress({ hasImageModeration: needsImageModeration(imageUrl, imageKey) });
         res = await sendChat('', {
           imageUrl,
           imageKey,
@@ -394,7 +503,7 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
       onReplyChange(currentReplyTo);
       const message = err instanceof Error ? err.message : '发送失败';
       setError(message);
-      setSending(false);
+      endSendProgress();
       throw (err instanceof Error ? err : new Error(message));
     }
   };
@@ -632,6 +741,12 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
           </div>
         )}
         {error && <p className="mb-1 text-xs text-netease-red">{error}</p>}
+        {(sending || uploadingImage) && sendProgress !== 'idle' && (
+          <p className="mb-1 flex items-center gap-1.5 text-xs text-amber-300/90">
+            <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+            <span>{sendProgressLabel(sendProgress)}</span>
+          </p>
+        )}
         {pendingImage && (
           <div className="mb-1.5 flex items-center gap-2 rounded-xl bg-white/5 px-2 py-1.5">
             <button
@@ -804,15 +919,20 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
                 event.preventDefault();
                 void handleSend();
               }}
-              className={`h-9 overflow-x-auto overflow-y-hidden whitespace-nowrap rounded-xl border border-netease-border/50 bg-netease-dark px-3 py-1.5 text-sm leading-6 text-white focus:border-netease-red/40 focus:outline-none ${chatMuted ? 'opacity-50 pointer-events-none' : ''}`}
+              className={`scrollbar-hide h-9 overflow-x-auto overflow-y-hidden whitespace-nowrap rounded-xl border border-netease-border/50 bg-netease-dark px-3 py-1.5 text-sm leading-6 text-white focus:border-netease-red/40 focus:outline-none ${chatMuted ? 'opacity-50 pointer-events-none' : ''}`}
             />
           </div>
           <button
             onClick={() => { void handleSend(); }}
             disabled={sending || uploadingImage || (!hasDraft && !pendingImage) || chatMuted}
             className="rounded-xl bg-netease-red px-3 py-1.5 text-white transition-colors hover:bg-red-500 disabled:opacity-40"
+            aria-label={sending || uploadingImage ? sendProgressLabel(sendProgress) || '发送中' : '发送'}
           >
-            <Send className="h-4 w-4" />
+            {sending || uploadingImage ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Send className="h-4 w-4" />
+            )}
           </button>
         </div>
       </div>

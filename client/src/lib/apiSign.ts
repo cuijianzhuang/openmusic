@@ -3,6 +3,7 @@ const SIGN_QUERY_KEYS = new Set(['om_ts', 'om_nonce', 'om_sign']);
 const PUBLIC_API_PATHS = new Set([
   '/api/health',
   '/api/app-version',
+  '/api/site-announcement',
   '/api/session/bootstrap',
 ]);
 

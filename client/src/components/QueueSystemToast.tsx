@@ -4,7 +4,8 @@ import { useChatSystemToastStore } from '../stores/chatSystemToastStore';
 const VISIBLE_MS = 2800;
 const FADE_MS = 320;
 
-export default function ChatSystemToast() {
+/** 切歌 / 点歌等系统提示，居中覆盖在播放队列标题栏正中间 */
+export default function QueueSystemToast() {
   const text = useChatSystemToastStore((s) => s.text);
   const seq = useChatSystemToastStore((s) => s.seq);
   const clear = useChatSystemToastStore((s) => s.clear);
@@ -29,9 +30,9 @@ export default function ChatSystemToast() {
   if (!text || phase === 'hidden') return null;
 
   return (
-    <div className="pointer-events-none absolute inset-x-0 top-1 z-20 flex justify-center px-3">
+    <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center px-2">
       <p
-        className={`max-w-[92%] truncate rounded-full border border-white/10 bg-black/55 px-3 py-1 text-center text-[11px] leading-5 text-netease-muted/90 shadow-lg backdrop-blur-sm transition-opacity duration-300 ${
+        className={`max-w-full truncate rounded-full border border-netease-border/50 bg-netease-card px-3 py-0.5 text-center text-xs leading-5 text-netease-muted transition-opacity duration-300 ${
           phase === 'exit' ? 'opacity-0' : 'opacity-100 animate-fade-in'
         }`}
         role="status"

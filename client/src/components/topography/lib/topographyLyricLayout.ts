@@ -6,8 +6,12 @@ function clamp(v: number, min: number, max: number): number {
 }
 
 /** 与星河 3D 歌词相同的滑块量程，映射为视口 2D 变换 */
-export function buildTopographyLyricTransform(fx: RoomVisualFxSettings): Pick<CSSProperties, 'transform'> {
+export function buildTopographyLyricTransform(
+  fx: RoomVisualFxSettings,
+  fitScale = 1,
+): Pick<CSSProperties, 'transform'> {
   const scale = clamp(Number(fx.lyricScale) || 1, 0.35, 1.65);
+  const safeFit = clamp(Number(fitScale) || 1, 0.35, 1);
   const offsetX = clamp(Number(fx.lyricOffsetX) || 0, -2, 2) * 12;
   const offsetY = clamp(Number(fx.lyricOffsetY) || 0, -1.2, 1.35) * -10;
   const offsetZ = clamp(Number(fx.lyricOffsetZ) || 0, -1.6, 1.6);
@@ -16,7 +20,7 @@ export function buildTopographyLyricTransform(fx: RoomVisualFxSettings): Pick<CS
   const tiltY = clamp(Number(fx.lyricTiltY) || 0, -42, 42);
 
   return {
-    transform: `translate3d(${offsetX}vw, ${offsetY}vh, ${offsetZ * 48}px) rotateX(${tiltX}deg) rotateY(${tiltY}deg) scale(${scale * depthScale})`,
+    transform: `translate3d(${offsetX}vw, ${offsetY}vh, ${offsetZ * 48}px) rotateX(${tiltX}deg) rotateY(${tiltY}deg) scale(${scale * depthScale * safeFit})`,
   };
 }
 

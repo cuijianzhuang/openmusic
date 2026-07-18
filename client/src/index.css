@@ -1166,11 +1166,13 @@ html.control-glass-svg-ok #search-box {
 
 .topography-center-lyric-line {
   margin: 0;
-  max-width: min(92vw, 960px);
+  max-width: min(90vw, 920px);
+  box-sizing: border-box;
   text-align: center;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   word-break: break-word;
-  font-size: clamp(30px, 5.2vw, 72px);
+  font-size: clamp(28px, 4.8vw, 68px);
   color: transparent;
   background-image: linear-gradient(
     90deg,

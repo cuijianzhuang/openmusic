@@ -51,7 +51,7 @@ export function isApiSignRequired() {
 
 export function isPublicApiPath(req) {
   const path = req.path || '';
-  if (path === '/api/health' || path === '/api/app-version') return true;
+  if (path === '/api/health' || path === '/api/app-version' || path === '/api/site-announcement') return true;
   if (path === '/api/session/bootstrap' && req.method === 'POST') return true;
   return false;
 }

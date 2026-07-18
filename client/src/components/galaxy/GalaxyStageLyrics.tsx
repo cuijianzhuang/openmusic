@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import { getActiveLyricPair } from '../../api/music';
+import { getActiveLyricLine } from '../../api/music';
 import { useSmoothPlaybackTime } from '../../hooks/useSmoothPlaybackTime';
 import { useTrackLyrics } from '../../hooks/useTrackLyrics';
 import { roomVisualFxLive, subscribeRoomVisualFx } from '../../lib/roomVisualFxLive';
@@ -21,6 +21,7 @@ import {
 } from './lib/galaxyStageLyricMaterial';
 import {
   createStageLyricsRuntime,
+  snapStageLyricCameraLock,
   updateStageLyrics3D,
   type StageLyricStageRoot,
 } from './lib/galaxyStageLyrics3D';
@@ -30,12 +31,17 @@ interface Props {
   spatialAnchor?: 'galaxy' | 'topography';
 }
 
-/** Mineradio stageLyrics + updateStageLyrics3D */
+/** Mineradio stageLyrics + updateStageLyrics3D — 所有着色器预设共用 */
 export default function GalaxyStageLyrics({ isPlaying, spatialAnchor = 'galaxy' }: Props) {
   const current = useRoomStore((s) => s.room?.current ?? null);
   const currentTime = useSmoothPlaybackTime();
   const lyrics = useTrackLyrics(current);
-  const { current: currentLine } = getActiveLyricPair(lyrics, currentTime);
+  const activeLine = getActiveLyricLine(lyrics, currentTime);
+  const currentLine = activeLine?.text ?? null;
+  const currentTranslation = activeLine?.translation ?? null;
+  const lyricKey = activeLine
+    ? `${activeLine.time}:${activeLine.text}:${activeLine.translation || ''}:${roomVisualFxLive.current.lyricShowTranslation !== false}`
+    : null;
   const { camera } = useThree();
 
   const stageRootRef = useRef<StageLyricStageRoot | null>(null);
@@ -50,6 +56,7 @@ export default function GalaxyStageLyrics({ isPlaying, spatialAnchor = 'galaxy' 
   useEffect(() => subscribeStageLyricPalette(() => setFxRevision((v) => v + 1)), []);
 
   const fx = roomVisualFxLive.current;
+  const showTranslation = fx.lyricShowTranslation !== false;
 
   useEffect(() => {
     let cancelled = false;
@@ -69,9 +76,13 @@ export default function GalaxyStageLyrics({ isPlaying, spatialAnchor = 'galaxy' 
 
   const lyricMesh = useMemo(() => {
     if (!currentLine) return null;
-    const mask = buildLyricMaskAsset(currentLine);
+    const mask = buildLyricMaskAsset(
+      currentLine,
+      showTranslation ? currentTranslation : null,
+      showTranslation,
+    );
     return buildLyricMesh(mask);
-  }, [currentLine, fxRevision, fontRevision]);
+  }, [lyricKey, currentLine, currentTranslation, showTranslation, fxRevision, fontRevision]);
 
   useEffect(() => {
     if (spatialAnchor !== 'topography') return;
@@ -102,20 +113,22 @@ export default function GalaxyStageLyrics({ isPlaying, spatialAnchor = 'galaxy' 
     currentMeshRef.current = lyricMesh;
     if (lyricMesh && root && spatialAnchor === 'topography') {
       root.add(lyricMesh);
-      if (currentLine !== prevLineRef.current) {
+      if (lyricKey !== prevLineRef.current) {
         lyricMesh.userData.age = 0;
+        snapStageLyricCameraLock(runtimeRef.current);
       }
       const textMat = lyricMesh.userData.lyric?.textMat;
       if (textMat) textMat.uniforms.uOpacity.value = 0.94;
       if (root.userData.starRiverMat) root.userData.starRiverMat.uniforms.uOpacity.value = 0.42;
     } else if (lyricMesh && root) {
       root.add(lyricMesh);
-      if (currentLine !== prevLineRef.current) {
+      if (lyricKey !== prevLineRef.current) {
         lyricMesh.userData.age = 0;
+        snapStageLyricCameraLock(runtimeRef.current);
       }
     }
-    prevLineRef.current = currentLine;
-  }, [currentLine, lyricMesh, spatialAnchor]);
+    prevLineRef.current = lyricKey;
+  }, [lyricKey, currentLine, lyricMesh, spatialAnchor]);
 
   useEffect(
     () => () => {

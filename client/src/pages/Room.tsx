@@ -60,6 +60,7 @@ import { getSongRequestBlockReason } from '../lib/roomPermissions';
 import { markAnnouncementSeen, shouldAutoShowAnnouncement } from '../lib/announcementSeen';
 import JumpRequestBanner from '../components/JumpRequestBanner';
 import Toast from '../components/Toast';
+import QueueSystemToast from '../components/QueueSystemToast';
 import Tooltip from '../components/Tooltip';
 import RoleBadge from '../components/RoleBadge';
 import { copyToClipboard } from '../lib/copyToClipboard';
@@ -74,6 +75,7 @@ import {
   stripRoomPasswordFromSearch,
 } from '../lib/roomPassword';
 import { isMobileDevice } from '../lib/audioUnlock';
+import { exitDocumentFullscreen } from '../lib/browserFullscreen';
 import {
   readRoomVisualFx,
   roomAmbientGlassClass,
@@ -1230,6 +1232,7 @@ export default function Room() {
     const next = !pureMode;
     setPureModeEnabled(next);
     if (next) {
+      void exitDocumentFullscreen();
       setImmersiveModeEnabled(false);
       setVisualFxOpen(false);
       setPurePlayerHidden(false);
@@ -1276,6 +1279,7 @@ export default function Room() {
     if (immersiveTransitionRef.current) return;
     immersiveTransitionRef.current = true;
     setImmersiveExitPromptOpen(false);
+    void exitDocumentFullscreen();
 
     const liveRoom = useRoomStore.getState().room;
     const currentSong = liveRoom?.current ?? null;
@@ -1413,12 +1417,14 @@ export default function Room() {
 
   useEffect(() => {
     if (!showImmersiveEntry && immersiveMode) {
+      void exitDocumentFullscreen();
       setImmersiveModeEnabled(false);
     }
   }, [showImmersiveEntry, immersiveMode, setImmersiveModeEnabled]);
 
   useEffect(() => {
     if (pureMode && immersiveMode) {
+      void exitDocumentFullscreen();
       setImmersiveModeEnabled(false);
     }
   }, [pureMode, immersiveMode, setImmersiveModeEnabled]);
@@ -1634,11 +1640,12 @@ export default function Room() {
         fillHeight ? 'h-full flex-1 min-h-0' : 'flex-shrink-0'
       }`}
     >
-      <div className="flex items-center justify-between px-4 py-2.5 sm:py-3 border-b border-netease-border/50 flex-shrink-0">
+      <div className="relative flex items-center justify-between px-4 py-2.5 sm:py-3 border-b border-netease-border/50 flex-shrink-0">
         <h2 className="text-sm font-medium">播放队列</h2>
         <span className="text-xs text-netease-muted">
           {queueCount > 0 ? `共 ${queueCount} 首` : '暂无歌曲'}
         </span>
+        <QueueSystemToast />
       </div>
       <div className={`p-2 ${fillHeight ? 'flex-1 min-h-0 overflow-hidden flex flex-col' : ''}`}>
         <QueuePanel fillHeight={fillHeight} />

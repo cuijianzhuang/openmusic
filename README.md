@@ -84,8 +84,9 @@ METING_API_AUTH=你的meting_token
 | `REDIS_URL` | 🗄️ 可选；房间与热榜持久化，**强烈推荐** |
 | `QINIU_*` | 🖼️ 可选；聊天发图 |
 | `APIHZ_BASE_URL` | 可选；接口盒子 API 根地址，默认 `https://cn.apihz.cn/api` |
-| `APIHZ_ID` / `APIHZ_KEY` | 可选；接口盒子凭证（表情包搜索、敏感词检测共用） |
+| `APIHZ_ID` / `APIHZ_KEY` | 可选；接口盒子凭证（表情包搜索；聊天敏感词**后端兜底**共用） |
 | `APIHZ_IMG_*` | 可选；与 `APIHZ_ID` / `APIHZ_KEY` 等价，兼容旧配置名 |
+| `SITE_ANNOUNCEMENT_FILE` | 可选；首页站点公告 JSON 路径，默认 `server/siteAnnouncement.json` |
 
 📚 完整说明 → [docs/DEPLOY.md](docs/DEPLOY.md)
 
@@ -106,19 +107,24 @@ METING_API_AUTH=你的meting_token
 ### 🏠 房间
 
 - 🚪 大厅、🔒 密码房、🕐 最近访问、🔗 分享链接（密码可直达）
-- 📢 公告、📻 FM 漫游、👑 贵宾角标、💬 聊天历史可见性
+- 📣 **首页站点公告**：编辑 `server/siteAnnouncement.json`（改 `id` = 新公告）；已读后不再弹，热更新无需重启
+- 📢 房间公告、📻 FM 漫游、👑 贵宾角标、💬 聊天历史可见性
+- 📍 成员归属地：进房时由客户端查询并上报（[uapis myip](https://uapis.cn/api/v1/network/myip)），本地缓存；失败不影响进房
 - ⚙️ 点歌规则、🚫 禁播、👎 踩歌切歌、🧹 离房清歌
 - 🌿 纯净模式：隐藏动效与热榜，标签页低调伪装
 
 ### 💬 互动
 
 - 💬 实时聊天：贴纸、发图、点评、回复 / @ / @全体、消息撤回
+- 🛡️ 敏感词：前端快速检测（[uapis](https://uapis.cn/api/v1/text/profanitycheck)）通过后签发密令，后端验密令可跳过慢接口；失败 / 积分不足自动走接口盒子兜底
+- 🖼️ 发图时服务端图片审核（`CYAPI_KEY`）；发送中显示「违禁词检测中 / 图片监测中」进度
 - 😺 微信表情包采集（本机 IndexedDB，单张 ≤ 5MB）
 - 🔍 表情包搜索（接口盒子，可选）
 
 ### 🌌 视觉与客户端
 
 - ✨ 星河 / 声波地形等 3D 背景与桌面沉浸模式
+- 🖥️ 沉浸模式：长歌词自适应（换行 / 缩小），浏览器原生全屏按钮（Esc 同步退出；退出沉浸时一并退出全屏）
 - 📱 Android / iOS（Capacitor 远程 URL 壳，前端发版无需重打包）
 - 🆕 发版更新：轮询 `/api/app-version`；「立即更新」在当前页硬刷新，同一版本不会重复强弹
 
@@ -194,7 +200,9 @@ location /socket.io/ {
 }
 ```
 
-- 🌍 限流与 IP 归属地：`TRUST_PROXY=1`；有 CDN 时设置 `CLIENT_IP_HEADER`（Cloudflare：`CF-Connecting-IP`；EdgeOne：`iqp`），并由 Nginx 透传该头
+- 🌍 限流：`TRUST_PROXY=1`；有 CDN 时设置 `CLIENT_IP_HEADER`（Cloudflare：`CF-Connecting-IP`；EdgeOne：`iqp`），并由 Nginx 透传该头
+- 📣 首页公告：编辑 `server/siteAnnouncement.json`（示例见 `siteAnnouncement.example.json`）；发布新公告请改 `id`；详见 [docs/DEPLOY.md](docs/DEPLOY.md)
+- 🛡️ 聊天敏感词：优先前端 uapis（访客积分共享）；积分不足 / 失败时后端用 `APIHZ_*` 兜底；图片审核仍依赖 `CYAPI_KEY`
 - 🆕 发版：编辑 `release-notes.json` 或执行 `npm run package:build`；CDN 勿长期缓存 `index.html` 与 `/api/*`
 - 🔍 `/sitemap.xml`、`/robots.txt` 由服务端动态生成（优先 `CLIENT_URL`）
 - 📄 完整 Nginx / 宝塔示例：[deploy/nginx.conf.example](deploy/nginx.conf.example)、[deploy/DEPLOY-BAOTA.md](deploy/DEPLOY-BAOTA.md)
