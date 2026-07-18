@@ -51,23 +51,29 @@ export function canonicalApiQuery(params: URLSearchParams): string {
 
 async function sha256Hex(text: string): Promise<string> {
   if (!text) return '';
+  if (!globalThis.crypto?.subtle) {
+    throw new Error('当前页面不支持安全请求签名，请使用 HTTPS 访问');
+  }
   const encoded = new TextEncoder().encode(text);
-  const digest = await crypto.subtle.digest('SHA-256', encoded);
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', encoded);
   return [...new Uint8Array(digest)]
     .map((byte) => byte.toString(16).padStart(2, '0'))
     .join('');
 }
 
 async function hmacSha256Base64Url(key: string, message: string): Promise<string> {
+  if (!globalThis.crypto?.subtle) {
+    throw new Error('当前页面不支持安全请求签名，请使用 HTTPS 访问');
+  }
   const encoder = new TextEncoder();
-  const cryptoKey = await crypto.subtle.importKey(
+  const cryptoKey = await globalThis.crypto.subtle.importKey(
     'raw',
     encoder.encode(key),
     { name: 'HMAC', hash: 'SHA-256' },
     false,
     ['sign'],
   );
-  const signature = await crypto.subtle.sign('HMAC', cryptoKey, encoder.encode(message));
+  const signature = await globalThis.crypto.subtle.sign('HMAC', cryptoKey, encoder.encode(message));
   const bytes = new Uint8Array(signature);
   let binary = '';
   for (const byte of bytes) binary += String.fromCharCode(byte);

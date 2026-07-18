@@ -240,7 +240,9 @@ app.use((req, res, next) => {
 
   req.apiIdentity = identity;
 
-  if (isApiSignRequired()) {
+  // Web Crypto 仅在 HTTPS/可信上下文可用；HTTP 直连阶段只能依赖会话校验。
+  // 上线 HTTPS 后 req.secure 为 true，自动恢复请求签名校验。
+  if (isApiSignRequired() && req.secure) {
     const signKey = deriveApiSignKey(CLIENT_ID_SECRET, identity.userId, identity.iat);
     const result = verifyApiSign(req, signKey, identity.userId);
     if (!result.ok) {
@@ -1011,7 +1013,7 @@ function sendBootstrapResponse(res, userId, iat, token, deviceId = null) {
     // 聊天文本门禁密令密钥：始终下发，供前端敏感词检测通过后签发密令
     chatTextGateKey: deriveChatTextGateKey(CLIENT_ID_SECRET, userId, iat),
   };
-  if (isApiSignRequired()) {
+  if (isApiSignRequired() && res.req?.secure) {
     payload.apiSignKey = deriveApiSignKey(CLIENT_ID_SECRET, userId, iat);
   }
   return res.json(payload);

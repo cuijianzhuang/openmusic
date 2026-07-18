@@ -30,7 +30,8 @@ async function requestSessionBootstrap(): Promise<string | null> {
     apiSignKey?: string;
     chatTextGateKey?: string;
   };
-  if (data.apiSignKey) setApiSignKey(data.apiSignKey);
+  // 非安全 HTTP 上 Web Crypto 可能不可用；此时服务端也不会要求请求签名。
+  setApiSignKey(globalThis.crypto?.subtle ? data.apiSignKey : null);
   setChatTextGateKey(data.chatTextGateKey);
   if (data.clientId) rememberClientId(data.clientId);
   return data.clientId || null;
