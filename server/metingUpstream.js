@@ -7,6 +7,7 @@ import { getRuntimeConfig } from './runtimeConfig.js';
 // 上游可用 `chksz:` 前缀标记为 ChKSz API（https://api.chksz.com 会自动识别），
 // 由 chkszAdapter.js 翻译为 Meting 语义参与负载均衡。
 const FAIL_COOLDOWN_MS = 60_000;
+const UPSTREAM_ATTEMPTS = 2;
 
 let upstreams = [];
 let upstreamSignature = '';
@@ -126,7 +127,7 @@ function buildUpstreamUrl(upstream, query) {
 }
 
 // 轮询起点每次前移；冷却中的上游排到最后兜底（全部故障时仍会尝试）；禁用的完全跳过
-function orderedUpstreams() {
+function orderedUpstreams(query = {}) {
   syncUpstreams();
   const enabled = upstreams.filter((u) => !u.disabled);
   if (enabled.length === 0) return [];
@@ -135,10 +136,38 @@ function orderedUpstreams() {
   rrCursor = (rrCursor + 1) % enabled.length;
   const rotated = [...enabled.slice(start), ...enabled.slice(0, start)];
   const now = Date.now();
+  const healthy = rotated.filter((u) => now >= u.cooldownUntil);
+  const cooling = rotated.filter((u) => now < u.cooldownUntil);
+  const server = String(query.server || '').toLowerCase();
+  // 网易优先 ChKSz（会员/高音质解析），QQ 优先标准 Meting；失败后仍交叉兜底。
+  const preferredStyle = server === 'netease' ? 'chksz' : (server === 'tencent' ? 'meting' : '');
+  if (!preferredStyle) return [...healthy, ...cooling];
   return [
-    ...rotated.filter((u) => now >= u.cooldownUntil),
-    ...rotated.filter((u) => now < u.cooldownUntil),
+    ...healthy.filter((upstream) => upstream.style === preferredStyle),
+    ...healthy.filter((upstream) => upstream.style !== preferredStyle),
+    ...cooling.filter((upstream) => upstream.style === preferredStyle),
+    ...cooling.filter((upstream) => upstream.style !== preferredStyle),
   ];
+}
+
+async function requestUpstream(upstream, query, options, timeoutMs) {
+  let lastError;
+  for (let attempt = 0; attempt < UPSTREAM_ATTEMPTS; attempt += 1) {
+    try {
+      const response = upstream.style === 'chksz'
+        ? await fetchChksz(upstream.base, query, timeoutMs, upstream.auth)
+        : await fetchMeting(buildUpstreamUrl(upstream, query), options, timeoutMs);
+      // 网络抖动和 5xx 快速重试一次；4xx 多为鉴权/参数问题，直接交给切换逻辑。
+      if (response.status >= 500 && attempt + 1 < UPSTREAM_ATTEMPTS) continue;
+      return response;
+    } catch (err) {
+      lastError = err;
+      const status = Number(err?.status || 0);
+      const retryable = !status || status >= 500;
+      if (!retryable || attempt + 1 >= UPSTREAM_ATTEMPTS) throw err;
+    }
+  }
+  throw lastError || new Error('音源请求失败');
 }
 
 function markFailure(upstream, err) {
@@ -163,7 +192,7 @@ export async function fetchMetingApi(query, options = {}, timeoutMs = 10000) {
     throw new Error('未配置 METING_API_URL');
   }
 
-  const candidates = orderedUpstreams();
+  const candidates = orderedUpstreams(query);
   if (candidates.length === 0) {
     throw new Error('所有 Meting 上游均已禁用');
   }
@@ -175,9 +204,7 @@ export async function fetchMetingApi(query, options = {}, timeoutMs = 10000) {
   let emptyUrlResponse = null;
   for (const upstream of candidates) {
     try {
-      const response = upstream.style === 'chksz'
-        ? await fetchChksz(upstream.base, query, timeoutMs, upstream.auth)
-        : await fetchMeting(buildUpstreamUrl(upstream, query), options, timeoutMs);
+      const response = await requestUpstream(upstream, query, options, timeoutMs);
       // 404 视为正常的“歌曲不存在”业务结果；其余 4xx/5xx 视为上游故障并触发切换
       if (response.status >= 400 && response.status !== 404) {
         markFailure(upstream, `上游返回 ${response.status}`);

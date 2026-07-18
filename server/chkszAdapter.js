@@ -74,7 +74,9 @@ async function chkszGet(base, path, params, timeoutMs, apiKey = '') {
     // chksz 对“未找到”场景会用 HTTP 404 承载 { code: 404, msg: ... } 正常业务 JSON；
     // 只有非 404 的非 2xx（网关错误、无 JSON 体等）才视为传输层故障
     if (!res.ok && res.status !== 404) {
-      throw new Error(`chksz 上游返回 ${res.status}`);
+      const error = new Error(`chksz 上游返回 ${res.status}`);
+      error.status = res.status;
+      throw error;
     }
     return await res.json();
   } finally {
