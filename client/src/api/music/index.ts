@@ -308,7 +308,11 @@ export async function createRoom(name?: string, password?: string): Promise<{ id
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error('创建房间失败');
+  if (!res.ok) {
+    const data = (await res.json().catch(() => null)) as { error?: unknown } | null;
+    const message = typeof data?.error === 'string' ? data.error.trim() : '';
+    throw new Error(message || `创建房间失败（${res.status}）`);
+  }
   return res.json();
 }
 

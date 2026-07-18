@@ -302,8 +302,8 @@ export default function Home() {
       setCreateRoomName('');
       setCreatePassword('');
       goToRoom(room.id, createPassword.trim() || undefined);
-    } catch {
-      setError('创建房间失败，请重试');
+    } catch (error) {
+      setError(error instanceof Error && error.message ? error.message : '创建房间失败，请重试');
     } finally {
       setActionLoading(false);
     }

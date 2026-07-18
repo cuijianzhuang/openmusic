@@ -987,7 +987,9 @@ function createServerClientId() {
 }
 
 function setIdentityCookieHeaders(res, userId, token, deviceId = null) {
-  const secure = IS_PRODUCTION ? '; Secure' : '';
+  // Secure Cookie 只能通过 HTTPS 保存。生产环境也允许先通过直连 HTTP
+  // 完成首次部署；反代正确传递 X-Forwarded-Proto 后 req.secure 会为 true。
+  const secure = res.req?.secure ? '; Secure' : '';
   const base = `Path=/; Max-Age=${IDENTITY_COOKIE_MAX_AGE_SEC}; HttpOnly; SameSite=Lax${secure}`;
   const cookies = [
     `${IDENTITY_UID_COOKIE}=${encodeURIComponent(userId)}; ${base}`,
