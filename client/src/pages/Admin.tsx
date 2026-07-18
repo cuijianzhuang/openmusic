@@ -13,6 +13,8 @@ interface MetingUpstreamStatus {
   okCount: number;
   failCount: number;
   lastError: string;
+  lastProbeAgoSec?: number | null;
+  lastProbeOk?: boolean | null;
 }
 
 interface AdminAuditEntry {
@@ -445,6 +447,7 @@ export default function Admin() {
                   <span className="text-xs text-netease-muted">
                     成功 {up.okCount} · 失败 {up.failCount}
                     {!up.healthy && ` · 冷却 ${up.cooldownRemainingSec}s`}
+                    {typeof up.lastProbeAgoSec === 'number' && ` · 探测 ${up.lastProbeAgoSec}s 前${up.lastProbeOk === false ? '（失败）' : ''}`}
                   </span>
                   {up.lastError && (
                     <span className="w-full truncate pl-6 text-[11px] text-red-400/80">{up.lastError}</span>

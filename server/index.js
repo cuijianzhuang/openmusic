@@ -10,6 +10,7 @@ import {
   isMetingApiHostname,
   getMetingUpstreamBases,
   getMetingUpstreamStatus,
+  startMetingHealthProbe,
 } from './metingUpstream.js';
 import { mountWechatFileHelperProxy } from './wechatFileHelperProxy.js';
 import { mountAdminApi } from './adminApi.js';
@@ -2676,4 +2677,5 @@ httpServer.listen(PORT, () => {
   console.log(`📡 Meting API: ${getMetingUpstreamBases().join(', ') || '未配置'}`);
   console.log(`🎤 Cyapi (绿点/蓝点): ${isCyapiConfigured() ? '已配置' : '未配置'}`);
   console.log(`💾 房间存储: ${isRedisEnabled() ? 'Redis' : '内存'}`);
+  startMetingHealthProbe();
 });
