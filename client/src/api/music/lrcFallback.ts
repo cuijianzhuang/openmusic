@@ -9,11 +9,18 @@ export function hasValidLrc(text: string): boolean {
   return LRC_LINE_RE.test(trimmed);
 }
 
-export async function fetchFallbackLrc(songName: string): Promise<string> {
+export async function fetchFallbackLrc(
+  songName: string,
+  options: { artist?: string; album?: string } = {},
+): Promise<string> {
   const name = songName.trim();
   if (!name) return '';
 
   const params = new URLSearchParams({ msg: name, n: '1' });
+  const artist = options.artist?.trim();
+  const album = options.album?.trim();
+  if (artist) params.set('artist', artist);
+  if (album) params.set('album', album);
   const res = await fetchWithTimeout(`/api/music/lrc-fallback?${params}`);
   if (!res.ok) return '';
   const text = await res.text();

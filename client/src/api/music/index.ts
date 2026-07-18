@@ -109,7 +109,9 @@ function lyricsRequestKey(song: Pick<Song, 'id' | 'source' | 'lrc' | 'name'>) {
   return `${source}:${song.id}:${song.lrc ?? ''}:${song.name ?? ''}`;
 }
 
-async function fetchLyrics(song: Pick<Song, 'id' | 'source' | 'lrc' | 'name'>): Promise<string> {
+type LyricsSong = Pick<Song, 'id' | 'source' | 'lrc' | 'name'> & Partial<Pick<Song, 'artist' | 'album'>>;
+
+async function fetchLyrics(song: LyricsSong): Promise<string> {
   const source = song.source || 'netease';
   let lrc = '';
 
@@ -122,14 +124,14 @@ async function fetchLyrics(song: Pick<Song, 'id' | 'source' | 'lrc' | 'name'>): 
   if (hasValidLrc(lrc)) return lrc;
 
   if (song.name) {
-    const fallback = await fetchFallbackLrc(song.name);
+    const fallback = await fetchFallbackLrc(song.name, { artist: song.artist, album: song.album });
     if (fallback) return fallback;
   }
 
   return lrc;
 }
 
-export async function getLyrics(song: Pick<Song, 'id' | 'source' | 'lrc' | 'name'>): Promise<string> {
+export async function getLyrics(song: LyricsSong): Promise<string> {
   const key = lyricsRequestKey(song);
   const cached = lyricsCache.get(key);
   if (cached && cached.expires > Date.now()) return cached.value;

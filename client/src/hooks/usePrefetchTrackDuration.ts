@@ -29,6 +29,7 @@ export function usePrefetchTrackDuration() {
       id: current.id,
       source: current.source || 'netease',
       name: current.name,
+      artist: current.artist,
       lrc: current.lrc,
     })
       .then((lrc) => {

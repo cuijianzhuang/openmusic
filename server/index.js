@@ -10,6 +10,7 @@ import {
   isMetingApiHostname,
   getMetingUpstreamBases,
   getMetingUpstreamStatus,
+  startMetingHealthProbe,
 } from './metingUpstream.js';
 import { mountWechatFileHelperProxy } from './wechatFileHelperProxy.js';
 import { mountAdminApi } from './adminApi.js';
@@ -133,6 +134,8 @@ import { getRuntimeConfig } from './runtimeConfig.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const clientDist = path.join(__dirname, '../client/dist');
 const PORT = process.env.PORT || 4000;
+// LrcAPI（https://docs.lrc.cx）歌词兜底，按 标题+歌手+专辑 匹配；置空则禁用
+const LRCAPI_URL = (process.env.LRCAPI_URL ?? 'https://api.lrc.cx').trim().replace(/\/$/, '');
 const DISCONNECT_GRACE_MS = 30_000;
 const AUTO_ADVANCE_INTERVAL_MS = 500;
 const CLIENT_URL = (process.env.CLIENT_URL || '').replace(/\/$/, '');
@@ -851,15 +854,50 @@ app.get('/api/music/cyapi/kugou/song', async (req, res) => {
 });
 
 /** 歌词备用：52vmy，按歌名搜索 */
+const LRC_TIMELINE_RE = /\[\d{2}:\d{2}/;
+
+function isUsableLrcText(text) {
+  const trimmed = String(text || '').trim();
+  if (!trimmed) return false;
+  if (/暂无歌词|无歌词|not found|404/i.test(trimmed)) return false;
+  return LRC_TIMELINE_RE.test(trimmed);
+}
+
+/** LrcAPI（lrc.cx）：按 标题+歌手+专辑 匹配，返回 LRC 文本；失败返回空串 */
+async function fetchLrcapiLyrics({ title, artist, album }) {
+  if (!LRCAPI_URL) return '';
+  try {
+    const params = new URLSearchParams({ title });
+    if (artist) params.set('artist', artist);
+    if (album) params.set('album', album);
+    // 旧版 /lyrics 端点新老版本与公共实例均可用（公共实例的 /api/v1 路径不可用）
+    const response = await fetchWithTimeout(`${LRCAPI_URL}/lyrics?${params}`, {}, 8000);
+    if (!response.ok) return '';
+    const text = await response.text();
+    return isUsableLrcText(text) ? text : '';
+  } catch (err) {
+    console.error('LrcAPI fallback error:', err.message);
+    return '';
+  }
+}
+
 app.get('/api/music/lrc-fallback', async (req, res) => {
   if (!requireSessionIdentity(req, res)) return;
   if (!limitProxyRequest(proxyLimitKey('lrc', req))) {
     return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
   }
 
-  const msg = String(req.query.msg || '').trim();
+  const msg = limitText(req.query.msg, 120);
+  const artist = limitText(req.query.artist, 120);
+  const album = limitText(req.query.album, 120);
   const n = String(req.query.n || '1');
   if (!msg) return res.status(400).json({ error: '缺少歌曲名' });
+
+  // 兜底链：LrcAPI（带歌手/专辑，匹配更准）→ 52vmy（仅按歌名）
+  const lrcapiText = await fetchLrcapiLyrics({ title: msg, artist, album });
+  if (lrcapiText) {
+    return res.type('text/plain; charset=utf-8').send(lrcapiText);
+  }
 
   try {
     const params = new URLSearchParams({ msg, n });
@@ -2747,4 +2785,5 @@ httpServer.listen(PORT, () => {
   console.log(`📡 Meting API: ${getMetingUpstreamBases().join(', ') || '未配置'}`);
   console.log(`🎤 Cyapi (绿点/蓝点): ${isCyapiConfigured() ? '已配置' : '未配置'}`);
   console.log(`💾 持久化存储: ${isRedisEnabled() ? 'Redis' : '未连接（仅安装向导）'}`);
+  startMetingHealthProbe();
 });

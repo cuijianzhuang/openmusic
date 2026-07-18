@@ -49,6 +49,8 @@ function syncUpstreams() {
       failCount: old?.failCount || 0,
       lastError: old?.lastError || '',
       disabled: Boolean(old?.disabled),
+      lastProbeAt: old?.lastProbeAt || 0,
+      lastProbeOk: old?.lastProbeOk ?? null,
     };
   });
   upstreamSignature = signature;
@@ -87,6 +89,8 @@ export function getMetingUpstreamStatus() {
     okCount: u.okCount,
     failCount: u.failCount,
     lastError: u.lastError,
+    lastProbeAgoSec: u.lastProbeAt ? Math.max(0, Math.round((now - u.lastProbeAt) / 1000)) : null,
+    lastProbeOk: u.lastProbeOk,
   }));
 }
 
@@ -162,7 +166,9 @@ export async function fetchMetingApi(query, options = {}, timeoutMs = 10000) {
     throw new Error('所有 Meting 上游均已禁用');
   }
 
+  const isSearch = String(query?.type || '') === 'search';
   let lastError = null;
+  let emptySearchResponse = null;
   for (const upstream of candidates) {
     try {
       const response = upstream.style === 'chksz'
@@ -175,6 +181,20 @@ export async function fetchMetingApi(query, options = {}, timeoutMs = 10000) {
         continue;
       }
       markSuccess(upstream);
+      // 搜索返回空数组（上游临时限流/曲库缺失时常见）：不算失败，但换下一个上游再试；
+      // 全部为空才把空结果返回给调用方（response.text 为缓冲实现，可重复读取）
+      if (isSearch && response.status === 200) {
+        try {
+          const text = typeof response.clone === 'function' ? await response.clone().text() : await response.text();
+          const data = JSON.parse(text);
+          if (Array.isArray(data) && data.length === 0) {
+            emptySearchResponse = response;
+            continue;
+          }
+        } catch {
+          // 非 JSON 响应按原样返回，交由调用方处理
+        }
+      }
       return response;
     } catch (err) {
       // 该上游不支持此类请求（如 chksz 不支持 QQ 源 / FM）：跳过但不计故障
@@ -186,5 +206,64 @@ export async function fetchMetingApi(query, options = {}, timeoutMs = 10000) {
       lastError = err;
     }
   }
+  if (emptySearchResponse) return emptySearchResponse;
   throw lastError || new Error('所有 Meting 上游均不可用');
+}
+
+// ---------- 主动健康探测 ----------
+// 每个周期探测冷却中的上游（故障后快速恢复）；健康上游每 5 个周期探测一次
+// （在用户碰到之前发现故障）。METING_HEALTH_PROBE_INTERVAL_MS=0 关闭探测。
+const HEALTH_PROBE_INTERVAL_MS = Math.max(
+  0,
+  parseInt(process.env.METING_HEALTH_PROBE_INTERVAL_MS ?? '60000', 10) || 0,
+);
+const HEALTHY_PROBE_EVERY_N_TICKS = 5;
+const PROBE_TIMEOUT_MS = 8000;
+// 用固定关键词做一次轻量搜索，netease 是所有上游风格都支持的探测面
+const PROBE_QUERY = { server: 'netease', type: 'search', id: '晴天' };
+
+let probeTick = 0;
+let probeTimer = null;
+
+async function probeUpstream(upstream) {
+  upstream.lastProbeAt = Date.now();
+  try {
+    const response = upstream.style === 'chksz'
+      ? await fetchChksz(upstream.base, PROBE_QUERY, PROBE_TIMEOUT_MS)
+      : await fetchMeting(buildUpstreamUrl(upstream, PROBE_QUERY), {}, PROBE_TIMEOUT_MS);
+    if (response.status >= 400 && response.status !== 404) {
+      markFailure(upstream, `健康探测返回 ${response.status}`);
+      upstream.lastProbeOk = false;
+      return;
+    }
+    const wasUnhealthy = Date.now() < upstream.cooldownUntil;
+    upstream.cooldownUntil = 0;
+    upstream.lastError = '';
+    upstream.lastProbeOk = true;
+    if (wasUnhealthy) {
+      console.log(`Meting 上游恢复：${upstream.base}`);
+    }
+  } catch (err) {
+    markFailure(upstream, err);
+    upstream.lastProbeOk = false;
+  }
+}
+
+export function startMetingHealthProbe() {
+  if (HEALTH_PROBE_INTERVAL_MS <= 0 || probeTimer) return;
+  probeTimer = setInterval(() => {
+    // 上游列表由管理后台运行时配置，每个周期重新同步；禁用的上游不探测
+    syncUpstreams();
+    probeTick += 1;
+    const now = Date.now();
+    for (const upstream of upstreams) {
+      if (upstream.disabled) continue;
+      const unhealthy = now < upstream.cooldownUntil;
+      if (unhealthy || probeTick % HEALTHY_PROBE_EVERY_N_TICKS === 0) {
+        void probeUpstream(upstream);
+      }
+    }
+  }, HEALTH_PROBE_INTERVAL_MS);
+  probeTimer.unref();
+  console.log(`🩺 Meting 健康探测已启动（间隔 ${HEALTH_PROBE_INTERVAL_MS / 1000}s）`);
 }

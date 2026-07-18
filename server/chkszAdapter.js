@@ -185,8 +185,103 @@ async function handlePlaylist(base, id, timeoutMs) {
   return makeResponse(200, 'application/json', songs);
 }
 
+// ---------- QQ 音乐（server=tencent → /api/qq_music） ----------
+
+// qq_music 无 code 包装：搜索返回 { count, list }，按 mid 解析返回平铺对象，
+// 未找到时返回 HTTP 200 + { error: "..." }
+function requireQqData(payload) {
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('chksz qq_music 返回空响应');
+  }
+  if (payload.error) {
+    throw Object.assign(new Error(String(payload.error)), { chkszNotFound: true });
+  }
+  return payload;
+}
+
+async function handleQqSearch(base, keyword, timeoutMs) {
+  const payload = await chkszGet(base, '/api/qq_music', { msg: keyword, num: '50' }, timeoutMs);
+  const data = requireQqData(payload);
+  const list = Array.isArray(data.list) ? data.list : [];
+  const songs = list.map((item) => ({
+    id: String(item.id || item.mid || ''),
+    name: String(item.name || ''),
+    artist: normalizeArtistField(item.artists || item.artist),
+    album: String(item.album || ''),
+    pic: String(item.cover || ''),
+  })).filter((s) => s.id);
+  return makeResponse(200, 'application/json', songs);
+}
+
+async function fetchQqSongDetail(base, mid, timeoutMs) {
+  const payload = await chkszGet(base, '/api/qq_music', { mid }, timeoutMs);
+  return requireQqData(payload);
+}
+
+function pickQqCover(data) {
+  const cover = data.cover;
+  if (cover && typeof cover === 'object') {
+    return String(cover.large || cover.medium || cover.small || '');
+  }
+  return String(cover || '');
+}
+
+async function handleQqSong(base, mid, timeoutMs) {
+  const data = await fetchQqSongDetail(base, mid, timeoutMs);
+  const durationSec = Number(data.duration || 0);
+  return makeResponse(200, 'application/json', [{
+    id: String(data.id || mid),
+    name: String(data.name || ''),
+    artist: normalizeArtistField(data.artists || data.artist),
+    album: String(data.album?.name || data.album || ''),
+    pic: pickQqCover(data),
+    url: String(data.url || ''),
+    // qq_music 时长为秒，客户端 duration 语义为毫秒
+    duration: durationSec > 0 ? durationSec * 1000 : undefined,
+    lrc: data.lyric?.text ? String(data.lyric.text) : undefined,
+  }]);
+}
+
+async function handleQqUrl(base, mid, timeoutMs) {
+  const data = await fetchQqSongDetail(base, mid, timeoutMs);
+  const url = String(data.url || '');
+  if (!url) throw Object.assign(new Error('chksz 未返回播放地址'), { chkszNotFound: true });
+  return redirectResponse(url);
+}
+
+async function handleQqPic(base, mid, timeoutMs) {
+  const data = await fetchQqSongDetail(base, mid, timeoutMs);
+  const pic = pickQqCover(data);
+  if (!pic) throw Object.assign(new Error('chksz 未返回封面'), { chkszNotFound: true });
+  return redirectResponse(pic);
+}
+
+async function handleQqLrc(base, mid, timeoutMs) {
+  const data = await fetchQqSongDetail(base, mid, timeoutMs);
+  const lyric = data.lyric;
+  const lrcText = lyric && typeof lyric === 'object' ? String(lyric.text || '') : String(lyric || '');
+  return makeResponse(200, 'text/plain; charset=utf-8', lrcText);
+}
+
+async function fetchChkszTencent(base, type, id, timeoutMs) {
+  switch (type) {
+    case 'search':
+      return handleQqSearch(base, id, timeoutMs);
+    case 'song':
+      return handleQqSong(base, id, timeoutMs);
+    case 'url':
+      return handleQqUrl(base, id, timeoutMs);
+    case 'pic':
+      return handleQqPic(base, id, timeoutMs);
+    case 'lrc':
+      return handleQqLrc(base, id, timeoutMs);
+    default:
+      throw unsupported(`chksz 适配器不支持 tencent type=${type}`);
+  }
+}
+
 /**
- * 以 Meting 查询语义请求 chksz。
+ * 以 Meting 查询语义请求 chksz。支持 server=netease / tencent。
  * 不支持的 server/type 抛 metingUnsupported 错误（调用方跳过该上游、不计入故障冷却）。
  */
 export async function fetchChksz(base, query, timeoutMs = 10000) {
@@ -194,11 +289,14 @@ export async function fetchChksz(base, query, timeoutMs = 10000) {
   const type = String(query.type || '');
   const id = String(query.id || '');
 
-  if (server !== 'netease') {
+  if (server !== 'netease' && server !== 'tencent') {
     throw unsupported(`chksz 适配器不支持 server=${server}`);
   }
 
   try {
+    if (server === 'tencent') {
+      return await fetchChkszTencent(base, type, id, timeoutMs);
+    }
     switch (type) {
       case 'search':
         return await handleSearch(base, id, timeoutMs);
