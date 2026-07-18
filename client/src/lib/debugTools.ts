@@ -281,6 +281,50 @@ export function getDebugSnapshot(): string {
   return formatSnapshotText('snapshot');
 }
 
+export function getDebugEvents(): DebugEvent[] {
+  return state.events.slice();
+}
+
+/** 错误上报用：快照 + 最近事件 + 基础环境信息（体积受控） */
+export function collectErrorReportBundle(description = ''): {
+  description: string;
+  snapshot: string;
+  events: DebugEvent[];
+  meta: Record<string, string | number | boolean | null>;
+} {
+  const { room, nickname, mySocketId } = useRoomStore.getState();
+  const current = room?.current;
+  const socket = state.getSocket?.();
+  // 上报去掉完整媒体直链，避免把带鉴权参数的上游 URL 存进管理端
+  const snapshot = getDebugSnapshot()
+    .split('\n')
+    .filter((line) => !line.startsWith('audioSrcFull='))
+    .join('\n');
+  const events = state.events.slice(-80);
+  return {
+    description: String(description || '').trim().slice(0, 500),
+    snapshot: snapshot.slice(0, 48_000),
+    events,
+    meta: {
+      href: typeof location !== 'undefined' ? location.href : '',
+      clientId: getClientId(),
+      userAgent: typeof navigator !== 'undefined' ? navigator.userAgent.slice(0, 300) : '',
+      language: typeof navigator !== 'undefined' ? navigator.language : '',
+      online: typeof navigator !== 'undefined' ? navigator.onLine : null,
+      roomId: room?.id ?? null,
+      roomName: room?.name ?? null,
+      nickname: nickname || null,
+      mySocketId: mySocketId || null,
+      socketConnected: socket?.connected ?? null,
+      trackName: current?.name ?? null,
+      trackArtist: current?.artist ?? null,
+      trackSource: current?.source ?? null,
+      trackId: current?.id ?? null,
+      isPlaying: room?.isPlaying ?? null,
+    },
+  };
+}
+
 function printSnapshot(reason = 'tick'): void {
   console.log(formatSnapshotText(reason));
 }

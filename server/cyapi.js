@@ -1,26 +1,19 @@
-const CYAPI_BASE = (
-  process.env.CYAPI_BASE
-  || process.env.CYAPI_URL?.replace(/\/qq_music\.php$/i, '')
-  || 'https://cyapi.top/API'
-).replace(/\/$/, '');
-
-const CYAPI_KEY = process.env.CYAPI_KEY || '';
-const VMY_LRC_URL = (process.env.VMY_LRC_URL || 'https://api.52vmy.cn/api/music/lrc').replace(/\/$/, '');
+import { getRuntimeConfig } from './runtimeConfig.js';
 
 export function isCyapiConfigured() {
-  return Boolean(CYAPI_KEY);
+  return Boolean(getRuntimeConfig().cyapiKey);
 }
 
 function kugouMusicEndpoint() {
-  return `${CYAPI_BASE}/kugou_music.php`;
+  return `${getRuntimeConfig().cyapiBase}/kugou_music.php`;
 }
 
 function wyrpEndpoint() {
-  return `${CYAPI_BASE}/wyrp.php`;
+  return `${getRuntimeConfig().cyapiBase}/wyrp.php`;
 }
 
 function tpshEndpoint() {
-  return `${CYAPI_BASE}/tpsh.php`;
+  return `${getRuntimeConfig().cyapiBase}/tpsh.php`;
 }
 
 const IMAGE_MODERATION_TIMEOUT_MS = 15000;
@@ -46,7 +39,7 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 10000) {
 
 function withApiKey(params) {
   const search = new URLSearchParams(params);
-  search.set('apikey', CYAPI_KEY);
+  search.set('apikey', getRuntimeConfig().cyapiKey);
   return search;
 }
 
@@ -186,7 +179,7 @@ async function fetchFallbackLrc(songName) {
 
   try {
     const params = new URLSearchParams({ msg, n: '1' });
-    const response = await fetchWithTimeout(`${VMY_LRC_URL}?${params}`, {}, RANDOM_DURATION_TIMEOUT_MS);
+    const response = await fetchWithTimeout(`${getRuntimeConfig().vmyLrcUrl}?${params}`, {}, RANDOM_DURATION_TIMEOUT_MS);
     if (!response.ok) return '';
     return await response.text();
   } catch {
@@ -208,10 +201,11 @@ async function resolveRandomDurationMs(song, raw) {
 }
 
 async function fetchRandomSongOnce() {
-  if (!CYAPI_KEY) return null;
+  const cyapiKey = getRuntimeConfig().cyapiKey;
+  if (!cyapiKey) return null;
 
   try {
-    const params = new URLSearchParams({ apikey: CYAPI_KEY });
+    const params = new URLSearchParams({ apikey: cyapiKey });
     const response = await fetchWithTimeout(`${wyrpEndpoint()}?${params}`);
     if (!response.ok) return null;
 

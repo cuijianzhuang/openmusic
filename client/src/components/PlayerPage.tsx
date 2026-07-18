@@ -1,7 +1,7 @@
 import { memo, useState } from 'react';
 
 import {
-  ChevronDown, Play, Pause, SkipForward, Loader2, Tv, Check,
+  ChevronDown, Play, Pause, SkipForward, Loader2, Tv, Check, Flag,
 } from 'lucide-react';
 import { useParams } from 'react-router-dom';
 import { copyToClipboard } from '../lib/copyToClipboard';
@@ -23,6 +23,7 @@ import Tooltip from './Tooltip';
 import VolumeControl from './VolumeControl';
 import FavoriteButton from './FavoriteButton';
 import AmbientCoverLayers from './AmbientCoverLayers';
+import ErrorReportModal from './ErrorReportModal';
 import { updateMediaSessionPlaybackState } from '../lib/mediaSession';
 import { canPauseInRoom, canSeekInRoom } from '../lib/roomPermissions';
 
@@ -40,6 +41,7 @@ export default memo(function PlayerPage({ onClose }: Props) {
 
   const { roomId } = useParams();
   const [tvCopied, setTvCopied] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
 
   const room = useRoomStore((s) => s.room);
 
@@ -213,7 +215,7 @@ export default memo(function PlayerPage({ onClose }: Props) {
           />
         </div>
 
-        <div className="flex items-center justify-center gap-8 sm:gap-10 2xl:gap-16">
+        <div className="relative flex items-center justify-center gap-8 sm:gap-10 2xl:gap-16">
 
           <VolumeControl
             compact
@@ -273,6 +275,20 @@ export default memo(function PlayerPage({ onClose }: Props) {
             </Tooltip>
           )}
 
+          <div className="absolute right-0 top-1/2 -translate-y-1/2">
+            <Tooltip content="上报错误">
+              <button
+                type="button"
+                onClick={() => setReportOpen(true)}
+                className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2.5 py-1.5 text-[11px] text-white/60 transition-colors hover:border-white/20 hover:bg-white/10 hover:text-white sm:px-3 sm:text-xs 2xl:px-4 2xl:py-2 2xl:text-base"
+                aria-label="上报错误"
+              >
+                <Flag className="h-3.5 w-3.5 sm:h-4 sm:w-4 2xl:h-5 2xl:w-5" />
+                <span className="max-sm:sr-only">上报错误</span>
+              </button>
+            </Tooltip>
+          </div>
+
         </div>
 
 
@@ -286,6 +302,8 @@ export default memo(function PlayerPage({ onClose }: Props) {
         )}
 
       </footer>
+
+      <ErrorReportModal open={reportOpen} onClose={() => setReportOpen(false)} />
 
     </div>
 

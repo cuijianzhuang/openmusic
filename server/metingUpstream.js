@@ -1,77 +1,118 @@
 import { fetchMeting, formatMetingFetchError } from './metingFetch.js';
 import { fetchChksz, isMetingUnsupportedError } from './chkszAdapter.js';
+import { getRuntimeConfig } from './runtimeConfig.js';
 
 // METING_API_URL 支持英文逗号分隔多个上游；METING_API_AUTH 同样支持逗号分隔：
 // 与 URL 一一对应；只填一个则应用到所有上游。
 // 上游可用 `chksz:` 前缀标记为 ChKSz API（https://api.chksz.com 会自动识别），
 // 由 chkszAdapter.js 翻译为 Meting 语义参与负载均衡。
-const RAW_URLS = String(process.env.METING_API_URL || '')
-  .split(',')
-  .map((s) => s.trim())
-  .filter(Boolean);
-const RAW_AUTHS = String(process.env.METING_API_AUTH || '')
-  .split(',')
-  .map((s) => s.trim());
-
 const FAIL_COOLDOWN_MS = 60_000;
 
-const upstreams = RAW_URLS.map((raw, i) => {
-  let style = 'meting';
-  let base = raw;
-  if (base.toLowerCase().startsWith('chksz:')) {
-    style = 'chksz';
-    base = base.slice('chksz:'.length).trim();
-  }
-  base = base.replace(/\/$/, '');
-
-  let hostname = '';
-  try {
-    hostname = new URL(base).hostname.toLowerCase();
-  } catch {
-    hostname = '';
-  }
-  if (hostname === 'api.chksz.com') style = 'chksz';
-
-  const auth = RAW_AUTHS.length === 1 ? RAW_AUTHS[0] : (RAW_AUTHS[i] || '');
-  return {
-    base,
-    style,
-    auth,
-    hostname,
-    cooldownUntil: 0,
-    okCount: 0,
-    failCount: 0,
-    lastError: '',
-    lastProbeAt: 0,
-    lastProbeOk: null,
-  };
-});
+let upstreams = [];
+let upstreamSignature = '';
 
 let rrCursor = 0;
 
+function syncUpstreams() {
+  const config = getRuntimeConfig();
+  const signature = `${config.metingApiUrl}\n${config.metingApiAuth}`;
+  if (signature === upstreamSignature) return;
+
+  const rawUrls = String(config.metingApiUrl || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const rawAuths = String(config.metingApiAuth || '').split(',').map((s) => s.trim());
+  const previous = new Map(upstreams.map((upstream) => [upstream.base, upstream]));
+  upstreams = rawUrls.map((raw, i) => {
+    let style = 'meting';
+    let base = raw;
+    if (base.toLowerCase().startsWith('chksz:')) {
+      style = 'chksz';
+      base = base.slice('chksz:'.length).trim();
+    }
+    base = base.replace(/\/$/, '');
+
+    let hostname = '';
+    try {
+      hostname = new URL(base).hostname.toLowerCase();
+    } catch {
+      hostname = '';
+    }
+    if (hostname === 'api.chksz.com') style = 'chksz';
+
+    const old = previous.get(base);
+    return {
+      base,
+      style,
+      auth: rawAuths.length === 1 ? rawAuths[0] : (rawAuths[i] || ''),
+      hostname,
+      cooldownUntil: old?.cooldownUntil || 0,
+      okCount: old?.okCount || 0,
+      failCount: old?.failCount || 0,
+      lastError: old?.lastError || '',
+      disabled: Boolean(old?.disabled),
+      lastProbeAt: old?.lastProbeAt || 0,
+      lastProbeOk: old?.lastProbeOk ?? null,
+    };
+  });
+  upstreamSignature = signature;
+  rrCursor = 0;
+}
+
 export function getMetingUpstreamBases() {
+  syncUpstreams();
   return upstreams.map((u) => u.base);
 }
 
 export function isMetingApiHostname(hostname) {
+  syncUpstreams();
   const target = String(hostname || '').toLowerCase();
   if (!target) return false;
   return upstreams.some((u) => u.hostname && u.hostname === target);
 }
 
+function findUpstream(url) {
+  syncUpstreams();
+  const target = String(url || '').trim().replace(/\/$/, '');
+  return upstreams.find((u) => u.base === target) || null;
+}
+
 export function getMetingUpstreamStatus() {
+  syncUpstreams();
   const now = Date.now();
   return upstreams.map((u) => ({
     url: u.base,
     style: u.style,
-    healthy: now >= u.cooldownUntil,
-    cooldownRemainingSec: Math.max(0, Math.ceil((u.cooldownUntil - now) / 1000)),
+    disabled: Boolean(u.disabled),
+    healthy: !u.disabled && now >= u.cooldownUntil,
+    cooldownRemainingSec: u.disabled
+      ? 0
+      : Math.max(0, Math.ceil((u.cooldownUntil - now) / 1000)),
     okCount: u.okCount,
     failCount: u.failCount,
     lastError: u.lastError,
     lastProbeAgoSec: u.lastProbeAt ? Math.max(0, Math.round((now - u.lastProbeAt) / 1000)) : null,
     lastProbeOk: u.lastProbeOk,
   }));
+}
+
+/** 手动清除冷却，立即参与调度（已禁用的上游仍保持禁用） */
+export function resetMetingUpstreamCooldown(url) {
+  const upstream = findUpstream(url);
+  if (!upstream) return { success: false, error: '上游不存在' };
+  upstream.cooldownUntil = 0;
+  upstream.lastError = '';
+  return { success: true, upstream: getMetingUpstreamStatus().find((u) => u.url === upstream.base) };
+}
+
+/** 临时禁用 / 启用上游；禁用时同时清冷却，启用后立即可调度 */
+export function setMetingUpstreamDisabled(url, disabled) {
+  const upstream = findUpstream(url);
+  if (!upstream) return { success: false, error: '上游不存在' };
+  upstream.disabled = Boolean(disabled);
+  if (!upstream.disabled) {
+    upstream.cooldownUntil = 0;
+    upstream.lastError = '';
+  }
+  return { success: true, upstream: getMetingUpstreamStatus().find((u) => u.url === upstream.base) };
 }
 
 function buildUpstreamUrl(upstream, query) {
@@ -82,12 +123,15 @@ function buildUpstreamUrl(upstream, query) {
   return `${upstream.base}/api?${params.toString()}`;
 }
 
-// 轮询起点每次前移；冷却中的上游排到最后兜底（全部故障时仍会尝试）
+// 轮询起点每次前移；冷却中的上游排到最后兜底（全部故障时仍会尝试）；禁用的完全跳过
 function orderedUpstreams() {
-  if (upstreams.length <= 1) return upstreams;
-  const start = rrCursor % upstreams.length;
-  rrCursor = (rrCursor + 1) % upstreams.length;
-  const rotated = [...upstreams.slice(start), ...upstreams.slice(0, start)];
+  syncUpstreams();
+  const enabled = upstreams.filter((u) => !u.disabled);
+  if (enabled.length === 0) return [];
+  if (enabled.length <= 1) return enabled;
+  const start = rrCursor % enabled.length;
+  rrCursor = (rrCursor + 1) % enabled.length;
+  const rotated = [...enabled.slice(start), ...enabled.slice(0, start)];
   const now = Date.now();
   return [
     ...rotated.filter((u) => now >= u.cooldownUntil),
@@ -112,14 +156,20 @@ function markSuccess(upstream) {
  * 网络错误或 5xx 时将该上游置入 60s 冷却并自动切换下一个。
  */
 export async function fetchMetingApi(query, options = {}, timeoutMs = 10000) {
+  syncUpstreams();
   if (upstreams.length === 0) {
     throw new Error('未配置 METING_API_URL');
+  }
+
+  const candidates = orderedUpstreams();
+  if (candidates.length === 0) {
+    throw new Error('所有 Meting 上游均已禁用');
   }
 
   const isSearch = String(query?.type || '') === 'search';
   let lastError = null;
   let emptySearchResponse = null;
-  for (const upstream of orderedUpstreams()) {
+  for (const upstream of candidates) {
     try {
       const response = upstream.style === 'chksz'
         ? await fetchChksz(upstream.base, query, timeoutMs)
@@ -200,11 +250,14 @@ async function probeUpstream(upstream) {
 }
 
 export function startMetingHealthProbe() {
-  if (HEALTH_PROBE_INTERVAL_MS <= 0 || upstreams.length === 0 || probeTimer) return;
+  if (HEALTH_PROBE_INTERVAL_MS <= 0 || probeTimer) return;
   probeTimer = setInterval(() => {
+    // 上游列表由管理后台运行时配置，每个周期重新同步；禁用的上游不探测
+    syncUpstreams();
     probeTick += 1;
     const now = Date.now();
     for (const upstream of upstreams) {
+      if (upstream.disabled) continue;
       const unhealthy = now < upstream.cooldownUntil;
       if (unhealthy || probeTick % HEALTHY_PROBE_EVERY_N_TICKS === 0) {
         void probeUpstream(upstream);
@@ -212,5 +265,5 @@ export function startMetingHealthProbe() {
     }
   }, HEALTH_PROBE_INTERVAL_MS);
   probeTimer.unref();
-  console.log(`🩺 Meting 健康探测已启动（间隔 ${HEALTH_PROBE_INTERVAL_MS / 1000}s，共 ${upstreams.length} 个上游）`);
+  console.log(`🩺 Meting 健康探测已启动（间隔 ${HEALTH_PROBE_INTERVAL_MS / 1000}s）`);
 }

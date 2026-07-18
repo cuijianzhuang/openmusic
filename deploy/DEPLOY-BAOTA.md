@@ -35,28 +35,34 @@ npm run package:build # 录入更新说明并打包（推荐）
 
 ---
 
-## 三、安装 Node 依赖
+## 三、安装 Node 依赖并完成首次配置
 
 宝塔 → **终端**（或 SSH）：
 
 ```bash
 cd /www/wwwroot/openmusic/server
-cp .env.example .env
-nano .env   # 或用宝塔文件管理器编辑
 npm install --production
 ```
 
-### `.env` 必改项
+用 PM2 / 宝塔先把 Node 跑起来（见下一节），浏览器打开域名会进入**首次部署向导**：填写 Redis、Meting、站点地址即可，**无需手写 `.env`**。完成后页会弹出推荐 Nginx 配置。
+
+若坚持手改环境变量：
+
+```bash
+cp .env.example .env
+nano .env
+```
+
+### `.env` 关键项（向导通常已写好）
 
 ```env
 PORT=4000
 CLIENT_URL=https://你的域名.com
 CLIENT_ID_SECRET=换成一段长随机字符串
-
+TRUST_PROXY=1
+REDIS_URL=redis://127.0.0.1:6379/0
 METING_API_URL=http://你的meting地址:3000
 METING_API_AUTH=你的token
-
-CYAPI_KEY=你的QQ搜索key
 ```
 
 > `CLIENT_URL` 填最终访问的 **https 域名**，不要带末尾斜杠。
@@ -101,17 +107,26 @@ pm2 startup   # 按提示设置开机自启
 
 ---
 
-## 五、Nginx 反向代理
+## 五、Nginx：静态直出 + 动态回 Node
 
 宝塔 → **网站** → 添加站点（你的域名）→ **设置** → **配置文件**
 
-参考 `deploy/nginx.conf.example`，将请求反代到 `127.0.0.1:4000`。
+**推荐**：用首次部署完成页弹出的 Nginx 配置（可改项目根目录后一键复制），或对照：
 
-**必须配置 `/socket.io/` 的 WebSocket**，否则房间无法实时同步。
+- [deploy/nginx.baota-optimized.conf.example](nginx.baota-optimized.conf.example)（完整宝塔版）
+- [deploy/nginx.conf.example](nginx.conf.example)（精简版）
+- 说明文档：[docs/DEPLOY.md](../docs/DEPLOY.md)
 
-**建议增加 `/api/media-proxy` 关闭缓冲**（示例里已写）：蓝点（酷狗）只有 `http://` 音链，必须经本站转发；Nginx 默认缓冲容易导致播放卡顿。
+要点：
+
+1. `root` 指向 `…/client/dist`，**不要** `location / { proxy_pass 4000; }`
+2. **必须**配置 `/socket.io/` 的 WebSocket，否则房间无法实时同步
+3. `/api/media-proxy` 写在 `/api/` 前并关闭缓冲（蓝点 HTTP 音链）
+4. `/api/`、`/downloads/`、`/wx-proxy`、`/cgi-bin/`、`robots.txt`、`sitemap.xml` 反代到 `127.0.0.1:4000`
 
 若使用 HTTPS，在宝塔申请 SSL 即可，反代地址仍用 `http://127.0.0.1:4000`。
+
+保存后执行：`nginx -t && nginx -s reload`。
 
 ---
 

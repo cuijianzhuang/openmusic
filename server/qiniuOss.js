@@ -1,11 +1,6 @@
 import { randomBytes } from 'crypto';
 import qiniu from 'qiniu';
-
-const ACCESS_KEY = (process.env.QINIU_ACCESS_KEY || '').trim();
-const SECRET_KEY = (process.env.QINIU_SECRET_KEY || '').trim();
-const BUCKET = (process.env.QINIU_BUCKET || '').trim();
-const DOMAIN = (process.env.QINIU_DOMAIN || '').trim().replace(/\/$/, '');
-const ZONE = (process.env.QINIU_ZONE || 'z0').trim();
+import { getRuntimeConfig } from './runtimeConfig.js';
 
 const UPLOAD_URLS = {
   z0: 'https://upload.qiniup.com',
@@ -20,14 +15,17 @@ const ALLOWED_EXTS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp']);
 const TOKEN_EXPIRES = 3600;
 
 export function isQiniuConfigured() {
-  return Boolean(ACCESS_KEY && SECRET_KEY && BUCKET && DOMAIN);
+  const config = getRuntimeConfig();
+  return Boolean(config.qiniuAccessKey && config.qiniuSecretKey && config.qiniuBucket && config.qiniuDomain);
 }
 
 function getMac() {
-  return new qiniu.auth.digest.Mac(ACCESS_KEY, SECRET_KEY);
+  const config = getRuntimeConfig();
+  return new qiniu.auth.digest.Mac(config.qiniuAccessKey, config.qiniuSecretKey);
 }
 
 function getConfig() {
+  const { qiniuZone } = getRuntimeConfig();
   const zoneMap = {
     z0: qiniu.zone.Zone_z0,
     z1: qiniu.zone.Zone_z1,
@@ -36,7 +34,7 @@ function getConfig() {
     as0: qiniu.zone.Zone_as0,
   };
   const config = new qiniu.conf.Config();
-  config.zone = zoneMap[ZONE] || qiniu.zone.Zone_z0;
+  config.zone = zoneMap[qiniuZone] || qiniu.zone.Zone_z0;
   return config;
 }
 
@@ -72,9 +70,10 @@ export function createChatImageUploadToken(roomId, ext) {
   }
 
   const key = buildChatImageKey(roomId, normalizedExt);
+  const { qiniuBucket, qiniuZone } = getRuntimeConfig();
   const mac = getMac();
   const putPolicy = new qiniu.rs.PutPolicy({
-    scope: `${BUCKET}:${key}`,
+    scope: `${qiniuBucket}:${key}`,
     expires: TOKEN_EXPIRES,
     insertOnly: 1,
   });
@@ -82,13 +81,13 @@ export function createChatImageUploadToken(roomId, ext) {
   return {
     token: putPolicy.uploadToken(mac),
     key,
-    uploadUrl: UPLOAD_URLS[ZONE] || UPLOAD_URLS.z0,
+    uploadUrl: UPLOAD_URLS[qiniuZone] || UPLOAD_URLS.z0,
     url: buildChatImageUrl(key),
   };
 }
 
 export function buildChatImageUrl(key) {
-  return `${DOMAIN}/${key}`;
+  return `${getRuntimeConfig().qiniuDomain}/${key}`;
 }
 
 const EXTERNAL_CHAT_IMAGE_HOST_RE = /^img[\w.-]*\.baidu\.com$/i;
@@ -144,6 +143,7 @@ function promisify(fn, ...args) {
 }
 
 async function listAllKeys(prefix) {
+  const { qiniuBucket } = getRuntimeConfig();
   const mac = getMac();
   const config = getConfig();
   const bucketManager = new qiniu.rs.BucketManager(mac, config);
@@ -152,7 +152,7 @@ async function listAllKeys(prefix) {
 
   do {
     const options = { prefix, limit: 1000, marker };
-    const result = await promisify(bucketManager.listPrefix.bind(bucketManager), BUCKET, options);
+    const result = await promisify(bucketManager.listPrefix.bind(bucketManager), qiniuBucket, options);
     const items = result?.items || [];
     for (const item of items) {
       if (item.key) keys.push(item.key);
@@ -166,6 +166,7 @@ async function listAllKeys(prefix) {
 async function batchDelete(keys) {
   if (!keys.length) return;
 
+  const { qiniuBucket } = getRuntimeConfig();
   const mac = getMac();
   const config = getConfig();
   const bucketManager = new qiniu.rs.BucketManager(mac, config);
@@ -173,7 +174,7 @@ async function batchDelete(keys) {
 
   for (let i = 0; i < keys.length; i += BATCH_SIZE) {
     const chunk = keys.slice(i, i + BATCH_SIZE);
-    const ops = chunk.map((key) => qiniu.rs.deleteOp(BUCKET, key));
+    const ops = chunk.map((key) => qiniu.rs.deleteOp(qiniuBucket, key));
     await promisify(bucketManager.batch.bind(bucketManager), ops);
   }
 }

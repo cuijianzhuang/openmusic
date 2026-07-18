@@ -626,11 +626,20 @@ export default function Room() {
     let cancelled = false;
     let redirectTimer: number | undefined;
 
+    // 清除上一次会话残留的退出原因（如“房间已被站点管理员解散”），
+    // 否则新建/加入房间后页面会误判为已被踢出并弹回大厅
+    if (useRoomStore.getState().exitReason) {
+      useRoomStore.getState().setExitReason(null);
+    }
+
     let nick = useRoomStore.getState().nickname.trim();
     if (!nick) {
       nick = createRandomNickname();
       useRoomStore.getState().setNickname(nick);
     }
+
+    // 清除上一次被踢/被解散残留的退出原因，否则新房间会误显示旧提示并被弹回首页
+    useRoomStore.getState().setExitReason(null);
 
     joinRoom(roomId, nick, roomPassword).then((res) => {
       if (cancelled) return;

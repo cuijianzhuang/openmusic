@@ -19,8 +19,6 @@ const SERVER_STATIC = [
   'package.json',
   'package-lock.json',
   '.env.example',
-  'siteAnnouncement.json',
-  'siteAnnouncement.example.json',
 ];
 
 function getServerFiles() {

@@ -5,6 +5,11 @@ dist/
 .DS_Store
 release/
 server/.env
+server/runtimeConfig.json
+server/adminCredentials.json
+server/siteBans.json
+server/adminConfig.json
+server/setup.lock
 client/.env.capacitor
 server/downloads/*.apk
 server/downloads/*.ipa
