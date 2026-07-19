@@ -23,7 +23,7 @@ export default function RoleBadge({ role, className = '' }: Props) {
   if (role === 'owner') {
     return (
       <span
-        className={`role-badge role-badge-owner inline-flex flex-shrink-0 items-center rounded-full px-1.5 py-0.5 text-[10px] leading-4 ${className}`}
+        className={`role-badge role-badge-owner inline-flex flex-shrink-0 items-center rounded-full border border-amber-300/20 bg-amber-400/10 px-2 py-0.5 text-[10px] leading-4 ${className}`}
       >
         <span className="role-badge-content">
           <Crown
@@ -40,11 +40,11 @@ export default function RoleBadge({ role, className = '' }: Props) {
 
   return (
     <span
-      className={`role-badge role-badge-admin inline-flex flex-shrink-0 items-center rounded-full px-1.5 py-0.5 text-[10px] leading-4 ${className}`}
+      className={`role-badge role-badge-admin inline-flex flex-shrink-0 items-center rounded-full border border-violet-300/20 bg-violet-400/10 px-2 py-0.5 text-[10px] leading-4 ${className}`}
     >
       <span className="role-badge-content">
         <Shield
-          className="h-3 w-3 flex-shrink-0 text-sky-300 drop-shadow-[0_0_4px_rgba(56,189,248,0.55)]"
+          className="h-3 w-3 flex-shrink-0 text-violet-300 drop-shadow-[0_0_4px_rgba(167,139,250,0.55)]"
           strokeWidth={2.25}
           fill="currentColor"
           fillOpacity={0.3}

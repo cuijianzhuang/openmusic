@@ -2,6 +2,22 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  color-scheme: dark;
+  --om-canvas: #09090b;
+  --om-surface: #111114;
+  --om-surface-raised: #18181d;
+  --om-surface-hover: #202026;
+  --om-border: rgba(255, 255, 255, 0.08);
+  --om-border-strong: rgba(255, 255, 255, 0.14);
+  --om-text: #f4f4f5;
+  --om-text-secondary: #a1a1aa;
+  --om-text-muted: #71717a;
+  --om-accent: #ff4d55;
+  --om-success: #32d583;
+  --om-warning: #f5a524;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -12,8 +28,8 @@ html, body, #root {
 }
 
 body {
-  background: #0d0d0d;
-  color: #e8e8e8;
+  background: var(--om-canvas);
+  color: var(--om-text);
   font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
@@ -76,29 +92,13 @@ body {
 
 @layer utilities {
   .glass {
-    background: rgba(30, 30, 30, 0.75);
+    background: rgba(17, 17, 20, 0.72);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
   }
 
-  /* 房间顶栏/底栏：透出星河或封面背景 */
-  .room-glass-bar {
-    background: rgba(0, 0, 0, 0.22);
-    border-color: rgba(255, 255, 255, 0.1);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-  }
-
-  /** 房间顶栏/底栏：透出星河或封面背景 */
-  .room-glass-bar {
-    border-color: rgba(255, 255, 255, 0.1);
-    background: rgba(0, 0, 0, 0.2);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-  }
-
   .text-gradient {
-    background: linear-gradient(135deg, #ec4141, #ff6b6b);
+    background: linear-gradient(135deg, #ff4d55, #ff8a90);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
@@ -2975,4 +2975,67 @@ body.immersive-mode #hand-canvas {
   z-index: 5;
   pointer-events: none;
   background: linear-gradient(180deg, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.16));
+}
+
+/* Shared product surfaces and controls. Kept outside Tailwind's layer so these
+   classes remain available to lazy-loaded screens. */
+.room-glass-bar {
+  border-color: var(--om-border);
+  background: rgba(9, 9, 11, 0.48);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.025);
+  backdrop-filter: blur(26px) saturate(125%);
+  -webkit-backdrop-filter: blur(26px) saturate(125%);
+}
+
+.surface-panel {
+  border: 1px solid var(--om-border);
+  background: linear-gradient(145deg, rgba(24, 24, 29, 0.7), rgba(13, 13, 16, 0.58));
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.025);
+  backdrop-filter: blur(22px) saturate(120%);
+  -webkit-backdrop-filter: blur(22px) saturate(120%);
+}
+
+.icon-button {
+  min-width: 2.5rem;
+  min-height: 2.5rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--om-border);
+  border-radius: 0.75rem;
+  color: var(--om-text-secondary);
+  background: rgba(255, 255, 255, 0.025);
+  transition: color 160ms ease, background 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+.icon-button:hover {
+  color: var(--om-text);
+  border-color: var(--om-border-strong);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.icon-button:active {
+  transform: scale(0.96);
+}
+
+.status-chip {
+  display: inline-flex;
+  height: 1.375rem;
+  align-items: center;
+  gap: 0.3rem;
+  border: 1px solid var(--om-border);
+  border-radius: 9999px;
+  padding: 0 0.5rem;
+  font-size: 0.625rem;
+  line-height: 1;
+  color: var(--om-text-secondary);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

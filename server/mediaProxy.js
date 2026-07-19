@@ -1,5 +1,7 @@
 import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
+import { lookup } from 'dns/promises';
+import { isIP } from 'net';
 
 export const DEFAULT_MEDIA_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
@@ -79,6 +81,60 @@ export function isBlockedMediaHostname(hostname) {
   return false;
 }
 
+function isBlockedIpAddress(address) {
+  const value = String(address || '').toLowerCase().replace(/%.+$/, '');
+  const family = isIP(value);
+  if (!family) return true;
+
+  if (family === 4) {
+    const parts = value.split('.').map(Number);
+    const [a, b] = parts;
+    return (
+      a === 0
+      || a === 10
+      || a === 127
+      || (a === 100 && b >= 64 && b <= 127)
+      || (a === 169 && b === 254)
+      || (a === 172 && b >= 16 && b <= 31)
+      || (a === 192 && b === 0)
+      || (a === 192 && b === 168)
+      || (a === 198 && (b === 18 || b === 19))
+      || a >= 224
+    );
+  }
+
+  if (value === '::' || value === '::1') return true;
+  if (/^f[cd][0-9a-f]{2}:/i.test(value)) return true;
+  if (/^fe[89ab][0-9a-f]:/i.test(value)) return true;
+  const mapped = value.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/i);
+  return mapped ? isBlockedIpAddress(mapped[1]) : false;
+}
+
+async function assertPublicDnsTarget(hostname) {
+  if (isIP(hostname)) {
+    if (isBlockedIpAddress(hostname)) {
+      const err = new Error('禁止访问内网地址');
+      err.statusCode = 403;
+      throw err;
+    }
+    return;
+  }
+
+  let records;
+  try {
+    records = await lookup(hostname, { all: true, verbatim: true });
+  } catch {
+    const err = new Error('媒体域名解析失败');
+    err.statusCode = 502;
+    throw err;
+  }
+  if (!records.length || records.some((record) => isBlockedIpAddress(record.address))) {
+    const err = new Error('禁止访问内网地址');
+    err.statusCode = 403;
+    throw err;
+  }
+}
+
 /**
  * 仅允许音乐 CDN / 已知媒体域名（可附带 Meting 主机名例外，用于解析前的中间跳）。
  * @param {string} hostname
@@ -152,7 +208,7 @@ function applyStreamingMediaHeaders(response, res, contentType) {
   res.status(response.status);
 }
 
-function assertSafeMediaUrl(rawUrl, extraAllowedHosts, { requireAllowlist }) {
+async function assertSafeMediaUrl(rawUrl, extraAllowedHosts, { requireAllowlist }) {
   let parsed;
   try {
     parsed = new URL(rawUrl);
@@ -166,12 +222,27 @@ function assertSafeMediaUrl(rawUrl, extraAllowedHosts, { requireAllowlist }) {
     err.statusCode = 400;
     throw err;
   }
+  if (parsed.username || parsed.password) {
+    const err = new Error('媒体地址不能包含认证信息');
+    err.statusCode = 400;
+    throw err;
+  }
+  if (parsed.port && !['80', '443'].includes(parsed.port)) {
+    const err = new Error('媒体地址端口不被允许');
+    err.statusCode = 403;
+    throw err;
+  }
   if (isBlockedMediaHostname(parsed.hostname)) {
     const err = new Error('禁止访问内网地址');
     err.statusCode = 403;
     throw err;
   }
-  // 不再限制媒体域名白名单，仅拦截内网地址
+  if (requireAllowlist && !isAllowedMediaHostname(parsed.hostname, extraAllowedHosts)) {
+    const err = new Error('媒体域名不在允许列表');
+    err.statusCode = 403;
+    throw err;
+  }
+  await assertPublicDnsTarget(parsed.hostname);
   return parsed;
 }
 
@@ -186,7 +257,7 @@ export async function fetchMediaWithSafeRedirects(fetchWithTimeout, rawUrl, fetc
   let currentUrl = preferHttpsMediaUrl(rawUrl);
 
   for (let hop = 0; hop <= MAX_MEDIA_REDIRECTS; hop += 1) {
-    assertSafeMediaUrl(currentUrl, extraAllowedHosts, { requireAllowlist });
+    await assertSafeMediaUrl(currentUrl, extraAllowedHosts, { requireAllowlist });
 
     const response = await fetchWithTimeout(
       currentUrl,

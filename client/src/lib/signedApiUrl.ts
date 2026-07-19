@@ -1,13 +1,8 @@
 import { useEffect, useState } from 'react';
-import { buildApiSignHeaders, canonicalApiQuery, isMediaApiPath, needsApiSign } from './apiSign';
+import { buildApiSignHeaders, canonicalApiQuery, needsApiSign } from './apiSign';
 import { ensureSessionBootstrap } from './sessionBootstrap';
 
 const SIGN_QUERY_KEYS = ['om_ts', 'om_nonce', 'om_sign'] as const;
-/** 普通 API 签名缓存：略短于服务端默认 5 分钟窗口 */
-const SIGNED_URL_CACHE_TTL_MS = 4 * 60 * 1000;
-
-const signedUrlCache = new Map<string, { url: string; expires: number }>();
-
 /**
  * 去掉已有签名参数。
  * - 同源 /api 相对路径：返回 pathname+search
@@ -40,12 +35,8 @@ export async function signApiUrl(relativeUrl: string, options?: { force?: boolea
   if (!needsApiSign(relativeUrl)) return relativeUrl;
 
   const cacheKey = stripApiSignParams(relativeUrl);
-  const media = isMediaApiPath(cacheKey);
-  // 媒体：始终重新颁发，保证 om_ts 从「现在」起算满配置窗口
-  if (!media && !options?.force) {
-    const cached = signedUrlCache.get(cacheKey);
-    if (cached && cached.expires > Date.now()) return cached.url;
-  }
+  // 普通 GET 的 nonce 会被服务端消费，不能复用签名 URL；媒体也换发以刷新时间窗口。
+  void options;
 
   await ensureSessionBootstrap();
   const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
@@ -59,9 +50,6 @@ export async function signApiUrl(relativeUrl: string, options?: { force?: boolea
   parsed.searchParams.set('om_sign', headers['X-OM-Sign']);
   const signed = `${parsed.pathname}${parsed.search}${parsed.hash}`;
 
-  if (!media) {
-    signedUrlCache.set(cacheKey, { url: signed, expires: Date.now() + SIGNED_URL_CACHE_TTL_MS });
-  }
   return signed;
 }
 

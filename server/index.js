@@ -129,7 +129,6 @@ import { checkApihzSensitiveWords } from './apihzSensitiveWord.js';
 import { getSiteAnnouncement, initSiteAnnouncement } from './siteAnnouncement.js';
 import { initSiteBans, isSiteBanned } from './siteBan.js';
 import { createErrorReport } from './errorReports.js';
-import { deriveChatTextGateKey, verifyChatTextGatePass } from './chatTextGate.js';
 import { getRuntimeConfig } from './runtimeConfig.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -168,7 +167,9 @@ if (IS_PRODUCTION && !(process.env.CLIENT_ID_SECRET || '').trim()) {
 }
 
 const app = express();
-app.set('trust proxy', TRUST_PROXY || IS_PRODUCTION ? 1 : 'loopback');
+// Forwarded IP headers are only trustworthy when the deployment explicitly
+// declares that a reverse proxy is in front of this process.
+app.set('trust proxy', TRUST_PROXY ? 1 : false);
 const httpServer = createServer(app);
 
 function corsOrigin(origin, callback) {
@@ -304,7 +305,7 @@ const CLIENT_IP_HEADER = String(process.env.CLIENT_IP_HEADER || '').trim().toLow
 
 function getClientIpFromHeaders(headers = {}, remoteAddress = '') {
   // 未接反代时只用 socket 地址，避免客户端伪造 XFF 绕过限流
-  const trustForwarded = TRUST_PROXY || IS_PRODUCTION;
+  const trustForwarded = TRUST_PROXY;
   if (!trustForwarded) {
     return normalizeClientIp(remoteAddress || '');
   }
@@ -391,12 +392,23 @@ function limitText(value, maxLength) {
   return String(value || '').trim().slice(0, maxLength);
 }
 
-function createRateLimiter({ windowMs, max }) {
+function createRateLimiter({ windowMs, max, maxBuckets = 10_000 }) {
   const buckets = new Map();
+  let lastSweepAt = 0;
   return (key) => {
     const now = Date.now();
+    if (now - lastSweepAt >= windowMs) {
+      lastSweepAt = now;
+      for (const [bucketKey, value] of buckets) {
+        if (value.resetAt <= now) buckets.delete(bucketKey);
+      }
+    }
     const bucket = buckets.get(key);
     if (!bucket || bucket.resetAt <= now) {
+      if (!bucket && buckets.size >= maxBuckets) {
+        const oldestKey = buckets.keys().next().value;
+        if (oldestKey !== undefined) buckets.delete(oldestKey);
+      }
       buckets.set(key, { count: 1, resetAt: now + windowMs });
       return true;
     }
@@ -412,6 +424,8 @@ const limitProxyRequest = createRateLimiter({ windowMs: 60_000, max: 120 });
 const limitSocketAction = createRateLimiter({ windowMs: 60_000, max: 90 });
 const limitSocketChat = createRateLimiter({ windowMs: 60_000, max: 30 });
 const limitErrorReport = createRateLimiter({ windowMs: 10 * 60_000, max: 5 });
+const limitSessionBootstrap = createRateLimiter({ windowMs: 60_000, max: 60 });
+const limitNewSessionBootstrap = createRateLimiter({ windowMs: 60_000, max: 12 });
 
 function sanitizeClientSong(song) {
   if (!song || typeof song !== 'object') {
@@ -1016,8 +1030,6 @@ function sendBootstrapResponse(res, userId, iat, token, deviceId = null) {
   setIdentityCookieHeaders(res, userId, token, deviceId);
   const payload = {
     clientId: userId,
-    // 聊天文本门禁密令密钥：始终下发，供前端敏感词检测通过后签发密令
-    chatTextGateKey: deriveChatTextGateKey(CLIENT_ID_SECRET, userId, iat),
   };
   const requireRequestSign = res.req?.secure || !ALLOW_INSECURE_HTTP_API;
   if (isApiSignRequired() && requireRequestSign) {
@@ -1033,6 +1045,10 @@ function proxyLimitKey(kind, req) {
 
 /** 建立 HttpOnly 会话：身份凭证仅通过 Cookie 传递，不经 WebSocket 明文下发 */
 app.post('/api/session/bootstrap', async (req, res) => {
+  const requestIp = getRequestIp(req);
+  if (!limitSessionBootstrap(`session:${requestIp}`)) {
+    return res.status(429).json({ error: '会话请求过于频繁，请稍后再试' });
+  }
   const cookieDeviceId = resolveDeviceIdFromCookieHeader(req.headers?.cookie || '');
   const bodyDeviceId = resolveBodyDeviceId(req);
   const now = Math.floor(Date.now() / 1000);
@@ -1064,6 +1080,9 @@ app.post('/api/session/bootstrap', async (req, res) => {
     }
   }
 
+  if (!limitNewSessionBootstrap(`session-new:${requestIp}`)) {
+    return res.status(429).json({ error: '新会话创建过于频繁，请稍后再试' });
+  }
   const userId = createServerClientId();
   const deviceId = cookieDeviceId || createServerClientId();
   await linkDeviceToUser(deviceId, userId);
@@ -2429,7 +2448,7 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
-  socket.on('send_chat', async ({ text, mentions, replyTo, imageUrl, imageKey, asSticker, textGatePass }, callback) => {
+  socket.on('send_chat', async ({ text, mentions, replyTo, imageUrl, imageKey, asSticker }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
     if (rejectRateLimited(socket, limitSocketChat, 'send_chat', callback)) return;
 
@@ -2441,19 +2460,11 @@ io.on('connection', (socket) => {
 
     const textContent = String(text || '').trim();
     if (textContent) {
-      const identity = resolveIdentityFromCookies(socket.handshake?.headers?.cookie || '');
-      const gateOk = Boolean(
-        identity
-        && identity.userId === getSocketUserId(socket)
-        && verifyChatTextGatePass(CLIENT_ID_SECRET, identity, textContent, textGatePass),
-      );
-      // 前端密令有效则跳过慢速敏感词接口；否则走服务端兜底
-      if (!gateOk) {
-        const sensitive = await checkApihzSensitiveWords(textContent);
-        if (!sensitive.ok) {
-          callback?.({ success: false, error: sensitive.error });
-          return;
-        }
+      // 客户端检测仅用于即时提示，服务端始终执行权威审核。
+      const sensitive = await checkApihzSensitiveWords(textContent);
+      if (!sensitive.ok) {
+        callback?.({ success: false, error: sensitive.error });
+        return;
       }
     }
 

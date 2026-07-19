@@ -41,17 +41,17 @@ export default function AmbientCoverLayers({ coverUrl, className = 'absolute ins
 
   return (
     <div className={`${className} overflow-hidden`} aria-hidden>
-      <div className="absolute inset-0 bg-[#0d0d0d]" />
+      <div className="absolute inset-0 bg-surface-canvas" />
 
       <img
         src={displayUrl}
         alt=""
         crossOrigin="anonymous"
-        className="absolute inset-0 h-full w-full object-cover saturate-110 transition-[opacity,filter] duration-700"
+        className="absolute inset-0 h-full w-full object-cover transition-[opacity,filter] duration-700"
         style={{
           opacity: loaded ? tuning.coverOpacity : 0,
-          filter: `blur(28px) brightness(${tuning.imgBrightness})`,
-          transform: 'scale(1.05)',
+          filter: `blur(46px) brightness(${tuning.imgBrightness}) saturate(1.32) contrast(.96)`,
+          transform: 'scale(1.14)',
         }}
         onLoad={() => setLoaded(true)}
       />
@@ -67,6 +67,9 @@ export default function AmbientCoverLayers({ coverUrl, className = 'absolute ins
           background: `linear-gradient(to bottom, rgba(0, 0, 0, ${tuning.gradientTop}), transparent, rgba(0, 0, 0, ${tuning.gradientBottom}))`,
         }}
       />
+
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_32%,rgba(255,255,255,0.08),transparent_42%),linear-gradient(90deg,rgba(0,0,0,.25),transparent_25%,transparent_75%,rgba(0,0,0,.25))]" />
+      <div className="absolute inset-0 shadow-[inset_0_0_180px_rgba(0,0,0,.42)]" />
     </div>
   );
 }

@@ -1645,7 +1645,7 @@ export default function Room() {
 
   const renderQueueSection = (fillHeight = false) => (
     <div
-      className={`bg-netease-card/30 border border-netease-border/50 rounded-2xl overflow-hidden flex flex-col ${
+      className={`surface-panel rounded-2xl overflow-hidden flex flex-col ${
         fillHeight ? 'h-full flex-1 min-h-0' : 'flex-shrink-0'
       }`}
     >
@@ -2124,6 +2124,21 @@ export default function Room() {
 
           <div className="flex items-center justify-between gap-2 min-w-0">
 
+            {room.current && !pureMode && (
+              <div className="relative hidden flex-shrink-0 sm:block">
+                <SongCover
+                  song={room.current}
+                  eager
+                  className="h-11 w-11 rounded-xl border border-white/10 bg-surface-raised object-cover shadow-lg shadow-black/30"
+                />
+                {room.isPlaying && (
+                  <span className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full border-2 border-surface-base bg-netease-red shadow-md shadow-netease-red/30">
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
+                  </span>
+                )}
+              </div>
+            )}
+
             <div className="min-w-0">
 
               <div className="flex items-center gap-2">
@@ -2349,11 +2364,11 @@ export default function Room() {
 
       <div className={`relative z-10 flex-1 min-h-0 mx-auto w-full px-3 sm:px-4 pt-3 sm:pt-4 pb-[calc(4.75rem+env(safe-area-inset-bottom,0px))] overflow-y-auto lg:overflow-hidden ${pureMode ? 'max-w-3xl' : 'max-w-[1680px]'}`}>
 
-        <div className={`flex flex-col gap-3 lg:gap-4 lg:h-full lg:min-h-0 ${pureMode ? '' : 'lg:grid lg:grid-cols-[360px_minmax(0,1fr)_360px]'}`}>
+        <div className={`flex flex-col gap-3 lg:gap-4 lg:h-full lg:min-h-0 ${pureMode ? '' : 'lg:grid lg:grid-cols-[320px_minmax(0,1fr)_340px]'}`}>
 
           {/* 左侧：网易云热榜 */}
           {isLgUp && !pureMode && (
-            <div className="order-0 flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-netease-border/50 bg-netease-card/30 lg:h-full">
+            <div className="surface-panel order-0 flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl lg:h-full">
               <HotSongPanel embedded addingId={addingId} onAdd={handleAdd} />
             </div>
           )}

@@ -110,7 +110,6 @@ interface Props {
       imageUrl?: string;
       imageKey?: string;
       asSticker?: boolean;
-      textGatePass?: string;
     },
   ) => Promise<{ success: boolean; error?: string }>;
   onStickToBottom: () => void;
@@ -406,7 +405,6 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
       hasImageModeration: checkImage,
     });
 
-    let textGatePass: string | undefined;
     if (messageText) {
       try {
         await requireSessionBootstrap(false);
@@ -424,7 +422,6 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
         endSendProgress();
         return;
       }
-      textGatePass = gate.pass;
       if (checkImage) beginSendProgress({ hasImageModeration: true });
     }
 
@@ -433,7 +430,6 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
       replyTo: currentReplyTo,
       imageUrl: currentImage?.url,
       imageKey: currentImage?.key,
-      textGatePass,
     });
     if (!res.success) {
       insertPlainText(messageText);

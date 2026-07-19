@@ -13,9 +13,50 @@ const scrypt = promisify(scryptCallback);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ENV_PATH = path.join(__dirname, '.env');
 const LOCK_PATH = path.join(__dirname, 'setup.lock');
+const INSTALLING_LOCK_PATH = path.join(__dirname, 'setup.installing.lock');
+const INSTALLING_LOCK_STALE_MS = 30 * 60_000;
 const RUNTIME_CONFIG_PATH = path.join(__dirname, 'runtimeConfig.json');
 const ADMIN_CREDENTIALS_KEY = 'openmusic:admin:credentials';
 const attempts = new Map();
+
+function acquireSetupLease() {
+  const openLease = () => {
+    const fd = fs.openSync(INSTALLING_LOCK_PATH, 'wx', 0o600);
+    try {
+      fs.writeFileSync(fd, `${JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() })}\n`, 'utf8');
+    } catch (err) {
+      try { fs.closeSync(fd); } catch { /* ignore cleanup failure */ }
+      try { fs.unlinkSync(INSTALLING_LOCK_PATH); } catch { /* ignore cleanup failure */ }
+      throw err;
+    }
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      try { fs.closeSync(fd); } catch { /* already closed */ }
+      try { fs.unlinkSync(INSTALLING_LOCK_PATH); } catch { /* already removed */ }
+    };
+  };
+
+  try {
+    return openLease();
+  } catch (err) {
+    if (err?.code !== 'EEXIST') throw err;
+    try {
+      const stat = fs.statSync(INSTALLING_LOCK_PATH);
+      if (Date.now() - stat.mtimeMs <= INSTALLING_LOCK_STALE_MS) {
+        const busy = new Error('安装正在由其它请求执行');
+        busy.code = 'EBUSY';
+        throw busy;
+      }
+      fs.unlinkSync(INSTALLING_LOCK_PATH);
+      return openLease();
+    } catch (retryErr) {
+      if (retryErr?.code === 'ENOENT') return openLease();
+      throw retryErr;
+    }
+  }
+}
 
 function hasCompletedSetupLock() {
   try {
@@ -296,8 +337,21 @@ export function mountSetupApi(app) {
   });
 
   app.post('/api/setup/complete', requireSameHost, async (req, res) => {
-    if (!isSetupRequired()) return res.status(404).json({ error: '安装向导已锁定' });
     if (isRateLimited(req, 5)) return res.status(429).json({ error: '尝试过于频繁，请稍后再试' });
+
+    let releaseLease;
+    try {
+      releaseLease = acquireSetupLease();
+    } catch (err) {
+      if (err?.code === 'EBUSY' || err?.code === 'EEXIST') {
+        return res.status(409).json({ error: '安装正在由其它请求执行' });
+      }
+      console.error('setup: 获取安装锁失败:', err?.message || err);
+      return res.status(500).json({ error: '无法锁定安装流程' });
+    }
+    try {
+      // 必须在获取原子租约后再次判断，避免两个请求同时通过前置检查。
+      if (!isSetupRequired()) return res.status(404).json({ error: '安装向导已锁定' });
 
     const siteUrl = validateSiteUrl(req.body?.siteUrl);
     if (siteUrl === null) return res.status(400).json({ error: '站点地址必须是有效的 http/https 地址' });
@@ -383,6 +437,9 @@ export function mountSetupApi(app) {
       if (err?.code === 'EEXIST') return res.status(409).json({ error: '安装已由其它请求完成' });
       console.error('setup: 安装失败:', err?.message || err);
       res.status(500).json({ error: '保存安装配置失败' });
+    }
+    } finally {
+      releaseLease?.();
     }
   });
 }

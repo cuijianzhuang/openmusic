@@ -10,8 +10,7 @@ interface Props {
   onClick?: () => void;
 }
 
-const META_TEXT =
-  'inline-flex h-5 items-center gap-x-1.5 whitespace-nowrap text-[10px] leading-none text-netease-muted';
+const META_TEXT = 'status-chip whitespace-nowrap';
 
 export default function RoomQualityBadge({ audioQuality, className = '', onClick }: Props) {
   const roomQuality = useRoomStore((s) => s.room?.audioQuality);

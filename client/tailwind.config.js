@@ -5,12 +5,18 @@ export default {
     extend: {
       colors: {
         netease: {
-          red: '#ec4141',
-          dark: '#1a1a1a',
-          card: '#242424',
-          hover: '#2a2a2a',
-          border: '#333333',
-          muted: '#888888',
+          red: '#ff4d55',
+          dark: '#09090b',
+          card: '#18181d',
+          hover: '#202026',
+          border: '#2b2b33',
+          muted: '#a1a1aa',
+        },
+        surface: {
+          canvas: '#09090b',
+          base: '#111114',
+          raised: '#18181d',
+          hover: '#202026',
         },
       },
       fontFamily: {

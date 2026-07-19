@@ -24,6 +24,7 @@ import {
 import Tooltip from '../components/Tooltip';
 import ClientDownloadModal from '../components/ClientDownloadModal';
 import SiteAnnouncementPopup from '../components/SiteAnnouncementPopup';
+import BrandMark from '../components/BrandMark';
 
 function GiteeIcon({ className }: { className?: string }) {
   return (
@@ -33,7 +34,7 @@ function GiteeIcon({ className }: { className?: string }) {
   );
 }
 
-const repoLinkCls = 'p-2.5 rounded-xl text-white/50 border border-white/10 hover:text-white hover:bg-white/5 transition-colors';
+const repoLinkCls = 'icon-button h-10 w-10 p-0';
 
 function PlayingBars() {
   return (
@@ -67,10 +68,10 @@ const RoomCard = memo(function RoomCard({
 
   const cardClassName = `group relative w-full text-left rounded-2xl border transition-all duration-300 overflow-hidden
     ${hardLocked
-      ? 'border-white/6 bg-[#141414]/80 opacity-70 cursor-not-allowed'
+      ? 'border-white/5 bg-surface-base/75 opacity-70 cursor-not-allowed'
       : isActive
-        ? 'border-netease-red/40 bg-gradient-to-br from-netease-red/10 via-[#1a1a1a] to-[#141414] shadow-lg shadow-netease-red/5 hover:shadow-netease-red/15 hover:border-netease-red/60'
-        : 'border-white/8 bg-[#161616]/90 hover:border-white/20 hover:bg-[#1c1c1c]'
+        ? 'border-netease-red/35 bg-gradient-to-br from-netease-red/12 via-surface-raised/80 to-surface-base/75 shadow-lg shadow-netease-red/5 hover:-translate-y-0.5 hover:shadow-netease-red/15 hover:border-netease-red/55'
+        : 'border-white/8 bg-surface-raised/70 shadow-lg shadow-black/10 hover:-translate-y-0.5 hover:border-white/15 hover:bg-surface-hover/80'
     }`;
 
   const body = (
@@ -112,19 +113,25 @@ const RoomCard = memo(function RoomCard({
 
         <div className="min-h-[3.5rem] mb-4">
           {room.currentSong ? (
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                {room.isPlaying && !hardLocked && <PlayingBars />}
-                <span className="text-[10px] uppercase tracking-wider text-netease-red/80 font-medium">
-                  {room.isPlaying ? '正在播放' : '已暂停'}
-                </span>
+            <div className="flex items-center gap-3">
+              <div className="relative flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-xl border border-white/10 bg-gradient-to-br from-netease-red/20 to-surface-raised shadow-md shadow-black/30">
+                <Disc3 className={`h-6 w-6 text-netease-red/80 ${room.isPlaying && !hardLocked ? 'animate-spin-slow' : ''}`} />
+                <span className="absolute inset-[7px] rounded-full border border-white/5" />
               </div>
-              <p className="text-sm font-medium text-white/90 truncate leading-snug">
-                {room.currentSong.name}
-              </p>
-              <p className="text-xs text-white/40 truncate mt-0.5">
-                {room.currentSong.artist}
-              </p>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 mb-1">
+                  {room.isPlaying && !hardLocked && <PlayingBars />}
+                  <span className="text-[10px] uppercase tracking-wider text-netease-red/80 font-medium">
+                    {room.isPlaying ? '正在播放' : '已暂停'}
+                  </span>
+                </div>
+                <p className="text-sm font-medium text-white/90 truncate leading-snug">
+                  {room.currentSong.name}
+                </p>
+                <p className="text-xs text-white/40 truncate mt-0.5">
+                  {room.currentSong.artist}
+                </p>
+              </div>
             </div>
           ) : (
             <div className="flex items-center gap-2 text-white/30">
@@ -354,7 +361,7 @@ export default function Home() {
     };
   }, [rooms]);
 
-  const inputCls = 'w-full bg-[#0d0d0d] border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm placeholder:text-white/30 focus:outline-none focus:border-netease-red/50 transition-colors';
+  const inputCls = 'w-full bg-black/25 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm placeholder:text-white/30 focus:outline-none focus:border-netease-red/55 focus:ring-2 focus:ring-netease-red/10 transition-[border-color,box-shadow,background]';
 
   const openAdminEntry = () => {
     const raw = adminEntryPath.trim();
@@ -369,14 +376,12 @@ export default function Home() {
   };
 
   return (
-    <div className="h-full flex flex-col relative overflow-hidden">
-      <div className="absolute inset-0 bg-[#0a0a0a]" />
-      <div className="absolute inset-0 bg-gradient-to-br from-netease-red/8 via-transparent to-purple-900/10 pointer-events-none" />
-      <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-netease-red/5 rounded-full blur-[120px] pointer-events-none" />
-      <div className="absolute bottom-0 right-1/4 w-[400px] h-[400px] bg-purple-600/5 rounded-full blur-[100px] pointer-events-none" />
+    <div className="h-full flex flex-col relative overflow-hidden bg-surface-canvas">
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_-10%,rgba(255,77,85,0.16),transparent_34%),radial-gradient(circle_at_82%_105%,rgba(124,58,237,0.11),transparent_30%)] pointer-events-none" />
+      <div className="absolute inset-0 opacity-[0.035] [background-image:linear-gradient(rgba(255,255,255,.4)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.4)_1px,transparent_1px)] [background-size:48px_48px] pointer-events-none" />
 
       {/* 顶栏：昵称 + 创建/加入 */}
-      <header className="relative z-20 flex-shrink-0 border-b border-white/5 glass safe-top">
+      <header className="relative z-20 flex-shrink-0 border-b border-white/8 glass safe-top shadow-[0_12px_40px_rgba(0,0,0,.18)]">
         <div className="relative h-14 sm:h-16">
           <div className="absolute right-4 sm:right-6 top-1/2 -translate-y-1/2 z-30 flex items-center gap-2">
             {!isMobileDevice() && (
@@ -385,7 +390,7 @@ export default function Home() {
                   <a
                     href={ANDROID_APK_URL}
                     download="openmusic.apk"
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium text-emerald-400/90 border border-emerald-500/25 hover:text-emerald-300 hover:bg-emerald-500/10 transition-colors"
+                    className="hidden lg:flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium text-emerald-400/90 border border-emerald-500/25 hover:text-emerald-300 hover:bg-emerald-500/10 transition-colors"
                   >
                     <Download className="w-4 h-4" />
                     <span>Android</span>
@@ -395,7 +400,7 @@ export default function Home() {
                   <a
                     href={IOS_IPA_URL}
                     download="openmusic.ipa"
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium text-sky-400/90 border border-sky-500/25 hover:text-sky-300 hover:bg-sky-500/10 transition-colors"
+                    className="hidden lg:flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium text-sky-400/90 border border-sky-500/25 hover:text-sky-300 hover:bg-sky-500/10 transition-colors"
                   >
                     <Download className="w-4 h-4" />
                     <span>iOS</span>
@@ -424,10 +429,8 @@ export default function Home() {
           </div>
           <div className="max-w-6xl mx-auto px-4 sm:px-6 sm:pr-72 h-full flex items-center gap-2 sm:gap-4 min-w-0">
           <div className="flex items-center gap-2.5 flex-shrink-0">
-            <div className="w-9 h-9 rounded-xl bg-netease-red/15 flex items-center justify-center">
-              <Music className="w-5 h-5 text-netease-red" />
-            </div>
-            <span className="hidden sm:block text-lg font-bold text-gradient">OpenMusic</span>
+            <BrandMark className="h-10 w-10 drop-shadow-[0_8px_20px_rgba(255,77,85,.18)]" />
+            <span className="hidden sm:block text-lg font-bold tracking-tight text-gradient">OpenMusic</span>
           </div>
 
           <div className="flex-1 min-w-0 sm:max-w-xs">
@@ -445,7 +448,7 @@ export default function Home() {
             <button
               type="button"
               onClick={() => { setError(''); setShowJoin(true); }}
-              className="hidden sm:flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm text-white/80 border border-white/10 hover:bg-white/5 transition-colors"
+              className="hidden sm:flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm text-white/80 border border-white/10 bg-white/[0.025] hover:border-white/15 hover:bg-white/[0.07] active:scale-[.97] transition-all"
             >
               <Hash className="w-4 h-4" />
               加入
@@ -461,7 +464,7 @@ export default function Home() {
             <button
               type="button"
               onClick={() => { setError(''); setShowCreate(true); }}
-              className="hidden sm:flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium bg-netease-red hover:bg-red-500 text-white transition-all hover:shadow-lg hover:shadow-netease-red/20"
+              className="hidden sm:flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium bg-netease-red hover:bg-[#ff626a] text-white transition-all active:scale-[.97] hover:shadow-lg hover:shadow-netease-red/25"
             >
               <Plus className="w-4 h-4" />
               <span>创建房间</span>
@@ -477,7 +480,7 @@ export default function Home() {
             <button
               type="button"
               onClick={() => { setAdminEntryError(''); setShowAdminEntry(true); }}
-              className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm text-white/60 border border-white/10 hover:text-white hover:bg-white/5 transition-colors"
+              className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm text-white/60 border border-white/10 bg-white/[0.025] hover:border-white/15 hover:text-white hover:bg-white/[0.07] active:scale-[.97] transition-all"
             >
               <ShieldCheck className="w-4 h-4" />
               <span>管理</span>
@@ -512,11 +515,11 @@ export default function Home() {
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
           <div className="flex items-center justify-between mb-6">
             <div>
-              <h1 className="text-xl sm:text-2xl font-bold text-white mb-1">
+              <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white mb-1.5">
                 <span className="sr-only">OpenMusic 在线点歌 - </span>
                 房间大厅
               </h1>
-              <p className="text-sm text-white/40">选择一个房间加入，或创建你自己的</p>
+              <p className="text-sm text-white/45">选择一个房间加入，或创建属于你的共同播放空间</p>
             </div>
             <button
               type="button"

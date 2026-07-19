@@ -13,6 +13,8 @@ const UPLOAD_URLS = {
 const CHAT_PREFIX = 'openmusic/chat';
 const ALLOWED_EXTS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp']);
 const TOKEN_EXPIRES = 3600;
+const MAX_CHAT_IMAGE_BYTES = 8 * 1024 * 1024;
+const CHAT_IMAGE_MIME_LIMIT = 'image/jpeg;image/png;image/gif;image/webp';
 
 export function isQiniuConfigured() {
   const config = getRuntimeConfig();
@@ -76,6 +78,9 @@ export function createChatImageUploadToken(roomId, ext) {
     scope: `${qiniuBucket}:${key}`,
     expires: TOKEN_EXPIRES,
     insertOnly: 1,
+    fsizeLimit: MAX_CHAT_IMAGE_BYTES,
+    mimeLimit: CHAT_IMAGE_MIME_LIMIT,
+    detectMime: 1,
   });
 
   return {
