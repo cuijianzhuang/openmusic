@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useFrame } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { RoomVisualPresetId } from '../../lib/roomVisualPreset';
 import { makeDotTexture } from './lib/dotTexture';
@@ -405,6 +405,7 @@ export default function GalaxyParticles({ coverUrl, preset, isPlaying }: Props) 
     [coverUrl],
   );
   const signedCover = useSignedApiUrl(proxiedCover);
+  const invalidate = useThree((state) => state.invalidate);
   const [particleGrid, setParticleGrid] = useState(() =>
     gridForResolution(roomVisualFxLive.current.coverResolution),
   );
@@ -641,6 +642,8 @@ export default function GalaxyParticles({ coverUrl, preset, isPlaying }: Props) 
       if (cancelled) return;
       coverImageCacheRef.current = img;
       applyLoadedCover(img);
+      // 暂停时为 demand 帧循环，封面纹理就绪后需请求一帧才能显示。
+      invalidate();
     };
     img.onerror = () => {
       if (cancelled) return;
@@ -651,6 +654,7 @@ export default function GalaxyParticles({ coverUrl, preset, isPlaying }: Props) 
       uniforms.uCoverTex.value = placeholder;
       uniforms.uHasCover.value = 0;
       uniforms.uHasDepth.value = 0;
+      invalidate();
     };
     img.src = signedCover;
 
@@ -663,7 +667,7 @@ export default function GalaxyParticles({ coverUrl, preset, isPlaying }: Props) 
       img.onload = null;
       img.onerror = null;
     };
-  }, [backCoverLayer, signedCover, floatLayer, preset, uniforms]);
+  }, [backCoverLayer, signedCover, floatLayer, preset, uniforms, invalidate]);
 
   useFrame((state, delta) => {
     updateGalaxyParticlePointerFrame(state.camera);
@@ -790,8 +794,11 @@ export default function GalaxyParticles({ coverUrl, preset, isPlaying }: Props) 
 
     uniforms.uBurstAmt.value *= 0.9;
 
-    if (isPlaying && uniforms.uAlpha.value < 1) {
+    // 淡入不能依赖播放状态：暂停时进入沉浸也必须让粒子可见，否则 uAlpha 停在 0 会黑屏。
+    if (uniforms.uAlpha.value < 1) {
       uniforms.uAlpha.value = Math.min(1, uniforms.uAlpha.value + delta / 0.26);
+      // demand 帧循环（暂停时）不会自动持续出帧，需主动请求下一帧完成淡入。
+      invalidate();
     }
 
     syncParticleGroupRotation(delta, galaxyOrbitRef.current.centerLocked);
