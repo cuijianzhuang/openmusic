@@ -1301,17 +1301,24 @@ export default function Room() {
       steps: initialSteps,
     });
 
+    let recoveryPending = false;
     try {
-      await runImmersiveExitPrep({
-        kind,
-        song: currentSong,
-        visualMode,
-        steps: initialSteps,
-        applyVisualMode,
-        onStepsChange: (steps) => {
-          setImmersiveTransition((prev) => (prev ? { ...prev, steps } : prev));
-        },
-      });
+      try {
+        await runImmersiveExitPrep({
+          kind,
+          song: currentSong,
+          visualMode,
+          steps: initialSteps,
+          applyVisualMode,
+          onStepsChange: (steps) => {
+            setImmersiveTransition((prev) => (prev ? { ...prev, steps } : prev));
+          },
+        });
+      } catch (error) {
+        // 退出界面不能被音频重载或媒体元数据超时阻塞，音频可在后台继续恢复。
+        recoveryPending = true;
+        console.warn('Immersive exit preparation is still recovering:', error);
+      }
 
       await ensureMinimumLoadingDuration(startedAt);
 
@@ -1321,22 +1328,28 @@ export default function Room() {
 
       await new Promise((resolve) => window.setTimeout(resolve, IMMERSIVE_REVEAL_OUT_MS));
 
+    } catch (error) {
+      recoveryPending = true;
+      console.error('Unexpected immersive exit error:', error);
+    } finally {
+      // 无论背景或音频恢复是否及时完成，都必须先退出沉浸界面，避免用户被困住。
       setImmersiveModeEnabled(false);
       setVisualFxOpen(false);
       setImmersivePanelFocus(null);
+      ensureGalaxyAudioOutputLazy();
       refreshPlaybackUrlCacheForQuality();
-
-      showToast(
-        kind === 'cover-bg' ? '已退出沉浸模式，并切回封面背景' : '已退出沉浸模式，保留当前动态背景',
-        'success',
-      );
-    } catch (error) {
-      console.error('Failed to exit immersive mode:', error);
-      showToast('退出沉浸模式失败，请重试', 'error');
-    } finally {
       immersiveTransitionRef.current = false;
       setImmersiveTransition(null);
       setImmersiveShellMotion(null);
+
+      showToast(
+        recoveryPending
+          ? '已退出沉浸模式，音频正在后台恢复'
+          : kind === 'cover-bg'
+            ? '已退出沉浸模式，并切回封面背景'
+            : '已退出沉浸模式，保留当前动态背景',
+        'success',
+      );
     }
   }, [applyVisualMode, refreshPlaybackUrlCacheForQuality, setImmersiveModeEnabled, showToast, visualMode]);
 

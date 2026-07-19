@@ -1609,27 +1609,6 @@ body.immersive-mode #hand-canvas {
   pointer-events: none;
 }
 
-.immersive-transition-iris {
-  position: absolute;
-  inset: 0;
-  background: #08090b;
-  mask-image: radial-gradient(circle at 50% 50%, transparent 0%, transparent 42%, #000 58%);
-  -webkit-mask-image: radial-gradient(circle at 50% 50%, transparent 0%, transparent 42%, #000 58%);
-  opacity: 0;
-  pointer-events: none;
-}
-
-.immersive-transition-overlay.is-enter.is-revealing .immersive-transition-iris {
-  animation: immersive-transition-iris-open var(--immersive-reveal-in, 1680ms) cubic-bezier(0.22, 1, 0.36, 1) forwards;
-}
-
-.immersive-transition-overlay.is-exit.is-revealing .immersive-transition-iris {
-  opacity: 1;
-  mask-image: radial-gradient(circle at 50% 50%, transparent 0%, transparent 0%, #000 0%);
-  -webkit-mask-image: radial-gradient(circle at 50% 50%, transparent 0%, transparent 0%, #000 0%);
-  animation: immersive-transition-iris-close var(--immersive-reveal-out, 1560ms) cubic-bezier(0.55, 0, 0.45, 1) forwards;
-}
-
 .immersive-transition-content {
   position: relative;
   z-index: 2;
@@ -1826,32 +1805,6 @@ body.immersive-mode #hand-canvas {
   100% { opacity: 0; }
 }
 
-@keyframes immersive-transition-iris-open {
-  0% {
-    opacity: 1;
-    mask-image: radial-gradient(circle at 50% 50%, transparent 0%, transparent 0%, #000 0%);
-    -webkit-mask-image: radial-gradient(circle at 50% 50%, transparent 0%, transparent 0%, #000 0%);
-  }
-  100% {
-    opacity: 1;
-    mask-image: radial-gradient(circle at 50% 50%, transparent 0%, transparent 72%, #000 100%);
-    -webkit-mask-image: radial-gradient(circle at 50% 50%, transparent 0%, transparent 72%, #000 100%);
-  }
-}
-
-@keyframes immersive-transition-iris-close {
-  0% {
-    opacity: 0.15;
-    mask-image: radial-gradient(circle at 50% 50%, transparent 0%, transparent 72%, #000 100%);
-    -webkit-mask-image: radial-gradient(circle at 50% 50%, transparent 0%, transparent 72%, #000 100%);
-  }
-  100% {
-    opacity: 1;
-    mask-image: radial-gradient(circle at 50% 50%, transparent 0%, transparent 0%, #000 0%);
-    -webkit-mask-image: radial-gradient(circle at 50% 50%, transparent 0%, transparent 0%, #000 0%);
-  }
-}
-
 @keyframes immersive-transition-spark-pulse {
   0%, 100% { opacity: 0.75; transform: scale(1); }
   50% { opacity: 1; transform: scale(1.08); }
@@ -1888,7 +1841,6 @@ body.immersive-mode #hand-canvas {
   .immersive-transition-overlay,
   .immersive-transition-cover,
   .immersive-transition-content,
-  .immersive-transition-iris,
   .room-immersive-mode.is-shell-entering,
   .room-immersive-mode.is-shell-exiting {
     animation: none !important;
