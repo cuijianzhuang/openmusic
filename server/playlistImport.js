@@ -5,6 +5,11 @@ const NETEASE_HEADERS = {
   Referer: 'https://music.163.com/',
 };
 
+const QQ_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  Referer: 'https://y.qq.com/',
+};
+
 async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -121,6 +126,64 @@ export async function fetchNeteasePlaylistMetas(playlistIds) {
   return results;
 }
 
+async function fetchQqPlaylistMeta(playlistId) {
+  try {
+    const params = new URLSearchParams({
+      type: '1',
+      json: '1',
+      utf8: '1',
+      onlysong: '0',
+      disstid: String(playlistId),
+      format: 'json',
+      platform: 'yqq',
+      needNewCode: '0',
+      inCharset: 'utf-8',
+      outCharset: 'utf-8',
+      notice: '0',
+      g_tk: '5381',
+      loginUin: '0',
+      hostUin: '0',
+    });
+    const response = await fetchWithTimeout(
+      `https://c.y.qq.com/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg?${params.toString()}`,
+      { headers: QQ_HEADERS },
+      10000,
+    );
+    if (!response.ok) return null;
+
+    const text = await response.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      // 部分节点会用 jsonCallback(...) 包裹，兜底提取内层 JSON。
+      const match = text.match(/\{[\s\S]*\}/);
+      if (!match) return null;
+      data = JSON.parse(match[0]);
+    }
+
+    const cd = Array.isArray(data?.cdlist) ? data.cdlist[0] : null;
+    if (!cd) return null;
+
+    const name = String(cd.dissname || '').trim();
+    return {
+      id: String(cd.disstid || playlistId),
+      name: name || null,
+      coverImgUrl: String(cd.logo || '').trim(),
+      creatorName: String(cd.nickname || cd.nick || '').trim(),
+      trackCount: Number(cd.songnum || cd.total_song_num || 0),
+      playCount: Number(cd.visitnum || 0),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function fetchQqPlaylistName(playlistId) {
+  const meta = await fetchQqPlaylistMeta(playlistId);
+  return meta?.name || null;
+}
+
 async function fetchMetingPlaylist(server, playlistId) {
   const response = await fetchMetingApi(
     { server, type: 'playlist', id: playlistId },
@@ -183,5 +246,11 @@ export async function importQqPlaylist(input) {
     throw new Error('无法识别绿点歌单链接，请按提示获取分享链接');
   }
 
-  return importMetingPlaylist('tencent', playlistId, '绿点歌单');
+  const [result, name] = await Promise.all([
+    importMetingPlaylist('tencent', playlistId, '绿点歌单'),
+    fetchQqPlaylistName(playlistId),
+  ]);
+
+  if (name) result.name = name;
+  return result;
 }
