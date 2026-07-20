@@ -39,14 +39,26 @@ function envRoomEmptyTtlMs() {
   return Math.max(0, Math.min(Math.round(value), 24 * 60 * 60 * 1000));
 }
 
+// 服务重启后，恢复出的房间若仍有内容（队列 / 当前曲 / 历史 / 聊天 / 成员）会被保留，
+// 不因重启这一动作被解散。此宽限期 > 0 时，超期仍无人重连才清理；默认 24 小时；
+// 设为 0 表示不主动清理（一直保留，交由正常“无人离开”流程处理）。
+function envRoomRestartGraceMs() {
+  const value = Number(process.env.ROOM_RESTART_GRACE_MS);
+  if (!Number.isFinite(value)) return 24 * 60 * 60 * 1000;
+  return Math.max(0, Math.min(Math.round(value), 7 * 24 * 60 * 60 * 1000));
+}
+
 function envDefaults() {
   return {
     roomEmptyTtlMs: envRoomEmptyTtlMs(),
+    roomRestartGraceMs: envRoomRestartGraceMs(),
     metingApiUrl: envText('METING_API_URL'),
     metingApiAuth: envText('METING_API_AUTH'),
     cyapiBase: envText('CYAPI_BASE', envText('CYAPI_URL').replace(/\/qq_music\.php$/i, '') || 'https://cyapi.top/API'),
     cyapiKey: envText('CYAPI_KEY'),
     vmyLrcUrl: envText('VMY_LRC_URL', 'https://api.52vmy.cn/api/music/lrc'),
+    // 支持英文逗号分隔多个 LrcAPI 上游做负载均衡；置空则禁用该级兜底
+    lrcapiUrl: envText('LRCAPI_URL', 'https://api.lrc.cx'),
     qiniuAccessKey: envText('QINIU_ACCESS_KEY'),
     qiniuSecretKey: envText('QINIU_SECRET_KEY'),
     qiniuBucket: envText('QINIU_BUCKET'),
@@ -163,15 +175,24 @@ function trimTrailingSlash(value) {
 
 function normalize(config) {
   const roomEmptyTtlMs = Number(config.roomEmptyTtlMs);
+  const roomRestartGraceMs = Number(config.roomRestartGraceMs);
   return {
     roomEmptyTtlMs: Number.isFinite(roomEmptyTtlMs)
       ? Math.max(0, Math.min(Math.round(roomEmptyTtlMs), 24 * 60 * 60 * 1000))
       : 10 * 60 * 1000,
+    roomRestartGraceMs: Number.isFinite(roomRestartGraceMs)
+      ? Math.max(0, Math.min(Math.round(roomRestartGraceMs), 7 * 24 * 60 * 60 * 1000))
+      : 24 * 60 * 60 * 1000,
     metingApiUrl: String(config.metingApiUrl || '').trim(),
     metingApiAuth: String(config.metingApiAuth || '').trim(),
     cyapiBase: trimTrailingSlash(config.cyapiBase) || 'https://cyapi.top/API',
     cyapiKey: String(config.cyapiKey || '').trim(),
     vmyLrcUrl: trimTrailingSlash(config.vmyLrcUrl) || 'https://api.52vmy.cn/api/music/lrc',
+    lrcapiUrl: String(config.lrcapiUrl ?? '')
+      .split(',')
+      .map((s) => trimTrailingSlash(s))
+      .filter(Boolean)
+      .join(','),
     qiniuAccessKey: String(config.qiniuAccessKey || '').trim(),
     qiniuSecretKey: String(config.qiniuSecretKey || '').trim(),
     qiniuBucket: String(config.qiniuBucket || '').trim(),
@@ -268,8 +289,12 @@ export function setRuntimeConfig(raw = {}) {
   }
 
   for (const field of Object.keys(current)) {
+    // 管理后台提交结构化音源列表时，旧的扁平字段只是回显兼容值，
+    // 不能覆盖上面刚由 metingSources 合并出的新列表。
+    if (Array.isArray(raw.metingSources) && (field === 'metingApiUrl' || field === 'metingApiAuth')) {
+      continue;
+    }
     if (SECRET_FIELDS.has(field)) {
-      if (field === 'metingApiAuth' && Array.isArray(raw.metingSources)) continue;
       if (clearSecrets.has(field)) next[field] = '';
       else if (typeof raw[field] === 'string' && raw[field].trim()) next[field] = raw[field].trim();
     } else if (Object.hasOwn(raw, field)) {
@@ -288,6 +313,7 @@ export function setRuntimeConfig(raw = {}) {
     }),
     validateHttpUrl(normalized.cyapiBase, '迟言 API 地址'),
     validateHttpUrl(normalized.vmyLrcUrl, '歌词备用地址'),
+    validateHttpUrl(normalized.lrcapiUrl, 'LrcAPI 歌词地址', { allowEmpty: true, allowList: true }),
     validateHttpUrl(normalized.qiniuDomain, '七牛云域名', { allowEmpty: true }),
     validateHttpUrl(normalized.apihzBaseUrl, '接口盒子地址'),
   ].filter(Boolean);
@@ -297,7 +323,14 @@ export function setRuntimeConfig(raw = {}) {
     const forDisk = encodeForDisk(normalized);
     const tempPath = `${CONFIG_PATH}.${process.pid}.tmp`;
     fs.writeFileSync(tempPath, `${JSON.stringify(forDisk, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
-    fs.renameSync(tempPath, CONFIG_PATH);
+    try {
+      fs.renameSync(tempPath, CONFIG_PATH);
+    } catch (err) {
+      // Docker 单文件 bind mount 不能被 rename 覆盖，回退为原位写入。
+      if (!['EBUSY', 'EPERM', 'EACCES'].includes(err?.code) || !fs.existsSync(CONFIG_PATH)) throw err;
+      fs.copyFileSync(tempPath, CONFIG_PATH);
+      fs.unlinkSync(tempPath);
+    }
     // 内存缓存保留明文，供运行时使用；磁盘为加密形态
     cached = { mtimeMs: fs.statSync(CONFIG_PATH).mtimeMs, persisted: normalized };
     return { success: true, config: getRuntimeConfigForAdmin() };

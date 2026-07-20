@@ -10,7 +10,9 @@ import {
   isMetingApiHostname,
   getMetingUpstreamBases,
   getMetingUpstreamStatus,
+  startMetingHealthProbe,
 } from './metingUpstream.js';
+import { fetchLrcapiLyrics, getLrcapiUpstreamStatus } from './lrcapiUpstream.js';
 import { mountWechatFileHelperProxy } from './wechatFileHelperProxy.js';
 import { mountAdminApi } from './adminApi.js';
 import { initAdminCredentials } from './adminCredentials.js';
@@ -128,7 +130,6 @@ import { checkApihzSensitiveWords } from './apihzSensitiveWord.js';
 import { getSiteAnnouncement, initSiteAnnouncement } from './siteAnnouncement.js';
 import { initSiteBans, isSiteBanned } from './siteBan.js';
 import { createErrorReport, listPendingSolutionsForUser, ackErrorReportSolution } from './errorReports.js';
-import { deriveChatTextGateKey, verifyChatTextGatePass } from './chatTextGate.js';
 import { getRuntimeConfig } from './runtimeConfig.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -143,6 +144,11 @@ const ALLOWED_ORIGINS = CLIENT_URL
 const CLIENT_ID_SECRET = process.env.CLIENT_ID_SECRET || randomBytes(32).toString('hex');
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 const TRUST_PROXY = process.env.TRUST_PROXY === '1' || process.env.TRUST_PROXY === 'true';
+const IS_TEST_DEPLOYMENT = process.env.DEPLOYMENT_MODE === 'test';
+const ALLOW_INSECURE_HTTP_API = IS_TEST_DEPLOYMENT || process.env.ALLOW_INSECURE_HTTP_API === '1'
+  || process.env.ALLOW_INSECURE_HTTP_API === 'true';
+const ALLOW_INSECURE_COOKIES = IS_TEST_DEPLOYMENT || process.env.ALLOW_INSECURE_COOKIES === '1'
+  || process.env.ALLOW_INSECURE_COOKIES === 'true';
 /** 会话 HMAC 有效期（秒），默认 90 天 */
 const SESSION_TTL_SEC = Math.max(
   60 * 60 * 24,
@@ -162,7 +168,9 @@ if (IS_PRODUCTION && !(process.env.CLIENT_ID_SECRET || '').trim()) {
 }
 
 const app = express();
-app.set('trust proxy', TRUST_PROXY || IS_PRODUCTION ? 1 : 'loopback');
+// Forwarded IP headers are only trustworthy when the deployment explicitly
+// declares that a reverse proxy is in front of this process.
+app.set('trust proxy', TRUST_PROXY ? 1 : false);
 const httpServer = createServer(app);
 
 function corsOrigin(origin, callback) {
@@ -239,7 +247,9 @@ app.use((req, res, next) => {
 
   req.apiIdentity = identity;
 
-  if (isApiSignRequired()) {
+  // 仅当管理员显式允许时，HTTP 才降级为只校验会话；HTTPS 始终校验请求签名。
+  const requireRequestSign = req.secure || !ALLOW_INSECURE_HTTP_API;
+  if (isApiSignRequired() && requireRequestSign) {
     const signKey = deriveApiSignKey(CLIENT_ID_SECRET, identity.userId, identity.iat);
     const result = verifyApiSign(req, signKey, identity.userId);
     if (!result.ok) {
@@ -296,7 +306,7 @@ const CLIENT_IP_HEADER = String(process.env.CLIENT_IP_HEADER || '').trim().toLow
 
 function getClientIpFromHeaders(headers = {}, remoteAddress = '') {
   // 未接反代时只用 socket 地址，避免客户端伪造 XFF 绕过限流
-  const trustForwarded = TRUST_PROXY || IS_PRODUCTION;
+  const trustForwarded = TRUST_PROXY;
   if (!trustForwarded) {
     return normalizeClientIp(remoteAddress || '');
   }
@@ -399,12 +409,23 @@ function limitText(value, maxLength) {
   return String(value || '').trim().slice(0, maxLength);
 }
 
-function createRateLimiter({ windowMs, max }) {
+function createRateLimiter({ windowMs, max, maxBuckets = 10_000 }) {
   const buckets = new Map();
+  let lastSweepAt = 0;
   return (key) => {
     const now = Date.now();
+    if (now - lastSweepAt >= windowMs) {
+      lastSweepAt = now;
+      for (const [bucketKey, value] of buckets) {
+        if (value.resetAt <= now) buckets.delete(bucketKey);
+      }
+    }
     const bucket = buckets.get(key);
     if (!bucket || bucket.resetAt <= now) {
+      if (!bucket && buckets.size >= maxBuckets) {
+        const oldestKey = buckets.keys().next().value;
+        if (oldestKey !== undefined) buckets.delete(oldestKey);
+      }
       buckets.set(key, { count: 1, resetAt: now + windowMs });
       return true;
     }
@@ -420,6 +441,8 @@ const limitProxyRequest = createRateLimiter({ windowMs: 60_000, max: 120 });
 const limitSocketAction = createRateLimiter({ windowMs: 60_000, max: 90 });
 const limitSocketChat = createRateLimiter({ windowMs: 60_000, max: 30 });
 const limitErrorReport = createRateLimiter({ windowMs: 10 * 60_000, max: 5 });
+const limitSessionBootstrap = createRateLimiter({ windowMs: 60_000, max: 60 });
+const limitNewSessionBootstrap = createRateLimiter({ windowMs: 60_000, max: 12 });
 
 function sanitizeClientSong(song) {
   if (!song || typeof song !== 'object') {
@@ -874,9 +897,17 @@ app.get('/api/music/lrc-fallback', async (req, res) => {
     return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
   }
 
-  const msg = String(req.query.msg || '').trim();
+  const msg = limitText(req.query.msg, 120);
+  const artist = limitText(req.query.artist, 120);
+  const album = limitText(req.query.album, 120);
   const n = String(req.query.n || '1');
   if (!msg) return res.status(400).json({ error: '缺少歌曲名' });
+
+  // 兜底链：LrcAPI（带歌手/专辑，匹配更准，支持多上游负载均衡）→ 52vmy（仅按歌名）
+  const lrcapiText = await fetchLrcapiLyrics({ title: msg, artist, album });
+  if (lrcapiText) {
+    return res.type('text/plain; charset=utf-8').send(lrcapiText);
+  }
 
   try {
     const params = new URLSearchParams({ msg, n });
@@ -966,7 +997,10 @@ function createServerClientId() {
 }
 
 function setIdentityCookieHeaders(res, userId, token, deviceId = null) {
-  const secure = IS_PRODUCTION ? '; Secure' : '';
+  // 生产环境默认强制 Secure，避免反代漏传 X-Forwarded-Proto 时静默降级。
+  // 临时 HTTP 部署必须由管理员显式允许不安全 Cookie。
+  const useSecureCookie = (IS_PRODUCTION && !ALLOW_INSECURE_COOKIES) || res.req?.secure;
+  const secure = useSecureCookie ? '; Secure' : '';
   const base = `Path=/; Max-Age=${IDENTITY_COOKIE_MAX_AGE_SEC}; HttpOnly; SameSite=Lax${secure}`;
   const cookies = [
     `${IDENTITY_UID_COOKIE}=${encodeURIComponent(userId)}; ${base}`,
@@ -1013,10 +1047,9 @@ function sendBootstrapResponse(res, userId, iat, token, deviceId = null) {
   setIdentityCookieHeaders(res, userId, token, deviceId);
   const payload = {
     clientId: userId,
-    // 聊天文本门禁密令密钥：始终下发，供前端敏感词检测通过后签发密令
-    chatTextGateKey: deriveChatTextGateKey(CLIENT_ID_SECRET, userId, iat),
   };
-  if (isApiSignRequired()) {
+  const requireRequestSign = res.req?.secure || !ALLOW_INSECURE_HTTP_API;
+  if (isApiSignRequired() && requireRequestSign) {
     payload.apiSignKey = deriveApiSignKey(CLIENT_ID_SECRET, userId, iat);
   }
   return res.json(payload);
@@ -1029,6 +1062,10 @@ function proxyLimitKey(kind, req) {
 
 /** 建立 HttpOnly 会话：身份凭证仅通过 Cookie 传递，不经 WebSocket 明文下发 */
 app.post('/api/session/bootstrap', async (req, res) => {
+  const requestIp = getRequestIp(req);
+  if (!limitSessionBootstrap(`session:${requestIp}`)) {
+    return res.status(429).json({ error: '会话请求过于频繁，请稍后再试' });
+  }
   const cookieDeviceId = resolveDeviceIdFromCookieHeader(req.headers?.cookie || '');
   const bodyDeviceId = resolveBodyDeviceId(req);
   const now = Math.floor(Date.now() / 1000);
@@ -1060,6 +1097,9 @@ app.post('/api/session/bootstrap', async (req, res) => {
     }
   }
 
+  if (!limitNewSessionBootstrap(`session-new:${requestIp}`)) {
+    return res.status(429).json({ error: '新会话创建过于频繁，请稍后再试' });
+  }
   const userId = createServerClientId();
   const deviceId = cookieDeviceId || createServerClientId();
   await linkDeviceToUser(deviceId, userId);
@@ -1132,7 +1172,12 @@ app.post('/api/rooms', (req, res) => {
   if (isSiteBanned({ ip: createIp, deviceId: createDeviceId })) {
     return res.status(403).json({ error: '你已被站点封禁，无法创建房间' });
   }
-  const room = createRoom({ name, password, creatorId: identity.userId });
+  const room = createRoom({
+    name,
+    password,
+    creatorId: identity.userId,
+    creatorDeviceId: createDeviceId,
+  });
   res.json(room);
 });
 
@@ -1592,7 +1637,8 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const auth = verifyRoomPassword(id, password, { clientId: userId });
+    const deviceId = resolveDeviceIdFromCookieHeader(socket.handshake?.headers?.cookie || '');
+    const auth = verifyRoomPassword(id, password, { clientId: userId, deviceId });
     if (!auth.ok) {
       if (!limitJoinPasswordFail(`joinfail:${ip}:${id}`)) {
         callback?.({ success: false, error: '尝试过于频繁，请稍后再试' });
@@ -1602,7 +1648,6 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const deviceId = resolveDeviceIdFromCookieHeader(socket.handshake?.headers?.cookie || '');
     // 安全限流仍使用连接来源 IP；客户端上报值仅用于成员归属展示/同端统计。
     // 站点封禁在密码校验前检查，避免被封用户反复试密码。
     const joinProbeIp = getClientIp(socket);
@@ -2487,7 +2532,7 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
-  socket.on('send_chat', async ({ text, mentions, replyTo, imageUrl, imageKey, asSticker, textGatePass }, callback) => {
+  socket.on('send_chat', async ({ text, mentions, replyTo, imageUrl, imageKey, asSticker }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
     if (rejectRateLimited(socket, limitSocketChat, 'send_chat', callback)) return;
 
@@ -2499,19 +2544,11 @@ io.on('connection', (socket) => {
 
     const textContent = String(text || '').trim();
     if (textContent) {
-      const identity = resolveIdentityFromCookies(socket.handshake?.headers?.cookie || '');
-      const gateOk = Boolean(
-        identity
-        && identity.userId === getSocketUserId(socket)
-        && verifyChatTextGatePass(CLIENT_ID_SECRET, identity, textContent, textGatePass),
-      );
-      // 前端密令有效则跳过慢速敏感词接口；否则走服务端兜底
-      if (!gateOk) {
-        const sensitive = await checkApihzSensitiveWords(textContent);
-        if (!sensitive.ok) {
-          callback?.({ success: false, error: sensitive.error });
-          return;
-        }
+      // 客户端检测仅用于即时提示，服务端始终执行权威审核。
+      const sensitive = await checkApihzSensitiveWords(textContent);
+      if (!sensitive.ok) {
+        callback?.({ success: false, error: sensitive.error });
+        return;
       }
     }
 
@@ -2831,4 +2868,5 @@ httpServer.listen(PORT, () => {
   console.log(`📡 Meting API: ${getMetingUpstreamBases().join(', ') || '未配置'}`);
   console.log(`🎤 Cyapi (绿点/蓝点): ${isCyapiConfigured() ? '已配置' : '未配置'}`);
   console.log(`💾 持久化存储: ${isRedisEnabled() ? 'Redis' : '未连接（仅安装向导）'}`);
+  startMetingHealthProbe();
 });

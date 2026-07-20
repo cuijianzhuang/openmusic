@@ -884,7 +884,6 @@ if (s.connected) {
       imageUrl?: string;
       imageKey?: string;
       asSticker?: boolean;
-      textGatePass?: string;
     } = {},
   ): Promise<{ success: boolean; error?: string }> => {
     const hasImage = Boolean(options.imageUrl);

@@ -2,6 +2,9 @@ import { getRedisClient, isRedisEnabled } from './roomStorage.js';
 
 const DEVICE_USER_PREFIX = 'openmusic:device:';
 const USER_DEVICES_PREFIX = 'openmusic:user_devices:';
+const DEVICE_BINDING_TTL_SEC = 180 * 24 * 60 * 60;
+const MAX_DEVICES_PER_USER = 20;
+const MAX_MEMORY_DEVICE_BINDINGS = 10_000;
 
 /** deviceId -> userId（进程内热缓存；持久化只写 Redis） */
 const deviceToUser = new Map();
@@ -26,7 +29,21 @@ function rememberDeviceBinding(deviceId, userId) {
 
   deviceToUser.set(did, uid);
   if (!userToDevices.has(uid)) userToDevices.set(uid, new Set());
-  userToDevices.get(uid).add(did);
+  const devices = userToDevices.get(uid);
+  devices.add(did);
+  while (devices.size > MAX_DEVICES_PER_USER) {
+    const oldest = Array.from(devices).find((item) => item !== did);
+    if (!oldest) break;
+    devices.delete(oldest);
+    deviceToUser.delete(oldest);
+  }
+  while (deviceToUser.size > MAX_MEMORY_DEVICE_BINDINGS) {
+    const oldest = Array.from(deviceToUser.keys()).find((item) => item !== did);
+    if (!oldest) break;
+    const oldestUser = deviceToUser.get(oldest);
+    deviceToUser.delete(oldest);
+    userToDevices.get(oldestUser)?.delete(oldest);
+  }
 }
 
 async function persistDeviceBinding(deviceId, userId) {
@@ -45,8 +62,19 @@ async function persistDeviceBinding(deviceId, userId) {
     if (previousUser && previousUser !== uid) {
       await client.sRem(`${USER_DEVICES_PREFIX}${previousUser}`, did);
     }
-    await client.set(`${DEVICE_USER_PREFIX}${did}`, uid);
-    await client.sAdd(`${USER_DEVICES_PREFIX}${uid}`, did);
+    const deviceKey = `${DEVICE_USER_PREFIX}${did}`;
+    const userDevicesKey = `${USER_DEVICES_PREFIX}${uid}`;
+    await client.set(deviceKey, uid, { EX: DEVICE_BINDING_TTL_SEC });
+    await client.sAdd(userDevicesKey, did);
+    await client.expire(userDevicesKey, DEVICE_BINDING_TTL_SEC);
+
+    const devices = await client.sMembers(userDevicesKey);
+    const excess = devices.filter((item) => item !== did).slice(0, Math.max(0, devices.length - MAX_DEVICES_PER_USER));
+    for (const staleDeviceId of excess) {
+      await client.sRem(userDevicesKey, staleDeviceId);
+      const staleKey = `${DEVICE_USER_PREFIX}${staleDeviceId}`;
+      if (await client.get(staleKey) === uid) await client.del(staleKey);
+    }
   } catch (err) {
     console.error('Redis: 保存设备身份绑定失败:', err.message);
   }
@@ -78,6 +106,8 @@ export async function getUserIdForDevice(deviceId) {
     const uid = await client.get(`${DEVICE_USER_PREFIX}${did}`);
     const normalized = sanitizeDeviceId(uid);
     if (normalized) {
+      await client.expire(`${DEVICE_USER_PREFIX}${did}`, DEVICE_BINDING_TTL_SEC);
+      await client.expire(`${USER_DEVICES_PREFIX}${normalized}`, DEVICE_BINDING_TTL_SEC);
       rememberDeviceBinding(did, normalized);
       return normalized;
     }

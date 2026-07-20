@@ -200,6 +200,19 @@ export function verifyRoomPassword(roomId, password, options = {}) {
   if (!room) return { ok: false, error: '房间不存在' };
 
   const clientId = sanitizeCreatorId(options.clientId);
+  const deviceId = sanitizeCreatorId(options.deviceId);
+  if (
+    clientId
+    && deviceId
+    && room.creatorDeviceId === deviceId
+    && room.creatorId !== clientId
+  ) {
+    // 身份 Cookie 因重装/密钥轮换而变化时，以 HttpOnly 设备绑定恢复永久房主。
+    room.creatorId = clientId;
+    ensureAdminIds(room).delete(clientId);
+    ensureAutoPromotedAdminIds(room).delete(clientId);
+    persistRoom(room);
+  }
   // 原创建者始终可进：无密码上锁 / 有密码房均免密
   if (clientId && room.creatorId === clientId) {
     return { ok: true };
@@ -228,12 +241,13 @@ function cancelRoomDestroy(room) {
   }
 }
 
-function scheduleRoomDestroy(roomId) {
+function scheduleRoomDestroy(roomId, ttlMsOverride) {
   const room = rooms.get(roomId);
   if (!room) return;
 
   cancelRoomDestroy(room);
   if (protectedRoomIds.has(roomId)) return;
+  const ttlMs = Number.isFinite(ttlMsOverride) ? ttlMsOverride : getRuntimeConfig().roomEmptyTtlMs;
   room.destroyTimer = setTimeout(() => {
     const current = rooms.get(roomId);
     if (current && current.users.size === 0 && !protectedRoomIds.has(roomId)) {
@@ -245,7 +259,18 @@ function scheduleRoomDestroy(roomId) {
         void deleteRoomFromStorage(roomId);
       });
     }
-  }, getRuntimeConfig().roomEmptyTtlMs);
+  }, ttlMs);
+}
+
+/** 房间是否含值得跨重启保留的内容（队列 / 当前曲 / 历史 / 聊天 / 已知成员） */
+function roomHasPersistableContent(room) {
+  if (!room) return false;
+  if (room.queue.length > 0) return true;
+  if (room.current || room.isPlaying) return true;
+  if ((room.songHistory?.length ?? 0) > 0) return true;
+  if ((room.messages?.length ?? 0) > 0) return true;
+  if ((room.knownUserIds?.size ?? 0) > 0) return true;
+  return false;
 }
 
 function snapshotRoomForStorage(room) {
@@ -257,6 +282,7 @@ function snapshotRoomForStorage(room) {
     muteAll: Boolean(room.muteAll),
     mutedUserIds: Array.from(room.mutedUserIds || []),
     creatorId: room.creatorId ?? null,
+    creatorDeviceId: room.creatorDeviceId ?? null,
     bannedUserIds: Array.from(room.bannedUserIds || []),
     bannedDeviceIds: Array.from(room.bannedDeviceIds || []),
     queue: room.queue.map(serializeQueueItemForRoom).filter(Boolean),
@@ -330,6 +356,7 @@ function restoreRoomFromStorage(data) {
   room.randomPlayedKeys = new Set(data.randomPlayedKeys || []);
   room.nextRandom = serializeSongMeta(data.nextRandom);
   room.creatorId = data.creatorId ?? null;
+  room.creatorDeviceId = sanitizeCreatorId(data.creatorDeviceId) || null;
   room.bannedUserIds = new Set(data.bannedUserIds || []);
   room.bannedDeviceIds = new Set(data.bannedDeviceIds || []);
   room.isLocked = Boolean(data.isLocked);
@@ -426,16 +453,27 @@ export async function initRooms() {
   }
   const stored = await loadAllRoomsFromStorage();
 
+  const restartGraceMs = getRuntimeConfig().roomRestartGraceMs;
+  let preservedCount = 0;
   for (const data of stored) {
     const room = restoreRoomFromStorage(data);
     rooms.set(room.id, room);
     if (room.users.size === 0) {
-      scheduleRoomDestroy(room.id);
+      // 重启不应解散仍有内容的房间：无内容的空壳按正常空房 TTL 清理，
+      // 有内容的房间予以保留（配置了重启宽限期时超期无人重连才清理）。
+      if (!roomHasPersistableContent(room)) {
+        scheduleRoomDestroy(room.id);
+      } else if (restartGraceMs > 0) {
+        scheduleRoomDestroy(room.id, restartGraceMs);
+        preservedCount += 1;
+      } else {
+        preservedCount += 1;
+      }
     }
   }
 
   if (stored.length > 0) {
-    console.log(`已从 Redis 恢复 ${stored.length} 个房间`);
+    console.log(`已从 Redis 恢复 ${stored.length} 个房间（保留 ${preservedCount} 个空闲房间不因重启解散）`);
   }
 
   if (isRedisEnabled()) {
@@ -490,6 +528,7 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
     muteAll: false,
     mutedUserIds: new Set(),
     creatorId: null,
+    creatorDeviceId: null,
     ownerId: null,
     bannedUserIds: new Set(),
     bannedDeviceIds: new Set(),
@@ -1098,7 +1137,7 @@ function getSongDurationSeconds(song) {
   return 0;
 }
 
-export function createRoom({ name, password, creatorId } = {}) {
+export function createRoom({ name, password, creatorId, creatorDeviceId } = {}) {
   let roomId;
   do {
     roomId = generateRoomId();
@@ -1110,6 +1149,7 @@ export function createRoom({ name, password, creatorId } = {}) {
   const reservedCreator = sanitizeCreatorId(creatorId);
   if (reservedCreator) {
     room.creatorId = reservedCreator;
+    room.creatorDeviceId = sanitizeCreatorId(creatorDeviceId) || null;
   }
   rooms.set(roomId, room);
   persistRoom(room);
@@ -1390,6 +1430,11 @@ export function addUser(roomId, userId, nickname, options = {}) {
     deviceId: options.deviceId || existing?.deviceId || null,
     chatVisibleSince,
   });
+  const safeDeviceId = sanitizeCreatorId(deviceId);
+  if (room.creatorId === userId && safeDeviceId && !room.creatorDeviceId) {
+    // 兼容旧房间：原房主下一次正常进房时补记可信的 HttpOnly 设备身份。
+    room.creatorDeviceId = safeDeviceId;
+  }
   rememberUserNickname(room, userId, resolvedNickname);
 
   reassignOrphanQueueOwnership(room, userId, resolvedNickname);

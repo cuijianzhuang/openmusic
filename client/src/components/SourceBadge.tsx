@@ -13,10 +13,10 @@ export default function SourceBadge({ source = 'netease', className = '', varian
 
   return (
     <span
-      className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium flex-shrink-0 ${
+      className={`inline-flex h-[22px] min-w-[22px] items-center justify-center rounded-full border px-1.5 text-[10px] font-semibold tracking-wide flex-shrink-0 ${
         isMuted
-          ? 'bg-white/6 text-netease-muted'
-          : 'text-white'
+          ? 'border-white/8 bg-white/[0.04] text-netease-muted'
+          : 'border-white/10 text-white shadow-sm shadow-black/20'
       } ${className}`}
       style={isMuted ? undefined : { backgroundColor: SOURCE_COLORS[source] || SOURCE_COLORS.netease }}
     >

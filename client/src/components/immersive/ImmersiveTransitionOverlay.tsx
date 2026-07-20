@@ -76,7 +76,6 @@ export default function ImmersiveTransitionOverlay({ transition, coverUrl }: Pro
       ) : null}
       <div className="immersive-transition-vignette" aria-hidden />
       <div className="immersive-transition-scrim" aria-hidden />
-      <div className="immersive-transition-iris" aria-hidden />
 
       <div className="immersive-transition-content">
         <div className="immersive-transition-ring-wrap" aria-hidden>

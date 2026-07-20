@@ -1,4 +1,4 @@
-import { getSongUrl, getTrackKey } from '../api/music';
+import { getSongUrl, getTrackKey, searchSongs } from '../api/music';
 import { isHttpsPageContext } from './mediaProxyUrl';
 import { shouldProxySongPlaybackUrl } from './roomVisualPreset';
 import {
@@ -16,7 +16,7 @@ import {
   resetPlaybackQualityLock,
 } from './playbackQualityLock';
 import { useRoomStore } from '../stores/roomStore';
-import type { MusicSource, QueueItem, RoomState } from '../types';
+import type { MusicSource, QueueItem, RoomState, SearchResult } from '../types';
 import { isMobileDevice } from './audioUnlock';
 
 const MAX_URL_CACHE = 24;
@@ -31,6 +31,10 @@ const urlCache = loadUrlCacheFromStorage();
 const pendingFetches = new Map<string, Promise<FetchUrlResult>>();
 const sourceErrorKeys = new Set<string>();
 const sourceErrorListeners = new Set<() => void>();
+const pendingCrossSourceFallbacks = new Map<string, Promise<string | null>>();
+const crossSourceCandidateCache = new Map<string, { expiresAt: number; candidates: SearchResult[] }>();
+const CROSS_SOURCE_CACHE_TTL_MS = 10 * 60_000;
+const ALL_MUSIC_SOURCES: MusicSource[] = ['netease', 'tencent', 'kugou'];
 
 function notifySourceErrors() {
   sourceErrorListeners.forEach((listener) => listener());
@@ -99,6 +103,101 @@ function trackKeyOf(song: Pick<QueueItem, 'queueId' | 'id' | 'source'>) {
 
 function songSourceOf(song: Pick<QueueItem, 'source'>): MusicSource {
   return song.source || 'netease';
+}
+
+function normalizeMatchText(value: string | undefined): string {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[（(【\[].*?(?:feat\.?|ft\.?|live|伴奏|翻唱|remix).*?[）)】\]]/gi, '')
+    .replace(/\b(?:feat\.?|ft\.?)\b.*$/gi, '')
+    .replace(/[^\p{L}\p{N}]+/gu, '');
+}
+
+function durationSeconds(value: number | undefined): number | null {
+  const duration = Number(value);
+  if (!Number.isFinite(duration) || duration <= 0) return null;
+  return duration > 10_000 ? duration / 1000 : duration;
+}
+
+function scoreFallbackCandidate(song: QueueItem, candidate: SearchResult): number {
+  if (!candidate.id || candidate.source === songSourceOf(song)) return -1;
+  const wantedTitle = normalizeMatchText(song.name);
+  const candidateTitle = normalizeMatchText(candidate.name);
+  if (!wantedTitle || !candidateTitle) return -1;
+
+  let score = 0;
+  if (wantedTitle === candidateTitle) score += 70;
+  else if (
+    Math.min(wantedTitle.length, candidateTitle.length) >= 5
+    && (wantedTitle.includes(candidateTitle) || candidateTitle.includes(wantedTitle))
+  ) score += 42;
+  else return -1;
+
+  const wantedArtist = normalizeMatchText(song.artist);
+  const candidateArtist = normalizeMatchText(candidate.artist);
+  if (wantedArtist && candidateArtist) {
+    if (wantedArtist === candidateArtist) score += 30;
+    else if (wantedArtist.includes(candidateArtist) || candidateArtist.includes(wantedArtist)) score += 20;
+    else return -1;
+  }
+
+  const wantedDuration = durationSeconds(song.duration);
+  const candidateDuration = durationSeconds(candidate.duration);
+  if (wantedDuration && candidateDuration) {
+    const difference = Math.abs(wantedDuration - candidateDuration);
+    if (difference > 30) return -1;
+    if (difference <= 5) score += 20;
+    else if (difference <= 12) score += 12;
+  }
+  return score;
+}
+
+async function findCrossSourceCandidates(song: QueueItem): Promise<SearchResult[]> {
+  const cacheKey = `${songSourceOf(song)}:${normalizeMatchText(song.name)}:${normalizeMatchText(song.artist)}`;
+  const cached = crossSourceCandidateCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.candidates;
+
+  const sources = ALL_MUSIC_SOURCES.filter((source) => source !== songSourceOf(song));
+  const batches = await Promise.allSettled(sources.map((source) => searchSongs(source, song.name)));
+  const candidates = batches.flatMap((batch) => batch.status === 'fulfilled' ? batch.value : [])
+    .map((candidate) => ({ candidate, score: scoreFallbackCandidate(song, candidate) }))
+    .filter((item) => item.score >= 70)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 6)
+    .map((item) => item.candidate);
+
+  crossSourceCandidateCache.set(cacheKey, {
+    expiresAt: Date.now() + CROSS_SOURCE_CACHE_TTL_MS,
+    candidates,
+  });
+  return candidates;
+}
+
+async function fetchCrossSourceFallback(song: QueueItem): Promise<string | null> {
+  const key = trackKeyOf(song);
+  const pending = pendingCrossSourceFallbacks.get(key);
+  if (pending) return pending;
+
+  const promise = (async () => {
+    const candidates = await findCrossSourceCandidates(song);
+    for (const candidate of candidates) {
+      try {
+        const quality = getLowestQuality(candidate.source) ?? getUserPlaybackQuality(candidate.source);
+        const url = await getSongUrl(candidate, quality);
+        if (!url) continue;
+        urlCache.set(urlCacheKey(song, getEffectivePlaybackQuality(song)), url);
+        trimUrlCache();
+        clearTrackSourceError(song);
+        return url;
+      } catch {
+        // 当前候选不可播放时继续尝试下一平台/版本。
+      }
+    }
+    return null;
+  })().finally(() => pendingCrossSourceFallbacks.delete(key));
+
+  pendingCrossSourceFallbacks.set(key, promise);
+  return promise;
 }
 
 function getEffectivePlaybackQuality(song: Pick<QueueItem, 'queueId' | 'id' | 'source'>): string | undefined {
@@ -267,6 +366,9 @@ async function fetchSongUrl(
     return fallback.url;
   }
 
+  const crossSource = await fetchCrossSourceFallback(song as QueueItem);
+  if (crossSource) return crossSource;
+
   if (useRoomStore.getState().isPlaybackLeader) {
     markTrackSourceError(song);
   }
@@ -275,19 +377,20 @@ async function fetchSongUrl(
 
 /** B 类服务错误：单级降至最低档并重取 URL（仅调用方负责重试 1 次播放） */
 export async function fetchServiceFallbackUrl(
-  song: Pick<QueueItem, 'queueId' | 'id' | 'source' | 'url'>,
+  song: QueueItem,
 ): Promise<string | null> {
   const source = songSourceOf(song);
   const quality = getEffectivePlaybackQuality(song);
   const lowest = getLowestQuality(source);
 
   if (lowest && quality === lowest) {
-    const refreshed = await fetchSongUrlOnce(song, lowest, { refresh: true });
-    return refreshed.ok ? refreshed.url : null;
+    // 当前平台最低音质仍触发播放错误时，刷新同一地址意义不大，直接切换平台。
+    return fetchCrossSourceFallback(song);
   }
 
   const fallback = await tryLowestQualityFetch(song);
-  return fallback.ok ? fallback.url : null;
+  if (fallback.ok) return fallback.url;
+  return fetchCrossSourceFallback(song);
 }
 
 export function rememberSongUrl(trackKey: string, url: string) {

@@ -1,10 +1,5 @@
-import { getChatTextGateKey } from './sessionBootstrap';
-import { getClientId } from './clientId';
-
 const PROFANITY_URL = 'https://uapis.cn/api/v1/text/profanitycheck';
 const CHECK_TIMEOUT_MS = 3500;
-const PASS_TTL_SEC = 90;
-const PASS_PREFIX = 'v1';
 const QUOTA_STORAGE_KEY = 'openmusic:uapis-profanity-quota';
 /** 剩余积分 ≤ 该值时停用前端检测，全部交给后端兜底（访客每月 1500 积分，各接口共享） */
 const REMOTE_QUOTA_RESERVE = 50;
@@ -26,7 +21,7 @@ const verdictCache = new Map<string, CachedVerdict>();
 const inflightChecks = new Map<string, Promise<ProfanityVerdict>>();
 
 export type TextProfanityResult =
-  | { ok: true; pass?: string }
+  | { ok: true }
   | { ok: false; error: string };
 
 type ProfanityVerdict =
@@ -58,22 +53,6 @@ async function sha256Hex(text: string): Promise<string> {
   return [...new Uint8Array(digest)]
     .map((byte) => byte.toString(16).padStart(2, '0'))
     .join('');
-}
-
-async function hmacSha256Base64Url(key: string, message: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const cryptoKey = await crypto.subtle.importKey(
-    'raw',
-    encoder.encode(key),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign'],
-  );
-  const signature = await crypto.subtle.sign('HMAC', cryptoKey, encoder.encode(message));
-  const bytes = new Uint8Array(signature);
-  let binary = '';
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 function readQuotaState(): QuotaState {
@@ -213,31 +192,13 @@ async function requestProfanityVerdict(normalized: string, textHash: string): Pr
   return request;
 }
 
-/** 用 bootstrap 下发的 chatTextGateKey 签发密令（绑定当前用户与原文） */
-export async function mintChatTextGatePass(
-  text: string,
-  gateKey: string,
-  userId: string,
-): Promise<string | undefined> {
-  const key = String(gateKey || '').trim();
-  const uid = String(userId || '').trim();
-  const normalized = String(text || '');
-  if (!key || !uid || !normalized) return undefined;
-
-  const ts = Math.floor(Date.now() / 1000);
-  const textHash = await sha256Hex(normalized);
-  const payload = [PASS_PREFIX, uid, textHash, String(ts)].join('\n');
-  const sign = await hmacSha256Base64Url(key, payload);
-  return `${ts}.${textHash}.${sign}`;
-}
-
 /**
- * 前端快速敏感词检测（uapis）。通过后签发密令供后端跳过慢速检测。
+ * 前端快速敏感词检测（uapis），仅用于即时提示；服务端仍会权威复检。
  * @see https://uapis.cn/api/v1/text/profanitycheck
  */
 export async function checkTextProfanity(
   text: string,
-  options: { userId?: string | null } = {},
+  _options: { userId?: string | null } = {},
 ): Promise<TextProfanityResult> {
   const normalized = String(text || '').trim();
   if (!normalized) return { ok: true };
@@ -251,16 +212,9 @@ export async function checkTextProfanity(
       return { ok: false, error: formatBlockedError(verdict.forbiddenWords) };
     }
 
-    const userId = String(options.userId || getClientId() || '').trim();
-    const gateKey = getChatTextGateKey();
-    const pass = gateKey && userId
-      ? await mintChatTextGatePass(normalized, gateKey, userId)
-      : undefined;
-    return { ok: true, pass };
+    return { ok: true };
   } catch {
     // 任意前端异常均不签密令，走服务端兜底检测。
     return { ok: true };
   }
 }
-
-export const CHAT_TEXT_GATE_PASS_TTL_SEC = PASS_TTL_SEC;

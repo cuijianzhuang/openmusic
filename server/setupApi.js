@@ -13,8 +13,59 @@ const scrypt = promisify(scryptCallback);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ENV_PATH = path.join(__dirname, '.env');
 const LOCK_PATH = path.join(__dirname, 'setup.lock');
+const INSTALLING_LOCK_PATH = path.join(__dirname, 'setup.installing.lock');
+const INSTALLING_LOCK_STALE_MS = 30 * 60_000;
+const RUNTIME_CONFIG_PATH = path.join(__dirname, 'runtimeConfig.json');
 const ADMIN_CREDENTIALS_KEY = 'openmusic:admin:credentials';
 const attempts = new Map();
+
+function acquireSetupLease() {
+  const openLease = () => {
+    const fd = fs.openSync(INSTALLING_LOCK_PATH, 'wx', 0o600);
+    try {
+      fs.writeFileSync(fd, `${JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() })}\n`, 'utf8');
+    } catch (err) {
+      try { fs.closeSync(fd); } catch { /* ignore cleanup failure */ }
+      try { fs.unlinkSync(INSTALLING_LOCK_PATH); } catch { /* ignore cleanup failure */ }
+      throw err;
+    }
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      try { fs.closeSync(fd); } catch { /* already closed */ }
+      try { fs.unlinkSync(INSTALLING_LOCK_PATH); } catch { /* already removed */ }
+    };
+  };
+
+  try {
+    return openLease();
+  } catch (err) {
+    if (err?.code !== 'EEXIST') throw err;
+    try {
+      const stat = fs.statSync(INSTALLING_LOCK_PATH);
+      if (Date.now() - stat.mtimeMs <= INSTALLING_LOCK_STALE_MS) {
+        const busy = new Error('安装正在由其它请求执行');
+        busy.code = 'EBUSY';
+        throw busy;
+      }
+      fs.unlinkSync(INSTALLING_LOCK_PATH);
+      return openLease();
+    } catch (retryErr) {
+      if (retryErr?.code === 'ENOENT') return openLease();
+      throw retryErr;
+    }
+  }
+}
+
+function hasCompletedSetupLock() {
+  try {
+    const stat = fs.statSync(LOCK_PATH);
+    return stat.isFile() && stat.size > 0;
+  } catch {
+    return false;
+  }
+}
 
 function hasLegacyConfiguration() {
   return Boolean(
@@ -24,6 +75,11 @@ function hasLegacyConfiguration() {
 }
 
 function writeSetupLock(detail = {}) {
+  if (hasCompletedSetupLock()) {
+    const error = new Error('安装已完成');
+    error.code = 'EEXIST';
+    throw error;
+  }
   const payload = {
     installedAt: new Date().toISOString(),
     version: 1,
@@ -32,7 +88,8 @@ function writeSetupLock(detail = {}) {
   fs.writeFileSync(LOCK_PATH, `${JSON.stringify(payload, null, 2)}\n`, {
     encoding: 'utf8',
     mode: 0o600,
-    flag: 'wx',
+    // Docker 单文件挂载要求宿主机预先创建空文件，因此需允许覆盖空锁文件。
+    flag: fs.existsSync(LOCK_PATH) ? 'w' : 'wx',
   });
 }
 
@@ -41,7 +98,7 @@ function writeSetupLock(detail = {}) {
  * 只要已有 Redis 环境配置，就说明站点已经按旧流程部署，不能重新进入安装向导。
  */
 export function migrateLegacySetupLock() {
-  if (fs.existsSync(LOCK_PATH) || !hasLegacyConfiguration()) return;
+  if (hasCompletedSetupLock() || !hasLegacyConfiguration()) return;
   try {
     migrateLegacyAdminEntryConfig();
     writeSetupLock({ migrated: true });
@@ -54,7 +111,7 @@ export function migrateLegacySetupLock() {
 
 export function isSetupRequired() {
   // 即使运行目录暂时不可写、无法补建锁，也必须阻止旧站点暴露安装接口。
-  return !fs.existsSync(LOCK_PATH) && !hasLegacyConfiguration();
+  return !hasCompletedSetupLock() && !hasLegacyConfiguration();
 }
 
 function clientIp(req) {
@@ -171,7 +228,33 @@ function updateEnvFile(values) {
     encoding: 'utf8',
     mode: 0o600,
   });
-  fs.renameSync(temp, ENV_PATH);
+  try {
+    fs.renameSync(temp, ENV_PATH);
+  } catch (err) {
+    // Docker bind mount 的单文件挂载点不能被 rename 覆盖（Linux 返回 EBUSY）。
+    if (!['EBUSY', 'EPERM', 'EACCES'].includes(err?.code) || !fs.existsSync(ENV_PATH)) throw err;
+    fs.copyFileSync(temp, ENV_PATH);
+    fs.unlinkSync(temp);
+  }
+}
+
+/** 重新安装时让新生成的 Meting 环境配置优先生效，保留其它后台运行配置。 */
+function clearPersistedMetingOverrides() {
+  if (!fs.existsSync(RUNTIME_CONFIG_PATH)) return;
+  let config;
+  try {
+    config = JSON.parse(fs.readFileSync(RUNTIME_CONFIG_PATH, 'utf8'));
+  } catch {
+    return;
+  }
+  if (!config || typeof config !== 'object' || Array.isArray(config)) return;
+  if (!Object.hasOwn(config, 'metingApiUrl') && !Object.hasOwn(config, 'metingApiAuth')) return;
+  delete config.metingApiUrl;
+  delete config.metingApiAuth;
+  fs.writeFileSync(RUNTIME_CONFIG_PATH, `${JSON.stringify(config, null, 2)}\n`, {
+    encoding: 'utf8',
+    mode: 0o600,
+  });
 }
 
 async function createBootstrapCredentials(client, username, password, { mustChange = true } = {}) {
@@ -254,8 +337,21 @@ export function mountSetupApi(app) {
   });
 
   app.post('/api/setup/complete', requireSameHost, async (req, res) => {
-    if (!isSetupRequired()) return res.status(404).json({ error: '安装向导已锁定' });
     if (isRateLimited(req, 5)) return res.status(429).json({ error: '尝试过于频繁，请稍后再试' });
+
+    let releaseLease;
+    try {
+      releaseLease = acquireSetupLease();
+    } catch (err) {
+      if (err?.code === 'EBUSY' || err?.code === 'EEXIST') {
+        return res.status(409).json({ error: '安装正在由其它请求执行' });
+      }
+      console.error('setup: 获取安装锁失败:', err?.message || err);
+      return res.status(500).json({ error: '无法锁定安装流程' });
+    }
+    try {
+      // 必须在获取原子租约后再次判断，避免两个请求同时通过前置检查。
+      if (!isSetupRequired()) return res.status(404).json({ error: '安装向导已锁定' });
 
     const siteUrl = validateSiteUrl(req.body?.siteUrl);
     if (siteUrl === null) return res.status(400).json({ error: '站点地址必须是有效的 http/https 地址' });
@@ -267,8 +363,38 @@ export function mountSetupApi(app) {
     if (metingApiUrl === null) {
       return res.status(400).json({ error: 'Meting 音源地址无效（http/https，多个用英文逗号分隔）' });
     }
+    const chkszApiUrl = validateMetingUrl(req.body?.chkszApiUrl);
+    if (chkszApiUrl === null) {
+      return res.status(400).json({ error: 'ChKSz 音源地址无效（须为 http/https 地址）' });
+    }
+    const metingSources = metingApiUrl
+      ? metingApiUrl.split(',').map((url) => url.trim()).filter(Boolean)
+      : [];
+    if (chkszApiUrl) {
+      for (const url of chkszApiUrl.split(',').map((item) => item.trim()).filter(Boolean)) {
+        const normalizedUrl = url.toLowerCase().startsWith('chksz:') ? url.slice(6).trim() : url;
+        const key = normalizedUrl.replace(/\/+$/, '').toLowerCase();
+        const exists = metingSources.some((item) => {
+          const normalizedItem = item.toLowerCase().startsWith('chksz:') ? item.slice(6).trim() : item;
+          return normalizedItem.replace(/\/+$/, '').toLowerCase() === key;
+        });
+        if (!exists) metingSources.push(`chksz:${normalizedUrl}`);
+      }
+    }
     const metingApiAuth = cleanText(req.body?.metingApiAuth, 1024);
     if (metingApiAuth === null) return res.status(400).json({ error: 'Meting 令牌无效' });
+    const chkszApiKey = cleanText(req.body?.chkszApiKey, 1024);
+    if (chkszApiKey === null) return res.status(400).json({ error: 'ChKSz API Key 无效' });
+    const metingAuths = metingSources.map((source) => {
+      const rawUrl = source.toLowerCase().startsWith('chksz:') ? source.slice(6).trim() : source;
+      let isChksz = source.toLowerCase().startsWith('chksz:');
+      try {
+        isChksz ||= new URL(rawUrl).hostname.toLowerCase() === 'api.chksz.com';
+      } catch {
+        // 地址已在前面校验，此处仅做类型识别
+      }
+      return isChksz ? chkszApiKey : metingApiAuth;
+    });
 
     const result = await connectRedis(req.body?.redis);
     if (result.error) return res.status(400).json({ error: result.error });
@@ -285,10 +411,12 @@ export function mountSetupApi(app) {
         CLIENT_URL: siteUrl || '',
         CLIENT_ID_SECRET: clientSecret,
         TRUST_PROXY: req.body?.trustProxy === false ? '0' : '1',
-        METING_API_URL: metingApiUrl,
-        METING_API_AUTH: metingApiAuth,
+        DEPLOYMENT_MODE: req.body?.testMode === true ? 'test' : 'production',
+        METING_API_URL: metingSources.join(','),
+        METING_API_AUTH: metingAuths.some(Boolean) ? metingAuths.join(',') : '',
         SETUP_NONCE: setupNonce,
       });
+      clearPersistedMetingOverrides();
       const pathResult = setAdminEntryPath(adminPath, { requireCustom: true });
       if (!pathResult.success) throw new Error(pathResult.error);
       writeSetupLock({ siteUrl: siteUrl || '', adminPath });
@@ -309,6 +437,9 @@ export function mountSetupApi(app) {
       if (err?.code === 'EEXIST') return res.status(409).json({ error: '安装已由其它请求完成' });
       console.error('setup: 安装失败:', err?.message || err);
       res.status(500).json({ error: '保存安装配置失败' });
+    }
+    } finally {
+      releaseLease?.();
     }
   });
 }

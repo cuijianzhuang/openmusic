@@ -59,6 +59,8 @@ npm start   # http://0.0.0.0:4000
 | `SESSION_TTL_SEC` | | 会话有效期（秒），默认 90 天；bootstrap 临近过期会静默续签 |
 | `TRUST_PROXY` | 生产推荐 | 设为 `1`：信任反代/CDN 回源头做限流与定位 |
 | `CLIENT_IP_HEADER` | 有 CDN 时必填 | CDN 回源真实客户端 IP 头名。Cloudflare：`CF-Connecting-IP`；EdgeOne：`iqp` |
+| `DEPLOYMENT_MODE` | 推荐 | `production`（默认）强制安全 Cookie 和 API 签名；`test` 允许普通 HTTP 测试访问，禁止用于正式公网环境 |
+| `ALLOW_INSECURE_HTTP_API` / `ALLOW_INSECURE_COOKIES` | 旧版兼容 | 细粒度 HTTP 兼容开关；新部署请改用 `DEPLOYMENT_MODE=test` |
 | `METING_API_URL` | 必填 | Meting-API 地址（向导或后台可改） |
 | `METING_API_AUTH` | 推荐 | Meting 的 `auth` 令牌 |
 | `CYAPI_KEY` | 可选 | 迟言 API Key（蓝点 + 随机推荐）；建议在后台填 |
@@ -147,6 +149,27 @@ npm run package:build
 详细步骤见 [deploy/DEPLOY-BAOTA.md](../deploy/DEPLOY-BAOTA.md)。
 
 **请保持单实例运行**（房间实时状态在进程内存热缓存，多实例会导致同步异常；持久化依赖 Redis）。
+
+### 一键部署脚本
+
+[`deploy/deploy.sh`](../deploy/deploy.sh) 支持两种部署方式，交互选择或直接传参：
+
+```bash
+bash deploy/deploy.sh          # 交互式选择
+bash deploy/deploy.sh docker   # Docker 部署（自带 Redis 容器，推荐）
+bash deploy/deploy.sh source   # 源码部署（PM2 常驻进程，需自行提供 Redis）
+```
+
+**Docker 部署**：脚本会用根目录 [`Dockerfile`](../Dockerfile) 和 [`docker-compose.yml`](../docker-compose.yml) 构建镜像并拉起 `openmusic` + `redis` 两个容器。
+
+- `.env`、`runtimeConfig.json`、`adminConfig.json`、`setup.lock`、`downloads/` 会挂载到宿主机的 `./data/` 目录，容器重建不丢配置
+- 首次访问 `http://<服务器IP>:4000/setup` 完成向导时，**Redis 主机名填 `redis`、端口 `6379`**（compose 内部服务名，不是公网地址）
+- 向导完成后需要手动重启一次容器才能生效：`docker compose restart openmusic`（因为 `.env` 只在进程启动时读取一次）
+- 更新代码后重新部署：`git pull && bash deploy/deploy.sh docker`（等价于 `docker compose up -d --build`）
+- 自定义端口：`OPENMUSIC_PORT=8080 bash deploy/deploy.sh docker`
+- 音源（Meting-API / chksz）仍按需在向导或管理后台配置，Docker 编排本身不含音源容器
+
+**源码部署**：脚本会执行 `npm run install:all && npm run build`，检测/安装 PM2，并用 [`deploy/ecosystem.config.cjs`](../deploy/ecosystem.config.cjs) 启动常驻进程；此模式下 Redis 需要你自行安装或另起容器，并在 `/setup` 向导中按实际地址填写。
 
 ---
 

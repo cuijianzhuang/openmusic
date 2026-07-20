@@ -33,6 +33,8 @@
 
 > 要求：Node.js ≥ 18 + 一个 Redis（必需）
 
+💡 **一键部署**：`bash deploy/deploy.sh`，交互选择 Docker（自带 Redis）或源码（PM2）部署，详见 [部署文档](docs/DEPLOY.md#一键部署脚本)。下面是手动分步流程。
+
 ### 1. 准备音源（Meting-API）
 
 ```bash

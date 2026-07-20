@@ -197,7 +197,7 @@ export default function ChatPanel({ className = '' }: { className?: string }) {
   return (
     <div
       ref={chatPanelRef}
-      className={`relative flex h-full flex-col overflow-hidden rounded-2xl border border-netease-border/50 bg-netease-card/30 ${className}`}
+      className={`surface-panel relative flex h-full flex-col overflow-hidden rounded-2xl ${className}`}
       onContextMenu={(event) => {
         // 空白区域：禁用浏览器默认菜单；消息体自行 stopPropagation 并弹出自定义菜单
         event.preventDefault();

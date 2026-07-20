@@ -3,7 +3,7 @@ import { getLyrics, parseLrc, getLrcFallbackDurationMs, getTrackKey } from '../a
 import { useAudioStore } from '../stores/audioStore';
 import type { LyricLine, Song } from '../types';
 
-export function useTrackLyrics(song: Pick<Song, 'id' | 'source' | 'name' | 'lrc' | 'duration'> | null | undefined) {
+export function useTrackLyrics(song: (Pick<Song, 'id' | 'source' | 'name' | 'lrc' | 'duration'> & Partial<Pick<Song, 'artist' | 'album'>>) | null | undefined) {
   const setLrcDuration = useAudioStore((s) => s.setLrcDuration);
   const [lyrics, setLyrics] = useState<LyricLine[]>([]);
 
@@ -18,6 +18,7 @@ export function useTrackLyrics(song: Pick<Song, 'id' | 'source' | 'name' | 'lrc'
       id: song.id,
       source: song.source || 'netease',
       name: song.name,
+      artist: song.artist,
       lrc: song.lrc,
     })
       .then((lrc) => {

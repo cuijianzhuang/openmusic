@@ -8,11 +8,11 @@ export type CoverBackdropTuning = {
 
 /** 无法采样亮度时，用偏保守的遮罩避免亮色封面过曝 */
 const FALLBACK_TUNING: CoverBackdropTuning = {
-  coverOpacity: 0.82,
-  baseOverlay: 0.26,
-  gradientTop: 0.32,
-  gradientBottom: 0.34,
-  imgBrightness: 0.94,
+  coverOpacity: 0.9,
+  baseOverlay: 0.16,
+  gradientTop: 0.2,
+  gradientBottom: 0.3,
+  imgBrightness: 1.04,
 };
 
 /** 采样封面平均亮度（0=暗，1=亮） */
@@ -50,10 +50,10 @@ export function tuneCoverBackdrop(luminance: number | null): CoverBackdropTuning
   const factor = Math.min(1, bright / 0.35);
 
   return {
-    coverOpacity: 0.85 - factor * 0.1,
-    baseOverlay: 0.22 + factor * 0.22,
-    gradientTop: 0.28 + factor * 0.18,
-    gradientBottom: 0.32 + factor * 0.16,
-    imgBrightness: 1 - factor * 0.1,
+    coverOpacity: 0.92 - factor * 0.08,
+    baseOverlay: 0.14 + factor * 0.18,
+    gradientTop: 0.18 + factor * 0.16,
+    gradientBottom: 0.28 + factor * 0.14,
+    imgBrightness: 1.08 - factor * 0.1,
   };
 }

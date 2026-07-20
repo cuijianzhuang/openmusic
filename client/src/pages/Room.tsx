@@ -10,6 +10,7 @@ import { importPlaylist, searchPlaylists, type PlaylistSearchItem, type Playlist
 import { normalizeFmMode } from '../api/music/fmMode';
 import { addSongsToQueue, formatBulkAddToast } from '../lib/addSongsToQueue';
 import { rememberPlaylistImportHistory } from '../lib/playlistImportHistory';
+import { detectPlaylistLink } from '../lib/playlistLink';
 
 import type { FavoriteSong, MusicSource, RoomAudioQuality, RoomMemberSettings, RoomMemberTier, SearchResult, Song, SongHistoryItem } from '../types';
 
@@ -872,6 +873,11 @@ export default function Room() {
 
   const handleSearch = useCallback(() => {
     const keyword = query.trim();
+    const detectedPlatform = detectPlaylistLink(keyword);
+    if (detectedPlatform) {
+      void handlePlaylistImport(detectedPlatform, keyword);
+      return;
+    }
     setActiveSearchMode(searchMode);
     if (searchMode === 'playlist') {
       setSearchedKeyword(keyword);
@@ -884,7 +890,7 @@ export default function Room() {
     setPlaylistSearchTotal(0);
     setSearchedKeyword(keyword);
     doSearch(keyword);
-  }, [query, searchMode, doPlaylistSearch, doSearch]);
+  }, [query, searchMode, doPlaylistSearch, doSearch, handlePlaylistImport]);
 
   const handleSearchModeChange = useCallback((mode: SearchMode) => {
     if (mode === searchMode) return;
@@ -923,6 +929,11 @@ export default function Room() {
 
   const handleOverlaySearch = useCallback(() => {
     const keyword = overlayQuery.trim();
+    const detectedPlatform = detectPlaylistLink(keyword);
+    if (detectedPlatform) {
+      void handlePlaylistImport(detectedPlatform, keyword);
+      return;
+    }
     setActiveSearchMode(overlaySearchMode);
     if (overlaySearchMode === 'playlist') {
       setSearchedKeyword(keyword);
@@ -935,7 +946,7 @@ export default function Room() {
     setPlaylistSearchTotal(0);
     setSearchedKeyword(keyword);
     void doSearch(keyword);
-  }, [overlayQuery, overlaySearchMode, doPlaylistSearch, doSearch]);
+  }, [overlayQuery, overlaySearchMode, doPlaylistSearch, doSearch, handlePlaylistImport]);
 
   const handleOverlaySearchModeChange = useCallback((mode: SearchMode) => {
     if (mode === overlaySearchMode) return;
@@ -1315,17 +1326,24 @@ export default function Room() {
       steps: initialSteps,
     });
 
+    let recoveryPending = false;
     try {
-      await runImmersiveExitPrep({
-        kind,
-        song: currentSong,
-        visualMode,
-        steps: initialSteps,
-        applyVisualMode,
-        onStepsChange: (steps) => {
-          setImmersiveTransition((prev) => (prev ? { ...prev, steps } : prev));
-        },
-      });
+      try {
+        await runImmersiveExitPrep({
+          kind,
+          song: currentSong,
+          visualMode,
+          steps: initialSteps,
+          applyVisualMode,
+          onStepsChange: (steps) => {
+            setImmersiveTransition((prev) => (prev ? { ...prev, steps } : prev));
+          },
+        });
+      } catch (error) {
+        // 退出界面不能被音频重载或媒体元数据超时阻塞，音频可在后台继续恢复。
+        recoveryPending = true;
+        console.warn('Immersive exit preparation is still recovering:', error);
+      }
 
       await ensureMinimumLoadingDuration(startedAt);
 
@@ -1335,22 +1353,28 @@ export default function Room() {
 
       await new Promise((resolve) => window.setTimeout(resolve, IMMERSIVE_REVEAL_OUT_MS));
 
+    } catch (error) {
+      recoveryPending = true;
+      console.error('Unexpected immersive exit error:', error);
+    } finally {
+      // 无论背景或音频恢复是否及时完成，都必须先退出沉浸界面，避免用户被困住。
       setImmersiveModeEnabled(false);
       setVisualFxOpen(false);
       setImmersivePanelFocus(null);
+      ensureGalaxyAudioOutputLazy();
       refreshPlaybackUrlCacheForQuality();
-
-      showToast(
-        kind === 'cover-bg' ? '已退出沉浸模式，并切回封面背景' : '已退出沉浸模式，保留当前动态背景',
-        'success',
-      );
-    } catch (error) {
-      console.error('Failed to exit immersive mode:', error);
-      showToast('退出沉浸模式失败，请重试', 'error');
-    } finally {
       immersiveTransitionRef.current = false;
       setImmersiveTransition(null);
       setImmersiveShellMotion(null);
+
+      showToast(
+        recoveryPending
+          ? '已退出沉浸模式，音频正在后台恢复'
+          : kind === 'cover-bg'
+            ? '已退出沉浸模式，并切回封面背景'
+            : '已退出沉浸模式，保留当前动态背景',
+        'success',
+      );
     }
   }, [applyVisualMode, refreshPlaybackUrlCacheForQuality, setImmersiveModeEnabled, showToast, visualMode]);
 
@@ -1659,7 +1683,7 @@ export default function Room() {
 
   const renderQueueSection = (fillHeight = false) => (
     <div
-      className={`bg-netease-card/30 border border-netease-border/50 rounded-2xl overflow-hidden flex flex-col ${
+      className={`surface-panel rounded-2xl overflow-hidden flex flex-col ${
         fillHeight ? 'h-full flex-1 min-h-0' : 'flex-shrink-0'
       }`}
     >
@@ -1706,7 +1730,7 @@ export default function Room() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-          placeholder={searchMode === 'playlist' ? '搜索红点/绿点歌单...' : '搜索歌曲、歌手...'}
+          placeholder={searchMode === 'playlist' ? '搜索红点/绿点歌单...' : '搜索歌曲、歌手，或粘贴歌单链接...'}
           className="w-full bg-netease-card border border-netease-border rounded-xl sm:rounded-2xl pl-10 sm:pl-12 pr-4 py-3 sm:py-3.5 text-sm sm:text-base text-white placeholder:text-netease-muted/50 focus:outline-none focus:border-netease-red/50 transition-colors"
         />
       </div>
@@ -1829,7 +1853,7 @@ export default function Room() {
           value={overlayQuery}
           onChange={(e) => setOverlayQuery(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleOverlaySearch()}
-          placeholder={overlaySearchMode === 'playlist' ? '搜索红点/绿点歌单...' : '搜索歌曲、歌手...'}
+          placeholder={overlaySearchMode === 'playlist' ? '搜索红点/绿点歌单...' : '搜索歌曲、歌手，或粘贴歌单链接...'}
           className="w-full bg-netease-card border border-netease-border rounded-xl pl-9 pr-3 py-2 text-sm text-white placeholder:text-netease-muted/50 focus:outline-none focus:border-netease-red/50 transition-colors"
         />
       </div>
@@ -1854,7 +1878,7 @@ export default function Room() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-          placeholder={searchMode === 'playlist' ? '搜索红点/绿点歌单...' : '搜索歌曲、歌手...'}
+          placeholder={searchMode === 'playlist' ? '搜索红点/绿点歌单...' : '搜索歌曲、歌手，或粘贴歌单链接...'}
           className="min-w-0 flex-1 border-none bg-transparent text-[13.5px] tracking-wide text-white outline-none placeholder:text-white/22"
         />
         <button
@@ -2142,6 +2166,21 @@ export default function Room() {
 
           <div className="flex items-center justify-between gap-2 min-w-0">
 
+            {room.current && !pureMode && (
+              <div className="relative hidden flex-shrink-0 sm:block">
+                <SongCover
+                  song={room.current}
+                  eager
+                  className="h-11 w-11 rounded-xl border border-white/10 bg-surface-raised object-cover shadow-lg shadow-black/30"
+                />
+                {room.isPlaying && (
+                  <span className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full border-2 border-surface-base bg-netease-red shadow-md shadow-netease-red/30">
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
+                  </span>
+                )}
+              </div>
+            )}
+
             <div className="min-w-0">
 
               <div className="flex items-center gap-2">
@@ -2367,11 +2406,11 @@ export default function Room() {
 
       <div className={`relative z-10 flex-1 min-h-0 mx-auto w-full px-3 sm:px-4 pt-3 sm:pt-4 pb-[calc(4.75rem+env(safe-area-inset-bottom,0px))] overflow-y-auto lg:overflow-hidden ${pureMode ? 'max-w-3xl' : 'max-w-[1680px]'}`}>
 
-        <div className={`flex flex-col gap-3 lg:gap-4 lg:h-full lg:min-h-0 ${pureMode ? '' : 'lg:grid lg:grid-cols-[360px_minmax(0,1fr)_360px]'}`}>
+        <div className={`flex flex-col gap-3 lg:gap-4 lg:h-full lg:min-h-0 ${pureMode ? '' : 'lg:grid lg:grid-cols-[320px_minmax(0,1fr)_340px]'}`}>
 
           {/* 左侧：网易云热榜 */}
           {isLgUp && !pureMode && (
-            <div className="order-0 flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-netease-border/50 bg-netease-card/30 lg:h-full">
+            <div className="surface-panel order-0 flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl lg:h-full">
               <HotSongPanel embedded addingId={addingId} onAdd={handleAdd} />
             </div>
           )}

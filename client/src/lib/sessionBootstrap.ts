@@ -4,15 +4,6 @@ import { getDeviceId } from './deviceId';
 import { setApiSignKey } from './apiSign';
 
 let bootstrapPromise: Promise<string | null> | null = null;
-let chatTextGateKey: string | null = null;
-
-export function getChatTextGateKey(): string | null {
-  return chatTextGateKey;
-}
-
-export function setChatTextGateKey(key: string | null | undefined): void {
-  chatTextGateKey = key?.trim() || null;
-}
 
 async function requestSessionBootstrap(): Promise<string | null> {
   const res = await fetchWithTimeout(
@@ -28,10 +19,9 @@ async function requestSessionBootstrap(): Promise<string | null> {
   const data = (await res.json()) as {
     clientId?: string;
     apiSignKey?: string;
-    chatTextGateKey?: string;
   };
-  if (data.apiSignKey) setApiSignKey(data.apiSignKey);
-  setChatTextGateKey(data.chatTextGateKey);
+  // 非安全 HTTP 上 Web Crypto 可能不可用；此时服务端也不会要求请求签名。
+  setApiSignKey(globalThis.crypto?.subtle ? data.apiSignKey : null);
   if (data.clientId) rememberClientId(data.clientId);
   return data.clientId || null;
 }
@@ -74,5 +64,4 @@ export async function requireSessionBootstrap(force = false): Promise<string> {
 export function resetSessionBootstrap(): void {
   bootstrapPromise = null;
   setApiSignKey(null);
-  setChatTextGateKey(null);
 }

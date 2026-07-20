@@ -8,6 +8,7 @@ import { buildAppVersionMeta, writeVersionJson } from '../scripts/app-version.mj
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const appVersionMeta = buildAppVersionMeta();
+const shouldPrecompress = process.env.OPENMUSIC_PRECOMPRESS === 'true';
 
 function seoDevMiddleware() {
   return {
@@ -58,16 +59,24 @@ export default defineConfig({
     react(),
     seoDevMiddleware(),
     appVersionPlugin(),
-    compression({
-      threshold: 1024,
-      algorithms: ['gzip', 'brotliCompress'],
-      skipIfLargerOrEqual: true,
-    }),
+    // Nginx already performs gzip compression in the recommended deployment.
+    // Precompressing every asset (especially Brotli) can appear to hang on
+    // low-memory deployment hosts, so keep it available as an explicit opt-in.
+    ...(shouldPrecompress
+      ? [compression({
+          threshold: 1024,
+          algorithms: ['gzip', 'brotliCompress'],
+          skipIfLargerOrEqual: true,
+        })]
+      : []),
   ],
   build: {
     target: 'es2020',
     minify: 'esbuild',
     cssMinify: true,
+    // Avoid recompressing every generated chunk only to print size statistics.
+    // This does not change the output; Nginx handles response compression.
+    reportCompressedSize: false,
     chunkSizeWarningLimit: 600,
     modulePreload: {
       polyfill: false,

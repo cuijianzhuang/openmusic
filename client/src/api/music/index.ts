@@ -109,7 +109,9 @@ function lyricsRequestKey(song: Pick<Song, 'id' | 'source' | 'lrc' | 'name'>) {
   return `${source}:${song.id}:${song.lrc ?? ''}:${song.name ?? ''}`;
 }
 
-async function fetchLyrics(song: Pick<Song, 'id' | 'source' | 'lrc' | 'name'>): Promise<string> {
+type LyricsSong = Pick<Song, 'id' | 'source' | 'lrc' | 'name'> & Partial<Pick<Song, 'artist' | 'album'>>;
+
+async function fetchLyrics(song: LyricsSong): Promise<string> {
   const source = song.source || 'netease';
   let lrc = '';
 
@@ -122,14 +124,14 @@ async function fetchLyrics(song: Pick<Song, 'id' | 'source' | 'lrc' | 'name'>): 
   if (hasValidLrc(lrc)) return lrc;
 
   if (song.name) {
-    const fallback = await fetchFallbackLrc(song.name);
+    const fallback = await fetchFallbackLrc(song.name, { artist: song.artist, album: song.album });
     if (fallback) return fallback;
   }
 
   return lrc;
 }
 
-export async function getLyrics(song: Pick<Song, 'id' | 'source' | 'lrc' | 'name'>): Promise<string> {
+export async function getLyrics(song: LyricsSong): Promise<string> {
   const key = lyricsRequestKey(song);
   const cached = lyricsCache.get(key);
   if (cached && cached.expires > Date.now()) return cached.value;
@@ -306,7 +308,11 @@ export async function createRoom(name?: string, password?: string): Promise<{ id
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error('创建房间失败');
+  if (!res.ok) {
+    const data = (await res.json().catch(() => null)) as { error?: unknown } | null;
+    const message = typeof data?.error === 'string' ? data.error.trim() : '';
+    throw new Error(message || `创建房间失败（${res.status}）`);
+  }
   return res.json();
 }
 

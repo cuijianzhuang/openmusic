@@ -1,0 +1,35 @@
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  openmusic:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${OPENMUSIC_PORT:-4000}:4000"
+    environment:
+      PORT: 4000
+    volumes:
+      # 首次部署向导与管理后台写入的配置需要持久化，否则容器重建后清空
+      - ./data/.env:/app/server/.env
+      - ./data/runtimeConfig.json:/app/server/runtimeConfig.json
+      - ./data/adminConfig.json:/app/server/adminConfig.json
+      - ./data/setup.lock:/app/server/setup.lock
+      - ./data/downloads:/app/server/downloads
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  redis-data:
