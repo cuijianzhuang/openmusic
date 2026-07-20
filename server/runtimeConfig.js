@@ -39,9 +39,19 @@ function envRoomEmptyTtlMs() {
   return Math.max(0, Math.min(Math.round(value), 24 * 60 * 60 * 1000));
 }
 
+// 服务重启后，恢复出的房间若仍有内容（队列 / 当前曲 / 历史 / 聊天 / 成员）会被保留，
+// 不因重启这一动作被解散。此宽限期 > 0 时，超期仍无人重连才清理；默认 24 小时；
+// 设为 0 表示不主动清理（一直保留，交由正常“无人离开”流程处理）。
+function envRoomRestartGraceMs() {
+  const value = Number(process.env.ROOM_RESTART_GRACE_MS);
+  if (!Number.isFinite(value)) return 24 * 60 * 60 * 1000;
+  return Math.max(0, Math.min(Math.round(value), 7 * 24 * 60 * 60 * 1000));
+}
+
 function envDefaults() {
   return {
     roomEmptyTtlMs: envRoomEmptyTtlMs(),
+    roomRestartGraceMs: envRoomRestartGraceMs(),
     metingApiUrl: envText('METING_API_URL'),
     metingApiAuth: envText('METING_API_AUTH'),
     cyapiBase: envText('CYAPI_BASE', envText('CYAPI_URL').replace(/\/qq_music\.php$/i, '') || 'https://cyapi.top/API'),
@@ -165,10 +175,14 @@ function trimTrailingSlash(value) {
 
 function normalize(config) {
   const roomEmptyTtlMs = Number(config.roomEmptyTtlMs);
+  const roomRestartGraceMs = Number(config.roomRestartGraceMs);
   return {
     roomEmptyTtlMs: Number.isFinite(roomEmptyTtlMs)
       ? Math.max(0, Math.min(Math.round(roomEmptyTtlMs), 24 * 60 * 60 * 1000))
       : 10 * 60 * 1000,
+    roomRestartGraceMs: Number.isFinite(roomRestartGraceMs)
+      ? Math.max(0, Math.min(Math.round(roomRestartGraceMs), 7 * 24 * 60 * 60 * 1000))
+      : 24 * 60 * 60 * 1000,
     metingApiUrl: String(config.metingApiUrl || '').trim(),
     metingApiAuth: String(config.metingApiAuth || '').trim(),
     cyapiBase: trimTrailingSlash(config.cyapiBase) || 'https://cyapi.top/API',

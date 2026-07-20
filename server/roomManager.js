@@ -231,12 +231,13 @@ function cancelRoomDestroy(room) {
   }
 }
 
-function scheduleRoomDestroy(roomId) {
+function scheduleRoomDestroy(roomId, ttlMsOverride) {
   const room = rooms.get(roomId);
   if (!room) return;
 
   cancelRoomDestroy(room);
   if (protectedRoomIds.has(roomId)) return;
+  const ttlMs = Number.isFinite(ttlMsOverride) ? ttlMsOverride : getRuntimeConfig().roomEmptyTtlMs;
   room.destroyTimer = setTimeout(() => {
     const current = rooms.get(roomId);
     if (current && current.users.size === 0 && !protectedRoomIds.has(roomId)) {
@@ -248,7 +249,18 @@ function scheduleRoomDestroy(roomId) {
         void deleteRoomFromStorage(roomId);
       });
     }
-  }, getRuntimeConfig().roomEmptyTtlMs);
+  }, ttlMs);
+}
+
+/** 房间是否含值得跨重启保留的内容（队列 / 当前曲 / 历史 / 聊天 / 已知成员） */
+function roomHasPersistableContent(room) {
+  if (!room) return false;
+  if (room.queue.length > 0) return true;
+  if (room.current || room.isPlaying) return true;
+  if ((room.songHistory?.length ?? 0) > 0) return true;
+  if ((room.messages?.length ?? 0) > 0) return true;
+  if ((room.knownUserIds?.size ?? 0) > 0) return true;
+  return false;
 }
 
 function snapshotRoomForStorage(room) {
@@ -429,16 +441,27 @@ export async function initRooms() {
   }
   const stored = await loadAllRoomsFromStorage();
 
+  const restartGraceMs = getRuntimeConfig().roomRestartGraceMs;
+  let preservedCount = 0;
   for (const data of stored) {
     const room = restoreRoomFromStorage(data);
     rooms.set(room.id, room);
     if (room.users.size === 0) {
-      scheduleRoomDestroy(room.id);
+      // 重启不应解散仍有内容的房间：无内容的空壳按正常空房 TTL 清理，
+      // 有内容的房间予以保留（配置了重启宽限期时超期无人重连才清理）。
+      if (!roomHasPersistableContent(room)) {
+        scheduleRoomDestroy(room.id);
+      } else if (restartGraceMs > 0) {
+        scheduleRoomDestroy(room.id, restartGraceMs);
+        preservedCount += 1;
+      } else {
+        preservedCount += 1;
+      }
     }
   }
 
   if (stored.length > 0) {
-    console.log(`已从 Redis 恢复 ${stored.length} 个房间`);
+    console.log(`已从 Redis 恢复 ${stored.length} 个房间（保留 ${preservedCount} 个空闲房间不因重启解散）`);
   }
 
   if (isRedisEnabled()) {
