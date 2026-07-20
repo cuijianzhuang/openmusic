@@ -830,8 +830,10 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
 
     if (isTrackSourceError(current)) {
       setTrackLoading(false);
-      // 仅本机标记源异常：稍后清标记并重试，不自动切走全屋
-      scheduleLocalRecovery(current, 'track_source_error_marked');
+      // 拿不到播放 URL（服务端/曲库源异常），不是房主网络问题 —— 主控应切歌
+      if (useRoomStore.getState().isPlaybackLeader) {
+        requestSkip({ bypassThrottle: true, reason: 'source_error' });
+      }
       return;
     }
 
@@ -863,7 +865,12 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
           console.error('Failed to load song:', err);
           if (gen !== loadGeneration.current) return;
           clearAudioQueueBinding(controller.audio);
-          scheduleLocalRecovery(current, 'resolve_url_failed');
+          // service 类失败会 markTrackSourceError；temporary（本机网络）则本地重试
+          if (isTrackSourceError(current) && useRoomStore.getState().isPlaybackLeader) {
+            requestSkip({ bypassThrottle: true, reason: 'source_error' });
+          } else {
+            scheduleLocalRecovery(current, 'resolve_url_failed');
+          }
           return;
         }
 
@@ -971,6 +978,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     tvMode,
     initAudio,
     controller,
+    requestSkip,
     scheduleLocalRecovery,
     enqueuePause,
     applySync,
