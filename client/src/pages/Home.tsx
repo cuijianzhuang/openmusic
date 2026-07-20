@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, memo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Music, Users, ArrowRight, Lock, ListMusic,
+  Users, ArrowRight, Lock, ListMusic,
   Loader2, RefreshCw, Plus, X, Disc3, Sparkles, Github, History, Download, Smartphone,
   Play, Activity, Search
 } from 'lucide-react';
@@ -25,6 +25,7 @@ import {
 import Tooltip from '../components/Tooltip';
 import ClientDownloadModal from '../components/ClientDownloadModal';
 import SiteAnnouncementPopup from '../components/SiteAnnouncementPopup';
+import BrandMark from '../components/BrandMark';
 
 function GiteeIcon({ className }: { className?: string }) {
   return (
@@ -463,9 +464,7 @@ export default function Home() {
       <header className="relative z-20 pt-6 px-4 sm:px-6 max-w-7xl mx-auto w-full">
         <div className="bg-white/[0.03] border border-white/10 backdrop-blur-xl rounded-full px-5 py-3 flex items-center justify-between shadow-2xl">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-netease-red to-rose-600 flex items-center justify-center shadow-lg shadow-netease-red/20">
-              <Music className="w-5 h-5 text-white" />
-            </div>
+            <BrandMark className="h-10 w-10 drop-shadow-[0_8px_20px_rgba(255,77,85,.18)]" />
             <span className="text-xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-white/60">
               OpenMusic
             </span>
