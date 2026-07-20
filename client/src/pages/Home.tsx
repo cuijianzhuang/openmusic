@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Music, Users, Radio, ArrowRight, Lock, ListMusic,
-  Loader2, RefreshCw, Plus, Hash, X, Disc3, Sparkles, History, Download, Smartphone, ShieldCheck,
+  Loader2, RefreshCw, Plus, Hash, X, Disc3, Sparkles, Github, History, Download, Smartphone, ShieldCheck,
 } from 'lucide-react';
 import { createRoom, checkRoom, listRooms } from '../api/meting';
 import { useRoomStore } from '../stores/roomStore';
@@ -25,6 +25,8 @@ import Tooltip from '../components/Tooltip';
 import ClientDownloadModal from '../components/ClientDownloadModal';
 import SiteAnnouncementPopup from '../components/SiteAnnouncementPopup';
 import BrandMark from '../components/BrandMark';
+
+const repoLinkCls = 'hidden sm:flex p-2.5 rounded-xl text-white/50 border border-white/10 hover:text-white hover:bg-white/5 transition-colors';
 
 function PlayingBars() {
   return (
@@ -398,6 +400,15 @@ export default function Home() {
                 </Tooltip>
               </>
             )}
+            <a
+              href="https://github.com/cuijianzhuang/openmusic"
+              target="_blank"
+              rel="noopener noreferrer"
+              className={repoLinkCls}
+              aria-label="GitHub 仓库"
+            >
+              <Github className="w-4 h-4" />
+            </a>
           </div>
           <div className="max-w-6xl mx-auto px-4 sm:px-6 sm:pr-72 h-full flex items-center gap-2 sm:gap-4 min-w-0">
           <div className="flex items-center gap-2.5 flex-shrink-0">

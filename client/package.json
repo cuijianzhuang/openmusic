@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "typecheck": "tsc -b --pretty false",
+    "build": "vite build",
+    "build:check": "npm run typecheck && npm run build",
     "preview": "vite preview",
     "cap:sync": "node scripts/cap-sync.mjs",
     "cap:sync:android": "node scripts/cap-sync.mjs android",

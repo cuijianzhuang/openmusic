@@ -74,6 +74,9 @@ export default defineConfig({
     target: 'es2020',
     minify: 'esbuild',
     cssMinify: true,
+    // Avoid recompressing every generated chunk only to print size statistics.
+    // This does not change the output; Nginx handles response compression.
+    reportCompressedSize: false,
     chunkSizeWarningLimit: 600,
     modulePreload: {
       polyfill: false,
