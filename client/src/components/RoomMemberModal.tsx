@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Crown, Search, Sparkles, Trash2, UserPlus, X } from 'lucide-react';
 import type { RoomMemberSettings, RoomMemberTier, RoomUser } from '../types';
 import {
+  BADGE_LABEL_PRESETS,
   DEFAULT_MEMBER_SETTINGS,
   DEFAULT_MEMBER_TIER,
   MEMBER_BORDER_STYLE_ID,
@@ -217,6 +218,22 @@ export default function RoomMemberModal({
                     placeholder="如：赞助、老铁、VIP"
                     className="w-full rounded-xl border border-netease-border bg-netease-card px-3 py-2 text-sm text-white outline-none focus:border-amber-400/50"
                   />
+                  <div className="flex flex-wrap gap-1.5">
+                    {BADGE_LABEL_PRESETS.map((label) => (
+                      <button
+                        key={label}
+                        type="button"
+                        onClick={() => setDraft((prev) => ({ ...prev, badgeLabel: label }))}
+                        className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
+                          draft.badgeLabel === label
+                            ? 'border-amber-400/60 bg-amber-500/15 text-amber-200'
+                            : 'border-netease-border bg-netease-card text-netease-muted hover:border-white/20 hover:text-white'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
                 </section>
 
                 <section className="space-y-2">

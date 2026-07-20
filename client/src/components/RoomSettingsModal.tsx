@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Minus, Plus, Sparkles, X } from 'lucide-react';
+import { Crown, Minus, Plus, Sparkles, X } from 'lucide-react';
 import { NETEASE_FM_MODE_OPTIONS, getFmModeLabel, normalizeFmMode, FM_MODE_OFF, DEFAULT_FM_MODE } from '../api/music/fmMode';
-import type { BannedSong } from '../types';
+import type { BannedSong, RoomUser } from '../types';
 import type { DislikeSkipMode } from '../lib/dislikeSkip';
 import SourceBadge from './SourceBadge';
+import ConfirmModal from './ConfirmModal';
 
 const ANNOUNCEMENT_MAX_LENGTH = 2000;
 const MIN_STAY_MINUTES_MAX = 24 * 60;
@@ -14,7 +15,7 @@ const CLEAR_ON_LEAVE_DELAY_MINUTES_MAX = 24 * 60;
 const COOLDOWN_OPTIONS = [0, 10, 30, 60, 120] as const;
 const QUEUE_LIMIT_OPTIONS = [50, 100, 200] as const;
 
-type SettingsTab = 'fm' | 'member' | 'announcement' | 'chat' | 'songRequest';
+type SettingsTab = 'fm' | 'member' | 'transfer' | 'announcement' | 'chat' | 'songRequest';
 
 export interface SongRequestSettings {
   enabled: boolean;
@@ -69,12 +70,16 @@ interface Props {
   bannedSongs?: BannedSong[];
   onUnbanSong?: (name: string) => void | Promise<void>;
   memberTierCount: number;
+  users?: RoomUser[];
+  myUserId?: string | null;
+  transferSaving?: boolean;
   onClose: () => void;
   onSaveFmMode: (mode: string) => void;
   onOpenMemberModal: () => void;
   onSaveAnnouncement: (options: { enabled: boolean; text: string }) => void;
   onSaveChatHistory: (enabled: boolean) => void;
   onSaveSongRequest: (settings: SongRequestSettings) => void;
+  onTransferOwner?: (userId: string) => void | Promise<void>;
 }
 
 function clampInt(value: number, min: number, max: number) {
@@ -201,26 +206,43 @@ export default function RoomSettingsModal({
   bannedSongs = [],
   onUnbanSong,
   memberTierCount,
+  users = [],
+  myUserId = null,
+  transferSaving = false,
   onClose,
   onSaveFmMode,
   onOpenMemberModal,
   onSaveAnnouncement,
   onSaveChatHistory,
   onSaveSongRequest,
+  onTransferOwner,
 }: Props) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('announcement');
   const [draftAnnouncementEnabled, setDraftAnnouncementEnabled] = useState(announcementEnabled);
   const [draftAnnouncementText, setDraftAnnouncementText] = useState(announcementText);
   const [draftSongRequest, setDraftSongRequest] = useState(songRequest);
+  const [transferTargetId, setTransferTargetId] = useState<string | null>(null);
+  const [confirmTransfer, setConfirmTransfer] = useState(false);
   const wasOpenRef = useRef(false);
   const appliedAnnouncementRef = useRef({ enabled: announcementEnabled, text: announcementText });
   const appliedSongRequestRef = useRef(songRequest);
+
+  const transferCandidates = useMemo(
+    () => users.filter((user) => !user.readOnly && user.id !== myUserId),
+    [users, myUserId],
+  );
+
+  const selectedTransferUser = useMemo(
+    () => transferCandidates.find((user) => user.id === transferTargetId) || null,
+    [transferCandidates, transferTargetId],
+  );
 
   const tabs = useMemo(() => {
     const items: { id: SettingsTab; label: string }[] = [];
     if (isOwner) {
       items.push({ id: 'fm', label: '漫游' });
       items.push({ id: 'member', label: '贵宾' });
+      items.push({ id: 'transfer', label: '转让' });
     }
     if (canModerate) {
       items.push({ id: 'announcement', label: '公告' });
@@ -241,8 +263,21 @@ export default function RoomSettingsModal({
     setDraftSongRequest(songRequest);
     appliedAnnouncementRef.current = { enabled: announcementEnabled, text: announcementText };
     appliedSongRequestRef.current = songRequest;
+    setTransferTargetId(null);
+    setConfirmTransfer(false);
     setActiveTab(tabs[0]?.id ?? 'announcement');
   }, [open, announcementEnabled, announcementText, songRequest, tabs]);
+
+  useEffect(() => {
+    if (!open) {
+      setConfirmTransfer(false);
+      return;
+    }
+    if (transferTargetId && !transferCandidates.some((user) => user.id === transferTargetId)) {
+      setTransferTargetId(null);
+      setConfirmTransfer(false);
+    }
+  }, [open, transferCandidates, transferTargetId]);
 
   // 打开期间：服务端公告变化时，若用户未编辑（草稿仍等于上次应用值），则跟随服务端
   useEffect(() => {
@@ -309,7 +344,9 @@ export default function RoomSettingsModal({
     return `${sec} 秒`;
   };
 
-  return createPortal(
+  return (
+    <>
+      {createPortal(
     <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
       <button
         type="button"
@@ -324,7 +361,7 @@ export default function RoomSettingsModal({
         <div className="flex flex-shrink-0 items-center justify-between border-b border-white/10 px-5 py-4">
           <div>
             <h2 className="text-base font-semibold text-white">房间设置</h2>
-            <p className="mt-0.5 text-xs text-netease-muted">漫游、贵宾、公告、聊天与点歌规则</p>
+            <p className="mt-0.5 text-xs text-netease-muted">漫游、贵宾、转让、公告、聊天与点歌规则</p>
           </div>
           <button
             type="button"
@@ -418,6 +455,59 @@ export default function RoomSettingsModal({
                   {memberTierCount > 0 ? `已设置 ${memberTierCount} 人` : '未设置'}
                 </span>
               </button>
+            </section>
+          )}
+
+          {activeTab === 'transfer' && isOwner && (
+            <section>
+              <div className="mb-2 flex items-center gap-2">
+                <Crown className="h-4 w-4 text-amber-400" />
+                <h3 className="text-sm font-medium text-white">转让房主</h3>
+              </div>
+              <p className="mb-3 text-xs text-netease-muted">
+                将房间创建者身份转让给在线成员。转让后对方成为房主，你将变为管理员（名额未满时）。
+              </p>
+              {transferCandidates.length === 0 ? (
+                <p className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-netease-muted">
+                  当前没有可转让的在线成员
+                </p>
+              ) : (
+                <div className="space-y-1.5">
+                  {transferCandidates.map((user) => {
+                    const selected = transferTargetId === user.id;
+                    return (
+                      <button
+                        key={user.id}
+                        type="button"
+                        disabled={transferSaving}
+                        onClick={() => setTransferTargetId(user.id)}
+                        className={`flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-left transition-colors disabled:opacity-50 ${
+                          selected
+                            ? 'border-amber-400/30 bg-amber-400/[0.08]'
+                            : 'border-transparent bg-white/[0.03] hover:bg-white/[0.06]'
+                        }`}
+                      >
+                        <span className={`text-sm font-medium ${selected ? 'text-white' : 'text-white/90'}`}>
+                          {user.nickname}
+                        </span>
+                        {selected && (
+                          <span className="text-[10px] text-amber-300">已选择</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              <div className="mt-4 flex justify-end">
+                <button
+                  type="button"
+                  disabled={!selectedTransferUser || transferSaving || !onTransferOwner}
+                  onClick={() => setConfirmTransfer(true)}
+                  className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-medium text-black transition-colors hover:bg-amber-400 disabled:opacity-50"
+                >
+                  {transferSaving ? '转让中…' : '转让房主'}
+                </button>
+              </div>
             </section>
           )}
 
@@ -764,5 +854,29 @@ export default function RoomSettingsModal({
       </div>
     </div>,
     document.body,
+      )}
+      {confirmTransfer && selectedTransferUser && (
+        <ConfirmModal
+          title="确认转让房主"
+          message={(
+            <>
+              确定将房主转让给「{selectedTransferUser.nickname}」？
+              <br />
+              转让后对方成为房主，你将失去创建者权限（名额未满时自动变为管理员）。
+            </>
+          )}
+          confirmLabel="确认转让"
+          confirmVariant="danger"
+          loading={transferSaving}
+          onCancel={() => setConfirmTransfer(false)}
+          onConfirm={() => {
+            if (!selectedTransferUser || !onTransferOwner) return;
+            void Promise.resolve(onTransferOwner(selectedTransferUser.id)).finally(() => {
+              setConfirmTransfer(false);
+            });
+          }}
+        />
+      )}
+    </>
   );
 }

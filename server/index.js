@@ -2048,6 +2048,7 @@ io.on('connection', (socket) => {
     }
 
     broadcastRoomUpdate(roomId);
+    emitSystemChat(roomId, result.systemMessage);
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId), message: result.message });
   });
 

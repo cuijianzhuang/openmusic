@@ -54,7 +54,7 @@ function markTrackSourceError(song: Pick<QueueItem, 'queueId' | 'id' | 'source'>
   notifySourceErrors();
 }
 
-function clearTrackSourceError(song: Pick<QueueItem, 'queueId' | 'id' | 'source'>) {
+export function clearTrackSourceError(song: Pick<QueueItem, 'queueId' | 'id' | 'source'>) {
   const key = trackKeyOf(song);
   if (!sourceErrorKeys.delete(key)) return;
   notifySourceErrors();

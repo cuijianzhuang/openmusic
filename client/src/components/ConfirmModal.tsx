@@ -27,7 +27,7 @@ export default function ConfirmModal({
     : 'bg-amber-500 hover:bg-amber-400 text-black';
 
   return createPortal(
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
       <button
         type="button"
         className="absolute inset-0 bg-black/70 backdrop-blur-sm"

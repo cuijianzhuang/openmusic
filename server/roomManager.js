@@ -969,7 +969,7 @@ function sanitizeCreatorId(value) {
   return /^[a-zA-Z0-9_-]{8,64}$/.test(id) ? id : '';
 }
 
-/** 记录房间创建者（首个可操控的非只读用户，或由创建房间 API 指定，持久保留；不可被后续请求覆盖） */
+/** 记录房间创建者（首个可操控的非只读用户，或由创建房间 API 指定，持久保留；仅可通过 transferOwner 变更） */
 function ensureCreatorId(room, userId) {
   if (room.creatorId) return;
   const safeId = sanitizeCreatorId(userId);
@@ -2057,11 +2057,59 @@ export async function kickUser(roomId, actorId, targetUserId, connectionId = nul
 }
 
 export function transferOwner(roomId, actorId, targetUserId, connectionId = null) {
-  void roomId;
-  void actorId;
-  void targetUserId;
-  void connectionId;
-  return { error: '房主为房间初创者，不可转让' };
+  const room = rooms.get(roomId);
+  if (!room) return { error: '房间不存在' };
+
+  const denied = requireCreator(room, actorId, connectionId);
+  if (denied) return denied;
+
+  const targetId = sanitizeCreatorId(targetUserId) || String(targetUserId || '').trim();
+  if (!/^[a-zA-Z0-9_-]{8,64}$/.test(targetId)) return { error: '无效用户' };
+  if (targetId === actorId) return { error: '不能转让给自己' };
+  if (targetId === room.creatorId) return { error: '对方已是房主' };
+
+  const target = room.users.get(targetId);
+  if (!target) return { error: '用户不在房间中' };
+  if (!isEligibleOwner(target)) return { error: '不能转让给 TV / 只读用户' };
+
+  const actor = room.users.get(actorId);
+  const actorLabel = formatActorName(actor);
+  const targetLabel = resolveStoredNickname(room, targetId);
+
+  const admins = ensureAdminIds(room);
+  const auto = ensureAutoPromotedAdminIds(room);
+
+  // 新房主不再保留管理员身份
+  admins.delete(targetId);
+  auto.delete(targetId);
+
+  room.creatorId = targetId;
+
+  // 原房主降为正式管理员（名额允许时），避免转让后立刻失去管理权
+  if (actorId && actorId !== targetId) {
+    auto.delete(actorId);
+    const appointedCount = getAppointedAdminIds(room).filter((id) => id !== actorId).length;
+    if (appointedCount < MAX_ADMINS) {
+      admins.add(actorId);
+    } else {
+      admins.delete(actorId);
+    }
+  }
+
+  refreshRoomOwner(room, { preferCreator: true });
+  persistRoom(room);
+  invalidateRoomsListCache();
+
+  const systemMessage = appendSystemChatMessage(
+    room,
+    `${actorLabel} 将房主转让给了 ${targetLabel}`,
+  );
+
+  return {
+    room: serializeRoom(room),
+    message: `已将房主转让给「${targetLabel}」`,
+    systemMessage,
+  };
 }
 
 export function removeUser(roomId, userId, connectionId = null) {

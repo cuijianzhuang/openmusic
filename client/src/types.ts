@@ -141,7 +141,7 @@ export interface RoomState {
   /** 仅加入时由服务端按当前用户计算；广播更新请用 isChatMutedForUser */
   chatMuted?: boolean;
   ownerId: string | null;
-  /** 房间初创房主（永久身份，唯一显示「房主」） */
+  /** 房间初创房主（可通过转让变更；唯一显示「房主」） */
   creatorId?: string | null;
   /** 管理员（最多 5 人，仅房主指定的正式管理） */
   adminIds?: string[];
