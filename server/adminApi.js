@@ -30,6 +30,7 @@ import {
   getErrorReport,
   updateErrorReport,
   deleteErrorReport,
+  toSolutionNotice,
 } from './errorReports.js';
 import { sanitizeDeviceId } from './deviceIdentity.js';
 import { getRuntimeConfigForAdmin, setRuntimeConfig } from './runtimeConfig.js';
@@ -352,6 +353,20 @@ function createRequireAdminOrigin(allowedOrigins) {
     }
     next();
   };
+}
+
+function emitErrorReportSolutionToUser(io, socketToUserId, report) {
+  const notice = toSolutionNotice(report);
+  if (!notice || !report?.userId) return 0;
+  let delivered = 0;
+  for (const [sid, uid] of socketToUserId.entries()) {
+    if (uid !== report.userId) continue;
+    const sock = io.sockets.sockets.get(sid);
+    if (!sock) continue;
+    sock.emit('error_report_solution', notice);
+    delivered += 1;
+  }
+  return delivered;
 }
 
 export function mountAdminApi(app, { io, socketToRoom, socketToUserId, getClientIp, allowedOrigins = null }) {
@@ -736,12 +751,20 @@ export function mountAdminApi(app, { io, socketToRoom, socketToUserId, getClient
       status: req.body?.status,
       note: req.body?.note,
     });
-    if (!result.success) return res.status(404).json({ error: result.error });
+    if (!result.success) {
+      const code = result.error?.includes('解决方案') ? 400 : 404;
+      return res.status(code).json({ error: result.error });
+    }
+    let delivered = 0;
+    if (result.report.status === 'resolved' && result.report.note && !result.report.solutionAckedAt) {
+      delivered = emitErrorReportSolutionToUser(io, socketToUserId, result.report);
+    }
     audit('error_report_update', {
       reportId: result.report.id,
       status: result.report.status,
+      delivered,
     }, ip);
-    res.json({ success: true, report: result.report });
+    res.json({ success: true, report: result.report, delivered });
   });
 
   app.delete('/api/admin/error-reports/:id', requireAdminOrigin, requireAdmin, requireAdminSetupComplete, async (req, res) => {

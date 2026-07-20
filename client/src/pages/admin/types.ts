@@ -80,6 +80,7 @@ export interface ErrorReportSummary {
   createdAt: number;
   resolvedAt: number | null;
   note: string;
+  solutionAckedAt?: number | null;
   meta: {
     roomId?: string | null;
     nickname?: string | null;

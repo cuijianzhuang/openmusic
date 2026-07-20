@@ -1,6 +1,7 @@
 import { Suspense, lazy, useEffect, useState } from 'react';
 import { Routes, Route, useLocation } from 'react-router-dom';
 import AppUpdateGate from './components/AppUpdateGate';
+import ErrorReportSolutionGate from './components/ErrorReportSolutionGate';
 
 const Home = lazy(() => import('./pages/Home'));
 const Room = lazy(() => import('./pages/Room'));
@@ -131,6 +132,7 @@ export default function App() {
   return (
     <div className="h-full">
       {!setupRequired && <AppUpdateGate />}
+      {!setupRequired && <ErrorReportSolutionGate />}
       <Suspense fallback={<RouteFallback />}>
         {setupRequired ? (
           <Setup />

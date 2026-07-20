@@ -137,6 +137,24 @@ export async function warmUpSocketSession(): Promise<void> {
 
 bindReportTrackDurationSocket(getSocket);
 
+export interface ErrorReportSolutionNoticePayload {
+  id: string;
+  description: string;
+  solution: string;
+  resolvedAt?: number | null;
+}
+
+/** 订阅管理员下发的问题上报解决方案（在线推送 / 进房补推） */
+export function subscribeErrorReportSolution(
+  handler: (notice: ErrorReportSolutionNoticePayload) => void,
+): () => void {
+  const s = getSocket();
+  s.on('error_report_solution', handler);
+  return () => {
+    s.off('error_report_solution', handler);
+  };
+}
+
 
 function emitWithAck<TResponse>(
   event: string,

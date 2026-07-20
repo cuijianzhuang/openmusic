@@ -42,7 +42,8 @@ const DEFAULT_CLEAR_SONGS_ON_LEAVE_DELAY_SEC = 60;
 const MAX_CLEAR_SONGS_ON_LEAVE_DELAY_SEC = 24 * 60 * 60;
 const MAX_BANNED_SONGS = 100;
 const MAX_CHAT_MESSAGES = 300;
-const MAX_ACCOUNTS_PER_IP_PER_ROOM = 2;
+/** 同一设备（非 IP）：办公室共用出口 IP 不应互相挤占 */
+const MAX_ACCOUNTS_PER_DEVICE_PER_ROOM = 2;
 const MAX_SONG_HISTORY = 150;
 export const INITIAL_CHAT_LIMIT = 100;
 export const CHAT_PAGE_LIMIT = 50;
@@ -1315,13 +1316,13 @@ function resolveChatVisibleSince(room, userId, existingUser) {
   return since;
 }
 
-function countActiveUsersByIp(room, clientIp, excludeUserId = null) {
-  if (!room || !clientIp) return 0;
+function countActiveUsersByDevice(room, deviceId, excludeUserId = null) {
+  if (!room || !deviceId) return 0;
   let count = 0;
   for (const [userId, user] of room.users) {
     if (excludeUserId && userId === excludeUserId) continue;
     if (user.readOnly) continue;
-    if (user.clientIp === clientIp) count += 1;
+    if (user.deviceId && user.deviceId === deviceId) count += 1;
   }
   return count;
 }
@@ -1340,10 +1341,10 @@ export function addUser(roomId, userId, nickname, options = {}) {
 
   const existing = room.users.get(userId);
   const clientIp = String(options.clientIp || existing?.clientIp || '').trim() || null;
-  if (clientIp && !options.readOnly) {
-    const othersFromSameIp = countActiveUsersByIp(room, clientIp, userId);
-    if (othersFromSameIp >= MAX_ACCOUNTS_PER_IP_PER_ROOM) {
-      return { error: '同一网络下最多 2 个账号同时在房间内，请先退出其他窗口后再试' };
+  if (deviceId && !options.readOnly) {
+    const othersFromSameDevice = countActiveUsersByDevice(room, deviceId, userId);
+    if (othersFromSameDevice >= MAX_ACCOUNTS_PER_DEVICE_PER_ROOM) {
+      return { error: '同一设备最多 2 个账号同时在房间内，请先退出其他窗口后再试' };
     }
   }
 

@@ -9,6 +9,7 @@ const MAX_DESCRIPTION = 500;
 const MAX_SNAPSHOT = 48_000;
 const MAX_EVENTS = 80;
 const MAX_META_STRING = 400;
+const MAX_NOTE = 500;
 
 /** @type {Map<string, object>} */
 const memoryReports = new Map();
@@ -47,6 +48,8 @@ function sanitizeEvents(raw) {
 
 function sanitizeReport(raw = {}) {
   const status = raw.status === 'resolved' ? 'resolved' : 'open';
+  const note = cleanText(raw.note, MAX_NOTE);
+  const ackedAt = Number(raw.solutionAckedAt);
   return {
     id: cleanText(raw.id, 32) || generateId(),
     status,
@@ -58,7 +61,11 @@ function sanitizeReport(raw = {}) {
     userId: cleanText(raw.userId, 64),
     createdAt: Number(raw.createdAt) || Date.now(),
     resolvedAt: status === 'resolved' ? (Number(raw.resolvedAt) || Date.now()) : null,
-    note: cleanText(raw.note, 200),
+    note,
+    /** 用户已确认看过解决方案；有 note 且未确认时需推送弹窗 */
+    solutionAckedAt: status === 'resolved' && note && Number.isFinite(ackedAt) && ackedAt > 0
+      ? ackedAt
+      : null,
   };
 }
 
@@ -72,6 +79,7 @@ function toSummary(report) {
     createdAt: report.createdAt,
     resolvedAt: report.resolvedAt,
     note: report.note,
+    solutionAckedAt: report.solutionAckedAt,
     meta: {
       roomId: report.meta?.roomId ?? null,
       nickname: report.meta?.nickname ?? null,
@@ -82,6 +90,28 @@ function toSummary(report) {
     eventCount: Array.isArray(report.events) ? report.events.length : 0,
     hasSnapshot: Boolean(report.snapshot),
   };
+}
+
+/** 下发给上报用户的解决方案通知 */
+export function toSolutionNotice(report) {
+  if (!report || report.status !== 'resolved') return null;
+  const solution = cleanText(report.note, MAX_NOTE);
+  if (!solution) return null;
+  if (report.solutionAckedAt) return null;
+  return {
+    id: report.id,
+    description: report.description,
+    solution,
+    resolvedAt: report.resolvedAt,
+  };
+}
+
+function isPendingSolution(report, userId) {
+  if (!report || report.status !== 'resolved') return false;
+  if (!report.note) return false;
+  if (report.solutionAckedAt) return false;
+  if (userId && report.userId && report.userId !== userId) return false;
+  return Boolean(report.userId);
 }
 
 async function persistReport(report) {
@@ -176,14 +206,59 @@ export async function updateErrorReport(id, { status, note } = {}) {
   const report = await readReport(id);
   if (!report) return { success: false, error: '上报不存在' };
 
+  const prevNote = report.note;
+  const prevStatus = report.status;
+
   if (status === 'open' || status === 'resolved') {
     report.status = status;
     report.resolvedAt = status === 'resolved' ? Date.now() : null;
   }
   if (note !== undefined) {
-    report.note = cleanText(note, 200);
+    report.note = cleanText(note, MAX_NOTE);
   }
 
+  if (report.status === 'open') {
+    report.solutionAckedAt = null;
+  } else if (report.status === 'resolved') {
+    // 新解决方案或重新标记已处理：需要再次推送给用户
+    if (prevStatus !== 'resolved' || report.note !== prevNote || !report.note) {
+      report.solutionAckedAt = null;
+    }
+  }
+
+  if (report.status === 'resolved' && !report.note) {
+    return { success: false, error: '请填写解决方案后再标记已处理' };
+  }
+
+  await persistReport(report);
+  return { success: true, report };
+}
+
+/** 某用户尚未确认的解决方案（新到旧） */
+export async function listPendingSolutionsForUser(userId) {
+  const uid = cleanText(userId, 64);
+  if (!uid) return [];
+  const summaries = await listErrorReports();
+  const notices = [];
+  for (const summary of summaries) {
+    if (!isPendingSolution(summary, uid)) continue;
+    const notice = toSolutionNotice(summary);
+    if (notice) notices.push(notice);
+  }
+  return notices;
+}
+
+export async function ackErrorReportSolution(id, userId) {
+  const uid = cleanText(userId, 64);
+  if (!uid) return { success: false, error: '会话无效' };
+  const report = await readReport(id);
+  if (!report) return { success: false, error: '上报不存在' };
+  if (report.userId !== uid) return { success: false, error: '无权确认该上报' };
+  if (report.status !== 'resolved' || !report.note) {
+    return { success: false, error: '该上报没有待确认的解决方案' };
+  }
+  if (report.solutionAckedAt) return { success: true, report };
+  report.solutionAckedAt = Date.now();
   await persistReport(report);
   return { success: true, report };
 }

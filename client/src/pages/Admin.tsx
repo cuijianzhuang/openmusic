@@ -409,20 +409,37 @@ function AdminPage() {
     setReportBusyId(id);
     try {
       const payload: { status: 'open' | 'resolved'; note?: string } = { status };
-      if (reportDetail?.id === id) payload.note = reportNoteDraft;
-      const res = await adminFetch<{ report: ErrorReportDetail }>(`/api/admin/error-reports/${id}`, {
+      if (reportDetail?.id === id) {
+        payload.note = reportNoteDraft;
+      } else if (status === 'resolved') {
+        message.warning('请先打开详情填写解决方案后再标记已处理');
+        setReportBusyId(null);
+        void openErrorReport(id);
+        return;
+      }
+      if (status === 'resolved' && !(payload.note || '').trim()) {
+        message.warning('请填写解决方案后再标记已处理');
+        setReportBusyId(null);
+        return;
+      }
+      const res = await adminFetch<{ report: ErrorReportDetail; delivered?: number }>(`/api/admin/error-reports/${id}`, {
         method: 'PUT',
         body: JSON.stringify(payload),
       });
       if (reportDetail?.id === id) setReportDetail(res.report);
-      message.success(status === 'resolved' ? '已标记为已处理' : '已重开');
+      if (status === 'resolved') {
+        const online = res.delivered ? `（已推送给 ${res.delivered} 个在线连接）` : '（用户下次进入时会看到）';
+        message.success(`已标记为已处理${online}`);
+      } else {
+        message.success('已重开');
+      }
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : '更新上报失败');
     } finally {
       setReportBusyId(null);
     }
-  }, [message, refresh, reportDetail?.id, reportNoteDraft]);
+  }, [message, openErrorReport, refresh, reportDetail?.id, reportNoteDraft]);
 
   const deleteErrorReportItem = useCallback(async (id: string) => {
     modal.confirm({
@@ -1455,14 +1472,25 @@ function AdminPage() {
               </pre>
             </Card>
             <Form layout="vertical">
-              <Form.Item label="处理备注">
-                <Input
+              <Form.Item
+                label="解决方案"
+                required={reportDetail.status !== 'resolved'}
+                extra="标记已处理后，上报用户若在线会立刻弹窗；否则下次进入站点或房间时弹出。"
+              >
+                <Input.TextArea
                   value={reportNoteDraft}
                   onChange={(e) => setReportNoteDraft(e.target.value)}
-                  maxLength={200}
-                  placeholder="可选：处理说明"
+                  maxLength={500}
+                  rows={4}
+                  showCount
+                  placeholder="写给用户的解决说明，例如：请清除浏览器缓存后刷新，或改用 Chrome…"
                 />
               </Form.Item>
+              {reportDetail.status === 'resolved' && reportDetail.solutionAckedAt ? (
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  用户已于 {formatAuditTime(reportDetail.solutionAckedAt)} 确认解决方案
+                </Typography.Text>
+              ) : null}
             </Form>
           </Space>
         )}

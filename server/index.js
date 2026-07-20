@@ -126,7 +126,7 @@ import {
 import { checkApihzSensitiveWords } from './apihzSensitiveWord.js';
 import { getSiteAnnouncement, initSiteAnnouncement } from './siteAnnouncement.js';
 import { initSiteBans, isSiteBanned } from './siteBan.js';
-import { createErrorReport } from './errorReports.js';
+import { createErrorReport, listPendingSolutionsForUser, ackErrorReportSolution } from './errorReports.js';
 import { deriveChatTextGateKey, verifyChatTextGatePass } from './chatTextGate.js';
 import { getRuntimeConfig } from './runtimeConfig.js';
 
@@ -1090,6 +1090,27 @@ app.post('/api/error-reports', async (req, res) => {
   res.json({ success: true, report: result.report });
 });
 
+app.get('/api/error-reports/pending-solutions', async (req, res) => {
+  const identity = resolveIdentityFromRequest(req);
+  if (!identity?.userId) {
+    return res.status(401).json({ error: '会话未就绪，请刷新页面后重试' });
+  }
+  const solutions = await listPendingSolutionsForUser(identity.userId);
+  res.json({ solutions });
+});
+
+app.post('/api/error-reports/:id/ack-solution', async (req, res) => {
+  const identity = resolveIdentityFromRequest(req);
+  if (!identity?.userId) {
+    return res.status(401).json({ error: '会话未就绪，请刷新页面后重试' });
+  }
+  const result = await ackErrorReportSolution(req.params.id, identity.userId);
+  if (!result.success) {
+    return res.status(400).json({ error: result.error });
+  }
+  res.json({ success: true });
+});
+
 app.get('/api/rooms', (_req, res) => {
   res.json(listRooms());
 });
@@ -1682,6 +1703,14 @@ io.on('connection', (socket) => {
       if (welcomeMessage) {
         socket.to(id).emit('chat_message', welcomeMessage);
       }
+      // 若管理员已给出解决方案且用户尚未确认，进房时补推弹窗
+      if (!readOnly && userId) {
+        void listPendingSolutionsForUser(userId).then((solutions) => {
+          for (const notice of solutions) {
+            socket.emit('error_report_solution', notice);
+          }
+        }).catch(() => {});
+      }
     });
 
     ensurePlayback(id).then((room) => {
@@ -1710,6 +1739,17 @@ io.on('connection', (socket) => {
 
     broadcastRoomUpdate(roomId);
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
+  });
+
+  socket.on('ack_error_report_solution', async ({ id } = {}, callback) => {
+    const userId = getSocketUserId(socket)
+      || resolveIdentityFromCookies(socket.handshake?.headers?.cookie || '')?.userId;
+    if (!userId) {
+      callback?.({ success: false, error: '会话无效' });
+      return;
+    }
+    const result = await ackErrorReportSolution(id, userId);
+    callback?.(result.success ? { success: true } : { success: false, error: result.error });
   });
 
   socket.on('rename_room', ({ name }, callback) => {
