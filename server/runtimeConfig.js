@@ -3,6 +3,7 @@ import path from 'path';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypto';
 import { fileURLToPath } from 'url';
 import { isBlockedMediaHostname } from './mediaProxy.js';
+import { normalizeMusicApis } from './customMusicApi.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = path.join(__dirname, 'runtimeConfig.json');
@@ -54,6 +55,7 @@ function envDefaults() {
     roomRestartGraceMs: envRoomRestartGraceMs(),
     metingApiUrl: envText('METING_API_URL'),
     metingApiAuth: envText('METING_API_AUTH'),
+    musicApis: [],
     cyapiBase: envText('CYAPI_BASE', envText('CYAPI_URL').replace(/\/qq_music\.php$/i, '') || 'https://cyapi.top/API'),
     cyapiKey: envText('CYAPI_KEY'),
     vmyLrcUrl: envText('VMY_LRC_URL', 'https://api.52vmy.cn/api/music/lrc'),
@@ -122,6 +124,15 @@ function decodePersisted(raw) {
       out[field] = decryptSecret(out[field]);
     }
   }
+  if (typeof out.musicApis === 'string' && out.musicApis.startsWith(ENC_PREFIX)) {
+    const decrypted = decryptSecret(out.musicApis);
+    try {
+      out.musicApis = JSON.parse(decrypted);
+    } catch {
+      console.error('runtime-config: 自定义音乐接口配置解密失败');
+      out.musicApis = [];
+    }
+  }
   return out;
 }
 
@@ -139,6 +150,15 @@ function encodeForDisk(config) {
       delete out[field];
     } else {
       out[field] = encrypted;
+    }
+  }
+  if (Array.isArray(out.musicApis) && out.musicApis.length > 0) {
+    const encrypted = encryptSecret(JSON.stringify(out.musicApis));
+    if (encrypted === null) {
+      console.warn('runtime-config: 缺少 CLIENT_ID_SECRET，自定义音乐接口配置将以明文保存');
+    } else {
+      // URL、参数、请求头和 Body 都可能含第三方密钥，整体加密避免遗漏。
+      out.musicApis = encrypted;
     }
   }
   return out;
@@ -176,6 +196,12 @@ function trimTrailingSlash(value) {
 function normalize(config) {
   const roomEmptyTtlMs = Number(config.roomEmptyTtlMs);
   const roomRestartGraceMs = Number(config.roomRestartGraceMs);
+  let musicApis = [];
+  try {
+    musicApis = normalizeMusicApis(config.musicApis);
+  } catch {
+    // 旧文件或手工编辑产生的非法配置不进入运行时；保存时会返回明确校验错误。
+  }
   return {
     roomEmptyTtlMs: Number.isFinite(roomEmptyTtlMs)
       ? Math.max(0, Math.min(Math.round(roomEmptyTtlMs), 24 * 60 * 60 * 1000))
@@ -185,6 +211,7 @@ function normalize(config) {
       : 24 * 60 * 60 * 1000,
     metingApiUrl: String(config.metingApiUrl || '').trim(),
     metingApiAuth: String(config.metingApiAuth || '').trim(),
+    musicApis,
     cyapiBase: trimTrailingSlash(config.cyapiBase) || 'https://cyapi.top/API',
     cyapiKey: String(config.cyapiKey || '').trim(),
     vmyLrcUrl: trimTrailingSlash(config.vmyLrcUrl) || 'https://api.52vmy.cn/api/music/lrc',
@@ -212,14 +239,13 @@ function validateHttpUrl(value, label, { allowEmpty = false, allowList = false, 
   const values = allowList ? String(value || '').split(',') : [String(value || '')];
   for (let raw of values) {
     raw = raw.trim();
-    if (allowList && raw.toLowerCase().startsWith('chksz:')) raw = raw.slice(6).trim();
     if (!raw && allowEmpty) continue;
     try {
       const parsed = new URL(raw);
       if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
         return `${label}必须是 http/https 地址${allowList ? '，多个地址用英文逗号分隔' : ''}`;
       }
-      // Meting/ChKSz 上游常部署在本机或局域网，配置校验允许内网；媒体代理 SSRF 另有拦截
+      // Meting 上游常部署在本机或局域网，配置校验允许内网；媒体代理 SSRF 另有拦截
       if (!allowPrivate && isBlockedMediaHostname(parsed.hostname)) {
         return `${label}不允许指向内网、本机或云元数据地址`;
       }
@@ -233,21 +259,17 @@ function validateHttpUrl(value, label, { allowEmpty = false, allowList = false, 
 export function getRuntimeConfigForAdmin() {
   const config = getRuntimeConfig();
   const result = { ...config, configuredSecrets: {} };
+  result.musicApis = config.musicApis.map((api) => ({
+    ...api,
+    headers: Object.keys(api.headers).length ? JSON.stringify(api.headers, null, 2) : '',
+  }));
   const urls = String(config.metingApiUrl || '').split(',').map((value) => value.trim()).filter(Boolean);
   const auths = String(config.metingApiAuth || '').split(',').map((value) => value.trim());
-  result.metingSources = urls.map((rawUrl, index) => {
-    const explicitChksz = rawUrl.toLowerCase().startsWith('chksz:');
-    const url = explicitChksz ? rawUrl.slice('chksz:'.length).trim() : rawUrl;
-    let isChksz = explicitChksz;
-    try {
-      isChksz ||= new URL(url).hostname.toLowerCase() === 'api.chksz.com';
-    } catch {
-      // 原有无效地址仍交给保存时的统一校验处理
-    }
+  result.metingSources = urls.map((url, index) => {
     const auth = auths.length === 1 ? auths[0] : (auths[index] || '');
     return {
       url,
-      type: isChksz ? 'chksz' : 'meting',
+      type: 'meting',
       configuredAuth: Boolean(auth),
       auth: auth ? maskSecret(auth) : '',
     };
@@ -268,24 +290,28 @@ export function setRuntimeConfig(raw = {}) {
   if (Array.isArray(raw.metingSources)) {
     const oldUrls = String(current.metingApiUrl || '').split(',').map((value) => value.trim()).filter(Boolean);
     const oldAuths = String(current.metingApiAuth || '').split(',').map((value) => value.trim());
-    const oldAuthByUrl = new Map(oldUrls.map((rawUrl, index) => {
-      const url = rawUrl.toLowerCase().startsWith('chksz:') ? rawUrl.slice('chksz:'.length).trim() : rawUrl;
+    const oldAuthByUrl = new Map(oldUrls.map((url, index) => {
       const auth = oldAuths.length === 1 ? oldAuths[0] : (oldAuths[index] || '');
       return [trimTrailingSlash(url), auth];
     }));
     const sources = raw.metingSources.slice(0, 20).map((source) => {
       const url = trimTrailingSlash(source?.url);
-      const type = source?.type === 'chksz' ? 'chksz' : 'meting';
       const submittedAuth = typeof source?.auth === 'string' ? source.auth.trim() : '';
       const auth = source?.clearAuth ? '' : (submittedAuth || oldAuthByUrl.get(url) || '');
-      return { url, type, auth };
+      return { url, type: 'meting', auth };
     }).filter((source) => source.url);
-    next.metingApiUrl = sources
-      .map((source) => source.type === 'chksz' ? `chksz:${source.url}` : source.url)
-      .join(',');
+    next.metingApiUrl = sources.map((source) => source.url).join(',');
     next.metingApiAuth = sources.some((source) => source.auth)
       ? sources.map((source) => source.auth).join(',')
       : '';
+  }
+
+  if (Object.hasOwn(raw, 'musicApis')) {
+    try {
+      next.musicApis = normalizeMusicApis(raw.musicApis);
+    } catch (err) {
+      return { success: false, error: err?.message || 'musicApis 配置无效' };
+    }
   }
 
   for (const field of Object.keys(current)) {

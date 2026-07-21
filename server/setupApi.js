@@ -301,14 +301,13 @@ function validateSiteUrl(raw) {
   }
 }
 
-/** 校验并规范化 Meting 上游地址（支持逗号分隔多上游、chksz: 前缀）。空值允许（可后台再配） */
+/** 校验并规范化 Meting 上游地址。空值允许（可后台再配） */
 function validateMetingUrl(raw) {
   const value = cleanText(raw, 1024);
   if (value === null) return null;
   if (!value) return '';
   const parts = value.split(',').map((s) => s.trim()).filter(Boolean);
-  for (let part of parts) {
-    if (part.toLowerCase().startsWith('chksz:')) part = part.slice(6).trim();
+  for (const part of parts) {
     try {
       const parsed = new URL(part);
       if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
@@ -375,38 +374,12 @@ export function mountSetupApi(app) {
     if (metingApiUrl === null) {
       return res.status(400).json({ error: 'Meting 音源地址无效（http/https，多个用英文逗号分隔）' });
     }
-    const chkszApiUrl = validateMetingUrl(req.body?.chkszApiUrl);
-    if (chkszApiUrl === null) {
-      return res.status(400).json({ error: 'ChKSz 音源地址无效（须为 http/https 地址）' });
-    }
     const metingSources = metingApiUrl
       ? metingApiUrl.split(',').map((url) => url.trim()).filter(Boolean)
       : [];
-    if (chkszApiUrl) {
-      for (const url of chkszApiUrl.split(',').map((item) => item.trim()).filter(Boolean)) {
-        const normalizedUrl = url.toLowerCase().startsWith('chksz:') ? url.slice(6).trim() : url;
-        const key = normalizedUrl.replace(/\/+$/, '').toLowerCase();
-        const exists = metingSources.some((item) => {
-          const normalizedItem = item.toLowerCase().startsWith('chksz:') ? item.slice(6).trim() : item;
-          return normalizedItem.replace(/\/+$/, '').toLowerCase() === key;
-        });
-        if (!exists) metingSources.push(`chksz:${normalizedUrl}`);
-      }
-    }
     const metingApiAuth = cleanText(req.body?.metingApiAuth, 1024);
     if (metingApiAuth === null) return res.status(400).json({ error: 'Meting 令牌无效' });
-    const chkszApiKey = cleanText(req.body?.chkszApiKey, 1024);
-    if (chkszApiKey === null) return res.status(400).json({ error: 'ChKSz API Key 无效' });
-    const metingAuths = metingSources.map((source) => {
-      const rawUrl = source.toLowerCase().startsWith('chksz:') ? source.slice(6).trim() : source;
-      let isChksz = source.toLowerCase().startsWith('chksz:');
-      try {
-        isChksz ||= new URL(rawUrl).hostname.toLowerCase() === 'api.chksz.com';
-      } catch {
-        // 地址已在前面校验，此处仅做类型识别
-      }
-      return isChksz ? chkszApiKey : metingApiAuth;
-    });
+    const metingAuths = metingSources.map(() => metingApiAuth);
 
     const dockerDefs = getDockerDefaults();
     const redisInput = req.body?.redis ?? (dockerDefs ? { mode: 'url', url: dockerDefs.redisUrl } : undefined);

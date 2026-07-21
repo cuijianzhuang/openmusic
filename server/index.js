@@ -12,6 +12,7 @@ import {
   getMetingUpstreamStatus,
   startMetingHealthProbe,
 } from './metingUpstream.js';
+import { fetchCustomMusicApi, hasCustomMusicApi } from './customMusicApi.js';
 import { fetchLrcapiLyrics, getLrcapiUpstreamStatus } from './lrcapiUpstream.js';
 import { mountWechatFileHelperProxy } from './wechatFileHelperProxy.js';
 import { mountAdminApi } from './adminApi.js';
@@ -740,9 +741,11 @@ app.get('/api/music/sources', (_req, res) => {
       name: '蓝点',
       shortName: '蓝点',
       color: '#2688ee',
-      supportsSearch: isCyapiConfigured(),
+      supportsSearch: isCyapiConfigured() || hasCustomMusicApi('kugou', 'search'),
       supportsIdLookup: false,
-      description: isCyapiConfigured() ? '通过迟言 API 搜索' : '请配置 CYAPI_KEY（蓝点）',
+      description: hasCustomMusicApi('kugou', 'search')
+        ? '通过自定义接口搜索'
+        : isCyapiConfigured() ? '通过迟言 API 搜索' : '请配置酷狗搜索接口',
     },
   ];
   res.json(sources);
@@ -826,16 +829,27 @@ app.get('/api/music/cyapi/kugou/search', async (req, res) => {
     return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
   }
 
-  if (!isCyapiConfigured()) {
-    return res.status(503).json({ error: '未配置 CYAPI_KEY' });
-  }
-
   const keyword = String(req.query.q || '').trim();
   const num = Math.min(Math.max(parseInt(String(req.query.num || '15'), 10) || 15, 1), 30);
 
   if (!keyword) return res.json([]);
 
   try {
+    try {
+      const custom = await fetchCustomMusicApi({
+        server: 'kugou',
+        type: 'search',
+        id: keyword,
+        keyword,
+        limit: num,
+      });
+      if (custom) return res.json(await custom.json());
+    } catch (err) {
+      console.warn(`自定义蓝点搜索失败，继续尝试 cyapi：${err?.message || err}`);
+    }
+    if (!isCyapiConfigured()) {
+      return res.status(503).json({ error: '未配置蓝点自定义接口或 CYAPI_KEY' });
+    }
     res.json(await searchKugouMusic(keyword, num));
   } catch (err) {
     console.error('Cyapi Kugou search error:', err.message);
@@ -875,14 +889,50 @@ app.get('/api/music/cyapi/kugou/song', async (req, res) => {
     return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
   }
 
-  if (!isCyapiConfigured()) {
-    return res.status(503).json({ error: '未配置 CYAPI_KEY' });
-  }
-
   const id = String(req.query.id || '').trim();
   if (!id) return res.status(400).json({ error: '缺少歌曲 id' });
 
   try {
+    let customDetail = null;
+    const customOperations = ['song', 'url', 'lrc', 'pic'].filter((operation) => (
+      hasCustomMusicApi('kugou', operation)
+    ));
+    if (customOperations.length > 0) {
+      const results = await Promise.allSettled(customOperations.map(async (operation) => {
+        const response = await fetchCustomMusicApi({ server: 'kugou', type: operation, id });
+        if (!response) return [operation, null];
+        if (operation === 'song') {
+          const songs = await response.json();
+          return [operation, Array.isArray(songs) ? songs[0] : songs];
+        }
+        return [operation, await response.text()];
+      }));
+      customDetail = { id, source: 'kugou' };
+      let customHit = false;
+      for (const result of results) {
+        if (result.status !== 'fulfilled') {
+          console.warn(`自定义蓝点详情字段失败：${result.reason?.message || result.reason}`);
+          continue;
+        }
+        const [operation, value] = result.value;
+        if (operation === 'song' && value && typeof value === 'object') {
+          Object.assign(customDetail, value);
+          customHit = true;
+        } else if (value) {
+          customDetail[operation] = value;
+          customHit = true;
+        }
+      }
+      if (!customHit) customDetail = null;
+    }
+    if (isCyapiConfigured() && (!customDetail?.url || !customDetail?.lrc)) {
+      const fallbackDetail = await getKugouSongDetail(id);
+      if (fallbackDetail) customDetail = { ...fallbackDetail, ...customDetail };
+    }
+    if (customDetail) return res.json(customDetail);
+    if (!isCyapiConfigured()) {
+      return res.status(503).json({ error: '未配置蓝点自定义接口或 CYAPI_KEY' });
+    }
     const detail = await getKugouSongDetail(id);
     if (!detail) return res.status(404).json({ error: '歌曲不存在' });
     res.json(detail);

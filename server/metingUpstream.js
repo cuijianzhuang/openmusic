@@ -1,11 +1,9 @@
 import { fetchMeting, formatMetingFetchError } from './metingFetch.js';
-import { fetchChksz, isMetingUnsupportedError } from './chkszAdapter.js';
+import { fetchCustomMusicApi } from './customMusicApi.js';
 import { getRuntimeConfig } from './runtimeConfig.js';
 
 // METING_API_URL 支持英文逗号分隔多个上游；METING_API_AUTH 同样支持逗号分隔：
 // 与 URL 一一对应；只填一个则应用到所有上游。
-// 上游可用 `chksz:` 前缀标记为 ChKSz API（https://api.chksz.com 会自动识别），
-// 由 chkszAdapter.js 翻译为 Meting 语义参与负载均衡。
 const FAIL_COOLDOWN_MS = 60_000;
 const UPSTREAM_ATTEMPTS = 2;
 
@@ -23,13 +21,7 @@ function syncUpstreams() {
   const rawAuths = String(config.metingApiAuth || '').split(',').map((s) => s.trim());
   const previous = new Map(upstreams.map((upstream) => [upstream.base, upstream]));
   upstreams = rawUrls.map((raw, i) => {
-    let style = 'meting';
-    let base = raw;
-    if (base.toLowerCase().startsWith('chksz:')) {
-      style = 'chksz';
-      base = base.slice('chksz:'.length).trim();
-    }
-    base = base.replace(/\/$/, '');
+    const base = raw.replace(/\/$/, '');
 
     let hostname = '';
     try {
@@ -37,14 +29,11 @@ function syncUpstreams() {
     } catch {
       hostname = '';
     }
-    if (hostname === 'api.chksz.com') style = 'chksz';
-
     const auth = rawAuths.length === 1 ? rawAuths[0] : (rawAuths[i] || '');
     const old = previous.get(base);
-    const reuseHealth = old?.auth === auth && old?.style === style;
+    const reuseHealth = old?.auth === auth;
     return {
       base,
-      style,
       auth,
       hostname,
       cooldownUntil: reuseHealth ? old.cooldownUntil : 0,
@@ -83,7 +72,7 @@ export function getMetingUpstreamStatus() {
   const now = Date.now();
   return upstreams.map((u) => ({
     url: u.base,
-    style: u.style,
+    type: 'meting',
     disabled: Boolean(u.disabled),
     healthy: !u.disabled && now >= u.cooldownUntil,
     cooldownRemainingSec: u.disabled
@@ -127,7 +116,7 @@ function buildUpstreamUrl(upstream, query) {
 }
 
 // 轮询起点每次前移；冷却中的上游排到最后兜底（全部故障时仍会尝试）；禁用的完全跳过
-function orderedUpstreams(query = {}) {
+function orderedUpstreams() {
   syncUpstreams();
   const enabled = upstreams.filter((u) => !u.disabled);
   if (enabled.length === 0) return [];
@@ -138,25 +127,14 @@ function orderedUpstreams(query = {}) {
   const now = Date.now();
   const healthy = rotated.filter((u) => now >= u.cooldownUntil);
   const cooling = rotated.filter((u) => now < u.cooldownUntil);
-  const server = String(query.server || '').toLowerCase();
-  // 网易优先 ChKSz（会员/高音质解析），QQ 优先标准 Meting；失败后仍交叉兜底。
-  const preferredStyle = server === 'netease' ? 'chksz' : (server === 'tencent' ? 'meting' : '');
-  if (!preferredStyle) return [...healthy, ...cooling];
-  return [
-    ...healthy.filter((upstream) => upstream.style === preferredStyle),
-    ...healthy.filter((upstream) => upstream.style !== preferredStyle),
-    ...cooling.filter((upstream) => upstream.style === preferredStyle),
-    ...cooling.filter((upstream) => upstream.style !== preferredStyle),
-  ];
+  return [...healthy, ...cooling];
 }
 
 async function requestUpstream(upstream, query, options, timeoutMs) {
   let lastError;
   for (let attempt = 0; attempt < UPSTREAM_ATTEMPTS; attempt += 1) {
     try {
-      const response = upstream.style === 'chksz'
-        ? await fetchChksz(upstream.base, query, timeoutMs, upstream.auth)
-        : await fetchMeting(buildUpstreamUrl(upstream, query), options, timeoutMs);
+      const response = await fetchMeting(buildUpstreamUrl(upstream, query), options, timeoutMs);
       // 网络抖动和 5xx 快速重试一次；4xx 多为鉴权/参数问题，直接交给切换逻辑。
       if (response.status >= 500 && attempt + 1 < UPSTREAM_ATTEMPTS) continue;
       return response;
@@ -188,6 +166,12 @@ function markSuccess(upstream) {
  */
 export async function fetchMetingApi(query, options = {}, timeoutMs = 10000) {
   syncUpstreams();
+  try {
+    const customResponse = await fetchCustomMusicApi(query, { timeoutMs });
+    if (customResponse) return customResponse;
+  } catch (err) {
+    console.warn(`自定义音乐接口失败，继续尝试 Meting：${err?.message || err}`);
+  }
   if (upstreams.length === 0) {
     throw new Error('未配置 METING_API_URL');
   }
@@ -220,7 +204,7 @@ export async function fetchMetingApi(query, options = {}, timeoutMs = 10000) {
       }
       markSuccess(upstream);
       // VIP/付费歌曲在部分标准 Meting 上游会返回 HTTP 200，但正文为空、null
-      // 或空数组。它不是可播放结果，应继续尝试 ChKSz 等后续上游。
+      // 或空数组。它不是可播放结果，应继续尝试后续上游。
       if (isUrl && response.status === 200) {
         try {
           const text = typeof response.clone === 'function' ? await response.clone().text() : await response.text();
@@ -249,11 +233,6 @@ export async function fetchMetingApi(query, options = {}, timeoutMs = 10000) {
       }
       return response;
     } catch (err) {
-      // 该上游不支持此类请求（如 chksz 不支持 QQ 源 / FM）：跳过但不计故障
-      if (isMetingUnsupportedError(err)) {
-        lastError = err;
-        continue;
-      }
       markFailure(upstream, err);
       lastError = err;
     }
@@ -282,9 +261,7 @@ let probeTimer = null;
 async function probeUpstream(upstream) {
   upstream.lastProbeAt = Date.now();
   try {
-    const response = upstream.style === 'chksz'
-      ? await fetchChksz(upstream.base, PROBE_QUERY, PROBE_TIMEOUT_MS, upstream.auth)
-      : await fetchMeting(buildUpstreamUrl(upstream, PROBE_QUERY), {}, PROBE_TIMEOUT_MS);
+    const response = await fetchMeting(buildUpstreamUrl(upstream, PROBE_QUERY), {}, PROBE_TIMEOUT_MS);
     if (response.status >= 400 && response.status !== 404) {
       markFailure(upstream, `健康探测返回 ${response.status}`);
       upstream.lastProbeOk = false;

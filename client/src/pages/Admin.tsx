@@ -1127,7 +1127,7 @@ function AdminPage() {
         return (
           <Card
             className="admin-settings-card"
-            styles={{ body: { padding: '0 20px 0' } }}
+            styles={{ body: { padding: '8px 20px 0' } }}
             style={{
               flex: '1 0 auto',
               display: 'flex',
@@ -1136,60 +1136,65 @@ function AdminPage() {
               borderBottomRightRadius: 0,
             }}
           >
-            <SettingsSection title="登录地址" description="管理后台的入口路径。修改后旧地址失效，请收藏新链接。">
-              <Space direction="vertical" style={{ width: '100%' }}>
-                <Input
-                  addonBefore={typeof window !== 'undefined' ? window.location.origin : ''}
-                  value={entryPathDraft}
-                  onChange={(e) => {
-                    setEntryPathDraft(e.target.value);
-                    setPathHint('');
-                  }}
-                  spellCheck={false}
-                  placeholder="/随机路径"
-                  suffix={(
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={<ReloadOutlined />}
-                      onClick={randomizeEntryPath}
-                      title="随机生成登录地址"
-                      aria-label="随机生成登录地址"
+            <RuntimeConfigPanel
+              onError={setError}
+              securityTab={(
+                <>
+                  <SettingsSection title="登录地址" description="管理后台的入口路径。修改后旧地址失效，请收藏新链接。">
+                    <Space direction="vertical" style={{ width: '100%' }}>
+                      <Input
+                        addonBefore={typeof window !== 'undefined' ? window.location.origin : ''}
+                        value={entryPathDraft}
+                        onChange={(e) => {
+                          setEntryPathDraft(e.target.value);
+                          setPathHint('');
+                        }}
+                        spellCheck={false}
+                        placeholder="/随机路径"
+                        suffix={(
+                          <Button
+                            type="text"
+                            size="small"
+                            icon={<ReloadOutlined />}
+                            onClick={randomizeEntryPath}
+                            title="随机生成登录地址"
+                            aria-label="随机生成登录地址"
+                          />
+                        )}
+                        style={{ fontFamily: 'monospace' }}
+                      />
+                      <Button
+                        type="primary"
+                        loading={savingPath}
+                        disabled={!entryPathDraft.trim() || entryPathDraft === overview?.entryPath}
+                        onClick={() => void saveEntryPath()}
+                      >
+                        保存
+                      </Button>
+                      {pathHint && <Typography.Text type="success">{pathHint}</Typography.Text>}
+                    </Space>
+                  </SettingsSection>
+                  <Divider style={{ margin: 0 }} />
+                  <SettingsSection
+                    title="管理员账号"
+                    badge={(
+                      <Tag color={(overview?.credentialsPersisted ?? true) ? 'success' : 'error'}>
+                        {(overview?.credentialsPersisted ?? true) ? 'Redis 持久化' : 'Redis 未就绪'}
+                      </Tag>
+                    )}
+                    description="密码以 scrypt 哈希存 Redis；新密码至少 8 位。修改后其它登录会话立即失效。"
+                  >
+                    <CredentialsPanel
+                      bare
+                      adminUsername={overview?.adminUsername || ''}
+                      persisted={overview?.credentialsPersisted ?? true}
+                      onError={setError}
+                      onSaved={() => void refresh()}
                     />
-                  )}
-                  style={{ fontFamily: 'monospace' }}
-                />
-                <Button
-                  type="primary"
-                  loading={savingPath}
-                  disabled={!entryPathDraft.trim() || entryPathDraft === overview?.entryPath}
-                  onClick={() => void saveEntryPath()}
-                >
-                  保存
-                </Button>
-                {pathHint && <Typography.Text type="success">{pathHint}</Typography.Text>}
-              </Space>
-            </SettingsSection>
-            <Divider style={{ margin: 0 }} />
-            <SettingsSection
-              title="管理员账号"
-              badge={(
-                <Tag color={(overview?.credentialsPersisted ?? true) ? 'success' : 'error'}>
-                  {(overview?.credentialsPersisted ?? true) ? 'Redis 持久化' : 'Redis 未就绪'}
-                </Tag>
+                  </SettingsSection>
+                </>
               )}
-              description="密码以 scrypt 哈希存 Redis；新密码至少 8 位。修改后其它登录会话立即失效。"
-            >
-              <CredentialsPanel
-                bare
-                adminUsername={overview?.adminUsername || ''}
-                persisted={overview?.credentialsPersisted ?? true}
-                onError={setError}
-                onSaved={() => void refresh()}
-              />
-            </SettingsSection>
-            <Divider style={{ margin: 0 }} />
-            <RuntimeConfigPanel onError={setError} />
+            />
           </Card>
         );
 

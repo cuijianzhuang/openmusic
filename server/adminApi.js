@@ -18,6 +18,11 @@ import {
 } from './metingUpstream.js';
 import { getLrcapiUpstreamStatus } from './lrcapiUpstream.js';
 import {
+  getCustomMusicApiStatus,
+  previewCustomMusicApi,
+  resetCustomMusicApiCircuit,
+} from './customMusicApi.js';
+import {
   getAdminEntryPath,
   setAdminEntryPath,
   createRandomAdminEntryPath,
@@ -496,6 +501,7 @@ export function mountAdminApi(app, { io, socketToRoom, socketToUserId, getClient
       memoryRssMb: Math.round(mem.rss / 1024 / 1024),
       redisEnabled: isRedisEnabled(),
       metingUpstreams: getMetingUpstreamStatus(),
+      customMusicApis: getCustomMusicApiStatus(),
       lrcapiUpstreams: getLrcapiUpstreamStatus(),
       entryPath: getAdminEntryPath(),
       adminUsername: getAdminUsername(),
@@ -583,6 +589,27 @@ export function mountAdminApi(app, { io, socketToRoom, socketToUserId, getClient
 
   app.get('/api/admin/runtime-config', requireAdmin, (_req, res) => {
     res.json({ config: getRuntimeConfigForAdmin() });
+  });
+
+  app.get('/api/admin/runtime-config/music-api-status', requireAdmin, (_req, res) => {
+    res.json(getCustomMusicApiStatus());
+  });
+
+  app.post('/api/admin/runtime-config/music-api-circuit/reset', requireAdminOrigin, requireAdmin, requireAdminSetupComplete, (req, res) => {
+    const ip = getClientIp?.(req) || req.ip || '';
+    const endpointId = String(req.body?.id || '').trim();
+    const status = resetCustomMusicApiCircuit(endpointId);
+    audit('reset_music_api_circuit', { id: endpointId || '*' }, ip);
+    res.json(status);
+  });
+
+  app.post('/api/admin/runtime-config/music-api-preview', requireAdminOrigin, requireAdmin, requireAdminSetupComplete, async (req, res) => {
+    try {
+      const result = await previewCustomMusicApi(req.body?.api, req.body?.variables);
+      res.json(result);
+    } catch (err) {
+      res.status(400).json({ error: err?.message || '自定义音乐接口解析失败' });
+    }
   });
 
   app.put('/api/admin/runtime-config', requireAdminOrigin, requireAdmin, requireAdminSetupComplete, (req, res) => {

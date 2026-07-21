@@ -6,15 +6,7 @@ function getMetingHosts() {
   return new Set(
     String(getRuntimeConfig().metingApiUrl || '')
     .split(',')
-    .map((s) => {
-      let base = s.trim();
-      // chksz: 前缀标记的上游由 chkszAdapter.js 走独立请求路径，不经过这里；
-      // 剥离前缀只是为了让 hostname 解析不因非标准协议前缀失败
-      if (base.toLowerCase().startsWith('chksz:')) {
-        base = base.slice('chksz:'.length).trim();
-      }
-      return base.replace(/\/$/, '');
-    })
+    .map((s) => s.trim().replace(/\/$/, ''))
     .filter(Boolean)
     .map((base) => {
       try {

@@ -159,10 +159,9 @@ export default function OverviewDashboard({
       title: '上游地址',
       dataIndex: 'url',
       ellipsis: true,
-      render: (url: string, up) => (
+      render: (url: string) => (
         <Space size={6} wrap>
           <Typography.Text code style={{ fontSize: 12 }}>{url}</Typography.Text>
-          {up.style === 'chksz' && <Tag color="blue">chksz</Tag>}
         </Space>
       ),
     },

@@ -44,11 +44,12 @@ export interface RuntimeConfig {
   metingApiAuth: string;
   metingSources: {
     url: string;
-    type: 'meting' | 'chksz';
+    type: 'meting';
     configuredAuth: boolean;
     auth?: string;
     clearAuth?: boolean;
   }[];
+  musicApis: CustomMusicApi[];
   cyapiBase: string;
   cyapiKey: string;
   vmyLrcUrl: string;
@@ -61,6 +62,63 @@ export interface RuntimeConfig {
   apihzId: string;
   apihzKey: string;
   configuredSecrets: Record<string, boolean>;
+}
+
+export type MusicApiPlatform = 'netease' | 'tencent' | 'kugou';
+export type MusicApiOperation = 'search' | 'song' | 'url' | 'lrc' | 'pic' | 'playlist' | 'search_playlist';
+
+export interface CustomMusicApi {
+  id: string;
+  name: string;
+  remark: string;
+  enabled: boolean;
+  platforms: MusicApiPlatform[];
+  operations: MusicApiOperation[];
+  weight: number;
+  timeoutMs: number;
+  failureThreshold: number;
+  cooldownMs: number;
+  method: 'GET' | 'POST';
+  url: string;
+  params: string;
+  headers: string;
+  body: string;
+  mapping: {
+    items?: string;
+    id?: string;
+    name?: string;
+    artist?: string;
+    album?: string;
+    pic?: string;
+    duration?: string;
+    url?: string;
+    lrc?: string;
+    value?: string;
+  };
+}
+
+export interface CustomMusicApiRouteStatus {
+  id: string;
+  name: string;
+  remark: string;
+  platform: MusicApiPlatform;
+  operation: MusicApiOperation;
+  enabled: boolean;
+  weight: number;
+  circuitState: 'closed' | 'open' | 'half-open' | 'disabled';
+  healthy: boolean;
+  cooldownRemainingSec: number;
+  consecutiveFailures: number;
+  okCount: number;
+  failCount: number;
+  lastError: string;
+  lastFailureAt: number;
+  lastSuccessAt: number;
+}
+
+export interface CustomMusicApiStatus {
+  configured: boolean;
+  routes: CustomMusicApiRouteStatus[];
 }
 
 export interface SiteBanEntry {
