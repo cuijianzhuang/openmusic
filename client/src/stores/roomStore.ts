@@ -4,6 +4,7 @@ import type { RoomState } from '../types';
 interface RoomStore {
   room: RoomState | null;
   nickname: string;
+  avatar_url: string;
   mySocketId: string | null;
   myConnectionId: string | null;
   /** 初创房主身份（creatorId）——仅由 syncRolesFromRoom 根据房间快照计算，不信任 ACK 布尔值 */
@@ -57,8 +58,10 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
   showPlayer: false,
   exitReason: null,
   isReconnecting: false,
+  avatar_url: localStorage.getItem('avatar_url') || '',
   setRoom: (room) => set({ room }),
   setNickname: (nickname) => {
+    console.log(111)
     localStorage.setItem('sjb_nickname', nickname);
     set({ nickname });
   },

@@ -69,6 +69,7 @@ export interface RoomUser {
   readOnly?: boolean;
   joinedAt: number;
   location?: string;
+  avatar_url?: string;
 }
 
 export interface JumpRequest {
@@ -113,7 +114,7 @@ export interface ChatMessage {
   imageUrl?: string | null;
   imageKey?: string | null;
   asSticker?: boolean;
-  kind?: 'chat' | 'welcome' | 'system' | 'notice' | 'recall';
+  kind?: 'chat' | 'welcome' | 'system' | 'recall';
   mentions?: ChatMention[];
   replyTo?: ChatReplyRef | null;
   timestamp: number;
@@ -149,6 +150,8 @@ export interface RoomState {
   autoPromotedAdminIds?: string[];
   /** 曾进房用户的最近昵称（用于离线管理员展示） */
   userNicknames?: Record<string, string>;
+  /** 用户头像 URL（所有用户可见） */
+  userAvatarUrls?: Record<string, string>;
   ownerConnectionId?: string | null;
   queue: QueueItem[];
   current: QueueItem | null;
@@ -165,7 +168,7 @@ export interface RoomState {
   chatHasMore?: boolean;
   /** @deprecated 不再随 room_update 广播，按需 load_song_history */
   songHistory?: SongHistoryItem[];
-/** 队列为空时服务端已预取的下一首私人漫游（含稳定 queueId，便于客户端预拉 URL） */
+  /** 队列为空时服务端已预取的下一首私人漫游（含稳定 queueId，便于客户端预拉 URL） */
   nextRandom?: QueueItem | null;
   /** 服务端正在为空队列拉取私人漫游 */
   randomLoading?: boolean;
@@ -183,10 +186,6 @@ export interface RoomState {
   announcementText?: string;
   /** 进房是否可查看聊天历史（关闭时仅见进房后的消息） */
   chatHistoryVisibleOnJoin?: boolean;
-  /** 是否在聊天室提示“昵称进入房间” */
-  joinNoticeEnabled?: boolean;
-  /** 同一用户进房提醒的防重复间隔（秒），默认 180 */
-  joinNoticeCooldownSec?: number;
   /** 是否允许成员点歌（关闭后仅房主/管理员可点） */
   songRequestEnabled?: boolean;
   /** 是否允许成员为自己的点歌插队（默认关闭，房主/管理员始终可插队） */

@@ -1,46 +1,25 @@
-import './loadEnv.js';
-import { resizeCoverForThumb } from './coverUrl.js';
-import {
-  isBlockedMediaHostname,
-  serveUpstreamMedia,
-} from './mediaProxy.js';
-import { formatMetingFetchError } from './metingFetch.js';
-import {
-  fetchMetingApi,
-  isMetingApiHostname,
-  getMetingUpstreamBases,
-  getMetingUpstreamStatus,
-  startMetingHealthProbe,
-} from './metingUpstream.js';
-import { fetchCustomMusicApi, hasCustomMusicApi } from './customMusicApi.js';
-import { fetchLrcapiLyrics, getLrcapiUpstreamStatus } from './lrcapiUpstream.js';
-import { mountWechatFileHelperProxy } from './wechatFileHelperProxy.js';
-import { mountAdminApi } from './adminApi.js';
-import { initAdminCredentials } from './adminCredentials.js';
-import { isSetupRequired, mountSetupApi } from './setupApi.js';
-import { buildRobotsTxt, buildSitemapXml, resolveSiteOrigin } from './seoFiles.js';
-import express from 'express';
-import cors from 'cors';
-import { createServer } from 'http';
-import { Server } from 'socket.io';
-import path from 'path';
-import fs from 'fs';
-import { fileURLToPath } from 'url';
-import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
-import { isIP } from 'net';
-import {
-  deriveApiSignKey,
-  verifyApiSign,
-  isPublicApiPath,
-  isApiSignRequired,
-} from './apiSign.js';
-import {
-  collectDeviceIdsForUser,
-  getUserIdForDevice,
-  isAccessBanned,
-  linkDeviceToUser,
-  sanitizeDeviceId,
-} from './deviceIdentity.js';
+import "./loadEnv.js";
+import { resizeCoverForThumb } from "./coverUrl.js";
+import { isBlockedMediaHostname, serveUpstreamMedia } from "./mediaProxy.js";
+import { formatMetingFetchError } from "./metingFetch.js";
+import { fetchMetingApi, isMetingApiHostname, getMetingUpstreamBases, getMetingUpstreamStatus, startMetingHealthProbe } from "./metingUpstream.js";
+import { fetchLrcapiLyrics, getLrcapiUpstreamStatus } from "./lrcapiUpstream.js";
+import { mountWechatFileHelperProxy } from "./wechatFileHelperProxy.js";
+import { mountAdminApi } from "./adminApi.js";
+import { initAdminCredentials } from "./adminCredentials.js";
+import { isSetupRequired, mountSetupApi } from "./setupApi.js";
+import { buildRobotsTxt, buildSitemapXml, resolveSiteOrigin } from "./seoFiles.js";
+import express from "express";
+import cors from "cors";
+import { createServer } from "http";
+import { Server } from "socket.io";
+import path from "path";
+import fs from "fs";
+import { fileURLToPath } from "url";
+import { createHmac, randomBytes, timingSafeEqual } from "crypto";
+import { isIP } from "net";
+import { deriveApiSignKey, verifyApiSign, isPublicApiPath, isApiSignRequired } from "./apiSign.js";
+import { collectDeviceIdsForUser, getUserIdForDevice, isAccessBanned, linkDeviceToUser, sanitizeDeviceId } from "./deviceIdentity.js";
 import {
   createRoom,
   getRoomPublic,
@@ -54,6 +33,7 @@ import {
   addUser,
   removeUser,
   renameUser,
+  setUserAvatar,
   renameRoom,
   setRoomLock,
   setRoomAudioQuality,
@@ -61,8 +41,6 @@ import {
   removeRoomMemberTier,
   setRoomMemberSettings,
   postMemberWelcomeMessage,
-  setRoomJoinNotice,
-  postJoinNoticeMessage,
   setRoomFmMode,
   setRoomPlayMode,
   setRoomAnnouncement,
@@ -110,70 +88,55 @@ import {
   serializeRoomForViewer,
   prepareRoomBroadcast,
   roomUpdateForViewer,
-} from './roomManager.js';
-import {
-  isCyapiConfigured,
-  searchKugouMusic,
-  getKugouSongDetail,
-  moderateCyapiImage,
-} from './cyapi.js';
-import { importNeteasePlaylist, importQqPlaylist, fetchNeteasePlaylistMetas } from './playlistImport.js';
-import { fetchNeteaseHotToplist } from './neteaseToplist.js';
-import { hasRedisEnvConfig, importFavoriteSongs, listFavoriteSongs, setFavoriteSong } from './roomStorage.js';
-import {
-  createChatImageUploadToken,
-  isQiniuConfigured,
-} from './qiniuOss.js';
-import { isLocalStickerImageKey } from './localSticker.js';
-import {
-  isApihzStickerConfigured,
-  searchApihzStickers,
-} from './apihzSticker.js';
-import { checkApihzSensitiveWords } from './apihzSensitiveWord.js';
-import { getSiteAnnouncement, initSiteAnnouncement } from './siteAnnouncement.js';
-import { initSiteBans, isSiteBanned } from './siteBan.js';
-import { createErrorReport, listPendingSolutionsForUser, ackErrorReportSolution } from './errorReports.js';
-import { getRuntimeConfig } from './runtimeConfig.js';
+} from "./roomManager.js";
+import { isCyapiConfigured, searchKugouMusic, getKugouSongDetail, moderateCyapiImage } from "./cyapi.js";
+import { importNeteasePlaylist, importQqPlaylist, fetchNeteasePlaylistMetas } from "./playlistImport.js";
+import { fetchNeteaseHotToplist } from "./neteaseToplist.js";
+import { hasRedisEnvConfig, importFavoriteSongs, listFavoriteSongs, setFavoriteSong } from "./roomStorage.js";
+import { createChatImageUploadToken, isQiniuConfigured } from "./qiniuOss.js";
+import { isLocalStickerImageKey } from "./localSticker.js";
+import { isApihzStickerConfigured, searchApihzStickers } from "./apihzSticker.js";
+import { checkApihzSensitiveWords } from "./apihzSensitiveWord.js";
+import { getSiteAnnouncement, initSiteAnnouncement } from "./siteAnnouncement.js";
+import { initSiteBans, isSiteBanned } from "./siteBan.js";
+import { createErrorReport, listPendingSolutionsForUser, ackErrorReportSolution } from "./errorReports.js";
+import { getRuntimeConfig } from "./runtimeConfig.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const clientDist = path.join(__dirname, '../client/dist');
+const clientDist = path.join(__dirname, "../client/dist");
 const PORT = process.env.PORT || 4000;
 const DISCONNECT_GRACE_MS = 30_000;
 const AUTO_ADVANCE_INTERVAL_MS = 500;
-const CLIENT_URL = (process.env.CLIENT_URL || '').replace(/\/$/, '');
+const CLIENT_URL = (process.env.CLIENT_URL || "").replace(/\/$/, "");
 const ALLOWED_ORIGINS = CLIENT_URL
-  ? new Set(CLIENT_URL.split(',').map((origin) => origin.trim().replace(/\/$/, '')).filter(Boolean))
+  ? new Set(
+      CLIENT_URL.split(",")
+        .map((origin) => origin.trim().replace(/\/$/, ""))
+        .filter(Boolean),
+    )
   : null;
-const CLIENT_ID_SECRET = process.env.CLIENT_ID_SECRET || randomBytes(32).toString('hex');
-const IS_PRODUCTION = process.env.NODE_ENV === 'production';
-const TRUST_PROXY = process.env.TRUST_PROXY === '1' || process.env.TRUST_PROXY === 'true';
-const IS_TEST_DEPLOYMENT = process.env.DEPLOYMENT_MODE === 'test';
-const ALLOW_INSECURE_HTTP_API = IS_TEST_DEPLOYMENT || process.env.ALLOW_INSECURE_HTTP_API === '1'
-  || process.env.ALLOW_INSECURE_HTTP_API === 'true';
-const ALLOW_INSECURE_COOKIES = IS_TEST_DEPLOYMENT || process.env.ALLOW_INSECURE_COOKIES === '1'
-  || process.env.ALLOW_INSECURE_COOKIES === 'true';
+const CLIENT_ID_SECRET = process.env.CLIENT_ID_SECRET || randomBytes(32).toString("hex");
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
+const TRUST_PROXY = process.env.TRUST_PROXY === "1" || process.env.TRUST_PROXY === "true";
+const IS_TEST_DEPLOYMENT = process.env.DEPLOYMENT_MODE === "test";
+const ALLOW_INSECURE_HTTP_API = IS_TEST_DEPLOYMENT || process.env.ALLOW_INSECURE_HTTP_API === "1" || process.env.ALLOW_INSECURE_HTTP_API === "true";
+const ALLOW_INSECURE_COOKIES = IS_TEST_DEPLOYMENT || process.env.ALLOW_INSECURE_COOKIES === "1" || process.env.ALLOW_INSECURE_COOKIES === "true";
 /** 会话 HMAC 有效期（秒），默认 90 天 */
-const SESSION_TTL_SEC = Math.max(
-  60 * 60 * 24,
-  parseInt(process.env.SESSION_TTL_SEC || String(60 * 60 * 24 * 90), 10) || (60 * 60 * 24 * 90),
-);
+const SESSION_TTL_SEC = Math.max(60 * 60 * 24, parseInt(process.env.SESSION_TTL_SEC || String(60 * 60 * 24 * 90), 10) || 60 * 60 * 24 * 90);
 /** 剩余有效期低于此值时 bootstrap 静默续签 */
-const SESSION_RENEW_WITHIN_SEC = Math.min(
-  60 * 60 * 24 * 7,
-  Math.max(60 * 60, Math.floor(SESSION_TTL_SEC / 3)),
-);
+const SESSION_RENEW_WITHIN_SEC = Math.min(60 * 60 * 24 * 7, Math.max(60 * 60, Math.floor(SESSION_TTL_SEC / 3)));
 
 if (IS_PRODUCTION && !ALLOWED_ORIGINS) {
-  console.warn('安全告警: NODE_ENV=production 但未配置 CLIENT_URL，浏览器跨域请求将被拒绝');
+  console.warn("安全告警: NODE_ENV=production 但未配置 CLIENT_URL，浏览器跨域请求将被拒绝");
 }
-if (IS_PRODUCTION && !(process.env.CLIENT_ID_SECRET || '').trim()) {
-  console.warn('安全告警: NODE_ENV=production 但未配置 CLIENT_ID_SECRET，重启后所有会话将失效');
+if (IS_PRODUCTION && !(process.env.CLIENT_ID_SECRET || "").trim()) {
+  console.warn("安全告警: NODE_ENV=production 但未配置 CLIENT_ID_SECRET，重启后所有会话将失效");
 }
 
 const app = express();
 // Forwarded IP headers are only trustworthy when the deployment explicitly
 // declares that a reverse proxy is in front of this process.
-app.set('trust proxy', TRUST_PROXY ? 1 : false);
+app.set("trust proxy", TRUST_PROXY ? 1 : false);
 const httpServer = createServer(app);
 
 function corsOrigin(origin, callback) {
@@ -193,13 +156,13 @@ function corsOrigin(origin, callback) {
     return;
   }
 
-  callback(null, ALLOWED_ORIGINS.has(origin.replace(/\/$/, '')));
+  callback(null, ALLOWED_ORIGINS.has(origin.replace(/\/$/, "")));
 }
 
 const io = new Server(httpServer, {
   cors: {
     origin: corsOrigin,
-    methods: ['GET', 'POST'],
+    methods: ["GET", "POST"],
   },
   // 表情 data URL 需 >1MB；4MB 兼顾防大包 DoS 与本地贴纸
   maxHttpBufferSize: 4 * 1024 * 1024,
@@ -215,32 +178,34 @@ const io = new Server(httpServer, {
 
 app.use(cors({ origin: corsOrigin }));
 app.use((_req, res, next) => {
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
-  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("X-Frame-Options", "SAMEORIGIN");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
   if (IS_PRODUCTION) {
-    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
   }
   next();
 });
-app.use(express.json({
-  limit: '2mb',
-  verify: (req, _res, buf) => {
-    req.rawBody = buf;
-  },
-}));
+app.use(
+  express.json({
+    limit: "2mb",
+    verify: (req, _res, buf) => {
+      req.rawBody = buf;
+    },
+  }),
+);
 
 mountSetupApi(app);
 
 /** 受保护 API：会话校验 + 请求签名校验 */
-const API_ACCESS_DENIED = '请求无效，请刷新页面后重试';
+const API_ACCESS_DENIED = "请求无效，请刷新页面后重试";
 
 app.use((req, res, next) => {
-  if (!req.path.startsWith('/api/')) return next();
-  if (req.path.startsWith('/api/setup/')) return next();
+  if (!req.path.startsWith("/api/")) return next();
+  if (req.path.startsWith("/api/setup/")) return next();
   // 管理后台使用独立的账号密码鉴权（见 adminApi.js / adminCredentials.js），不走会话身份与签名
-  if (req.path.startsWith('/api/admin/')) return next();
+  if (req.path.startsWith("/api/admin/")) return next();
   if (isPublicApiPath(req)) return next();
 
   const identity = resolveIdentityFromRequest(req);
@@ -274,12 +239,14 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 10000) {
 }
 
 function normalizeClientIp(raw) {
-  let ip = String(raw || '').replace(/^::ffff:/, '').trim();
-  if (!ip) return '';
+  let ip = String(raw || "")
+    .replace(/^::ffff:/, "")
+    .trim();
+  if (!ip) return "";
 
   // 取逗号分隔链的首段（CDN 自定义头偶发带多值）
-  if (ip.includes(',')) {
-    ip = ip.split(',')[0].trim();
+  if (ip.includes(",")) {
+    ip = ip.split(",")[0].trim();
   }
 
   const v4WithPort = ip.match(/^(\d{1,3}(?:\.\d{1,3}){3}):\d+$/);
@@ -289,13 +256,13 @@ function normalizeClientIp(raw) {
 }
 
 function normalizeReportedClientIp(raw) {
-  const ip = normalizeClientIp(String(raw || '').slice(0, 64));
-  return isIP(ip) ? ip : '';
+  const ip = normalizeClientIp(String(raw || "").slice(0, 64));
+  return isIP(ip) ? ip : "";
 }
 
 function getHeaderIp(headers, name) {
-  const key = String(name || '').toLowerCase();
-  if (!key) return '';
+  const key = String(name || "").toLowerCase();
+  if (!key) return "";
   const raw = headers[key];
   const value = Array.isArray(raw) ? raw[0] : raw;
   return normalizeClientIp(value);
@@ -305,13 +272,15 @@ function getHeaderIp(headers, name) {
  * CDN 回源真实客户端 IP 头（有 CDN 时必填）。
  * Cloudflare: CF-Connecting-IP；EdgeOne: iqp
  */
-const CLIENT_IP_HEADER = String(process.env.CLIENT_IP_HEADER || '').trim().toLowerCase();
+const CLIENT_IP_HEADER = String(process.env.CLIENT_IP_HEADER || "")
+  .trim()
+  .toLowerCase();
 
-function getClientIpFromHeaders(headers = {}, remoteAddress = '') {
+function getClientIpFromHeaders(headers = {}, remoteAddress = "") {
   // 未接反代时只用 socket 地址，避免客户端伪造 XFF 绕过限流
   const trustForwarded = TRUST_PROXY;
   if (!trustForwarded) {
-    return normalizeClientIp(remoteAddress || '');
+    return normalizeClientIp(remoteAddress || "");
   }
 
   // CDN 配置头优先于 Nginx 写入的边缘节点 X-Real-IP
@@ -321,27 +290,30 @@ function getClientIpFromHeaders(headers = {}, remoteAddress = '') {
   }
 
   // Nginx 覆盖写入的 X-Real-IP 优先于可被伪造的 XFF 首段
-  const realIp = getHeaderIp(headers, 'x-real-ip');
+  const realIp = getHeaderIp(headers, "x-real-ip");
   if (realIp) return realIp;
 
-  const forwarded = headers['x-forwarded-for'];
+  const forwarded = headers["x-forwarded-for"];
   const rawForwarded = Array.isArray(forwarded) ? forwarded[0] : forwarded;
   if (rawForwarded) {
-    const parts = String(rawForwarded).split(',').map((part) => part.trim()).filter(Boolean);
+    const parts = String(rawForwarded)
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean);
     // 可信代理追加在末尾；取最后一段
     if (parts.length > 0) return normalizeClientIp(parts[parts.length - 1]);
   }
 
-  return normalizeClientIp(remoteAddress || '');
+  return normalizeClientIp(remoteAddress || "");
 }
 
 function logIpDebug(scope, headers, remoteAddress, resolvedIp) {
-  if (process.env.DEBUG_IP !== '1') return;
+  if (process.env.DEBUG_IP !== "1") return;
   console.log(`[ip-debug:${scope}]`, {
-    clientIpHeader: CLIENT_IP_HEADER || '(unset)',
+    clientIpHeader: CLIENT_IP_HEADER || "(unset)",
     customIp: CLIENT_IP_HEADER ? headers?.[CLIENT_IP_HEADER] : undefined,
-    xff: headers?.['x-forwarded-for'],
-    realIp: headers?.['x-real-ip'],
+    xff: headers?.["x-forwarded-for"],
+    realIp: headers?.["x-real-ip"],
     remoteAddress,
     resolvedIp,
   });
@@ -349,7 +321,7 @@ function logIpDebug(scope, headers, remoteAddress, resolvedIp) {
 
 function getRequestIp(req) {
   const ip = getClientIpFromHeaders(req.headers, req.socket?.remoteAddress || req.ip);
-  logIpDebug('http', req.headers, req.socket?.remoteAddress || req.ip, ip);
+  logIpDebug("http", req.headers, req.socket?.remoteAddress || req.ip, ip);
   return ip;
 }
 
@@ -357,36 +329,34 @@ function getClientIp(socket) {
   const headers = socket.request?.headers || socket.handshake.headers || {};
   const remoteAddress = socket.request?.socket?.remoteAddress || socket.handshake.address;
   const ip = getClientIpFromHeaders(headers, remoteAddress);
-  logIpDebug('socket', headers, remoteAddress, ip);
+  logIpDebug("socket", headers, remoteAddress, ip);
   return ip;
 }
 
 function isPrivateIp(ip) {
   return (
-    !ip
-    || ip === '::1'
-    || ip === '127.0.0.1'
-    || ip === '0.0.0.0'
-    || ip.startsWith('10.')
-    || ip.startsWith('192.168.')
-    || ip.startsWith('169.254.')
-    || /^172\.(1[6-9]|2\d|3[0-1])\./.test(ip)
-    || /^fc|^fd/i.test(ip)
-    || /^fe80:/i.test(ip)
+    !ip ||
+    ip === "::1" ||
+    ip === "127.0.0.1" ||
+    ip === "0.0.0.0" ||
+    ip.startsWith("10.") ||
+    ip.startsWith("192.168.") ||
+    ip.startsWith("169.254.") ||
+    /^172\.(1[6-9]|2\d|3[0-1])\./.test(ip) ||
+    /^fc|^fd/i.test(ip) ||
+    /^fe80:/i.test(ip)
   );
 }
 
 function normalizeLocationName(value) {
-  const text = String(value || '').trim();
-  if (!text) return '';
+  const text = String(value || "").trim();
+  if (!text) return "";
   const parts = text
-    .replace(/^(中国|中华人民共和国)\s*/u, '')
+    .replace(/^(中国|中华人民共和国)\s*/u, "")
     .split(/[\s/|]+/u)
     .map((part) => part.trim())
     .filter(Boolean)
-    .map((part) => part
-      .replace(/(省|市|特别行政区|壮族自治区|回族自治区|维吾尔自治区)$/u, '')
-      .trim())
+    .map((part) => part.replace(/(省|市|特别行政区|壮族自治区|回族自治区|维吾尔自治区)$/u, "").trim())
     .filter(Boolean)
     .slice(0, 2);
 
@@ -398,18 +368,20 @@ function normalizeLocationName(value) {
   if (deduped.length > 1 && deduped.every((part) => part === deduped[0])) {
     return deduped[0].slice(0, 12);
   }
-  return deduped.join(' ').slice(0, 12);
+  return deduped.join(" ").slice(0, 12);
 }
 
 function fallbackLocationForIp(ip) {
-  if (!ip || isPrivateIp(ip)) return '本地';
-  return '未知';
+  if (!ip || isPrivateIp(ip)) return "本地";
+  return "未知";
 }
 
-const VALID_SOURCES = new Set(['netease', 'tencent', 'kugou']);
+const VALID_SOURCES = new Set(["netease", "tencent", "kugou"]);
 
 function limitText(value, maxLength) {
-  return String(value || '').trim().slice(0, maxLength);
+  return String(value || "")
+    .trim()
+    .slice(0, maxLength);
 }
 
 function createRateLimiter({ windowMs, max, maxBuckets = 10_000 }) {
@@ -448,17 +420,17 @@ const limitSessionBootstrap = createRateLimiter({ windowMs: 60_000, max: 60 });
 const limitNewSessionBootstrap = createRateLimiter({ windowMs: 60_000, max: 12 });
 
 function sanitizeClientSong(song) {
-  if (!song || typeof song !== 'object') {
-    return { error: '歌曲数据无效' };
+  if (!song || typeof song !== "object") {
+    return { error: "歌曲数据无效" };
   }
 
-  const source = VALID_SOURCES.has(song.source) ? song.source : 'netease';
+  const source = VALID_SOURCES.has(song.source) ? song.source : "netease";
   const id = limitText(song.id, 128);
   const name = limitText(song.name, 100);
-  const artist = limitText(song.artist, 100) || '未知歌手';
+  const artist = limitText(song.artist, 100) || "未知歌手";
 
   if (!id || !name) {
-    return { error: '歌曲数据缺少 id 或名称' };
+    return { error: "歌曲数据缺少 id 或名称" };
   }
 
   const sanitized = {
@@ -480,12 +452,12 @@ function sanitizeClientSong(song) {
 function parseMetingMediaQuery(url) {
   try {
     const parsed = new URL(url);
-    const type = parsed.searchParams.get('type');
-    if (type !== 'pic' && type !== 'url') return null;
-    const server = parsed.searchParams.get('server');
-    const id = parsed.searchParams.get('id');
+    const type = parsed.searchParams.get("type");
+    if (type !== "pic" && type !== "url") return null;
+    const server = parsed.searchParams.get("server");
+    const id = parsed.searchParams.get("id");
     if (!server || !id) return null;
-    const quality = parsed.searchParams.get('quality') || undefined;
+    const quality = parsed.searchParams.get("quality") || undefined;
     return { server, id, type, quality };
   } catch {
     return null;
@@ -494,13 +466,13 @@ function parseMetingMediaQuery(url) {
 
 function parseMetingPicQuery(url) {
   const query = parseMetingMediaQuery(url);
-  return query?.type === 'pic' ? query : null;
+  return query?.type === "pic" ? query : null;
 }
 
 function normalizeMetingResolvedUrl(raw) {
-  const text = String(raw || '').trim();
-  if (!text) return '';
-  return text.startsWith('@') ? text.slice(1).trim() : text;
+  const text = String(raw || "").trim();
+  if (!text) return "";
+  return text.startsWith("@") ? text.slice(1).trim() : text;
 }
 
 function isUnresolvedMetingMediaUrl(url) {
@@ -515,16 +487,16 @@ function isUnresolvedMetingMediaUrl(url) {
 }
 
 async function resolveMetingMediaUrl(query, depth = 0) {
-  if (depth > 5) throw new Error('Meting 媒体地址解析过深');
+  if (depth > 5) throw new Error("Meting 媒体地址解析过深");
 
   const params = { server: query.server, type: query.type, id: query.id };
   if (query.quality) params.quality = query.quality;
 
-  const response = await fetchMetingApi(params, { redirect: 'manual' }, 15000);
+  const response = await fetchMetingApi(params, { redirect: "manual" }, 15000);
 
   if (response.status >= 300 && response.status < 400) {
-    const location = normalizeMetingResolvedUrl(response.headers.get('location'));
-    if (!location) throw new Error('Meting 返回空重定向');
+    const location = normalizeMetingResolvedUrl(response.headers.get("location"));
+    if (!location) throw new Error("Meting 返回空重定向");
     const nested = parseMetingMediaQuery(location);
     if (nested && isUnresolvedMetingMediaUrl(location)) {
       return resolveMetingMediaUrl(nested, depth + 1);
@@ -533,7 +505,7 @@ async function resolveMetingMediaUrl(query, depth = 0) {
   }
 
   const text = normalizeMetingResolvedUrl(await response.text());
-  if (!text.startsWith('http')) throw new Error('Meting 未返回有效媒体地址');
+  if (!text.startsWith("http")) throw new Error("Meting 未返回有效媒体地址");
 
   const nested = parseMetingMediaQuery(text);
   if (nested && isUnresolvedMetingMediaUrl(text)) {
@@ -550,7 +522,7 @@ async function resolveMediaProxyFetchUrl(fetchUrl, thumbPx = 0) {
 
   try {
     const resolved = await resolveMetingMediaUrl(query);
-    if (query.type === 'pic' && thumbPx > 0) {
+    if (query.type === "pic" && thumbPx > 0) {
       return resizeCoverForThumb(resolved, thumbPx);
     }
     return resolved;
@@ -562,108 +534,108 @@ async function resolveMediaProxyFetchUrl(fetchUrl, thumbPx = 0) {
 
 async function finalizeMetingTextResponse(body, metingType) {
   const normalized = normalizeMetingResolvedUrl(body);
-  if (metingType !== 'url' || !normalized.startsWith('http')) return normalized;
+  if (metingType !== "url" || !normalized.startsWith("http")) return normalized;
   if (!isUnresolvedMetingMediaUrl(normalized)) return normalized;
 
   const nested = parseMetingMediaQuery(normalized);
-  if (!nested || nested.type !== 'url') return normalized;
+  if (!nested || nested.type !== "url") return normalized;
   return resolveMetingMediaUrl(nested);
 }
 
-async function proxyMetingResponse(metingQuery, res, thumbPx = 0, metingType = '') {
-  const response = await fetchMetingApi(metingQuery, { redirect: 'manual' });
+async function proxyMetingResponse(metingQuery, res, thumbPx = 0, metingType = "") {
+  const response = await fetchMetingApi(metingQuery, { redirect: "manual" });
 
   if (response.status >= 300 && response.status < 400) {
-    let location = response.headers.get('location');
+    let location = response.headers.get("location");
     if (location && thumbPx > 0) {
       location = resizeCoverForThumb(location, thumbPx);
     }
     if (location) {
       // type=url/lrc 必须返回文本 URL，不能把浏览器重定向到第三方 CDN（fetch 会触发 CORS）
-      if (metingType === 'url' || metingType === 'lrc') {
+      if (metingType === "url" || metingType === "lrc") {
         const body = await finalizeMetingTextResponse(location, metingType);
-        return res.type('text').send(body);
+        return res.type("text").send(body);
       }
       return res.redirect(response.status, location);
     }
   }
 
-  const contentType = response.headers.get('content-type') || '';
+  const contentType = response.headers.get("content-type") || "";
   const text = await response.text();
 
-  if (metingType === 'url' || metingType === 'lrc') {
+  if (metingType === "url" || metingType === "lrc") {
     const body = await finalizeMetingTextResponse(text, metingType);
-    return res.type('text').send(body);
+    return res.type("text").send(body);
   }
 
-  if (contentType.includes('application/json') || text.startsWith('[') || text.startsWith('{')) {
+  if (contentType.includes("application/json") || text.startsWith("[") || text.startsWith("{")) {
     try {
       return res.json(JSON.parse(text));
     } catch {
-      return res.type('text').send(text);
+      return res.type("text").send(text);
     }
   }
 
-  return res.type('text').send(text);
+  return res.type("text").send(text);
 }
 
-app.get('/api/health', (_req, res) => {
+app.get("/api/health", (_req, res) => {
   res.json({ ok: true });
 });
 
 /** 首页站点公告：管理后台设置（Redis 持久化）；no-store 防 CDN/浏览器缓存旧公告 */
-app.get('/api/site-announcement', (_req, res) => {
-  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
-  res.set('Pragma', 'no-cache');
+app.get("/api/site-announcement", (_req, res) => {
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+  res.set("Pragma", "no-cache");
   res.json(getSiteAnnouncement());
 });
 
 /** 前端更新检测：走 /api 绕过 EdgeOne 静态缓存；no-store 防中间层缓存 */
-app.get('/api/app-version', (_req, res) => {
-  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
-  res.set('Pragma', 'no-cache');
-  const versionPath = path.join(clientDist, 'version.json');
+app.get("/api/app-version", (_req, res) => {
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+  res.set("Pragma", "no-cache");
+  const versionPath = path.join(clientDist, "version.json");
   try {
     if (fs.existsSync(versionPath)) {
-      const raw = fs.readFileSync(versionPath, 'utf8');
+      const raw = fs.readFileSync(versionPath, "utf8");
       const data = JSON.parse(raw);
       return res.json({
-        buildId: String(data.buildId || data.version || ''),
-        version: String(data.version || data.buildId || ''),
+        buildId: String(data.buildId || data.version || ""),
+        version: String(data.version || data.buildId || ""),
         notes: Array.isArray(data.notes) ? data.notes : [],
         builtAt: data.builtAt || null,
         forcePrompt: data.forcePrompt === true,
       });
     }
   } catch (err) {
-    console.error('app-version read error:', err?.message || err);
+    console.error("app-version read error:", err?.message || err);
   }
-  return res.json({ buildId: 'dev', version: 'dev', notes: [], builtAt: null, forcePrompt: false });
+  return res.json({ buildId: "dev", version: "dev", notes: [], builtAt: null, forcePrompt: false });
 });
 
-app.get('/api/music/toplist/netease', async (req, res) => {
+app.get("/api/music/toplist/netease", async (req, res) => {
   if (!requireSessionIdentity(req, res)) return;
-  if (!limitProxyRequest(proxyLimitKey('toplist', req))) {
-    return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
+  if (!limitProxyRequest(proxyLimitKey("toplist", req))) {
+    return res.status(429).json({ error: "请求过于频繁，请稍后再试" });
   }
-  const limit = parseInt(String(req.query.limit || ''), 10);
+  const limit = parseInt(String(req.query.limit || ""), 10);
   try {
     const data = await fetchNeteaseHotToplist(Number.isFinite(limit) ? limit : 200);
     res.json(data);
   } catch (err) {
-    console.error('Netease toplist error:', err.message);
-    res.status(502).json({ error: err.message || '获取热榜失败' });
+    console.error("Netease toplist error:", err.message);
+    res.status(502).json({ error: err.message || "获取热榜失败" });
   }
 });
 
-app.get('/api/music/netease/playlists/meta', async (req, res) => {
+app.get("/api/music/netease/playlists/meta", async (req, res) => {
   if (!requireSessionIdentity(req, res)) return;
-  if (!limitProxyRequest(proxyLimitKey('playlist-meta', req))) {
-    return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
+  if (!limitProxyRequest(proxyLimitKey("playlist-meta", req))) {
+    return res.status(429).json({ error: "请求过于频繁，请稍后再试" });
   }
 
-  const ids = String(req.query.ids || '')
-    .split(',')
+  const ids = String(req.query.ids || "")
+    .split(",")
     .map((id) => id.trim())
     .filter(Boolean)
     .slice(0, 12);
@@ -676,35 +648,37 @@ app.get('/api/music/netease/playlists/meta', async (req, res) => {
     const playlists = await fetchNeteasePlaylistMetas(ids);
     res.json({ playlists });
   } catch (err) {
-    console.error('Netease playlist meta error:', err.message);
-    res.status(502).json({ error: '获取歌单信息失败' });
+    console.error("Netease playlist meta error:", err.message);
+    res.status(502).json({ error: "获取歌单信息失败" });
   }
 });
 
-app.get('/api/music/netease/playlists/search', async (req, res) => {
+app.get("/api/music/netease/playlists/search", async (req, res) => {
   if (!requireSessionIdentity(req, res)) return;
-  if (!limitProxyRequest(proxyLimitKey('playlist-search', req))) {
-    return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
+  if (!limitProxyRequest(proxyLimitKey("playlist-search", req))) {
+    return res.status(429).json({ error: "请求过于频繁，请稍后再试" });
   }
 
   const keyword = limitText(req.query.keyword || req.query.s, 80);
-  const page = Math.max(1, parseInt(String(req.query.page || '1'), 10) || 1);
-  const limit = Math.min(50, Math.max(1, parseInt(String(req.query.limit || '20'), 10) || 20));
+  const page = Math.max(1, parseInt(String(req.query.page || "1"), 10) || 1);
+  const limit = Math.min(50, Math.max(1, parseInt(String(req.query.limit || "20"), 10) || 20));
   if (!keyword) return res.json({ playlists: [], total: 0, page, limit });
 
   try {
-    const response = await fetchMetingApi({ server: 'netease', type: 'search_playlist', id: keyword }, {}, 10000);
-    if (!response.ok) return res.status(response.status).json({ error: '红点歌单搜索失败' });
+    const response = await fetchMetingApi({ server: "netease", type: "search_playlist", id: keyword }, {}, 10000);
+    if (!response.ok) return res.status(response.status).json({ error: "红点歌单搜索失败" });
     const data = await response.json();
     const playlists = Array.isArray(data) ? data : [];
-    const normalized = playlists.map((item) => ({
-      id: String(item.id || ''),
-      name: String(item.name || item.title || '未命名歌单'),
-      coverImgUrl: String(item.cover || item.coverImgUrl || item.pic || ''),
-      creatorName: String(item.creator?.nickname || item.creator?.name || item.user?.nickname || ''),
-      trackCount: Number(item.trackCount || item.track_count || item.song_count || 0),
-      playCount: Number(item.playCount || item.playcount || 0),
-    })).filter((item) => item.id);
+    const normalized = playlists
+      .map((item) => ({
+        id: String(item.id || ""),
+        name: String(item.name || item.title || "未命名歌单"),
+        coverImgUrl: String(item.cover || item.coverImgUrl || item.pic || ""),
+        creatorName: String(item.creator?.nickname || item.creator?.name || item.user?.nickname || ""),
+        trackCount: Number(item.trackCount || item.track_count || item.song_count || 0),
+        playCount: Number(item.playCount || item.playcount || 0),
+      }))
+      .filter((item) => item.id);
     const start = (page - 1) * limit;
     res.json({
       page,
@@ -713,81 +687,79 @@ app.get('/api/music/netease/playlists/search', async (req, res) => {
       playlists: normalized.slice(start, start + limit),
     });
   } catch (err) {
-    console.error('Netease playlist search error:', err.message);
-    res.status(502).json({ error: '红点歌单搜索失败' });
+    console.error("Netease playlist search error:", err.message);
+    res.status(502).json({ error: "红点歌单搜索失败" });
   }
 });
 
-app.get('/api/music/sources', (_req, res) => {
+app.get("/api/music/sources", (_req, res) => {
   const sources = [
     {
-      id: 'netease',
-      name: '红点',
-      shortName: '红点',
-      color: '#ec4141',
+      id: "netease",
+      name: "红点",
+      shortName: "红点",
+      color: "#ec4141",
       supportsSearch: true,
       supportsIdLookup: true,
     },
     {
-      id: 'tencent',
-      name: '绿点',
-      shortName: '绿点',
-      color: '#31c27c',
+      id: "tencent",
+      name: "绿点",
+      shortName: "绿点",
+      color: "#31c27c",
       supportsSearch: true,
       supportsIdLookup: false,
     },
     {
-      id: 'kugou',
-      name: '蓝点',
-      shortName: '蓝点',
-      color: '#2688ee',
-      supportsSearch: isCyapiConfigured() || hasCustomMusicApi('kugou', 'search'),
+      id: "kugou",
+      name: "蓝点",
+      shortName: "蓝点",
+      color: "#2688ee",
+      supportsSearch: isCyapiConfigured(),
       supportsIdLookup: false,
-      description: hasCustomMusicApi('kugou', 'search')
-        ? '通过自定义接口搜索'
-        : isCyapiConfigured() ? '通过迟言 API 搜索' : '请配置酷狗搜索接口',
+      description: isCyapiConfigured() ? "通过迟言 API 搜索" : "请配置 CYAPI_KEY（蓝点）",
     },
   ];
   res.json(sources);
 });
 
-app.get('/api/meting', async (req, res) => {
+app.get("/api/meting", async (req, res) => {
   if (!requireSessionIdentity(req, res)) return;
 
   try {
-    const thumbPx = parseInt(String(req.query.size || ''), 10) || 0;
+    const thumbPx = parseInt(String(req.query.size || ""), 10) || 0;
     const query = { ...req.query };
     delete query.size;
-    await proxyMetingResponse(query, res, thumbPx, String(query.type || ''));
+    await proxyMetingResponse(query, res, thumbPx, String(query.type || ""));
   } catch (err) {
-    console.error('Meting proxy error:', formatMetingFetchError(err));
-    res.status(502).json({ error: '无法连接 Meting API，请检查 METING_API_URL 配置' });
+    console.error("Meting proxy error:", formatMetingFetchError(err));
+    res.status(502).json({ error: "无法连接 Meting API，请检查 METING_API_URL 配置" });
   }
 });
 
 /** HTTPS 站点下代理 http 音频/封面，避免浏览器混合内容警告 */
-app.get('/api/media-proxy', async (req, res) => {
+app.get("/api/media-proxy", async (req, res) => {
   if (!requireSessionIdentity(req, res)) return;
-  if (!limitProxyRequest(proxyLimitKey('media', req))) {
-    return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
+  if (!limitProxyRequest(proxyLimitKey("media", req))) {
+    return res.status(429).json({ error: "请求过于频繁，请稍后再试" });
   }
 
-  const raw = String(req.query.url || '').trim();
-  const thumbPx = Math.min(512, Math.max(0, parseInt(String(req.query.size || ''), 10) || 0));
+  const raw = String(req.query.url || "").trim();
+  const thumbPx = Math.min(512, Math.max(0, parseInt(String(req.query.size || ""), 10) || 0));
   let fetchUrl = raw;
   let parsed;
   try {
     parsed = new URL(fetchUrl);
   } catch {
-    return res.status(400).json({ error: '无效地址' });
+    return res.status(400).json({ error: "无效地址" });
   }
 
-  if (!['http:', 'https:'].includes(parsed.protocol)) {
-    return res.status(400).json({ error: '不支持的协议' });
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    return res.status(400).json({ error: "不支持的协议" });
   }
 
   if (isBlockedMediaHostname(parsed.hostname) && !isMetingApiHostname(parsed.hostname)) {
-    return res.status(403).json({ error: '禁止访问内网地址' });
+    return res.status(403).json({ error: "禁止访问内网地址" });
   }
   // 不再限制媒体域名白名单，仅拦截内网地址
 
@@ -801,14 +773,14 @@ app.get('/api/media-proxy', async (req, res) => {
     }
 
     // 解析后的最终 URL 必须落在音乐 CDN 白名单（不再允许任意公网 / 内网 Meting）
-    let finalHost = '';
+    let finalHost = "";
     try {
       finalHost = new URL(fetchUrl).hostname;
     } catch {
-      return res.status(400).json({ error: '无效地址' });
+      return res.status(400).json({ error: "无效地址" });
     }
     if (isBlockedMediaHostname(finalHost)) {
-      return res.status(403).json({ error: '禁止访问内网地址' });
+      return res.status(403).json({ error: "禁止访问内网地址" });
     }
 
     await serveUpstreamMedia(fetchUrl, res, fetchWithTimeout, {
@@ -817,176 +789,127 @@ app.get('/api/media-proxy', async (req, res) => {
       requireAllowlist: true,
     });
   } catch (err) {
-    console.error('Media proxy error:', err.message);
-    if (!res.headersSent) res.status(502).json({ error: '媒体代理失败' });
+    console.error("Media proxy error:", err.message);
+    if (!res.headersSent) res.status(502).json({ error: "媒体代理失败" });
   }
 });
 
 /** cyapi 蓝点音乐搜索 */
-app.get('/api/music/cyapi/kugou/search', async (req, res) => {
+app.get("/api/music/cyapi/kugou/search", async (req, res) => {
   if (!requireSessionIdentity(req, res)) return;
-  if (!limitProxyRequest(proxyLimitKey('kugou', req))) {
-    return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
+  if (!limitProxyRequest(proxyLimitKey("kugou", req))) {
+    return res.status(429).json({ error: "请求过于频繁，请稍后再试" });
   }
 
-  const keyword = String(req.query.q || '').trim();
-  const num = Math.min(Math.max(parseInt(String(req.query.num || '15'), 10) || 15, 1), 30);
+  if (!isCyapiConfigured()) {
+    return res.status(503).json({ error: "未配置 CYAPI_KEY" });
+  }
+
+  const keyword = String(req.query.q || "").trim();
+  const num = Math.min(Math.max(parseInt(String(req.query.num || "15"), 10) || 15, 1), 30);
 
   if (!keyword) return res.json([]);
 
   try {
-    try {
-      const custom = await fetchCustomMusicApi({
-        server: 'kugou',
-        type: 'search',
-        id: keyword,
-        keyword,
-        limit: num,
-      });
-      if (custom) return res.json(await custom.json());
-    } catch (err) {
-      console.warn(`自定义蓝点搜索失败，继续尝试 cyapi：${err?.message || err}`);
-    }
-    if (!isCyapiConfigured()) {
-      return res.status(503).json({ error: '未配置蓝点自定义接口或 CYAPI_KEY' });
-    }
     res.json(await searchKugouMusic(keyword, num));
   } catch (err) {
-    console.error('Cyapi Kugou search error:', err.message);
-    res.status(502).json({ error: '蓝点音乐搜索失败' });
+    console.error("Cyapi Kugou search error:", err.message);
+    res.status(502).json({ error: "蓝点音乐搜索失败" });
   }
 });
 
 /** 导入外部歌单（分享链接） */
-app.post('/api/music/playlist/import', async (req, res) => {
+app.post("/api/music/playlist/import", async (req, res) => {
   if (!requireSessionIdentity(req, res)) return;
-  if (!limitProxyRequest(proxyLimitKey('playlist', req))) {
-    return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
+  if (!limitProxyRequest(proxyLimitKey("playlist", req))) {
+    return res.status(429).json({ error: "请求过于频繁，请稍后再试" });
   }
 
-  const platform = String(req.body?.platform || '').trim();
-  const input = String(req.body?.input || '').trim();
-  if (!input) return res.status(400).json({ error: '请粘贴歌单分享链接' });
-  if (platform !== 'netease' && platform !== 'qq') {
-    return res.status(400).json({ error: '不支持的平台' });
+  const platform = String(req.body?.platform || "").trim();
+  const input = String(req.body?.input || "").trim();
+  if (!input) return res.status(400).json({ error: "请粘贴歌单分享链接" });
+  if (platform !== "netease" && platform !== "qq") {
+    return res.status(400).json({ error: "不支持的平台" });
   }
 
   try {
-    const result = platform === 'netease'
-      ? await importNeteasePlaylist(input)
-      : await importQqPlaylist(input);
+    const result = platform === "netease" ? await importNeteasePlaylist(input) : await importQqPlaylist(input);
     res.json(result);
   } catch (err) {
-    console.error('Playlist import error:', err.message);
-    res.status(400).json({ error: err.message || '歌单导入失败' });
+    console.error("Playlist import error:", err.message);
+    res.status(400).json({ error: err.message || "歌单导入失败" });
   }
 });
 
 /** cyapi 蓝点音乐详情（播放链接、歌词） */
-app.get('/api/music/cyapi/kugou/song', async (req, res) => {
+app.get("/api/music/cyapi/kugou/song", async (req, res) => {
   if (!requireSessionIdentity(req, res)) return;
-  if (!limitProxyRequest(proxyLimitKey('kugou-song', req))) {
-    return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
+  if (!limitProxyRequest(proxyLimitKey("kugou-song", req))) {
+    return res.status(429).json({ error: "请求过于频繁，请稍后再试" });
   }
 
-  const id = String(req.query.id || '').trim();
-  if (!id) return res.status(400).json({ error: '缺少歌曲 id' });
+  if (!isCyapiConfigured()) {
+    return res.status(503).json({ error: "未配置 CYAPI_KEY" });
+  }
+
+  const id = String(req.query.id || "").trim();
+  if (!id) return res.status(400).json({ error: "缺少歌曲 id" });
 
   try {
-    let customDetail = null;
-    const customOperations = ['song', 'url', 'lrc', 'pic'].filter((operation) => (
-      hasCustomMusicApi('kugou', operation)
-    ));
-    if (customOperations.length > 0) {
-      const results = await Promise.allSettled(customOperations.map(async (operation) => {
-        const response = await fetchCustomMusicApi({ server: 'kugou', type: operation, id });
-        if (!response) return [operation, null];
-        if (operation === 'song') {
-          const songs = await response.json();
-          return [operation, Array.isArray(songs) ? songs[0] : songs];
-        }
-        return [operation, await response.text()];
-      }));
-      customDetail = { id, source: 'kugou' };
-      let customHit = false;
-      for (const result of results) {
-        if (result.status !== 'fulfilled') {
-          console.warn(`自定义蓝点详情字段失败：${result.reason?.message || result.reason}`);
-          continue;
-        }
-        const [operation, value] = result.value;
-        if (operation === 'song' && value && typeof value === 'object') {
-          Object.assign(customDetail, value);
-          customHit = true;
-        } else if (value) {
-          customDetail[operation] = value;
-          customHit = true;
-        }
-      }
-      if (!customHit) customDetail = null;
-    }
-    if (isCyapiConfigured() && (!customDetail?.url || !customDetail?.lrc)) {
-      const fallbackDetail = await getKugouSongDetail(id);
-      if (fallbackDetail) customDetail = { ...fallbackDetail, ...customDetail };
-    }
-    if (customDetail) return res.json(customDetail);
-    if (!isCyapiConfigured()) {
-      return res.status(503).json({ error: '未配置蓝点自定义接口或 CYAPI_KEY' });
-    }
     const detail = await getKugouSongDetail(id);
-    if (!detail) return res.status(404).json({ error: '歌曲不存在' });
+    if (!detail) return res.status(404).json({ error: "歌曲不存在" });
     res.json(detail);
   } catch (err) {
-    console.error('Cyapi Kugou song error:', err.message);
-    res.status(502).json({ error: '蓝点音乐获取失败' });
+    console.error("Cyapi Kugou song error:", err.message);
+    res.status(502).json({ error: "蓝点音乐获取失败" });
   }
 });
 
 /** 歌词备用：52vmy，按歌名搜索 */
-app.get('/api/music/lrc-fallback', async (req, res) => {
+app.get("/api/music/lrc-fallback", async (req, res) => {
   if (!requireSessionIdentity(req, res)) return;
-  if (!limitProxyRequest(proxyLimitKey('lrc', req))) {
-    return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
+  if (!limitProxyRequest(proxyLimitKey("lrc", req))) {
+    return res.status(429).json({ error: "请求过于频繁，请稍后再试" });
   }
 
   const msg = limitText(req.query.msg, 120);
   const artist = limitText(req.query.artist, 120);
   const album = limitText(req.query.album, 120);
-  const n = String(req.query.n || '1');
-  if (!msg) return res.status(400).json({ error: '缺少歌曲名' });
+  const n = String(req.query.n || "1");
+  if (!msg) return res.status(400).json({ error: "缺少歌曲名" });
 
   // 兜底链：LrcAPI（带歌手/专辑，匹配更准，支持多上游负载均衡）→ 52vmy（仅按歌名）
   const lrcapiText = await fetchLrcapiLyrics({ title: msg, artist, album });
   if (lrcapiText) {
-    return res.type('text/plain; charset=utf-8').send(lrcapiText);
+    return res.type("text/plain; charset=utf-8").send(lrcapiText);
   }
 
   try {
     const params = new URLSearchParams({ msg, n });
     const response = await fetchWithTimeout(`${getRuntimeConfig().vmyLrcUrl}?${params}`);
     if (!response.ok) {
-      return res.status(502).json({ error: '歌词接口请求失败' });
+      return res.status(502).json({ error: "歌词接口请求失败" });
     }
     const text = await response.text();
-    res.type('text/plain; charset=utf-8').send(text);
+    res.type("text/plain; charset=utf-8").send(text);
   } catch (err) {
-    console.error('LRC fallback error:', err.message);
-    res.status(502).json({ error: '歌词获取失败' });
+    console.error("LRC fallback error:", err.message);
+    res.status(502).json({ error: "歌词获取失败" });
   }
 });
 
-const IDENTITY_UID_COOKIE = 'openmusic_uid';
-const IDENTITY_TOKEN_COOKIE = 'openmusic_token';
-const DEVICE_ID_COOKIE = 'openmusic_did';
+const IDENTITY_UID_COOKIE = "openmusic_uid";
+const IDENTITY_TOKEN_COOKIE = "openmusic_token";
+const DEVICE_ID_COOKIE = "openmusic_did";
 const IDENTITY_COOKIE_MAX_AGE_SEC = SESSION_TTL_SEC;
 
 function parseCookieHeader(header) {
   const out = {};
   if (!header) return out;
-  for (const part of String(header).split(';')) {
+  for (const part of String(header).split(";")) {
     const trimmed = part.trim();
     if (!trimmed) continue;
-    const eq = trimmed.indexOf('=');
+    const eq = trimmed.indexOf("=");
     if (eq <= 0) continue;
     const key = trimmed.slice(0, eq);
     const value = trimmed.slice(eq + 1);
@@ -1000,15 +923,15 @@ function parseCookieHeader(header) {
 }
 
 function sanitizeClientId(value) {
-  const id = String(value || '').trim();
-  return /^[a-zA-Z0-9_-]{8,64}$/.test(id) ? id : '';
+  const id = String(value || "").trim();
+  return /^[a-zA-Z0-9_-]{8,64}$/.test(id) ? id : "";
 }
 
 /** 签名格式：`iat.hmac(userId.iat)`，带过期时间 */
 function signClientId(clientId, iat = Math.floor(Date.now() / 1000)) {
   const issuedAt = Math.floor(Number(iat) || Date.now() / 1000);
   const payload = `${clientId}.${issuedAt}`;
-  const sig = createHmac('sha256', CLIENT_ID_SECRET).update(payload).digest('base64url');
+  const sig = createHmac("sha256", CLIENT_ID_SECRET).update(payload).digest("base64url");
   return `${issuedAt}.${sig}`;
 }
 
@@ -1017,10 +940,10 @@ function signClientId(clientId, iat = Math.floor(Date.now() / 1000)) {
  */
 function verifyClientToken(clientId, token) {
   const id = sanitizeClientId(clientId);
-  const rawToken = String(token || '').trim();
+  const rawToken = String(token || "").trim();
   if (!id || !rawToken) return null;
 
-  const dot = rawToken.indexOf('.');
+  const dot = rawToken.indexOf(".");
   if (dot <= 0) return null;
 
   const iat = Number(rawToken.slice(0, dot));
@@ -1028,9 +951,7 @@ function verifyClientToken(clientId, token) {
   if (!Number.isFinite(iat) || iat <= 0 || !sig) return null;
 
   try {
-    const expected = Buffer.from(
-      createHmac('sha256', CLIENT_ID_SECRET).update(`${id}.${iat}`).digest('base64url'),
-    );
+    const expected = Buffer.from(createHmac("sha256", CLIENT_ID_SECRET).update(`${id}.${iat}`).digest("base64url"));
     const actual = Buffer.from(sig);
     if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) return null;
   } catch {
@@ -1045,29 +966,26 @@ function verifyClientToken(clientId, token) {
 }
 
 function createServerClientId() {
-  return randomBytes(18).toString('base64url');
+  return randomBytes(18).toString("base64url");
 }
 
 function setIdentityCookieHeaders(res, userId, token, deviceId = null) {
   // 生产环境默认强制 Secure，避免反代漏传 X-Forwarded-Proto 时静默降级。
   // 临时 HTTP 部署必须由管理员显式允许不安全 Cookie。
   const useSecureCookie = (IS_PRODUCTION && !ALLOW_INSECURE_COOKIES) || res.req?.secure;
-  const secure = useSecureCookie ? '; Secure' : '';
+  const secure = useSecureCookie ? "; Secure" : "";
   const base = `Path=/; Max-Age=${IDENTITY_COOKIE_MAX_AGE_SEC}; HttpOnly; SameSite=Lax${secure}`;
-  const cookies = [
-    `${IDENTITY_UID_COOKIE}=${encodeURIComponent(userId)}; ${base}`,
-    `${IDENTITY_TOKEN_COOKIE}=${encodeURIComponent(token)}; ${base}`,
-  ];
+  const cookies = [`${IDENTITY_UID_COOKIE}=${encodeURIComponent(userId)}; ${base}`, `${IDENTITY_TOKEN_COOKIE}=${encodeURIComponent(token)}; ${base}`];
   const did = sanitizeDeviceId(deviceId);
   if (did) {
     cookies.push(`${DEVICE_ID_COOKIE}=${encodeURIComponent(did)}; ${base}`);
   }
-  res.setHeader('Set-Cookie', cookies);
+  res.setHeader("Set-Cookie", cookies);
 }
 
 /** 仅读取 HttpOnly 设备 Cookie（不可用 body/localStorage 冒充恢复） */
 function resolveDeviceIdFromCookieHeader(cookieHeader) {
-  const cookies = parseCookieHeader(cookieHeader || '');
+  const cookies = parseCookieHeader(cookieHeader || "");
   return sanitizeDeviceId(cookies[DEVICE_ID_COOKIE]);
 }
 
@@ -1078,18 +996,18 @@ function resolveBodyDeviceId(req) {
 function resolveIdentityFromCookies(cookieHeader) {
   const cookies = parseCookieHeader(cookieHeader);
   const userId = sanitizeClientId(cookies[IDENTITY_UID_COOKIE]);
-  const token = String(cookies[IDENTITY_TOKEN_COOKIE] || '').trim();
+  const token = String(cookies[IDENTITY_TOKEN_COOKIE] || "").trim();
   return verifyClientToken(userId, token);
 }
 
 function resolveIdentityFromRequest(req) {
-  return resolveIdentityFromCookies(req.headers?.cookie || '');
+  return resolveIdentityFromCookies(req.headers?.cookie || "");
 }
 
 function requireSessionIdentity(req, res) {
   const identity = req.apiIdentity || resolveIdentityFromRequest(req);
   if (!identity?.userId) {
-    res.status(401).json({ error: '会话未就绪，请刷新页面后重试' });
+    res.status(401).json({ error: "会话未就绪，请刷新页面后重试" });
     return null;
   }
   return identity;
@@ -1109,16 +1027,16 @@ function sendBootstrapResponse(res, userId, iat, token, deviceId = null) {
 
 function proxyLimitKey(kind, req) {
   const identity = resolveIdentityFromRequest(req);
-  return `${kind}:${getRequestIp(req)}:${identity?.userId || 'anon'}`;
+  return `${kind}:${getRequestIp(req)}:${identity?.userId || "anon"}`;
 }
 
 /** 建立 HttpOnly 会话：身份凭证仅通过 Cookie 传递，不经 WebSocket 明文下发 */
-app.post('/api/session/bootstrap', async (req, res) => {
+app.post("/api/session/bootstrap", async (req, res) => {
   const requestIp = getRequestIp(req);
   if (!limitSessionBootstrap(`session:${requestIp}`)) {
-    return res.status(429).json({ error: '会话请求过于频繁，请稍后再试' });
+    return res.status(429).json({ error: "会话请求过于频繁，请稍后再试" });
   }
-  const cookieDeviceId = resolveDeviceIdFromCookieHeader(req.headers?.cookie || '');
+  const cookieDeviceId = resolveDeviceIdFromCookieHeader(req.headers?.cookie || "");
   const bodyDeviceId = resolveBodyDeviceId(req);
   const now = Math.floor(Date.now() / 1000);
 
@@ -1139,18 +1057,12 @@ app.post('/api/session/bootstrap', async (req, res) => {
     if (boundUserId) {
       await linkDeviceToUser(cookieDeviceId, boundUserId);
       const signIat = now;
-      return sendBootstrapResponse(
-        res,
-        boundUserId,
-        signIat,
-        signClientId(boundUserId, signIat),
-        cookieDeviceId,
-      );
+      return sendBootstrapResponse(res, boundUserId, signIat, signClientId(boundUserId, signIat), cookieDeviceId);
     }
   }
 
   if (!limitNewSessionBootstrap(`session-new:${requestIp}`)) {
-    return res.status(429).json({ error: '新会话创建过于频繁，请稍后再试' });
+    return res.status(429).json({ error: "新会话创建过于频繁，请稍后再试" });
   }
   const userId = createServerClientId();
   const deviceId = cookieDeviceId || createServerClientId();
@@ -1159,14 +1071,14 @@ app.post('/api/session/bootstrap', async (req, res) => {
   return sendBootstrapResponse(res, userId, signIat, signClientId(userId, signIat), deviceId);
 });
 
-app.post('/api/error-reports', async (req, res) => {
+app.post("/api/error-reports", async (req, res) => {
   const identity = resolveIdentityFromRequest(req);
   if (!identity?.userId) {
-    return res.status(401).json({ error: '会话未就绪，请刷新页面后重试' });
+    return res.status(401).json({ error: "会话未就绪，请刷新页面后重试" });
   }
   const ip = getRequestIp(req);
   if (!limitErrorReport(`error-report:${ip}:${identity.userId}`)) {
-    return res.status(429).json({ error: '上报过于频繁，请稍后再试' });
+    return res.status(429).json({ error: "上报过于频繁，请稍后再试" });
   }
 
   const result = await createErrorReport({
@@ -1183,19 +1095,19 @@ app.post('/api/error-reports', async (req, res) => {
   res.json({ success: true, report: result.report });
 });
 
-app.get('/api/error-reports/pending-solutions', async (req, res) => {
+app.get("/api/error-reports/pending-solutions", async (req, res) => {
   const identity = resolveIdentityFromRequest(req);
   if (!identity?.userId) {
-    return res.status(401).json({ error: '会话未就绪，请刷新页面后重试' });
+    return res.status(401).json({ error: "会话未就绪，请刷新页面后重试" });
   }
   const solutions = await listPendingSolutionsForUser(identity.userId);
   res.json({ solutions });
 });
 
-app.post('/api/error-reports/:id/ack-solution', async (req, res) => {
+app.post("/api/error-reports/:id/ack-solution", async (req, res) => {
   const identity = resolveIdentityFromRequest(req);
   if (!identity?.userId) {
-    return res.status(401).json({ error: '会话未就绪，请刷新页面后重试' });
+    return res.status(401).json({ error: "会话未就绪，请刷新页面后重试" });
   }
   const result = await ackErrorReportSolution(req.params.id, identity.userId);
   if (!result.success) {
@@ -1204,25 +1116,25 @@ app.post('/api/error-reports/:id/ack-solution', async (req, res) => {
   res.json({ success: true });
 });
 
-app.get('/api/rooms', (_req, res) => {
+app.get("/api/rooms", (_req, res) => {
   res.json(listRooms());
 });
 
-app.post('/api/rooms', (req, res) => {
+app.post("/api/rooms", (req, res) => {
   if (!limitRoomCreate(`room:${getRequestIp(req)}`)) {
-    return res.status(429).json({ error: '创建房间过于频繁，请稍后再试' });
+    return res.status(429).json({ error: "创建房间过于频繁，请稍后再试" });
   }
 
   const name = req.body?.name;
   const password = req.body?.password;
   const identity = resolveIdentityFromRequest(req);
   if (!identity?.userId) {
-    return res.status(401).json({ error: '会话未就绪，请刷新页面后重试' });
+    return res.status(401).json({ error: "会话未就绪，请刷新页面后重试" });
   }
   const createIp = getRequestIp(req);
-  const createDeviceId = resolveDeviceIdFromCookieHeader(req.headers?.cookie || '');
+  const createDeviceId = resolveDeviceIdFromCookieHeader(req.headers?.cookie || "");
   if (isSiteBanned({ ip: createIp, deviceId: createDeviceId })) {
-    return res.status(403).json({ error: '你已被站点封禁，无法创建房间' });
+    return res.status(403).json({ error: "你已被站点封禁，无法创建房间" });
   }
   const room = createRoom({
     name,
@@ -1233,91 +1145,91 @@ app.post('/api/rooms', (req, res) => {
   res.json(room);
 });
 
-app.get('/api/rooms/:id', (req, res) => {
+app.get("/api/rooms/:id", (req, res) => {
   const room = getRoomPublic(req.params.id);
-  if (!room) return res.status(404).json({ error: '房间不存在' });
+  if (!room) return res.status(404).json({ error: "房间不存在" });
   res.json(room);
 });
 
-app.get('/api/chat/upload-config', (_req, res) => {
+app.get("/api/chat/upload-config", (_req, res) => {
   res.json({ enabled: isQiniuConfigured() });
 });
 
-app.get('/api/chat/sticker-search-config', (_req, res) => {
+app.get("/api/chat/sticker-search-config", (_req, res) => {
   res.json({ enabled: isApihzStickerConfigured() });
 });
 
-app.get('/api/chat/sticker-search', async (req, res) => {
+app.get("/api/chat/sticker-search", async (req, res) => {
   if (!isApihzStickerConfigured()) {
-    return res.status(503).json({ error: '未配置表情包搜索' });
+    return res.status(503).json({ error: "未配置表情包搜索" });
   }
 
   if (!requireSessionIdentity(req, res)) return;
-  if (!limitProxyRequest(proxyLimitKey('sticker-search', req))) {
-    return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
+  if (!limitProxyRequest(proxyLimitKey("sticker-search", req))) {
+    return res.status(429).json({ error: "请求过于频繁，请稍后再试" });
   }
 
   const words = limitText(req.query.words, 32);
   const page = Math.max(1, Math.min(200, Number(req.query.page) || 1));
   const limit = Math.max(1, Math.min(20, Number(req.query.limit) || 15));
   if (!words) {
-    return res.status(400).json({ error: '请输入搜索关键词' });
+    return res.status(400).json({ error: "请输入搜索关键词" });
   }
 
   try {
     const result = await searchApihzStickers(words, page, limit);
     res.json(result);
   } catch (err) {
-    res.status(400).json({ error: err.message || '搜索失败' });
+    res.status(400).json({ error: err.message || "搜索失败" });
   }
 });
 
-app.post('/api/chat/upload-token', (req, res) => {
+app.post("/api/chat/upload-token", (req, res) => {
   if (!isQiniuConfigured()) {
-    return res.status(503).json({ error: '图片上传未配置' });
+    return res.status(503).json({ error: "图片上传未配置" });
   }
 
   if (!limitProxyRequest(`chat-upload:${getRequestIp(req)}`)) {
-    return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
+    return res.status(429).json({ error: "请求过于频繁，请稍后再试" });
   }
 
   const roomId = limitText(req.body?.roomId, 32);
   const ext = limitText(req.body?.ext, 8).toLowerCase();
   if (!roomId) {
-    return res.status(400).json({ error: '房间无效' });
+    return res.status(400).json({ error: "房间无效" });
   }
 
   const identity = resolveIdentityFromRequest(req);
   if (!identity?.userId) {
-    return res.status(401).json({ error: '未登录' });
+    return res.status(401).json({ error: "未登录" });
   }
 
   const room = getRoomInternal(roomId);
   if (!room) {
-    return res.status(404).json({ error: '房间不存在' });
+    return res.status(404).json({ error: "房间不存在" });
   }
 
   if (!room.users.has(identity.userId)) {
-    return res.status(403).json({ error: '未加入房间' });
+    return res.status(403).json({ error: "未加入房间" });
   }
 
   if (room.muteAll || room.mutedUserIds?.has(identity.userId)) {
-    return res.status(403).json({ error: room.muteAll ? '当前房间已全体禁言' : '你已被禁言' });
+    return res.status(403).json({ error: room.muteAll ? "当前房间已全体禁言" : "你已被禁言" });
   }
 
   try {
     const tokenData = createChatImageUploadToken(roomId, ext);
     res.json(tokenData);
   } catch (err) {
-    res.status(400).json({ error: err.message || '生成上传凭证失败' });
+    res.status(400).json({ error: err.message || "生成上传凭证失败" });
   }
 });
 
 function resolveAndroidApkPath() {
   const candidates = [
-    path.join(__dirname, 'downloads/openmusic.apk'),
-    path.join(clientDist, 'downloads/openmusic.apk'),
-    path.join(clientDist, 'downloads/apk'),
+    path.join(__dirname, "downloads/openmusic.apk"),
+    path.join(clientDist, "downloads/openmusic.apk"),
+    path.join(clientDist, "downloads/apk"),
   ];
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) return candidate;
@@ -1326,10 +1238,7 @@ function resolveAndroidApkPath() {
 }
 
 function resolveIosIpaPath() {
-  const candidates = [
-    path.join(__dirname, 'downloads/openmusic.ipa'),
-    path.join(clientDist, 'downloads/openmusic.ipa'),
-  ];
+  const candidates = [path.join(__dirname, "downloads/openmusic.ipa"), path.join(clientDist, "downloads/openmusic.ipa")];
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) return candidate;
   }
@@ -1339,73 +1248,77 @@ function resolveIosIpaPath() {
 function sendAndroidApk(req, res) {
   const apkPath = resolveAndroidApkPath();
   if (!apkPath) {
-    return res.status(404).type('text/plain; charset=utf-8').send(
-      'APK 尚未部署。请将 GitHub Actions 构建的 app-debug.apk 上传到 server/downloads/openmusic.apk',
-    );
+    return res
+      .status(404)
+      .type("text/plain; charset=utf-8")
+      .send("APK 尚未部署。请将 GitHub Actions 构建的 app-debug.apk 上传到 server/downloads/openmusic.apk");
   }
-  res.setHeader('Content-Type', 'application/vnd.android.package-archive');
-  res.download(apkPath, 'openmusic.apk');
+  res.setHeader("Content-Type", "application/vnd.android.package-archive");
+  res.download(apkPath, "openmusic.apk");
 }
 
 function sendIosIpa(req, res) {
   const ipaPath = resolveIosIpaPath();
   if (!ipaPath) {
-    return res.status(404).type('text/plain; charset=utf-8').send(
-      'IPA 尚未部署。请将 GitHub Actions 构建的 openmusic.ipa 上传到 server/downloads/openmusic.ipa，并用 Sideloadly 安装。',
-    );
+    return res
+      .status(404)
+      .type("text/plain; charset=utf-8")
+      .send("IPA 尚未部署。请将 GitHub Actions 构建的 openmusic.ipa 上传到 server/downloads/openmusic.ipa，并用 Sideloadly 安装。");
   }
-  res.setHeader('Content-Type', 'application/octet-stream');
-  res.download(ipaPath, 'openmusic.ipa');
+  res.setHeader("Content-Type", "application/octet-stream");
+  res.download(ipaPath, "openmusic.ipa");
 }
 
-app.get('/downloads/openmusic.apk', sendAndroidApk);
-app.get('/downloads/openmusic.ipa', sendIosIpa);
+app.get("/downloads/openmusic.apk", sendAndroidApk);
+app.get("/downloads/openmusic.ipa", sendIosIpa);
 
 mountWechatFileHelperProxy(app, fetchWithTimeout, {
   requireAuth: (req, res) => Boolean(requireSessionIdentity(req, res)),
   secureCookies: IS_PRODUCTION,
 });
 
-app.get('/robots.txt', (req, res) => {
+app.get("/robots.txt", (req, res) => {
   const origin = resolveSiteOrigin(req, ALLOWED_ORIGINS);
-  res.type('text/plain').send(buildRobotsTxt(origin));
+  res.type("text/plain").send(buildRobotsTxt(origin));
 });
 
-app.get('/sitemap.xml', (req, res) => {
+app.get("/sitemap.xml", (req, res) => {
   const origin = resolveSiteOrigin(req, ALLOWED_ORIGINS);
-  res.type('application/xml').send(buildSitemapXml(origin));
+  res.type("application/xml").send(buildSitemapXml(origin));
 });
 
-app.use(express.static(clientDist, {
-  setHeaders(res, filePath) {
-    const rel = path.relative(clientDist, filePath).replace(/\\/g, '/');
-    if (rel === 'index.html') {
-      // 入口页不长期缓存，确保发版后能拉到新资源
-      res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-      return;
-    }
-    if (rel.startsWith('assets/')) {
-      // 固定文件名：允许短缓存；发版后清 EO /assets 即可
-      res.setHeader('Cache-Control', 'public, max-age=86400');
-      return;
-    }
-    if (rel.startsWith('qface/') || rel.startsWith('vendor/')) {
-      res.setHeader('Cache-Control', 'public, max-age=604800');
-    }
-  },
-}));
-app.get('*', (req, res, next) => {
+app.use(
+  express.static(clientDist, {
+    setHeaders(res, filePath) {
+      const rel = path.relative(clientDist, filePath).replace(/\\/g, "/");
+      if (rel === "index.html") {
+        // 入口页不长期缓存，确保发版后能拉到新资源
+        res.setHeader("Cache-Control", "no-cache, must-revalidate");
+        return;
+      }
+      if (rel.startsWith("assets/")) {
+        // 固定文件名：允许短缓存；发版后清 EO /assets 即可
+        res.setHeader("Cache-Control", "public, max-age=86400");
+        return;
+      }
+      if (rel.startsWith("qface/") || rel.startsWith("vendor/")) {
+        res.setHeader("Cache-Control", "public, max-age=604800");
+      }
+    },
+  }),
+);
+app.get("*", (req, res, next) => {
   if (
-    req.path.startsWith('/api')
-    || req.path.startsWith('/socket.io')
-    || req.path.startsWith('/downloads/')
-    || req.path.startsWith('/wx-proxy')
-    || req.path.startsWith('/cgi-bin')
+    req.path.startsWith("/api") ||
+    req.path.startsWith("/socket.io") ||
+    req.path.startsWith("/downloads/") ||
+    req.path.startsWith("/wx-proxy") ||
+    req.path.startsWith("/cgi-bin")
   ) {
     return next();
   }
-  res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-  res.sendFile(path.join(clientDist, 'index.html'), (err) => {
+  res.setHeader("Cache-Control", "no-cache, must-revalidate");
+  res.sendFile(path.join(clientDist, "index.html"), (err) => {
     if (err) next();
   });
 });
@@ -1417,7 +1330,7 @@ mountAdminApi(app, {
   io,
   socketToRoom,
   socketToUserId,
-  getClientIp: (req) => getClientIpFromHeaders(req.headers, req.socket?.remoteAddress || ''),
+  getClientIp: (req) => getClientIpFromHeaders(req.headers, req.socket?.remoteAddress || ""),
   allowedOrigins: ALLOWED_ORIGINS,
 });
 
@@ -1432,18 +1345,18 @@ function getSocketUserId(socket) {
 function rejectReadOnly(socket, callback) {
   const roomId = socketToRoom.get(socket.id);
   if (!roomId) {
-    callback?.({ success: false, error: '未加入房间' });
+    callback?.({ success: false, error: "未加入房间" });
     return true;
   }
 
   const userId = getSocketUserId(socket);
   if (!userId) {
-    callback?.({ success: false, error: '会话无效，请刷新后重试' });
+    callback?.({ success: false, error: "会话无效，请刷新后重试" });
     return true;
   }
 
   if (!canUserMutate(roomId, userId)) {
-    callback?.({ success: false, error: '只读端无法执行此操作' });
+    callback?.({ success: false, error: "只读端无法执行此操作" });
     return true;
   }
 
@@ -1452,7 +1365,7 @@ function rejectReadOnly(socket, callback) {
 
 function rejectRateLimited(socket, limiter, kind, callback) {
   if (!limiter(`${kind}:${socket.id}`)) {
-    callback?.({ success: false, error: '操作过于频繁，请稍后再试' });
+    callback?.({ success: false, error: "操作过于频繁，请稍后再试" });
     return true;
   }
   return false;
@@ -1464,7 +1377,7 @@ function getViewerRoomPayload(socket, roomId) {
 
 function emitSystemChat(roomId, message) {
   if (!roomId || !message) return;
-  io.to(roomId).emit('chat_message', message);
+  io.to(roomId).emit("chat_message", message);
 }
 
 /** 合并同房短时间内的多次 room_update，减轻人多时 O(N) 风暴 */
@@ -1482,9 +1395,7 @@ function clearPendingRoomBroadcast(normalized) {
 
 function flushRoomBroadcast(normalized) {
   const pending = pendingRoomBroadcasts.get(normalized);
-  const excludeSocketIds = pending?.excludeSocketIds?.size
-    ? [...pending.excludeSocketIds]
-    : undefined;
+  const excludeSocketIds = pending?.excludeSocketIds?.size ? [...pending.excludeSocketIds] : undefined;
   clearPendingRoomBroadcast(normalized);
   doBroadcastRoomUpdate(normalized, { excludeSocketIds });
 }
@@ -1527,9 +1438,7 @@ function doBroadcastRoomUpdate(roomId, options = {}) {
   const prepared = prepareRoomBroadcast(normalized);
   if (!prepared) return;
 
-  const excludeSids = options.excludeSocketIds?.length
-    ? new Set(options.excludeSocketIds)
-    : null;
+  const excludeSids = options.excludeSocketIds?.length ? new Set(options.excludeSocketIds) : null;
 
   const muteAll = Boolean(prepared.room.muteAll);
   const basePayload = {
@@ -1544,10 +1453,7 @@ function doBroadcastRoomUpdate(roomId, options = {}) {
     const payload = roomUpdateForViewer(prepared, viewerId);
     if (!payload) continue;
 
-    const needsPersonal = payload.chatMuted !== muteAll
-      || payload.mutedUserIds != null
-      || payload.userNicknames != null
-      || payload.bannedSongs != null;
+    const needsPersonal = payload.chatMuted !== muteAll || payload.mutedUserIds != null || payload.userNicknames != null || payload.bannedSongs != null;
 
     if (needsPersonal) {
       personalized.push({ sid, payload });
@@ -1560,13 +1466,13 @@ function doBroadcastRoomUpdate(roomId, options = {}) {
     if (excludeSids) {
       for (const sid of excludeSids) target = target.except(sid);
     }
-    target.emit('room_update', basePayload);
+    target.emit("room_update", basePayload);
     return;
   }
 
   if (personalized.length >= sockets.size - (excludeSids?.size || 0)) {
     for (const entry of personalized) {
-      io.to(entry.sid).emit('room_update', entry.payload);
+      io.to(entry.sid).emit("room_update", entry.payload);
     }
     return;
   }
@@ -1579,10 +1485,10 @@ function doBroadcastRoomUpdate(roomId, options = {}) {
   if (excludeSids) {
     for (const sid of excludeSids) target = target.except(sid);
   }
-  target.emit('room_update', basePayload);
+  target.emit("room_update", basePayload);
 
   for (const entry of personalized) {
-    io.to(entry.sid).emit('room_update', entry.payload);
+    io.to(entry.sid).emit("room_update", entry.payload);
   }
 }
 
@@ -1590,7 +1496,7 @@ function broadcastPlaybackState(roomId) {
   const internal = getRoomInternal(roomId);
   if (!internal) return;
   const state = buildPlaybackState(internal);
-  if (state) io.to(roomId).emit('playback_state', state);
+  if (state) io.to(roomId).emit("playback_state", state);
 }
 
 setOnRoomPrefetchReady((roomId) => {
@@ -1608,17 +1514,19 @@ function emitRoomAndPlayback(roomId, room) {
   broadcastPlaybackState(roomId);
 
   if (room?.randomLoading && !room.current) {
-    ensurePlayback(roomId).then((nextRoom) => {
-      if (!nextRoom) return;
-      if (nextRoom.current) {
-        emitRoomAndPlayback(roomId, nextRoom);
-        return;
-      }
-      broadcastRoomUpdate(roomId, { immediate: true });
-      broadcastPlaybackState(roomId);
-    }).catch((err) => {
-      console.error('Ensure playback after loading state failed:', err.message);
-    });
+    ensurePlayback(roomId)
+      .then((nextRoom) => {
+        if (!nextRoom) return;
+        if (nextRoom.current) {
+          emitRoomAndPlayback(roomId, nextRoom);
+          return;
+        }
+        broadcastRoomUpdate(roomId, { immediate: true });
+        broadcastPlaybackState(roomId);
+      })
+      .catch((err) => {
+        console.error("Ensure playback after loading state failed:", err.message);
+      });
   }
 }
 
@@ -1627,7 +1535,7 @@ function emitPlaybackOnly(roomId) {
   broadcastPlaybackState(roomId);
 }
 
-async function advanceEndedRoomNow(roomId, expectedQueueId = '') {
+async function advanceEndedRoomNow(roomId, expectedQueueId = "") {
   const internal = getRoomInternal(roomId);
   if (!internal?.current || !internal.isPlaying) return null;
   if (expectedQueueId && internal.current.queueId !== expectedQueueId) return null;
@@ -1649,51 +1557,42 @@ async function advanceEndedRoomNow(roomId, expectedQueueId = '') {
   }
 
   emitRoomAndPlayback(roomId, advanced);
-  console.log(sameTrackRestart ? 'playback loop-one restarted' : 'playback auto advanced', {
+  console.log(sameTrackRestart ? "playback loop-one restarted" : "playback auto advanced", {
     roomId,
     from: beforeQueueId,
     at: beforePosition.toFixed(2),
-    to: advanced.current?.queueId || 'loading',
+    to: advanced.current?.queueId || "loading",
   });
   return advanced;
 }
 
-io.on('connection', (socket) => {
-  socket.on('join_room', ({
-    roomId,
-    nickname,
-    password,
-    readOnly,
-    clientIp: reportedClientIp,
-    clientLocation,
-  } = {}, callback) => {
+io.on("connection", (socket) => {
+  socket.on("join_room", ({ roomId, nickname, password, readOnly, clientIp: reportedClientIp, clientLocation } = {}, callback) => {
     const id = roomId?.toUpperCase();
     if (!roomExists(id)) {
-      callback?.({ success: false, error: '房间不存在' });
+      callback?.({ success: false, error: "房间不存在" });
       return;
     }
 
     const ip = getClientIp(socket);
     if (!limitJoinAttempt(`join:${ip}:${id}`)) {
-      callback?.({ success: false, error: '尝试过于频繁，请稍后再试' });
+      callback?.({ success: false, error: "尝试过于频繁，请稍后再试" });
       return;
     }
 
-    const cookieIdentity = resolveIdentityFromCookies(socket.handshake?.headers?.cookie || '');
-    const userId = Boolean(readOnly)
-      ? createServerClientId()
-      : (cookieIdentity?.userId || createServerClientId());
+    const cookieIdentity = resolveIdentityFromCookies(socket.handshake?.headers?.cookie || "");
+    const userId = Boolean(readOnly) ? createServerClientId() : cookieIdentity?.userId || createServerClientId();
 
     if (!readOnly && !cookieIdentity) {
-      callback?.({ success: false, error: '会话未就绪，请刷新页面后重试', needsSession: true });
+      callback?.({ success: false, error: "会话未就绪，请刷新页面后重试", needsSession: true });
       return;
     }
 
-    const deviceId = resolveDeviceIdFromCookieHeader(socket.handshake?.headers?.cookie || '');
+    const deviceId = resolveDeviceIdFromCookieHeader(socket.handshake?.headers?.cookie || "");
     const auth = verifyRoomPassword(id, password, { clientId: userId, deviceId });
     if (!auth.ok) {
       if (!limitJoinPasswordFail(`joinfail:${ip}:${id}`)) {
-        callback?.({ success: false, error: '尝试过于频繁，请稍后再试' });
+        callback?.({ success: false, error: "尝试过于频繁，请稍后再试" });
         return;
       }
       callback?.({ success: false, error: auth.error, needsPassword: auth.needsPassword });
@@ -1705,13 +1604,13 @@ io.on('connection', (socket) => {
     const joinProbeIp = getClientIp(socket);
     const siteBan = isSiteBanned({ ip: joinProbeIp, deviceId });
     if (siteBan) {
-      callback?.({ success: false, error: '你已被站点封禁，无法进入房间' });
+      callback?.({ success: false, error: "你已被站点封禁，无法进入房间" });
       return;
     }
 
     const joinRoomInternal = getRoomInternal(id);
     if (joinRoomInternal && isAccessBanned(joinRoomInternal, userId, deviceId)) {
-      callback?.({ success: false, error: '你已被移出该房间，无法再次进入' });
+      callback?.({ success: false, error: "你已被移出该房间，无法再次进入" });
       return;
     }
 
@@ -1739,12 +1638,7 @@ io.on('connection', (socket) => {
 
     const joinInternalBefore = getRoomInternal(id);
     const priorUser = joinInternalBefore?.users?.get(userId);
-    const hadActiveSession = Boolean(
-      priorUser && (
-        (Array.isArray(priorUser.connectionIds) && priorUser.connectionIds.length > 0)
-        || priorUser.connectionId
-      ),
-    );
+    const hadActiveSession = Boolean(priorUser && ((Array.isArray(priorUser.connectionIds) && priorUser.connectionIds.length > 0) || priorUser.connectionId));
 
     // 安全限流仍使用连接来源 IP；客户端上报值仅用于成员归属展示/同端统计。
     const clientIp = normalizeReportedClientIp(reportedClientIp) || getClientIp(socket);
@@ -1757,7 +1651,7 @@ io.on('connection', (socket) => {
       clientIp: clientIp || undefined,
     });
     if (!joinedRoom) {
-      callback?.({ success: false, error: '加入房间失败' });
+      callback?.({ success: false, error: "加入房间失败" });
       return;
     }
     if (joinedRoom.error) {
@@ -1770,7 +1664,6 @@ io.on('connection', (socket) => {
     socket.join(id);
 
     const welcomeMessage = hadActiveSession ? null : postMemberWelcomeMessage(id, userId);
-    const joinNoticeMessage = hadActiveSession ? null : postJoinNoticeMessage(id, userId);
 
     // 无当前歌曲且队列为空时，加入后会异步拉取随机歌曲，先告知客户端"加载中"，
     // 避免播放条在随机歌曲到达前直接消失。
@@ -1790,9 +1683,7 @@ io.on('connection', (socket) => {
       playbackState,
       socketId: userId,
       connectionId: socket.id,
-      nickname: joinUser?.nickname
-        || roomPayload.users?.find((user) => user.id === userId)?.nickname
-        || String(nickname || '').trim(),
+      nickname: joinUser?.nickname || roomPayload.users?.find((user) => user.id === userId)?.nickname || String(nickname || "").trim(),
       // 不在 ACK 中下发 isOwner/isAdmin/canControl 等特权布尔值：
       // 角色仅由服务端鉴权 + 客户端用 room.creatorId/adminIds 与自身 socketId 比对展示 UI
     });
@@ -1803,38 +1694,39 @@ io.on('connection', (socket) => {
       // room_update 广播省略 location，需单独补发新成员的归属地给房内其他人，
       // 否则他们要等自己退出重进才能看到（进房 ACK 才带全量 location）
       if (location) {
-        socket.to(id).emit('user_location', { userId, location });
+        socket.to(id).emit("user_location", { userId, location });
       }
       if (welcomeMessage) {
-        socket.to(id).emit('chat_message', welcomeMessage);
-      }
-      if (joinNoticeMessage) {
-        socket.to(id).emit('chat_message', joinNoticeMessage);
+        socket.to(id).emit("chat_message", welcomeMessage);
       }
       // 若管理员已给出解决方案且用户尚未确认，进房时补推弹窗
       if (!readOnly && userId) {
-        void listPendingSolutionsForUser(userId).then((solutions) => {
-          for (const notice of solutions) {
-            socket.emit('error_report_solution', notice);
-          }
-        }).catch(() => {});
+        void listPendingSolutionsForUser(userId)
+          .then((solutions) => {
+            for (const notice of solutions) {
+              socket.emit("error_report_solution", notice);
+            }
+          })
+          .catch(() => {});
       }
     });
 
-    ensurePlayback(id).then((room) => {
-      if (room) emitRoomAndPlayback(id, room);
-    }).catch((err) => {
-      console.error('Ensure playback after join failed:', err.message);
-    });
+    ensurePlayback(id)
+      .then((room) => {
+        if (room) emitRoomAndPlayback(id, room);
+      })
+      .catch((err) => {
+        console.error("Ensure playback after join failed:", err.message);
+      });
   });
 
-  socket.on('rename_user', ({ nickname }, callback) => {
+  socket.on("rename_user", ({ nickname }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
-    if (rejectRateLimited(socket, limitSocketAction, 'rename', callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, "rename", callback)) return;
 
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
@@ -1849,24 +1741,44 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
-  socket.on('ack_error_report_solution', async ({ id } = {}, callback) => {
-    const userId = getSocketUserId(socket)
-      || resolveIdentityFromCookies(socket.handshake?.headers?.cookie || '')?.userId;
+  socket.on("set_user_avatar", ({ avatar_url }, callback) => {
+    if (rejectReadOnly(socket, callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, "avatar", callback)) return;
+
+    const roomId = socketToRoom.get(socket.id);
+    if (!roomId) {
+      callback?.({ success: false, error: "未加入房间" });
+      return;
+    }
+
+    const userId = getSocketUserId(socket);
+    const result = setUserAvatar(roomId, userId, avatar_url);
+    if (result.error) {
+      callback?.({ success: false, error: result.error });
+      return;
+    }
+
+    broadcastRoomUpdate(roomId);
+    callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
+  });
+
+  socket.on("ack_error_report_solution", async ({ id } = {}, callback) => {
+    const userId = getSocketUserId(socket) || resolveIdentityFromCookies(socket.handshake?.headers?.cookie || "")?.userId;
     if (!userId) {
-      callback?.({ success: false, error: '会话无效' });
+      callback?.({ success: false, error: "会话无效" });
       return;
     }
     const result = await ackErrorReportSolution(id, userId);
     callback?.(result.success ? { success: true } : { success: false, error: result.error });
   });
 
-  socket.on('rename_room', ({ name }, callback) => {
+  socket.on("rename_room", ({ name }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
-    if (rejectRateLimited(socket, limitSocketAction, 'rename_room', callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, "rename_room", callback)) return;
 
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
@@ -1880,13 +1792,13 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
-  socket.on('set_room_lock', ({ locked, password }, callback) => {
+  socket.on("set_room_lock", ({ locked, password }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
-    if (rejectRateLimited(socket, limitSocketAction, 'set_room_lock', callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, "set_room_lock", callback)) return;
 
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
@@ -1900,13 +1812,13 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
-  socket.on('set_room_fm_mode', ({ mode }, callback) => {
+  socket.on("set_room_fm_mode", ({ mode }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
-    if (rejectRateLimited(socket, limitSocketAction, 'set_room_fm_mode', callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, "set_room_fm_mode", callback)) return;
 
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
@@ -1920,13 +1832,13 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
-  socket.on('set_room_play_mode', ({ mode }, callback) => {
+  socket.on("set_room_play_mode", ({ mode }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
-    if (rejectRateLimited(socket, limitSocketAction, 'set_room_play_mode', callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, "set_room_play_mode", callback)) return;
 
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
@@ -1940,13 +1852,13 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
-  socket.on('set_room_announcement', ({ enabled, text }, callback) => {
+  socket.on("set_room_announcement", ({ enabled, text }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
-    if (rejectRateLimited(socket, limitSocketAction, 'set_room_announcement', callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, "set_room_announcement", callback)) return;
 
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
@@ -1960,22 +1872,17 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
-  socket.on('set_room_chat_history', ({ enabled }, callback) => {
+  socket.on("set_room_chat_history", ({ enabled }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
-    if (rejectRateLimited(socket, limitSocketAction, 'set_room_chat_history', callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, "set_room_chat_history", callback)) return;
 
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
-    const result = setChatHistoryVisibleOnJoin(
-      roomId,
-      getSocketUserId(socket),
-      enabled,
-      socket.id,
-    );
+    const result = setChatHistoryVisibleOnJoin(roomId, getSocketUserId(socket), enabled, socket.id);
     if (result.error) {
       callback?.({ success: false, error: result.error });
       return;
@@ -1985,74 +1892,76 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
-  socket.on('set_room_join_notice', ({ enabled, cooldownSec } = {}, callback) => {
+  socket.on(
+    "set_room_song_request",
+    (
+      {
+        enabled,
+        minStaySec,
+        maxPerUser,
+        cooldownSec,
+        queueMaxLength,
+        memberJumpEnabled,
+        memberSeekEnabled,
+        memberPauseEnabled,
+        systemMediaPlayBound,
+        systemMediaSkipBound,
+        dislikeSkipMode,
+        dislikeSkipThreshold,
+        dislikeSkipPercent,
+        clearSongsOnLeaveEnabled,
+        clearSongsOnLeaveDelaySec,
+      },
+      callback,
+    ) => {
+      if (rejectReadOnly(socket, callback)) return;
+      if (rejectRateLimited(socket, limitSocketAction, "set_room_song_request", callback)) return;
+
+      const roomId = socketToRoom.get(socket.id);
+      if (!roomId) {
+        callback?.({ success: false, error: "未加入房间" });
+        return;
+      }
+
+      const result = setSongRequestEnabled(
+        roomId,
+        getSocketUserId(socket),
+        {
+          enabled,
+          minStaySec,
+          maxPerUser,
+          cooldownSec,
+          queueMaxLength,
+          memberJumpEnabled,
+          memberSeekEnabled,
+          memberPauseEnabled,
+          systemMediaPlayBound,
+          systemMediaSkipBound,
+          dislikeSkipMode,
+          dislikeSkipThreshold,
+          dislikeSkipPercent,
+          clearSongsOnLeaveEnabled,
+          clearSongsOnLeaveDelaySec,
+        },
+        socket.id,
+      );
+      if (result.error) {
+        callback?.({ success: false, error: result.error });
+        return;
+      }
+
+      broadcastRoomUpdate(roomId);
+      callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
+    },
+  );
+
+  socket.on("ban_room_song", ({ song }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
-    if (rejectRateLimited(socket, limitSocketAction, 'set_room_join_notice', callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, "ban_room_song", callback)) return;
 
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
-      return;
-    }
-
-    const result = setRoomJoinNotice(
-      roomId,
-      getSocketUserId(socket),
-      { enabled, cooldownSec },
-      socket.id,
-    );
-    if (result.error) {
-      callback?.({ success: false, error: result.error });
-      return;
-    }
-
-    broadcastRoomUpdate(roomId);
-    callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
-  });
-
-  socket.on('set_room_song_request', ({ enabled, minStaySec, maxPerUser, cooldownSec, queueMaxLength, memberJumpEnabled, memberSeekEnabled, memberPauseEnabled, systemMediaPlayBound, systemMediaSkipBound, dislikeSkipMode, dislikeSkipThreshold, dislikeSkipPercent, clearSongsOnLeaveEnabled, clearSongsOnLeaveDelaySec }, callback) => {
-    if (rejectReadOnly(socket, callback)) return;
-    if (rejectRateLimited(socket, limitSocketAction, 'set_room_song_request', callback)) return;
-
-    const roomId = socketToRoom.get(socket.id);
-    if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
-      return;
-    }
-
-    const result = setSongRequestEnabled(roomId, getSocketUserId(socket), {
-      enabled,
-      minStaySec,
-      maxPerUser,
-      cooldownSec,
-      queueMaxLength,
-      memberJumpEnabled,
-      memberSeekEnabled,
-      memberPauseEnabled,
-      systemMediaPlayBound,
-      systemMediaSkipBound,
-      dislikeSkipMode,
-      dislikeSkipThreshold,
-      dislikeSkipPercent,
-      clearSongsOnLeaveEnabled,
-      clearSongsOnLeaveDelaySec,
-    }, socket.id);
-    if (result.error) {
-      callback?.({ success: false, error: result.error });
-      return;
-    }
-
-    broadcastRoomUpdate(roomId);
-    callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
-  });
-
-  socket.on('ban_room_song', ({ song }, callback) => {
-    if (rejectReadOnly(socket, callback)) return;
-    if (rejectRateLimited(socket, limitSocketAction, 'ban_room_song', callback)) return;
-
-    const roomId = socketToRoom.get(socket.id);
-    if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
@@ -2066,13 +1975,13 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
-  socket.on('unban_room_song', ({ name }, callback) => {
+  socket.on("unban_room_song", ({ name }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
-    if (rejectRateLimited(socket, limitSocketAction, 'unban_room_song', callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, "unban_room_song", callback)) return;
 
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
@@ -2086,13 +1995,13 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
-  socket.on('set_room_audio_quality', ({ netease, tencent }, callback) => {
+  socket.on("set_room_audio_quality", ({ netease, tencent }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
-    if (rejectRateLimited(socket, limitSocketAction, 'set_room_audio_quality', callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, "set_room_audio_quality", callback)) return;
 
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
@@ -2106,13 +2015,13 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
-  socket.on('set_room_member_tier', ({ userId, tier }, callback) => {
+  socket.on("set_room_member_tier", ({ userId, tier }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
-    if (rejectRateLimited(socket, limitSocketAction, 'set_room_member_tier', callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, "set_room_member_tier", callback)) return;
 
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
@@ -2126,13 +2035,13 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
-  socket.on('remove_room_member_tier', ({ userId }, callback) => {
+  socket.on("remove_room_member_tier", ({ userId }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
-    if (rejectRateLimited(socket, limitSocketAction, 'remove_room_member_tier', callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, "remove_room_member_tier", callback)) return;
 
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
@@ -2146,13 +2055,13 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
-  socket.on('set_room_member_settings', (settings, callback) => {
+  socket.on("set_room_member_settings", (settings, callback) => {
     if (rejectReadOnly(socket, callback)) return;
-    if (rejectRateLimited(socket, limitSocketAction, 'set_room_member_settings', callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, "set_room_member_settings", callback)) return;
 
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
@@ -2166,13 +2075,13 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
-  socket.on('set_chat_mute', ({ muteAll, userId, muted }, callback) => {
+  socket.on("set_chat_mute", ({ muteAll, userId, muted }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
-    if (rejectRateLimited(socket, limitSocketAction, 'set_chat_mute', callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, "set_chat_mute", callback)) return;
 
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
@@ -2186,13 +2095,13 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
-  socket.on('kick_user', async ({ userId: targetUserId }, callback) => {
+  socket.on("kick_user", async ({ userId: targetUserId }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
-    if (rejectRateLimited(socket, limitSocketAction, 'kick_user', callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, "kick_user", callback)) return;
 
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
@@ -2211,8 +2120,8 @@ io.on('connection', (socket) => {
       socketToRoom.delete(sid);
       socketToUserId.delete(sid);
       kickedSocket?.leave(roomId);
-      kickedSocket?.emit('kicked', {
-        message: '你已被房主移出房间，无法再次进入',
+      kickedSocket?.emit("kicked", {
+        message: "你已被房主移出房间，无法再次进入",
       });
     }
 
@@ -2223,13 +2132,13 @@ io.on('connection', (socket) => {
     });
   });
 
-  socket.on('transfer_owner', ({ userId: targetUserId }, callback) => {
+  socket.on("transfer_owner", ({ userId: targetUserId }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
-    if (rejectRateLimited(socket, limitSocketAction, 'transfer_owner', callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, "transfer_owner", callback)) return;
 
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
@@ -2245,13 +2154,13 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId), message: result.message });
   });
 
-  socket.on('set_room_admin', ({ userId: targetUserId, admin }, callback) => {
+  socket.on("set_room_admin", ({ userId: targetUserId, admin }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
-    if (rejectRateLimited(socket, limitSocketAction, 'set_room_admin', callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, "set_room_admin", callback)) return;
 
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
@@ -2266,7 +2175,7 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId), message: result.message });
   });
 
-  socket.on('leave_room', (_payload, callback) => {
+  socket.on("leave_room", (_payload, callback) => {
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
       callback?.({ success: true });
@@ -2286,13 +2195,13 @@ io.on('connection', (socket) => {
     callback?.({ success: true });
   });
 
-  socket.on('add_song', async ({ song }, callback) => {
+  socket.on("add_song", async ({ song }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
-    if (rejectRateLimited(socket, limitSocketAction, 'add_song', callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, "add_song", callback)) return;
 
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
@@ -2307,7 +2216,7 @@ io.on('connection', (socket) => {
     const user = room?.users.get(userId);
     const result = await addToQueue(roomId, clean.song, {
       id: userId,
-      nickname: user?.nickname || '匿名',
+      nickname: user?.nickname || "匿名",
     });
     if (result.error) {
       callback?.({ success: false, error: result.error });
@@ -2319,13 +2228,13 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
-  socket.on('remove_song', ({ queueId }, callback) => {
+  socket.on("remove_song", ({ queueId }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
-    if (rejectRateLimited(socket, limitSocketAction, 'remove_song', callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, "remove_song", callback)) return;
 
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
@@ -2340,13 +2249,13 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
-  socket.on('clear_queue', (_payload, callback) => {
+  socket.on("clear_queue", (_payload, callback) => {
     if (rejectReadOnly(socket, callback)) return;
-    if (rejectRateLimited(socket, limitSocketAction, 'clear_queue', callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, "clear_queue", callback)) return;
 
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
@@ -2360,13 +2269,13 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
-  socket.on('skip_song', async ({ reason } = {}, callback) => {
+  socket.on("skip_song", async ({ reason } = {}, callback) => {
     if (rejectReadOnly(socket, callback)) return;
-    if (rejectRateLimited(socket, limitSocketAction, 'skip_song', callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, "skip_song", callback)) return;
 
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
@@ -2381,17 +2290,17 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
-  socket.on('finish_song', async ({ queueId }, callback) => {
+  socket.on("finish_song", async ({ queueId }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
-    if (rejectRateLimited(socket, limitSocketAction, 'finish_song', callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, "finish_song", callback)) return;
 
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
-    const expectedQueueId = String(queueId || '');
+    const expectedQueueId = String(queueId || "");
     const advanced = await advanceEndedRoomNow(roomId, expectedQueueId);
     if (advanced) {
       emitRoomAndPlayback(roomId, advanced);
@@ -2409,13 +2318,13 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
-  socket.on('request_jump', async ({ queueId }, callback) => {
+  socket.on("request_jump", async ({ queueId }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
-    if (rejectRateLimited(socket, limitSocketAction, 'request_jump', callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, "request_jump", callback)) return;
 
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
@@ -2430,13 +2339,13 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
-  socket.on('reorder_queue', ({ orderedQueueIds, movedQueueId }, callback) => {
+  socket.on("reorder_queue", ({ orderedQueueIds, movedQueueId }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
-    if (rejectRateLimited(socket, limitSocketAction, 'reorder_queue', callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, "reorder_queue", callback)) return;
 
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
@@ -2446,20 +2355,20 @@ io.on('connection', (socket) => {
       return;
     }
 
-    io.to(roomId).emit('queue_snapshot', {
+    io.to(roomId).emit("queue_snapshot", {
       queue: result.room.queue,
       current: result.room.current,
     });
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
-  socket.on('toggle_queue_like', ({ queueId }, callback) => {
+  socket.on("toggle_queue_like", ({ queueId }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
-    if (rejectRateLimited(socket, limitSocketAction, 'toggle_queue_like', callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, "toggle_queue_like", callback)) return;
 
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
@@ -2470,7 +2379,7 @@ io.on('connection', (socket) => {
     }
 
     // 点赞会改队列排序：只推 queue/current，不下发整包 users
-    io.to(roomId).emit('queue_snapshot', {
+    io.to(roomId).emit("queue_snapshot", {
       queue: result.queue || [],
       current: result.current || null,
     });
@@ -2478,13 +2387,13 @@ io.on('connection', (socket) => {
     callback?.({ success: true, liked: result.liked });
   });
 
-  socket.on('toggle_current_dislike', async (_payload, callback) => {
+  socket.on("toggle_current_dislike", async (_payload, callback) => {
     if (rejectReadOnly(socket, callback)) return;
-    if (rejectRateLimited(socket, limitSocketAction, 'toggle_current_dislike', callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, "toggle_current_dislike", callback)) return;
 
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
@@ -2497,7 +2406,7 @@ io.on('connection', (socket) => {
     if (result.skipped) {
       emitRoomAndPlayback(roomId, result.room);
     } else {
-      io.to(roomId).emit('queue_snapshot', {
+      io.to(roomId).emit("queue_snapshot", {
         queue: result.room?.queue || [],
         current: result.room?.current || null,
       });
@@ -2513,13 +2422,13 @@ io.on('connection', (socket) => {
     });
   });
 
-  socket.on('approve_jump', async ({ requestId }, callback) => {
+  socket.on("approve_jump", async ({ requestId }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
-    if (rejectRateLimited(socket, limitSocketAction, 'approve_jump', callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, "approve_jump", callback)) return;
 
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
@@ -2533,13 +2442,13 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
-  socket.on('reject_jump', ({ requestId }, callback) => {
+  socket.on("reject_jump", ({ requestId }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
-    if (rejectRateLimited(socket, limitSocketAction, 'reject_jump', callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, "reject_jump", callback)) return;
 
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
@@ -2553,13 +2462,13 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
-  socket.on('request_skip', (_payload, callback) => {
+  socket.on("request_skip", (_payload, callback) => {
     if (rejectReadOnly(socket, callback)) return;
-    if (rejectRateLimited(socket, limitSocketAction, 'request_skip', callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, "request_skip", callback)) return;
 
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
@@ -2573,13 +2482,13 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
-  socket.on('approve_skip', async ({ requestId }, callback) => {
+  socket.on("approve_skip", async ({ requestId }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
-    if (rejectRateLimited(socket, limitSocketAction, 'approve_skip', callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, "approve_skip", callback)) return;
 
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
@@ -2593,13 +2502,13 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
-  socket.on('reject_skip', ({ requestId }, callback) => {
+  socket.on("reject_skip", ({ requestId }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
-    if (rejectRateLimited(socket, limitSocketAction, 'reject_skip', callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, "reject_skip", callback)) return;
 
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
@@ -2613,17 +2522,17 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
-  socket.on('send_chat', async ({ text, mentions, replyTo, imageUrl, imageKey, asSticker }, callback) => {
+  socket.on("send_chat", async ({ text, mentions, replyTo, imageUrl, imageKey, asSticker }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
-    if (rejectRateLimited(socket, limitSocketChat, 'send_chat', callback)) return;
+    if (rejectRateLimited(socket, limitSocketChat, "send_chat", callback)) return;
 
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
-    const textContent = String(text || '').trim();
+    const textContent = String(text || "").trim();
     if (textContent) {
       // 客户端检测仅用于即时提示，服务端始终执行权威审核。
       const sensitive = await checkApihzSensitiveWords(textContent);
@@ -2633,7 +2542,7 @@ io.on('connection', (socket) => {
       }
     }
 
-    const imageContent = String(imageUrl || '').trim();
+    const imageContent = String(imageUrl || "").trim();
     if (imageContent && !isLocalStickerImageKey(imageKey)) {
       const imageModeration = await moderateCyapiImage(imageContent);
       if (!imageModeration.ok) {
@@ -2657,21 +2566,21 @@ io.on('connection', (socket) => {
     // 先 ACK 再广播，避免大图表情包推给全员时发送方超时
     callback?.({ success: true, message: result.message });
 
-    const rawUrl = String(result.message?.imageUrl || '');
-    const hugeDataUrl = rawUrl.startsWith('data:') && rawUrl.length > 12 * 1024;
+    const rawUrl = String(result.message?.imageUrl || "");
+    const hugeDataUrl = rawUrl.startsWith("data:") && rawUrl.length > 12 * 1024;
     if (hugeDataUrl) {
       // 超大 data URL：其他人只收占位，发送者收完整图（socket.to 不含自己）
-      socket.to(roomId).emit('chat_message', { ...result.message, imageUrl: null });
-      socket.emit('chat_message', result.message);
+      socket.to(roomId).emit("chat_message", { ...result.message, imageUrl: null });
+      socket.emit("chat_message", result.message);
     } else {
-      io.to(roomId).emit('chat_message', result.message);
+      io.to(roomId).emit("chat_message", result.message);
     }
   });
 
-  socket.on('recall_chat', ({ messageId }, callback) => {
+  socket.on("recall_chat", ({ messageId }, callback) => {
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
@@ -2683,17 +2592,17 @@ io.on('connection', (socket) => {
 
     callback?.({ success: true });
     if (result.recalledMessageId) {
-      io.to(roomId).emit('chat_message_recall', { messageId: result.recalledMessageId });
+      io.to(roomId).emit("chat_message_recall", { messageId: result.recalledMessageId });
     }
     if (result.recallMessage) {
-      io.to(roomId).emit('chat_message', result.recallMessage);
+      io.to(roomId).emit("chat_message", result.recallMessage);
     }
   });
 
-  socket.on('toggle_chat_reaction', ({ messageId, emoji }, callback) => {
+  socket.on("toggle_chat_reaction", ({ messageId, emoji }, callback) => {
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
@@ -2703,17 +2612,17 @@ io.on('connection', (socket) => {
       return;
     }
 
-    io.to(roomId).emit('chat_reaction_update', {
+    io.to(roomId).emit("chat_reaction_update", {
       messageId: result.messageId,
       reactions: result.reactions,
     });
     callback?.({ success: true, messageId: result.messageId, reactions: result.reactions });
   });
 
-  socket.on('load_chat_history', ({ before, beforeId, limit }, callback) => {
+  socket.on("load_chat_history", ({ before, beforeId, limit }, callback) => {
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
@@ -2730,10 +2639,10 @@ io.on('connection', (socket) => {
     });
   });
 
-  socket.on('load_song_history', ({ limit }, callback) => {
+  socket.on("load_song_history", ({ limit }, callback) => {
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
@@ -2746,20 +2655,14 @@ io.on('connection', (socket) => {
     callback?.({ success: true, songs: result.songs });
   });
 
-  socket.on('report_track_duration', async ({ queueId, durationMs }, callback) => {
+  socket.on("report_track_duration", async ({ queueId, durationMs }, callback) => {
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
-    const result = reportTrackDuration(
-      roomId,
-      getSocketUserId(socket),
-      queueId,
-      durationMs,
-      socket.id,
-    );
+    const result = reportTrackDuration(roomId, getSocketUserId(socket), queueId, durationMs, socket.id);
     if (result.error) {
       callback?.({ success: false, error: result.error });
       return;
@@ -2768,27 +2671,26 @@ io.on('connection', (socket) => {
 
     // 补种/缩短时长后，若时钟已越过真实尽头则立刻切歌（不必等 500ms 轮询）
     if (!result.skipped) {
-      await advanceEndedRoomNow(roomId, queueId || '');
+      await advanceEndedRoomNow(roomId, queueId || "");
     }
   });
 
-
-  socket.on('list_favorites', async (_payload, callback) => {
-    const identity = resolveIdentityFromCookies(socket.handshake?.headers?.cookie || '');
+  socket.on("list_favorites", async (_payload, callback) => {
+    const identity = resolveIdentityFromCookies(socket.handshake?.headers?.cookie || "");
     if (!identity?.userId) {
-      callback?.({ success: false, error: '会话未就绪，请刷新页面后重试' });
+      callback?.({ success: false, error: "会话未就绪，请刷新页面后重试" });
       return;
     }
     const favorites = await listFavoriteSongs(identity.userId);
     callback?.({ success: true, favorites });
   });
 
-  socket.on('set_favorite', async ({ song, favorite }, callback) => {
-    if (rejectRateLimited(socket, limitSocketAction, 'set_favorite', callback)) return;
+  socket.on("set_favorite", async ({ song, favorite }, callback) => {
+    if (rejectRateLimited(socket, limitSocketAction, "set_favorite", callback)) return;
 
-    const identity = resolveIdentityFromCookies(socket.handshake?.headers?.cookie || '');
+    const identity = resolveIdentityFromCookies(socket.handshake?.headers?.cookie || "");
     if (!identity?.userId) {
-      callback?.({ success: false, error: '会话未就绪，请刷新页面后重试' });
+      callback?.({ success: false, error: "会话未就绪，请刷新页面后重试" });
       return;
     }
 
@@ -2806,17 +2708,17 @@ io.on('connection', (socket) => {
     callback?.({ success: true, favorites: result.favorites, favorite: result.favorite });
   });
 
-  socket.on('import_favorites', async ({ songs }, callback) => {
-    if (rejectRateLimited(socket, limitSocketAction, 'import_favorites', callback)) return;
+  socket.on("import_favorites", async ({ songs }, callback) => {
+    if (rejectRateLimited(socket, limitSocketAction, "import_favorites", callback)) return;
 
-    const identity = resolveIdentityFromCookies(socket.handshake?.headers?.cookie || '');
+    const identity = resolveIdentityFromCookies(socket.handshake?.headers?.cookie || "");
     if (!identity?.userId) {
-      callback?.({ success: false, error: '会话未就绪，请刷新页面后重试' });
+      callback?.({ success: false, error: "会话未就绪，请刷新页面后重试" });
       return;
     }
 
     if (!Array.isArray(songs) || songs.length === 0 || songs.length > 1000) {
-      callback?.({ success: false, error: '收藏数据格式无效' });
+      callback?.({ success: false, error: "收藏数据格式无效" });
       return;
     }
 
@@ -2833,45 +2735,45 @@ io.on('connection', (socket) => {
     }
     callback?.({ success: true, favorites: result.favorites, imported: result.imported, dropped: result.dropped, maxFavorites: result.maxFavorites });
   });
-  socket.on('toggle_play', ({ isPlaying }, callback) => {
+  socket.on("toggle_play", ({ isPlaying }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
-    if (rejectRateLimited(socket, limitSocketAction, 'toggle_play', callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, "toggle_play", callback)) return;
 
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
     const updated = setPlaying(roomId, getSocketUserId(socket), isPlaying, socket.id);
     if (!updated) {
-      callback?.({ success: false, error: '房间未允许成员暂停/播放' });
+      callback?.({ success: false, error: "房间未允许成员暂停/播放" });
       return;
     }
     emitPlaybackOnly(roomId);
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
-  socket.on('seek', ({ time }, callback) => {
+  socket.on("seek", ({ time }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
-    if (rejectRateLimited(socket, limitSocketAction, 'seek', callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, "seek", callback)) return;
 
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
+      callback?.({ success: false, error: "未加入房间" });
       return;
     }
 
     const updated = seekTo(roomId, getSocketUserId(socket), time, socket.id);
     if (!updated) {
-      callback?.({ success: false, error: '房间未允许成员调节进度' });
+      callback?.({ success: false, error: "房间未允许成员调节进度" });
       return;
     }
     emitPlaybackOnly(roomId);
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
-  socket.on('disconnect', () => {
+  socket.on("disconnect", () => {
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) return;
 
@@ -2929,9 +2831,9 @@ await initRooms();
 const setupRequired = isSetupRequired();
 if (!isRedisEnabled()) {
   if (setupRequired && !hasRedisEnvConfig()) {
-    console.warn('🛠️ OpenMusic 尚未初始化，请访问 /setup 完成首次部署（需配置 Redis）');
+    console.warn("🛠️ OpenMusic 尚未初始化，请访问 /setup 完成首次部署（需配置 Redis）");
   } else {
-    console.error('❌ Redis 为必需依赖：未连接时无法启动。请检查 REDIS_URL / REDIS_HOST 后重试。');
+    console.error("❌ Redis 为必需依赖：未连接时无法启动。请检查 REDIS_URL / REDIS_HOST 后重试。");
     process.exit(1);
   }
 } else {
@@ -2940,14 +2842,14 @@ if (!isRedisEnabled()) {
   if (!setupRequired) {
     await initAdminCredentials();
   } else {
-    console.warn('🛠️ OpenMusic 尚未初始化，请访问 /setup 完成首次部署');
+    console.warn("🛠️ OpenMusic 尚未初始化，请访问 /setup 完成首次部署");
   }
 }
 
 httpServer.listen(PORT, () => {
   console.log(`🎵 OpenMusic 服务运行在 http://localhost:${PORT}`);
-  console.log(`📡 Meting API: ${getMetingUpstreamBases().join(', ') || '未配置'}`);
-  console.log(`🎤 Cyapi (绿点/蓝点): ${isCyapiConfigured() ? '已配置' : '未配置'}`);
-  console.log(`💾 持久化存储: ${isRedisEnabled() ? 'Redis' : '未连接（仅安装向导）'}`);
+  console.log(`📡 Meting API: ${getMetingUpstreamBases().join(", ") || "未配置"}`);
+  console.log(`🎤 Cyapi (绿点/蓝点): ${isCyapiConfigured() ? "已配置" : "未配置"}`);
+  console.log(`💾 持久化存储: ${isRedisEnabled() ? "Redis" : "未连接（仅安装向导）"}`);
   startMetingHealthProbe();
 });

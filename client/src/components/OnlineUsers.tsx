@@ -1,28 +1,27 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Clock, Crown, MapPin, Pencil, Shield, UserMinus, Users, X } from 'lucide-react';
-import { useRoomStore } from '../stores/roomStore';
-import { useSocket } from '../hooks/useSocket';
-import { formatStayDuration } from '../lib/formatStayDuration';
-import { formatDisplayLocation } from '../lib/clientNetworkInfo';
-import ConfirmModal from './ConfirmModal';
-import Tooltip from './Tooltip';
-import TruncateTip from './TruncateTip';
-import MemberTierBadge from './MemberTierBadge';
-import RoleBadge from './RoleBadge';
-import type { RoomUser } from '../types';
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Check, Clock, Crown, Image, MapPin, Pencil, Shield, UserMinus, Users, X } from "lucide-react";
+import { useRoomStore } from "../stores/roomStore";
+import Modal from "./Modal";
+import { useSocket } from "../hooks/useSocket";
+import { formatStayDuration } from "../lib/formatStayDuration";
+import { formatDisplayLocation } from "../lib/clientNetworkInfo";
+import ConfirmModal from "./ConfirmModal";
+import Tooltip from "./Tooltip";
+import TruncateTip from "./TruncateTip";
+import MemberTierBadge from "./MemberTierBadge";
+import RoleBadge from "./RoleBadge";
+import type { RoomUser } from "../types";
 
 interface Props {
   users: RoomUser[];
   creatorId?: string | null;
   memberTiers?: Record<string, { badgeLabel: string; badgeColor: string }>;
-  onNotice?: (message: string, type: 'success' | 'error') => void;
+  onNotice?: (message: string, type: "success" | "error") => void;
 }
 
 type DisplayUser = RoomUser & { offline?: boolean };
 
-type PendingAction =
-  | { type: 'kick'; user: DisplayUser }
-  | { type: 'admin'; user: DisplayUser; admin: boolean };
+type PendingAction = { type: "kick"; user: DisplayUser } | { type: "admin"; user: DisplayUser; admin: boolean };
 
 export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNotice }: Props) {
   const mySocketId = useRoomStore((s) => s.mySocketId);
@@ -35,7 +34,7 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
   const userNicknames = useRoomStore((s) => s.room?.userNicknames) || {};
   const nickname = useRoomStore((s) => s.nickname);
   const setNickname = useRoomStore((s) => s.setNickname);
-  const { renameUser, kickUser, setRoomAdmin } = useSocket();
+  const { renameUser, kickUser, setRoomAdmin, setUserAvatar } = useSocket();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draftName, setDraftName] = useState(nickname);
@@ -43,9 +42,20 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
   const [kickingId, setKickingId] = useState<string | null>(null);
   const [adminTogglingId, setAdminTogglingId] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
   const [now, setNow] = useState(() => Date.now());
+  const [showAvatarModal, setShowAvatarModal] = useState(false);
+  const [avatarDraft, setAvatarDraft] = useState("");
+  const [previewAvatarUrl, setPreviewAvatarUrl] = useState<string | null>(null);
+  const userAvatarUrls = useRoomStore((s) => s.room?.userAvatarUrls) || {};
+  const avatar_url = useRoomStore((s) => s.avatar_url);
+  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+
+  const getUserAvatar = (userId: string) => {
+    if (userId === mySocketId) return avatar_url;
+    return userAvatarUrls[userId] || "";
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -54,10 +64,7 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
     return () => window.clearInterval(timer);
   }, [open]);
 
-  const visibleUsers = useMemo(
-    () => users.filter((user) => !user.readOnly),
-    [users],
-  );
+  const visibleUsers = useMemo(() => users.filter((user) => !user.readOnly), [users]);
 
   const orderedUsers = useMemo<DisplayUser[]>(() => {
     const onlineIds = new Set(visibleUsers.map((user) => user.id));
@@ -92,11 +99,11 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
       if (panelRef.current?.contains(target)) return;
       setOpen(false);
       setEditing(false);
-      setError('');
+      setError("");
     };
 
-    document.addEventListener('pointerdown', handlePointerDown);
-    return () => document.removeEventListener('pointerdown', handlePointerDown);
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
   }, [open]);
 
   useEffect(() => {
@@ -108,43 +115,43 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
     if (!nextName || saving) return;
 
     setSaving(true);
-    setError('');
+    setError("");
     const res = await renameUser(nextName);
     if (res.success) {
       setNickname(nextName);
       setEditing(false);
     } else {
-      setError(res.error || '改名失败');
+      setError(res.error || "改名失败");
     }
     setSaving(false);
   };
 
   const handleKick = (user: DisplayUser) => {
     if (!canModerate || kickingId || user.offline) return;
-    setPendingAction({ type: 'kick', user });
+    setPendingAction({ type: "kick", user });
   };
 
   const handleToggleAdmin = (user: DisplayUser) => {
     if (!isOwner || adminTogglingId) return;
     const nextAdmin = !adminIds.includes(user.id);
-    setPendingAction({ type: 'admin', user, admin: nextAdmin });
+    setPendingAction({ type: "admin", user, admin: nextAdmin });
   };
 
   const executePendingAction = async () => {
     if (!pendingAction) return;
 
-    if (pendingAction.type === 'kick') {
+    if (pendingAction.type === "kick") {
       const user = pendingAction.user;
       setKickingId(user.id);
-      setError('');
+      setError("");
       const res = await kickUser(user.id);
       setPendingAction(null);
       if (res.success) {
-        onNotice?.(res.message || `已移出「${user.nickname}」`, 'success');
+        onNotice?.(res.message || `已移出「${user.nickname}」`, "success");
       } else {
-        const msg = res.error || '踢出失败';
+        const msg = res.error || "踢出失败";
         setError(msg);
-        onNotice?.(msg, 'error');
+        onNotice?.(msg, "error");
       }
       setKickingId(null);
       return;
@@ -152,34 +159,50 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
 
     const user = pendingAction.user;
     setAdminTogglingId(user.id);
-    setError('');
+    setError("");
     const res = await setRoomAdmin(user.id, pendingAction.admin);
     setPendingAction(null);
     if (res.success) {
-      onNotice?.(res.message || (pendingAction.admin ? `已将「${user.nickname}」设为管理员` : `已取消「${user.nickname}」的管理员`), 'success');
+      onNotice?.(res.message || (pendingAction.admin ? `已将「${user.nickname}」设为管理员` : `已取消「${user.nickname}」的管理员`), "success");
     } else {
-      const msg = res.error || '设置管理员失败';
+      const msg = res.error || "设置管理员失败";
       setError(msg);
-      onNotice?.(msg, 'error');
+      onNotice?.(msg, "error");
     }
     setAdminTogglingId(null);
   };
 
-  const canKick = (user: DisplayUser) => (
-    canModerate
-    && !user.offline
-    && user.id !== mySocketId
-    && user.id !== creatorId
-    && !adminIds.includes(user.id)
-    && (isOwner || !autoPromotedAdminIds.includes(user.id))
-  );
+  const handleAvatarPreview = (url: string) => {
+    if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
+    clickTimerRef.current = setTimeout(() => setPreviewAvatarUrl(url), 220);
+  };
 
-  const canToggleAdmin = (user: DisplayUser) => (
-    isOwner
-    && user.id !== mySocketId
-    && user.id !== creatorId
-    && !user.readOnly
-  );
+  const handleAvatarDoubleClick = () => {
+    if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
+    setAvatarDraft(avatar_url);
+    setShowAvatarModal(true);
+  };
+
+  const saveAvatar = async () => {
+    const url = avatarDraft.trim();
+    localStorage.setItem("avatar_url", url);
+    useRoomStore.setState({ avatar_url: url });
+    setShowAvatarModal(false);
+    const res = await setUserAvatar(url);
+    if (!res.success && res.error) {
+      setError(res.error);
+    }
+  };
+
+  const canKick = (user: DisplayUser) =>
+    canModerate &&
+    !user.offline &&
+    user.id !== mySocketId &&
+    user.id !== creatorId &&
+    !adminIds.includes(user.id) &&
+    (isOwner || !autoPromotedAdminIds.includes(user.id));
+
+  const canToggleAdmin = (user: DisplayUser) => isOwner && user.id !== mySocketId && user.id !== creatorId && !user.readOnly;
 
   return (
     <div className="relative" ref={panelRef}>
@@ -190,37 +213,37 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
           className="flex items-center gap-2 rounded-xl px-2 py-1.5 text-xs text-netease-muted hover:bg-netease-card hover:text-white transition-colors"
           aria-label="查看房间用户"
         >
-        <Users className="w-4 h-4" />
-        <div className="flex -space-x-2">
-          {orderedUsers.slice(0, 5).map((user) => (
-            <Tooltip
-              key={user.id}
-              content={user.id === creatorId ? `${user.nickname}（房主）` : user.nickname}
-              side="bottom"
-            >
-              <div
-                className={`relative w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white border-2 border-netease-dark ${
-                  user.id === creatorId
-                    ? 'bg-gradient-to-br from-amber-500 to-orange-600'
-                    : user.id === mySocketId
-                      ? 'bg-gradient-to-br from-netease-red to-pink-500'
-                      : 'bg-gradient-to-br from-zinc-500 to-zinc-700'
-                }`}
-              >
-                {user.nickname.charAt(0).toUpperCase()}
-                {user.id === creatorId && (
-                  <Crown className="absolute -top-1 -right-1 w-3 h-3 text-amber-300" />
-                )}
+          <Users className="w-4 h-4" />
+          <div className="flex -space-x-2">
+            {orderedUsers.slice(0, 5).map((user) => (
+              <Tooltip key={user.id} content={user.id === creatorId ? `${user.nickname}（房主）` : user.nickname} side="bottom">
+                <div
+                  className={`relative w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white border-2 border-netease-dark overflow-hidden ${
+                    getUserAvatar(user.id)
+                      ? ""
+                      : user.id === creatorId
+                        ? "bg-gradient-to-br from-amber-500 to-orange-600"
+                        : user.id === mySocketId
+                          ? "bg-gradient-to-br from-netease-red to-pink-500"
+                          : "bg-gradient-to-br from-zinc-500 to-zinc-700"
+                  }`}
+                >
+                  {getUserAvatar(user.id) ? (
+                    <img src={getUserAvatar(user.id)} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    user.nickname.charAt(0).toUpperCase()
+                  )}
+                  {user.id === creatorId && <Crown className="absolute -top-1 -right-1 w-3 h-3 text-amber-300" />}
+                </div>
+              </Tooltip>
+            ))}
+            {orderedUsers.length > 5 && (
+              <div className="w-7 h-7 rounded-full bg-netease-card flex items-center justify-center text-[10px] text-white border-2 border-netease-dark">
+                +{orderedUsers.length - 5}
               </div>
-            </Tooltip>
-          ))}
-          {orderedUsers.length > 5 && (
-            <div className="w-7 h-7 rounded-full bg-netease-card flex items-center justify-center text-[10px] text-white border-2 border-netease-dark">
-              +{orderedUsers.length - 5}
-            </div>
-          )}
-        </div>
-        <span className="hidden sm:inline">共 {visibleUsers.length} 人</span>
+            )}
+          </div>
+          <span className="hidden sm:inline">共 {visibleUsers.length} 人</span>
         </button>
       </Tooltip>
 
@@ -249,40 +272,49 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
               const isMe = user.id === mySocketId;
               const isRoomCreator = Boolean(creatorId && user.id === creatorId);
               const isAppointedAdmin = adminIds.includes(user.id);
-              const isTempAdmin = autoPromotedAdminIds.includes(user.id)
-                || Boolean(ownerId && user.id === ownerId && !isRoomCreator && !isAppointedAdmin);
+              const isTempAdmin = autoPromotedAdminIds.includes(user.id) || Boolean(ownerId && user.id === ownerId && !isRoomCreator && !isAppointedAdmin);
               const showAdminBadge = (isAppointedAdmin || isTempAdmin) && !isRoomCreator;
 
               return (
                 <div
                   key={user.id}
-                  className={`rounded-xl border px-2.5 py-2 ${
-                    isMe
-                      ? 'border-netease-red/30 bg-netease-red/10'
-                      : 'border-white/5 bg-white/[0.03]'
-                  }`}
+                  className={`rounded-xl border px-2.5 py-2 ${isMe ? "border-netease-red/30 bg-netease-red/10" : "border-white/5 bg-white/[0.03]"}`}
                 >
                   <div className="flex items-center gap-2">
                     <div
-                      className={`relative w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0 ${
-                        isRoomCreator
-                          ? 'bg-gradient-to-br from-amber-500 to-orange-600'
-                          : isMe
-                            ? 'bg-gradient-to-br from-netease-red to-pink-500'
-                            : 'bg-gradient-to-br from-zinc-500 to-zinc-700'
+                      onClick={() => {
+                        const url = getUserAvatar(user.id);
+                        if (url) handleAvatarPreview(url);
+                      }}
+                      onDoubleClick={isMe ? handleAvatarDoubleClick : undefined}
+                      className={`relative w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0 overflow-hidden ${
+                        getUserAvatar(user.id) ? "cursor-pointer" : ""
+                      } ${
+                        getUserAvatar(user.id)
+                          ? ""
+                          : isRoomCreator
+                            ? "bg-gradient-to-br from-amber-500 to-orange-600"
+                            : isMe
+                              ? "bg-gradient-to-br from-netease-red to-pink-500"
+                              : "bg-gradient-to-br from-zinc-500 to-zinc-700"
                       }`}
                     >
-                      {user.nickname.charAt(0).toUpperCase()}
+                      {getUserAvatar(user.id) ? (
+                        <img src={getUserAvatar(user.id)} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        user.nickname.charAt(0).toUpperCase()
+                      )}
+                      {isMe && (
+                        <div className="absolute inset-0 flex items-center justify-center rounded-full bg-black/50 opacity-0 hover:opacity-100 transition-opacity">
+                          <Image className="w-3.5 h-3.5 text-white" />
+                        </div>
+                      )}
                       {isRoomCreator && <Crown className="absolute -top-1 -right-1 w-3 h-3 text-amber-300" />}
                     </div>
 
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 items-center gap-1.5">
-                        <TruncateTip
-                          text={user.nickname}
-                          as="p"
-                          className="min-w-0 flex-1 truncate text-sm text-white"
-                        />
+                        <TruncateTip text={user.nickname} as="p" className="min-w-0 flex-1 truncate text-sm text-white" />
                         {isMe && (
                           <span className="flex-shrink-0 whitespace-nowrap rounded-full bg-netease-red/20 px-1.5 py-0 text-[9px] leading-4 text-netease-red">
                             我
@@ -290,9 +322,7 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
                         )}
                         {isRoomCreator && <RoleBadge role="owner" />}
                         {showAdminBadge && <RoleBadge role="admin" />}
-                        {memberTiers[user.id] && (
-                          <MemberTierBadge tier={memberTiers[user.id]} />
-                        )}
+                        {memberTiers[user.id] && <MemberTierBadge tier={memberTiers[user.id]} />}
                         {user.offline && (
                           <span className="flex-shrink-0 whitespace-nowrap rounded-full bg-white/8 px-1.5 py-0 text-[9px] leading-4 text-netease-muted">
                             离线
@@ -331,17 +361,15 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
                       )}
 
                       {canToggleAdmin(user) && (
-                        <Tooltip content={isAppointedAdmin ? '取消管理员' : '设为管理员'}>
+                        <Tooltip content={isAppointedAdmin ? "取消管理员" : "设为管理员"}>
                           <button
                             type="button"
                             onClick={() => handleToggleAdmin(user)}
                             disabled={adminTogglingId === user.id}
                             className={`rounded-lg p-1.5 transition-colors disabled:opacity-40 ${
-                              isAppointedAdmin
-                                ? 'bg-sky-400/15 text-sky-300'
-                                : 'text-netease-muted hover:bg-sky-400/10 hover:text-sky-300'
+                              isAppointedAdmin ? "bg-sky-400/15 text-sky-300" : "text-netease-muted hover:bg-sky-400/10 hover:text-sky-300"
                             }`}
-                            aria-label={isAppointedAdmin ? '取消管理员' : '设为管理员'}
+                            aria-label={isAppointedAdmin ? "取消管理员" : "设为管理员"}
                           >
                             <Shield className="w-3.5 h-3.5" />
                           </button>
@@ -370,8 +398,8 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
                         value={draftName}
                         onChange={(event) => setDraftName(event.target.value)}
                         onKeyDown={(event) => {
-                          if (event.key === 'Enter') void saveNickname();
-                          if (event.key === 'Escape') setEditing(false);
+                          if (event.key === "Enter") void saveNickname();
+                          if (event.key === "Escape") setEditing(false);
                         }}
                         maxLength={20}
                         className="min-w-0 flex-1 rounded-lg border border-netease-border/60 bg-netease-dark px-2 py-1 text-xs text-white outline-none focus:border-netease-red/50"
@@ -400,7 +428,7 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
         </div>
       )}
 
-      {pendingAction?.type === 'kick' && (
+      {pendingAction?.type === "kick" && (
         <ConfirmModal
           title="移出用户"
           message={
@@ -418,21 +446,75 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
         />
       )}
 
-      {pendingAction?.type === 'admin' && (
+      {pendingAction?.type === "admin" && (
         <ConfirmModal
-          title={pendingAction.admin ? '设为管理员' : '取消管理员'}
+          title={pendingAction.admin ? "设为管理员" : "取消管理员"}
           message={
             pendingAction.admin
               ? `确定将「${pendingAction.user.nickname}」设为管理员吗？管理员可控制播放、切歌与审批。`
               : `确定取消「${pendingAction.user.nickname}」的管理员权限吗？`
           }
-          confirmLabel={pendingAction.admin ? '设为管理员' : '取消管理员'}
+          confirmLabel={pendingAction.admin ? "设为管理员" : "取消管理员"}
           confirmVariant="primary"
           loading={adminTogglingId === pendingAction.user.id}
           onConfirm={() => void executePendingAction()}
           onCancel={() => setPendingAction(null)}
         />
       )}
+
+      <Modal open={previewAvatarUrl !== null} onClose={() => setPreviewAvatarUrl(null)}>
+        <div className="flex flex-col items-center gap-3">
+          <img src={previewAvatarUrl || ""} alt="头像预览" className="w-40 h-40 rounded-full object-cover border border-white/10 shadow-lg" />
+          <p className="text-xs text-netease-muted">头像预览</p>
+        </div>
+      </Modal>
+
+      <Modal open={showAvatarModal} onClose={() => setShowAvatarModal(false)}>
+        <h3 className="text-base font-medium text-white mb-4">设置头像链接</h3>
+        <input
+          value={avatarDraft}
+          onChange={(event) => setAvatarDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") saveAvatar();
+            if (event.key === "Escape") setShowAvatarModal(false);
+          }}
+          placeholder="输入头像图片链接（URL）"
+          className="w-full rounded-lg border border-netease-border/60 bg-netease-dark px-3 py-2 text-sm text-white outline-none focus:border-netease-red/50"
+          autoFocus
+        />
+        {avatarDraft.trim() && (
+          <div className="mt-3 flex items-center gap-3">
+            <img
+              src={avatarDraft.trim()}
+              alt="头像预览"
+              className="w-12 h-12 rounded-full object-cover border border-white/10"
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = "none";
+              }}
+              onLoad={(e) => {
+                (e.target as HTMLImageElement).style.display = "";
+              }}
+            />
+            <span className="text-xs text-netease-muted">预览</span>
+          </div>
+        )}
+        <div className="mt-4 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => setShowAvatarModal(false)}
+            className="rounded-lg px-4 py-1.5 text-sm text-netease-muted hover:bg-white/10 hover:text-white transition-colors"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            onClick={saveAvatar}
+            className="rounded-lg bg-netease-red px-4 py-1.5 text-sm text-white hover:bg-netease-red/90 transition-colors"
+          >
+            保存
+          </button>
+        </div>
+      </Modal>
     </div>
   );
 }

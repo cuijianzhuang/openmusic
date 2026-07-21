@@ -396,6 +396,11 @@ async function attemptRoomRejoin(trigger: string) {
       applyJoinResponse(session, res);
       useRoomStore.getState().setReconnecting(false);
       clearReconnectSchedule();
+      // 重连后自动同步本地头像
+      const localAvatar = localStorage.getItem('avatar_url') || '';
+      if (localAvatar && !res.room.userAvatarUrls?.[res.socketId || '']) {
+        emitWithAck('set_user_avatar', { avatar_url: localAvatar }, { success: false }).catch(() => { });
+      }
       return;
     }
 
@@ -451,17 +456,17 @@ export function useSocket() {
 
     const s = getSocket();
 
-        setDebugSocketProvider(() => ({
+    setDebugSocketProvider(() => ({
       id: s.id,
       connected: s.connected,
       transport: s.io.engine?.transport?.name,
     }));
-if (socketListenersAttached) return;
+    if (socketListenersAttached) return;
     socketListenersAttached = true;
 
 
 
-let prefetchDebounceTimer = 0;
+    let prefetchDebounceTimer = 0;
 
     const onRoomUpdate = (room: RoomState) => {
       debugLog('room_update', debugLine({
@@ -626,12 +631,12 @@ let prefetchDebounceTimer = 0;
 
     const s = getSocket();
 
-        setDebugSocketProvider(() => ({
+    setDebugSocketProvider(() => ({
       id: s.id,
       connected: s.connected,
       transport: s.io.engine?.transport?.name,
     }));
-if (!connected.current && !socketConnectRequested) {
+    if (!connected.current && !socketConnectRequested) {
 
       s.connect();
 
@@ -694,6 +699,11 @@ if (!connected.current && !socketConnectRequested) {
         if (res.success && res.room) {
           if (generation !== joinGeneration) return res;
           applyJoinResponse(session, res);
+          // 加入后自动同步本地头像到服务器（非阻塞）
+          const localAvatar = localStorage.getItem('avatar_url') || '';
+          if (localAvatar && !res.room.userAvatarUrls?.[res.socketId || '']) {
+            emitWithAck('set_user_avatar', { avatar_url: localAvatar }, { success: false }).catch(() => { });
+          }
         }
         return res;
       };
@@ -731,13 +741,13 @@ if (!connected.current && !socketConnectRequested) {
     resetSession();
 
     const s = getSocket();
-        setDebugSocketProvider(() => ({
+    setDebugSocketProvider(() => ({
       id: s.id,
       connected: s.connected,
       transport: s.io.engine?.transport?.name,
     }));
-if (s.connected) {
-      s.timeout(SOCKET_ACK_TIMEOUT_MS).emit('leave_room', {}, () => {});
+    if (s.connected) {
+      s.timeout(SOCKET_ACK_TIMEOUT_MS).emit('leave_room', {}, () => { });
     }
     return Promise.resolve();
   }, [resetSession]);
@@ -955,6 +965,21 @@ if (s.connected) {
 
   }, []);
 
+  const setUserAvatar = useCallback((avatar_url: string): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
+    return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
+      'set_user_avatar',
+      { avatar_url },
+      { success: false, error: '连接超时，请重试' },
+    )
+      .then((res) => {
+        if (res.success && res.room) {
+          applyRoomSnapshot(res.room);
+          useRoomStore.setState({ avatar_url: avatar_url.trim() });
+        }
+        return res;
+      });
+  }, []);
+
   const transferOwner = useCallback((userId: string): Promise<{ success: boolean; error?: string; message?: string }> => {
     return emitWithAck<{ success: boolean; error?: string; message?: string; room?: RoomState }>(
       'transfer_owner',
@@ -1063,22 +1088,6 @@ if (s.connected) {
     return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
       'set_room_chat_history',
       { enabled },
-      { success: false, error: '连接超时，请重试' },
-    ).then((res) => {
-      if (res.success && res.room) {
-        applyRoomSnapshot(res.room);
-      }
-      return res;
-    });
-  }, []);
-
-  const setRoomJoinNotice = useCallback((options: {
-    enabled: boolean;
-    cooldownSec: number;
-  }): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
-    return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
-      'set_room_join_notice',
-      options,
       { success: false, error: '连接超时，请重试' },
     ).then((res) => {
       if (res.success && res.room) {
@@ -1306,6 +1315,7 @@ if (s.connected) {
     setFavorite,
     importFavorites,
     renameUser,
+    setUserAvatar,
 
     kickUser,
 
@@ -1340,8 +1350,6 @@ if (s.connected) {
     setRoomMemberSettings,
 
     setChatMute,
-
-    setRoomJoinNotice,
 
     loadChatHistory,
 

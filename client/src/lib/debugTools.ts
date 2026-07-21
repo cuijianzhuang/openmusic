@@ -292,7 +292,7 @@ export function collectErrorReportBundle(description = ''): {
   events: DebugEvent[];
   meta: Record<string, string | number | boolean | null>;
 } {
-  const { room, nickname, mySocketId } = useRoomStore.getState();
+  const { room, nickname, mySocketId, avatar_url } = useRoomStore.getState();
   const current = room?.current;
   const socket = state.getSocket?.();
   // 上报去掉完整媒体直链，避免把带鉴权参数的上游 URL 存进管理端
@@ -321,6 +321,7 @@ export function collectErrorReportBundle(description = ''): {
       trackSource: current?.source ?? null,
       trackId: current?.id ?? null,
       isPlaying: room?.isPlaying ?? null,
+      avatar_url: avatar_url
     },
   };
 }
