@@ -39,12 +39,26 @@ export function formatAuditTime(at: number) {
 
 export function formatAuditAction(entry: AdminAuditEntry) {
   switch (entry.action) {
-    case 'login_ok':
+    case 'login_ok': {
+      if (entry.via === 'linuxdo') return `登录成功（Linux.do：${entry.linuxdoUsername || ''}）`;
+      if (entry.via === 'github') return `登录成功（GitHub：${entry.githubUsername || ''}）`;
       return `登录成功${entry.username ? ` ${entry.username}` : ''}`;
-    case 'login_fail':
+    }
+    case 'login_fail': {
+      if (entry.via === 'linuxdo') return `登录失败（Linux.do：${entry.linuxdoUsername || ''}）`;
+      if (entry.via === 'github') return `登录失败（GitHub：${entry.githubUsername || ''}）`;
       return `登录失败${entry.username ? ` ${entry.username}` : ''}`;
+    }
     case 'logout':
       return '退出登录';
+    case 'linuxdo_bind':
+      return `绑定 Linux.do 账号${entry.linuxdoUsername ? `（${entry.linuxdoUsername}）` : ''}`;
+    case 'linuxdo_unbind':
+      return '解绑 Linux.do 账号';
+    case 'github_bind':
+      return `绑定 GitHub 账号${entry.githubUsername ? `（${entry.githubUsername}）` : ''}`;
+    case 'github_unbind':
+      return '解绑 GitHub 账号';
     case 'set_credentials':
       return `修改管理员账号密码${entry.username ? `（${entry.username}）` : ''}`;
     case 'set_entry_path':

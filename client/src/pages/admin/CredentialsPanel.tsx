@@ -10,6 +10,8 @@ interface LinuxdoAdminBinding {
   boundAt: number;
 }
 
+type GithubAdminBinding = LinuxdoAdminBinding;
+
 export default function CredentialsPanel({
   adminUsername,
   persisted,
@@ -35,6 +37,9 @@ export default function CredentialsPanel({
   const [linuxdoEnabled, setLinuxdoEnabled] = useState(false);
   const [linuxdoBound, setLinuxdoBound] = useState<LinuxdoAdminBinding | null>(null);
   const [linuxdoUnbinding, setLinuxdoUnbinding] = useState(false);
+  const [githubEnabled, setGithubEnabled] = useState(false);
+  const [githubBound, setGithubBound] = useState<GithubAdminBinding | null>(null);
+  const [githubUnbinding, setGithubUnbinding] = useState(false);
 
   useEffect(() => {
     if (!touchedRef.current) setUsername(adminUsername);
@@ -47,11 +52,18 @@ export default function CredentialsPanel({
         setLinuxdoBound(status.bound);
       })
       .catch(() => setLinuxdoEnabled(false));
+    void adminFetch<{ enabled: boolean; bound: GithubAdminBinding | null }>('/api/admin/github/status')
+      .then((status) => {
+        setGithubEnabled(status.enabled);
+        setGithubBound(status.bound);
+      })
+      .catch(() => setGithubEnabled(false));
 
     const url = new URL(window.location.href);
-    const result = url.searchParams.get('linuxdo');
+    const result = url.searchParams.get('linuxdo') || url.searchParams.get('github');
     if (result) {
       url.searchParams.delete('linuxdo');
+      url.searchParams.delete('github');
       window.history.replaceState(null, '', url.pathname + url.search + url.hash);
     }
   }, []);
@@ -66,6 +78,19 @@ export default function CredentialsPanel({
       onError(err instanceof Error ? err.message : '解绑失败');
     } finally {
       setLinuxdoUnbinding(false);
+    }
+  };
+
+  const unbindGithub = async () => {
+    setGithubUnbinding(true);
+    try {
+      await adminFetch('/api/admin/github/unbind', { method: 'POST' });
+      setGithubBound(null);
+      message.success('已解绑 GitHub 账号');
+    } catch (err) {
+      onError(err instanceof Error ? err.message : '解绑失败');
+    } finally {
+      setGithubUnbinding(false);
     }
   };
 
@@ -202,6 +227,34 @@ export default function CredentialsPanel({
           ) : (
             <Button onClick={() => { window.location.href = '/api/admin/linuxdo/bind/start'; }}>
               绑定 Linux.do 账号
+            </Button>
+          )}
+        </>
+      )}
+      {githubEnabled && (
+        <>
+          <Divider style={{ margin: '20px 0 16px' }} />
+          <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>
+            GitHub 登录
+          </Typography.Text>
+          <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>
+            绑定后可以用这个 GitHub 账号直接登录后台，作为账号密码之外的另一种登录方式；不影响账号密码本身。
+          </Typography.Paragraph>
+          {githubBound ? (
+            <Space align="center" style={{ width: '100%', justifyContent: 'space-between' }}>
+              <span>
+                已绑定：{githubBound.username || githubBound.id}
+                <Typography.Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
+                  {new Date(githubBound.boundAt).toLocaleString()}
+                </Typography.Text>
+              </span>
+              <Button danger loading={githubUnbinding} onClick={() => void unbindGithub()}>
+                解绑
+              </Button>
+            </Space>
+          ) : (
+            <Button onClick={() => { window.location.href = '/api/admin/github/bind/start'; }}>
+              绑定 GitHub 账号
             </Button>
           )}
         </>

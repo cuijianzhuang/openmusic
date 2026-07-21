@@ -29,6 +29,9 @@ export interface AdminAuditEntry {
   reportId?: string;
   status?: string;
   username?: string;
+  via?: string;
+  linuxdoUsername?: string;
+  githubUsername?: string;
 }
 
 export interface SiteAnnouncementConfig {

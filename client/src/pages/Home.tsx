@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Users, ArrowRight, Lock, ListMusic,
   Loader2, RefreshCw, Plus, X, Disc3, Sparkles, Github, History, Download, Smartphone,
-  Play, Activity, Search
+  Play, Activity, Search, ShieldCheck
 } from 'lucide-react';
 import { createRoom, checkRoom, listRooms } from '../api/meting';
 import { useRoomStore } from '../stores/roomStore';
@@ -27,6 +27,7 @@ import ClientDownloadModal from '../components/ClientDownloadModal';
 import SiteAnnouncementPopup from '../components/SiteAnnouncementPopup';
 import BrandMark from '../components/BrandMark';
 import SongCover from '../components/SongCover';
+import { getRememberedAdminEntryPath } from '../lib/adminEntryShortcut';
 
 function GiteeIcon({ className }: { className?: string }) {
   return (
@@ -348,6 +349,7 @@ export default function Home() {
   const [rooms, setRooms] = useState<RoomSummary[]>([]);
   const [roomsLoading, setRoomsLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
+  const [adminEntryPath] = useState(() => getRememberedAdminEntryPath());
   const [error, setError] = useState('');
 
   const [showCreate, setShowCreate] = useState(false);
@@ -542,6 +544,13 @@ export default function Home() {
                   </a>
                 </Tooltip>
               </div>
+            )}
+            {adminEntryPath && (
+              <Tooltip content="管理后台（仅本机可见）">
+                <a href={adminEntryPath} className={`hidden sm:flex ${repoLinkCls}`} aria-label="管理后台">
+                  <ShieldCheck className="w-5 h-5" />
+                </a>
+              </Tooltip>
             )}
             <a href="https://gitee.com/w3126197382/openmusic" target="_blank" rel="noopener noreferrer" className={`hidden sm:flex ${repoLinkCls}`} aria-label="Gitee">
               <GiteeIcon className="w-5 h-5" />

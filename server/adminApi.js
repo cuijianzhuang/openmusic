@@ -51,6 +51,10 @@ import {
   isLinuxdoIdBoundToAdmin,
   bindAdminLinuxdo,
   unbindAdminLinuxdo,
+  getAdminGithubBinding,
+  isGithubIdBoundToAdmin,
+  bindAdminGithub,
+  unbindAdminGithub,
 } from './adminCredentials.js';
 import {
   isLinuxdoConfigured,
@@ -61,6 +65,15 @@ import {
   exchangeLinuxdoCode,
   fetchLinuxdoProfile,
 } from './linuxdoAuth.js';
+import {
+  isGithubConfigured,
+  signGithubState,
+  verifyGithubState,
+  sanitizeGithubReturnPath,
+  buildGithubAuthorizeUrl,
+  exchangeGithubCode,
+  fetchGithubProfile,
+} from './githubAuth.js';
 
 export { isAdminEnabled };
 
@@ -557,6 +570,82 @@ export function mountAdminApi(app, { io, socketToRoom, socketToUserId, getClient
     const result = await unbindAdminLinuxdo();
     if (!result.success) return res.status(400).json({ error: result.error });
     audit('linuxdo_unbind', {}, ip);
+    res.json({ success: true });
+  });
+
+  // ---------- GitHub OAuth：后台登录的另一种额外方式（与 Linux.do 完全对称） ----------
+
+  app.get('/api/admin/github/status', (req, res) => {
+    if (!isGithubConfigured()) return res.json({ enabled: false, bound: null });
+    res.json({ enabled: true, bound: getAdminGithubBinding() });
+  });
+
+  app.get('/api/admin/github/bind/start', requireAdmin, (req, res) => {
+    if (!isGithubConfigured()) return res.status(400).json({ error: 'GitHub 登录未配置' });
+    const state = signGithubState({ purpose: 'admin-bind' });
+    res.redirect(buildGithubAuthorizeUrl(state));
+  });
+
+  app.get('/api/admin/github/login/start', (req, res) => {
+    if (!isGithubConfigured()) return res.status(400).json({ error: 'GitHub 登录未配置' });
+    const state = signGithubState({ purpose: 'admin-login' });
+    res.redirect(buildGithubAuthorizeUrl(state));
+  });
+
+  app.get('/api/admin/github/callback', async (req, res) => {
+    const ip = getClientIp?.(req) || req.ip || '';
+    const entryPath = getAdminEntryPath();
+    const fail = (reason) => res.redirect(`${entryPath}?github=${reason}`);
+
+    if (!isGithubConfigured()) return fail('error');
+
+    const state = verifyGithubState(req.query?.state);
+    if (!state || (state.purpose !== 'admin-bind' && state.purpose !== 'admin-login')) {
+      return fail('error');
+    }
+
+    let profile;
+    try {
+      const accessToken = await exchangeGithubCode(req.query?.code);
+      profile = await fetchGithubProfile(accessToken);
+    } catch (err) {
+      console.error('GitHub 后台 OAuth 失败:', err?.message || err);
+      return fail('error');
+    }
+
+    if (state.purpose === 'admin-bind') {
+      if (!isAdminEnabled() || !verifySession(req)) return fail('expired');
+      const result = await bindAdminGithub(profile);
+      if (!result.success) return fail('error');
+      audit('github_bind', { githubUsername: profile.username }, ip);
+      return fail('bound');
+    }
+
+    const block = getLoginBlock(ip);
+    if (block.blocked) {
+      res.setHeader('Retry-After', String(block.retryAfterSec));
+      return fail('locked');
+    }
+    noteLoginAttempt(ip);
+
+    if (!isAdminEnabled() || !isGithubIdBoundToAdmin(profile.id)) {
+      noteLoginFailure(ip);
+      audit('login_fail', { via: 'github', githubUsername: profile.username }, ip);
+      return fail('denied');
+    }
+
+    noteLoginSuccess(ip);
+    const { sid } = createSession();
+    setAdminSessionCookie(res, sid);
+    audit('login_ok', { via: 'github', githubUsername: profile.username }, ip);
+    return fail('login_ok');
+  });
+
+  app.post('/api/admin/github/unbind', requireAdminOrigin, requireAdmin, async (req, res) => {
+    const ip = getClientIp?.(req) || req.ip || '';
+    const result = await unbindAdminGithub();
+    if (!result.success) return res.status(400).json({ error: result.error });
+    audit('github_unbind', {}, ip);
     res.json({ success: true });
   });
 

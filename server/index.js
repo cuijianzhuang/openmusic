@@ -151,6 +151,19 @@ import {
   getLinuxdoProfileForUser,
   unbindLinuxdoForUser,
 } from './linuxdoAuth.js';
+import {
+  isGithubConfigured,
+  signGithubState,
+  verifyGithubState,
+  sanitizeGithubReturnPath,
+  buildGithubAuthorizeUrl,
+  exchangeGithubCode,
+  fetchGithubProfile,
+  bindGithubToUser,
+  getUserIdForGithub,
+  getGithubProfileForUser,
+  unbindGithubForUser,
+} from './githubAuth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const clientDist = path.join(__dirname, '../client/dist');
@@ -464,6 +477,7 @@ const limitErrorReport = createRateLimiter({ windowMs: 10 * 60_000, max: 5 });
 const limitSessionBootstrap = createRateLimiter({ windowMs: 60_000, max: 60 });
 const limitNewSessionBootstrap = createRateLimiter({ windowMs: 60_000, max: 12 });
 const limitLinuxdoAuth = createRateLimiter({ windowMs: 60_000, max: 10 });
+const limitGithubAuth = createRateLimiter({ windowMs: 60_000, max: 10 });
 
 function sanitizeClientSong(song) {
   if (!song || typeof song !== 'object') {
@@ -1286,6 +1300,95 @@ app.post('/api/auth/linuxdo/unbind', async (req, res) => {
   const identity = requireSessionIdentity(req, res);
   if (!identity) return;
   await unbindLinuxdoForUser(identity.userId);
+  res.json({ success: true });
+});
+
+// ---------- GitHub OAuth：房主身份绑定 / 找回（与 Linux.do 完全对称的一套流程） ----------
+
+app.get('/api/auth/github/status', async (req, res) => {
+  const enabled = isGithubConfigured();
+  if (!enabled) return res.json({ enabled: false, bound: null });
+
+  const identity = resolveIdentityFromRequest(req);
+  const bound = identity?.userId ? await getGithubProfileForUser(identity.userId) : null;
+  res.json({ enabled: true, bound });
+});
+
+app.get('/api/auth/github/start', (req, res) => {
+  if (!isGithubConfigured()) return res.status(400).json({ error: 'GitHub 登录未配置' });
+  if (!limitGithubAuth(`github-start:${getRequestIp(req)}`)) {
+    return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
+  }
+
+  const purpose = req.query?.purpose === 'recover' ? 'recover' : 'bind';
+  const returnPath = sanitizeGithubReturnPath(req.query?.returnPath);
+
+  if (purpose === 'bind') {
+    const identity = requireSessionIdentity(req, res);
+    if (!identity) return;
+    const roomId = String(req.query?.roomId || '').trim().toUpperCase();
+    const room = roomId ? getRoomInternal(roomId) : null;
+    if (!room || room.creatorId !== identity.userId) {
+      return res.status(403).json({ error: '只有房主本人可以绑定 GitHub 账号' });
+    }
+    const state = signGithubState({ purpose: 'bind', userId: identity.userId, returnPath });
+    return res.redirect(buildGithubAuthorizeUrl(state));
+  }
+
+  const state = signGithubState({ purpose: 'recover', returnPath });
+  res.redirect(buildGithubAuthorizeUrl(state));
+});
+
+app.get('/api/auth/github/callback', async (req, res) => {
+  const fail = (returnPath, reason) => res.redirect(`${sanitizeGithubReturnPath(returnPath)}?github=${reason}`);
+
+  if (!isGithubConfigured()) return fail('/', 'error');
+  if (!limitGithubAuth(`github-callback:${getRequestIp(req)}`)) {
+    return res.status(429).send('请求过于频繁，请稍后再试');
+  }
+
+  const state = verifyGithubState(req.query?.state);
+  if (!state) return fail('/', 'error');
+  const returnPath = sanitizeGithubReturnPath(state.returnPath);
+
+  let profile;
+  try {
+    const accessToken = await exchangeGithubCode(req.query?.code);
+    profile = await fetchGithubProfile(accessToken);
+  } catch (err) {
+    console.error('GitHub OAuth 失败:', err?.message || err);
+    return fail(returnPath, 'error');
+  }
+
+  if (state.purpose === 'bind') {
+    const identity = resolveIdentityFromRequest(req);
+    if (!identity?.userId || identity.userId !== state.userId) {
+      return fail(returnPath, 'expired');
+    }
+    try {
+      await bindGithubToUser(profile.id, identity.userId, profile);
+    } catch (err) {
+      console.error('GitHub 绑定写入失败:', err?.message || err);
+      return fail(returnPath, 'error');
+    }
+    return fail(returnPath, 'bound');
+  }
+
+  const boundUserId = await getUserIdForGithub(profile.id);
+  if (!boundUserId) return fail(returnPath, 'notfound');
+
+  const now = Math.floor(Date.now() / 1000);
+  const cookieDeviceId = resolveDeviceIdFromCookieHeader(req.headers?.cookie || '');
+  const deviceId = cookieDeviceId || createServerClientId();
+  await linkDeviceToUser(deviceId, boundUserId);
+  setIdentityCookieHeaders(res, boundUserId, signClientId(boundUserId, now), deviceId);
+  return fail(returnPath, 'recovered');
+});
+
+app.post('/api/auth/github/unbind', async (req, res) => {
+  const identity = requireSessionIdentity(req, res);
+  if (!identity) return;
+  await unbindGithubForUser(identity.userId);
   res.json({ success: true });
 });
 

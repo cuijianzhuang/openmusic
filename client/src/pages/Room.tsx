@@ -12,6 +12,7 @@ import { addSongsToQueue, formatBulkAddToast } from '../lib/addSongsToQueue';
 import { rememberPlaylistImportHistory } from '../lib/playlistImportHistory';
 import { detectPlaylistLink } from '../lib/playlistLink';
 import { consumeLinuxdoReturnParam } from '../lib/linuxdoAuth';
+import { consumeGithubReturnParam } from '../lib/githubAuth';
 
 import type { FavoriteSong, MusicSource, RoomAudioQuality, RoomMemberSettings, RoomMemberTier, SearchResult, Song, SongHistoryItem } from '../types';
 
@@ -388,7 +389,7 @@ export default function Room() {
   const closeToast = useCallback(() => setToast(null), []);
 
   useEffect(() => {
-    const result = consumeLinuxdoReturnParam();
+    const result = consumeLinuxdoReturnParam() || consumeGithubReturnParam();
     if (result) showToast(result.message, result.type);
   }, [showToast]);
 

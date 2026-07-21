@@ -2,6 +2,7 @@ import { Suspense, lazy, useEffect, useState } from 'react';
 import { Routes, Route, useLocation } from 'react-router-dom';
 import AppUpdateGate from './components/AppUpdateGate';
 import ErrorReportSolutionGate from './components/ErrorReportSolutionGate';
+import { rememberAdminEntryPath } from './lib/adminEntryShortcut';
 
 const Home = lazy(() => import('./pages/Home'));
 const Room = lazy(() => import('./pages/Room'));
@@ -65,7 +66,10 @@ function AdminGate() {
           body: JSON.stringify({ path }),
         });
         const data = await res.json().catch(() => ({}));
-        if (!cancelled) setMatch(Boolean(data.match));
+        const matched = Boolean(data.match);
+        if (!cancelled) setMatch(matched);
+        // 只在真正命中管理入口的这台设备本地记住路径，方便下次从首页快捷进入
+        if (matched) rememberAdminEntryPath(path);
       } catch {
         if (!cancelled) setMatch(false);
       }
