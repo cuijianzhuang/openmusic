@@ -1,14 +1,15 @@
-import { Suspense, lazy, useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { Routes, Route, useLocation } from 'react-router-dom';
 import AppUpdateGate from './components/AppUpdateGate';
 import ErrorReportSolutionGate from './components/ErrorReportSolutionGate';
 import { rememberAdminEntryPath } from './lib/adminEntryShortcut';
+import { lazyWithRetry } from './lib/lazyWithRetry';
 
-const Home = lazy(() => import('./pages/Home'));
-const Room = lazy(() => import('./pages/Room'));
-const TvDisplay = lazy(() => import('./pages/TvDisplay'));
-const Admin = lazy(() => import('./pages/Admin'));
-const Setup = lazy(() => import('./pages/Setup'));
+const Home = lazyWithRetry(() => import('./pages/Home'), 'Home');
+const Room = lazyWithRetry(() => import('./pages/Room'), 'Room');
+const TvDisplay = lazyWithRetry(() => import('./pages/TvDisplay'), 'TvDisplay');
+const Admin = lazyWithRetry(() => import('./pages/Admin'), 'Admin');
+const Setup = lazyWithRetry(() => import('./pages/Setup'), 'Setup');
 
 function RouteFallback() {
   return (
@@ -112,6 +113,16 @@ export default function App() {
       if (cancelled) return;
       void import('./lib/qface').then((mod) => {
         if (!cancelled) mod.ensureQQFacesLoaded();
+      });
+      // 预热房间页面及沉浸式背景的懒加载 chunk：新建/加入房间是跳转进 Room.tsx 的
+      // 第一次，如果这几个 chunk（尤其是带 three.js 的背景）还没取到，会在跳转瞬间
+      // 出现黑屏，直到 chunk 加载完成才渲染出内容。这里提前在空闲时取好，命中浏览器缓存。
+      void import('./pages/Room');
+      void import('./lib/roomVisualPreset').then((mod) => {
+        if (cancelled) return;
+        void import('./lib/immersiveEntry').then((entry) => {
+          if (!cancelled) void entry.preloadImmersiveBackground(mod.readRoomVisualMode());
+        });
       });
     };
 

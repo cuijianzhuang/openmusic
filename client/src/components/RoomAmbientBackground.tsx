@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { getCoverUrl } from '../api/music';
 import type { QueueItem } from '../types';
 import { ROOM_VISUAL_MODE_META, type RoomVisualMode } from '../lib/roomVisualPreset';
@@ -6,9 +6,10 @@ import { roomVisualFxLive, subscribeRoomVisualFx } from '../lib/roomVisualFxLive
 import { effectiveBackgroundColor } from '../lib/roomVisualAppearance';
 import { syncGalaxyHandGestureMode } from './galaxy/lib/galaxyHandGesture';
 import AmbientCoverLayers from './AmbientCoverLayers';
+import { lazyWithRetry } from '../lib/lazyWithRetry';
 
-const GalaxyBackground = lazy(() => import('./galaxy/GalaxyBackground3D'));
-const TopographyBackground = lazy(() => import('./topography/TopographyBackground3D'));
+const GalaxyBackground = lazyWithRetry(() => import('./galaxy/GalaxyBackground3D'), 'GalaxyBackground3D');
+const TopographyBackground = lazyWithRetry(() => import('./topography/TopographyBackground3D'), 'TopographyBackground3D');
 
 interface Props {
   song: Pick<QueueItem, 'queueId' | 'id' | 'source' | 'pic' | 'url'> | null | undefined;

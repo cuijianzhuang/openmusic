@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'react';
 import { createPortal } from 'react-dom';
+import { lazyWithRetry } from '../lib/lazyWithRetry';
 
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 
@@ -100,26 +101,26 @@ import {
   immersiveGlassListFooter,
 } from '../lib/immersiveGlass';
 
-const PlayerPage = lazy(() => import('../components/PlayerPage'));
-const PlaylistImportModal = lazy(() => import('../components/PlaylistImportModal'));
-const RecommendedPlaylistsDrawer = lazy(() => import('../components/RecommendedPlaylistsDrawer'));
-const ClientDownloadModal = lazy(() => import('../components/ClientDownloadModal'));
-const RoomMemberModal = lazy(() => import('../components/RoomMemberModal'));
-const RoomSettingsModal = lazy(() => import('../components/RoomSettingsModal'));
-const RoomVisualFxPanel = lazy(() => import('../components/RoomVisualFxPanel'));
-const RoomImmersiveShell = lazy(() => import('../components/immersive/RoomImmersiveShell'));
-const ImmersiveFxSettingsPanel = lazy(() => import('../components/immersive/ImmersiveFxSettingsPanel'));
-const ImmersiveExitModal = lazy(() => import('../components/immersive/ImmersiveExitModal'));
-const ImmersiveTransitionOverlay = lazy(() => import('../components/immersive/ImmersiveTransitionOverlay'));
-const ChatPanel = lazy(() => import('../components/ChatPanel'));
-const PureModeChatDock = lazy(() => import('../components/PureModeChatDock'));
-const QueuePanel = lazy(() => import('../components/QueuePanel'));
-const HotSongPanel = lazy(() => import('../components/HotSongPanel'));
-const OnlineUsers = lazy(() => import('../components/OnlineUsers'));
-const RoomAmbientBackground = lazy(() => import('../components/RoomAmbientBackground'));
-const MiniPlayer = lazy(() => import('../components/MiniPlayer'));
-const RoomQualityModal = lazy(() => import('../components/RoomQualityModal'));
-const RoomAnnouncementPopup = lazy(() => import('../components/RoomAnnouncementPopup'));
+const PlayerPage = lazyWithRetry(() => import('../components/PlayerPage'), 'PlayerPage');
+const PlaylistImportModal = lazyWithRetry(() => import('../components/PlaylistImportModal'), 'PlaylistImportModal');
+const RecommendedPlaylistsDrawer = lazyWithRetry(() => import('../components/RecommendedPlaylistsDrawer'), 'RecommendedPlaylistsDrawer');
+const ClientDownloadModal = lazyWithRetry(() => import('../components/ClientDownloadModal'), 'ClientDownloadModal');
+const RoomMemberModal = lazyWithRetry(() => import('../components/RoomMemberModal'), 'RoomMemberModal');
+const RoomSettingsModal = lazyWithRetry(() => import('../components/RoomSettingsModal'), 'RoomSettingsModal');
+const RoomVisualFxPanel = lazyWithRetry(() => import('../components/RoomVisualFxPanel'), 'RoomVisualFxPanel');
+const RoomImmersiveShell = lazyWithRetry(() => import('../components/immersive/RoomImmersiveShell'), 'RoomImmersiveShell');
+const ImmersiveFxSettingsPanel = lazyWithRetry(() => import('../components/immersive/ImmersiveFxSettingsPanel'), 'ImmersiveFxSettingsPanel');
+const ImmersiveExitModal = lazyWithRetry(() => import('../components/immersive/ImmersiveExitModal'), 'ImmersiveExitModal');
+const ImmersiveTransitionOverlay = lazyWithRetry(() => import('../components/immersive/ImmersiveTransitionOverlay'), 'ImmersiveTransitionOverlay');
+const ChatPanel = lazyWithRetry(() => import('../components/ChatPanel'), 'ChatPanel');
+const PureModeChatDock = lazyWithRetry(() => import('../components/PureModeChatDock'), 'PureModeChatDock');
+const QueuePanel = lazyWithRetry(() => import('../components/QueuePanel'), 'QueuePanel');
+const HotSongPanel = lazyWithRetry(() => import('../components/HotSongPanel'), 'HotSongPanel');
+const OnlineUsers = lazyWithRetry(() => import('../components/OnlineUsers'), 'OnlineUsers');
+const RoomAmbientBackground = lazyWithRetry(() => import('../components/RoomAmbientBackground'), 'RoomAmbientBackground');
+const MiniPlayer = lazyWithRetry(() => import('../components/MiniPlayer'), 'MiniPlayer');
+const RoomQualityModal = lazyWithRetry(() => import('../components/RoomQualityModal'), 'RoomQualityModal');
+const RoomAnnouncementPopup = lazyWithRetry(() => import('../components/RoomAnnouncementPopup'), 'RoomAnnouncementPopup');
 
 function ensureGalaxyAudioOutputLazy() {
   void import('../components/galaxy/lib/galaxyAudio').then((m) => m.ensureGalaxyAudioOutput());
@@ -2047,7 +2048,11 @@ export default function Room() {
 
 
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={(
+      <div className="min-h-full flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-netease-red animate-spin" />
+      </div>
+    )}>
     <div
       className="relative isolate flex h-full flex-col overflow-hidden"
       style={immersiveTransition || immersiveShellMotion ? immersiveTimingCssVars() : undefined}
