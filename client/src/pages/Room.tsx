@@ -11,8 +11,8 @@ import { normalizeFmMode } from '../api/music/fmMode';
 import { addSongsToQueue, formatBulkAddToast } from '../lib/addSongsToQueue';
 import { rememberPlaylistImportHistory } from '../lib/playlistImportHistory';
 import { detectPlaylistLink } from '../lib/playlistLink';
-import { consumeLinuxdoReturnParam } from '../lib/linuxdoAuth';
-import { consumeGithubReturnParam } from '../lib/githubAuth';
+import { consumeLinuxdoReturnParam, fetchLinuxdoStatus } from '../lib/linuxdoAuth';
+import { consumeGithubReturnParam, fetchGithubStatus } from '../lib/githubAuth';
 
 import type { FavoriteSong, MusicSource, RoomAudioQuality, RoomMemberSettings, RoomMemberTier, SearchResult, Song, SongHistoryItem } from '../types';
 
@@ -392,6 +392,19 @@ export default function Room() {
     const result = consumeLinuxdoReturnParam() || consumeGithubReturnParam();
     if (result) showToast(result.message, result.type);
   }, [showToast]);
+
+  // 找回身份入口需要对所有人可见：换设备/清 Cookie 后正是不再被识别为房主/管理员的状态，
+  // 不能把这个入口也一起挡在 canModerate 后面，否则找回功能在它本该生效的场景里反而打不开。
+  const [identityRecoveryAvailable, setIdentityRecoveryAvailable] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all([fetchLinuxdoStatus(), fetchGithubStatus()]).then(([linuxdo, github]) => {
+      if (!cancelled) setIdentityRecoveryAvailable(linuxdo.enabled || github.enabled);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const isCreator = Boolean(room?.creatorId && mySocketId && room.creatorId === mySocketId);
   const songRequestBlockReason = getSongRequestBlockReason(
@@ -2282,6 +2295,19 @@ export default function Room() {
                       aria-label="房间设置"
                     >
                       <SlidersHorizontal className="w-3.5 h-3.5" />
+                    </button>
+                  </Tooltip>
+                )}
+
+                {!canOpenRoomSettings && identityRecoveryAvailable && (
+                  <Tooltip side="bottom" content="找回房间身份">
+                    <button
+                      type="button"
+                      onClick={() => setSettingsOpen(true)}
+                      className="flex-shrink-0 rounded-lg p-1 text-netease-muted transition-colors hover:bg-white/10 hover:text-white"
+                      aria-label="找回房间身份"
+                    >
+                      <Shield className="w-3.5 h-3.5" />
                     </button>
                   </Tooltip>
                 )}

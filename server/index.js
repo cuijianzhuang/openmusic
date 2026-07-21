@@ -165,6 +165,12 @@ import {
   unbindGithubForUser,
 } from './githubAuth.js';
 
+// 由 mountAdminApi() 返回赋值：房主 OAuth 回调路由与后台 OAuth 回调共用同一个
+// 已在第三方平台注册的 redirect_uri，只能在这一个路由里按 state.purpose 分发，
+// 详见下方 /api/auth/{provider}/callback 路由与 adminApi.js 内的处理函数。
+let handleLinuxdoAdminCallback = null;
+let handleGithubAdminCallback = null;
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const clientDist = path.join(__dirname, '../client/dist');
 const PORT = process.env.PORT || 4000;
@@ -1269,6 +1275,11 @@ app.get('/api/auth/linuxdo/callback', async (req, res) => {
     return fail(returnPath, 'error');
   }
 
+  if (state.purpose === 'admin-bind' || state.purpose === 'admin-login') {
+    // 后台绑定 / 后台登录复用同一个已注册的 redirect_uri，只能在这里按 purpose 转发
+    return handleLinuxdoAdminCallback(req, res, state, profile);
+  }
+
   if (state.purpose === 'bind') {
     // 二次核验：跳转期间房主可能已变化（转让 / 身份过期），不能只信 state
     const identity = resolveIdentityFromRequest(req);
@@ -1358,6 +1369,11 @@ app.get('/api/auth/github/callback', async (req, res) => {
   } catch (err) {
     console.error('GitHub OAuth 失败:', err?.message || err);
     return fail(returnPath, 'error');
+  }
+
+  if (state.purpose === 'admin-bind' || state.purpose === 'admin-login') {
+    // 后台绑定 / 后台登录复用同一个已注册的 redirect_uri，只能在这里按 purpose 转发
+    return handleGithubAdminCallback(req, res, state, profile);
   }
 
   if (state.purpose === 'bind') {
@@ -1646,13 +1662,13 @@ app.get('*', (req, res, next) => {
 const socketToRoom = new Map();
 const socketToUserId = new Map();
 
-mountAdminApi(app, {
+({ handleLinuxdoAdminCallback, handleGithubAdminCallback } = mountAdminApi(app, {
   io,
   socketToRoom,
   socketToUserId,
   getClientIp: (req) => getClientIpFromHeaders(req.headers, req.socket?.remoteAddress || ''),
   allowedOrigins: ALLOWED_ORIGINS,
-});
+}));
 
 function isPrivateHostname(hostname) {
   return isBlockedMediaHostname(hostname);

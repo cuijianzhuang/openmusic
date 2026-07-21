@@ -67,9 +67,11 @@ function AdminGate() {
         });
         const data = await res.json().catch(() => ({}));
         const matched = Boolean(data.match);
-        if (!cancelled) setMatch(matched);
-        // 只在真正命中管理入口的这台设备本地记住路径，方便下次从首页快捷进入
-        if (matched) rememberAdminEntryPath(path);
+        if (!cancelled) {
+          setMatch(matched);
+          // 只在真正命中管理入口的这台设备本地记住路径，方便下次从首页快捷进入
+          if (matched) rememberAdminEntryPath(path);
+        }
       } catch {
         if (!cancelled) setMatch(false);
       }
