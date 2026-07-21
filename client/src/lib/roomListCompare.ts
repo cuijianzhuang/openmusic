@@ -49,6 +49,7 @@ function roomSummarySignature(room: RoomSummary): string {
     room.isPlaying,
     song?.name ?? '',
     song?.artist ?? '',
+    song?.pic ?? '',
     room.queueLength,
     room.createdAt,
   ].join('\0');

@@ -250,7 +250,13 @@ export interface RoomSummary {
   hasPassword: boolean;
   isLocked?: boolean;
   isPlaying: boolean;
-  currentSong: { name: string; artist: string } | null;
+  currentSong: {
+    name: string;
+    artist: string;
+    id?: string;
+    source?: MusicSource;
+    pic?: string;
+  } | null;
   queueLength: number;
   createdAt: number;
 }

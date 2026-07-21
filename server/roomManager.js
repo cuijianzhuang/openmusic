@@ -3610,7 +3610,15 @@ function serializeRoomSummary(room) {
     hasPassword: Boolean(room.passwordHash),
     isLocked: Boolean(room.isLocked),
     isPlaying: room.isPlaying,
-    currentSong: room.current ? { name: room.current.name, artist: room.current.artist } : null,
+    currentSong: room.current
+      ? {
+          name: room.current.name,
+          artist: room.current.artist,
+          id: room.current.id,
+          source: room.current.source,
+          pic: room.current.pic,
+        }
+      : null,
     queueLength: room.queue.length,
     createdAt: room.createdAt,
   };
