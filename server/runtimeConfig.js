@@ -14,6 +14,7 @@ const SECRET_FIELDS = new Set([
   'qiniuSecretKey',
   'apihzId',
   'apihzKey',
+  'linuxdoClientSecret',
 ]);
 const QINIU_ZONES = new Set(['z0', 'z1', 'z2', 'na0', 'as0']);
 const ENC_PREFIX = 'enc:v1:';
@@ -53,6 +54,16 @@ function envDefaults() {
   return {
     roomEmptyTtlMs: envRoomEmptyTtlMs(),
     roomRestartGraceMs: envRoomRestartGraceMs(),
+    // Linux.do OAuth2（房主身份绑定 / 后台登录）：全部留空表示未配置、功能自动关闭。
+    // 需要先在 https://connect.linux.do 注册应用拿到 client_id / secret / 回调地址，
+    // 并向 Linux.do 核实真实的授权 / 令牌 / 用户信息接口地址后再填写，不要照抄示例值。
+    linuxdoClientId: envText('LINUXDO_CLIENT_ID'),
+    linuxdoClientSecret: envText('LINUXDO_CLIENT_SECRET'),
+    linuxdoRedirectUri: envText('LINUXDO_REDIRECT_URI'),
+    linuxdoAuthorizeUrl: envText('LINUXDO_AUTHORIZE_URL'),
+    linuxdoTokenUrl: envText('LINUXDO_TOKEN_URL'),
+    linuxdoUserInfoUrl: envText('LINUXDO_USERINFO_URL'),
+    linuxdoScope: envText('LINUXDO_SCOPE', 'read'),
     metingApiUrl: envText('METING_API_URL'),
     metingApiAuth: envText('METING_API_AUTH'),
     musicApis: [],
@@ -209,6 +220,13 @@ function normalize(config) {
     roomRestartGraceMs: Number.isFinite(roomRestartGraceMs)
       ? Math.max(0, Math.min(Math.round(roomRestartGraceMs), 7 * 24 * 60 * 60 * 1000))
       : 24 * 60 * 60 * 1000,
+    linuxdoClientId: String(config.linuxdoClientId || '').trim(),
+    linuxdoClientSecret: String(config.linuxdoClientSecret || '').trim(),
+    linuxdoRedirectUri: String(config.linuxdoRedirectUri || '').trim(),
+    linuxdoAuthorizeUrl: String(config.linuxdoAuthorizeUrl || '').trim(),
+    linuxdoTokenUrl: String(config.linuxdoTokenUrl || '').trim(),
+    linuxdoUserInfoUrl: String(config.linuxdoUserInfoUrl || '').trim(),
+    linuxdoScope: String(config.linuxdoScope || 'read').trim() || 'read',
     metingApiUrl: String(config.metingApiUrl || '').trim(),
     metingApiAuth: String(config.metingApiAuth || '').trim(),
     musicApis,
@@ -233,6 +251,17 @@ function normalize(config) {
 
 export function getRuntimeConfig() {
   return normalize({ ...envDefaults(), ...getPersisted() });
+}
+
+/** Linux.do OAuth 是否已具备可用配置（客户端凭据 + 三个接口地址均已填写） */
+export function isLinuxdoConfigured(config = getRuntimeConfig()) {
+  return Boolean(
+    config.linuxdoClientId
+    && config.linuxdoClientSecret
+    && config.linuxdoAuthorizeUrl
+    && config.linuxdoTokenUrl
+    && config.linuxdoUserInfoUrl,
+  );
 }
 
 function validateHttpUrl(value, label, { allowEmpty = false, allowList = false, allowPrivate = false } = {}) {

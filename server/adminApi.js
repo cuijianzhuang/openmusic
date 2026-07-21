@@ -47,7 +47,20 @@ import {
   getAdminUsername,
   isAdminCredentialsPersisted,
   mustChangeAdminCredentials,
+  getAdminLinuxdoBinding,
+  isLinuxdoIdBoundToAdmin,
+  bindAdminLinuxdo,
+  unbindAdminLinuxdo,
 } from './adminCredentials.js';
+import {
+  isLinuxdoConfigured,
+  signLinuxdoState,
+  verifyLinuxdoState,
+  sanitizeReturnPath,
+  buildLinuxdoAuthorizeUrl,
+  exchangeLinuxdoCode,
+  fetchLinuxdoProfile,
+} from './linuxdoAuth.js';
 
 export { isAdminEnabled };
 
@@ -465,6 +478,86 @@ export function mountAdminApi(app, { io, socketToRoom, socketToUserId, getClient
     }
     clearAdminSessionCookie(res);
     res.json({ ok: true });
+  });
+
+  // ---------- Linux.do OAuth：后台登录的一种额外方式 ----------
+  // 只有「已经用账号密码登录过的管理员」才能把自己绑定到一个 Linux.do 账号；
+  // Linux.do 本身不能凭空创建新的管理员权限，绑定关系随现有唯一管理员账号存储。
+
+  app.get('/api/admin/linuxdo/status', (req, res) => {
+    if (!isLinuxdoConfigured()) return res.json({ enabled: false, bound: null });
+    res.json({ enabled: true, bound: getAdminLinuxdoBinding() });
+  });
+
+  app.get('/api/admin/linuxdo/bind/start', requireAdmin, (req, res) => {
+    if (!isLinuxdoConfigured()) return res.status(400).json({ error: 'Linux.do 登录未配置' });
+    const state = signLinuxdoState({ purpose: 'admin-bind' });
+    res.redirect(buildLinuxdoAuthorizeUrl(state));
+  });
+
+  app.get('/api/admin/linuxdo/login/start', (req, res) => {
+    if (!isLinuxdoConfigured()) return res.status(400).json({ error: 'Linux.do 登录未配置' });
+    const state = signLinuxdoState({ purpose: 'admin-login' });
+    res.redirect(buildLinuxdoAuthorizeUrl(state));
+  });
+
+  app.get('/api/admin/linuxdo/callback', async (req, res) => {
+    const ip = getClientIp?.(req) || req.ip || '';
+    const entryPath = getAdminEntryPath();
+    const fail = (reason) => res.redirect(`${entryPath}?linuxdo=${reason}`);
+
+    if (!isLinuxdoConfigured()) return fail('error');
+
+    const state = verifyLinuxdoState(req.query?.state);
+    if (!state || (state.purpose !== 'admin-bind' && state.purpose !== 'admin-login')) {
+      return fail('error');
+    }
+
+    let profile;
+    try {
+      const accessToken = await exchangeLinuxdoCode(req.query?.code);
+      profile = await fetchLinuxdoProfile(accessToken);
+    } catch (err) {
+      console.error('Linux.do 后台 OAuth 失败:', err?.message || err);
+      return fail('error');
+    }
+
+    if (state.purpose === 'admin-bind') {
+      // 跳转期间会话可能已过期，绑定前二次核验管理员身份
+      if (!isAdminEnabled() || !verifySession(req)) return fail('expired');
+      const result = await bindAdminLinuxdo(profile);
+      if (!result.success) return fail('error');
+      audit('linuxdo_bind', { linuxdoUsername: profile.username }, ip);
+      return fail('bound');
+    }
+
+    // admin-login：走和密码登录同样的节流，避免被用来穷举/高频探测
+    const block = getLoginBlock(ip);
+    if (block.blocked) {
+      res.setHeader('Retry-After', String(block.retryAfterSec));
+      return fail('locked');
+    }
+    noteLoginAttempt(ip);
+
+    if (!isAdminEnabled() || !isLinuxdoIdBoundToAdmin(profile.id)) {
+      noteLoginFailure(ip);
+      audit('login_fail', { via: 'linuxdo', linuxdoUsername: profile.username }, ip);
+      return fail('denied');
+    }
+
+    noteLoginSuccess(ip);
+    const { sid } = createSession();
+    setAdminSessionCookie(res, sid);
+    audit('login_ok', { via: 'linuxdo', linuxdoUsername: profile.username }, ip);
+    return fail('login_ok');
+  });
+
+  app.post('/api/admin/linuxdo/unbind', requireAdminOrigin, requireAdmin, async (req, res) => {
+    const ip = getClientIp?.(req) || req.ip || '';
+    const result = await unbindAdminLinuxdo();
+    if (!result.success) return res.status(400).json({ error: result.error });
+    audit('linuxdo_unbind', {}, ip);
+    res.json({ success: true });
   });
 
   function requireAdmin(req, res, next) {
