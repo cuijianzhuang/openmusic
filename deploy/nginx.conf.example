@@ -3,7 +3,7 @@
 #
 # 替换：
 #   your-domain.com
-#   /www/sjbmusic/client/dist  → 前端构建目录
+#   /www/openmusic/client/dist  → 前端构建目录
 #   127.0.0.1:4000             → Node 端口
 # 保存后：nginx -t && nginx -s reload
 #
@@ -14,7 +14,7 @@ server {
     listen 443 ssl http2;
     server_name your-domain.com;
 
-    root /www/sjbmusic/client/dist;
+    root /www/openmusic/client/dist;
     index index.html;
 
     # SSL 证书路径按宝塔实际填写

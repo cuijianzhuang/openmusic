@@ -1,12 +1,12 @@
 # 基于宝塔站点配置修改：静态 Nginx 直出，动态回 Node
-# 前端：/www/sjbmusic/client/dist
-# 后端：/www/sjbmusic/server → 127.0.0.1:4000
-# 请按实际域名与部署路径替换 m.qqovo.cn、/www/sjbmusic
+# 前端：/www/openmusic/client/dist
+# 后端：/www/openmusic/server → 127.0.0.1:4000
+# 请按实际域名与部署路径替换 m.qqovo.cn、/www/openmusic
 # 保存后执行：nginx -t && nginx -s reload
 #
 # 精简通用版见 nginx.conf.example
 
-proxy_cache_path /www/sjbmusic/proxy_cache_dir levels=1:2 keys_zone=m_qqovo_cn_cache:20m inactive=1d max_size=5g;
+proxy_cache_path /www/openmusic/proxy_cache_dir levels=1:2 keys_zone=m_qqovo_cn_cache:20m inactive=1d max_size=5g;
 
 server {
     listen 80;
@@ -17,7 +17,7 @@ server {
     server_name m.qqovo.cn;
 
     # ★ 改成前端目录（你文件已在这里）
-    root /www/sjbmusic/client/dist;
+    root /www/openmusic/client/dist;
     index index.html;
 
     include /www/server/panel/vhost/nginx/extension/m.qqovo.cn/*.conf;
@@ -268,7 +268,7 @@ server {
 
     #一键申请SSL证书验证目录相关设置
     location /.well-known {
-        root /www/sjbmusic;
+        root /www/openmusic;
         allow all;
     }
 

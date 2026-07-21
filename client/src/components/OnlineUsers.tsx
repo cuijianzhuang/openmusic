@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Clock, Crown, Image, MapPin, Pencil, Shield, UserMinus, Users, X } from "lucide-react";
+import { Check, Clock, Crown, Image, MapPin, Pencil, Shield, Upload, UserMinus, Users, X } from "lucide-react";
 import { useRoomStore } from "../stores/roomStore";
 import Modal from "./Modal";
 import { useSocket } from "../hooks/useSocket";
+import { fileToAvatarDataUrl, isSupportedAvatarFile } from "../lib/avatarImage";
 import { formatStayDuration } from "../lib/formatStayDuration";
 import { formatDisplayLocation } from "../lib/clientNetworkInfo";
 import ConfirmModal from "./ConfirmModal";
@@ -46,10 +47,13 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
   const [now, setNow] = useState(() => Date.now());
   const [showAvatarModal, setShowAvatarModal] = useState(false);
   const [avatarDraft, setAvatarDraft] = useState("");
+  const [avatarError, setAvatarError] = useState("");
+  const [avatarSaving, setAvatarSaving] = useState(false);
   const [previewAvatarUrl, setPreviewAvatarUrl] = useState<string | null>(null);
   const userAvatarUrls = useRoomStore((s) => s.room?.userAvatarUrls) || {};
   const avatar_url = useRoomStore((s) => s.avatar_url);
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const avatarFileInputRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
   const getUserAvatar = (userId: string) => {
@@ -180,18 +184,37 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
   const handleAvatarDoubleClick = () => {
     if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
     setAvatarDraft(avatar_url);
+    setAvatarError("");
     setShowAvatarModal(true);
   };
 
+  const handleAvatarFile = async (file: File | undefined) => {
+    if (!file) return;
+    if (!isSupportedAvatarFile(file)) {
+      setAvatarError("仅支持 JPG / PNG 图片");
+      return;
+    }
+    setAvatarError("");
+    try {
+      setAvatarDraft(await fileToAvatarDataUrl(file));
+    } catch (err) {
+      setAvatarError(err instanceof Error ? err.message : "图片处理失败");
+    }
+  };
+
   const saveAvatar = async () => {
+    if (avatarSaving) return;
     const url = avatarDraft.trim();
+    setAvatarSaving(true);
     localStorage.setItem("avatar_url", url);
     useRoomStore.setState({ avatar_url: url });
-    setShowAvatarModal(false);
     const res = await setUserAvatar(url);
-    if (!res.success && res.error) {
-      setError(res.error);
+    setAvatarSaving(false);
+    if (!res.success) {
+      setAvatarError(res.error || "头像保存失败");
+      return;
     }
+    setShowAvatarModal(false);
   };
 
   const canKick = (user: DisplayUser) =>
@@ -218,7 +241,7 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
             {orderedUsers.slice(0, 5).map((user) => (
               <Tooltip key={user.id} content={user.id === creatorId ? `${user.nickname}（房主）` : user.nickname} side="bottom">
                 <div
-                  className={`relative w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white border-2 border-netease-dark overflow-hidden ${
+                  className={`relative w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white border-2 border-netease-dark ${
                     getUserAvatar(user.id)
                       ? ""
                       : user.id === creatorId
@@ -229,7 +252,7 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
                   }`}
                 >
                   {getUserAvatar(user.id) ? (
-                    <img src={getUserAvatar(user.id)} alt="" className="w-full h-full object-cover" />
+                    <img src={getUserAvatar(user.id)} alt="" className="w-full h-full rounded-full object-cover" />
                   ) : (
                     user.nickname.charAt(0).toUpperCase()
                   )}
@@ -285,9 +308,10 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
                       onClick={() => {
                         const url = getUserAvatar(user.id);
                         if (url) handleAvatarPreview(url);
+                        else if (isMe && !user.offline) handleAvatarDoubleClick();
                       }}
                       onDoubleClick={isMe ? handleAvatarDoubleClick : undefined}
-                      className={`relative w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0 overflow-hidden ${
+                      className={`relative w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0 ${
                         getUserAvatar(user.id) ? "cursor-pointer" : ""
                       } ${
                         getUserAvatar(user.id)
@@ -300,7 +324,7 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
                       }`}
                     >
                       {getUserAvatar(user.id) ? (
-                        <img src={getUserAvatar(user.id)} alt="" className="w-full h-full object-cover" />
+                        <img src={getUserAvatar(user.id)} alt="" className="w-full h-full rounded-full object-cover" />
                       ) : (
                         user.nickname.charAt(0).toUpperCase()
                       )}
@@ -470,35 +494,48 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
       </Modal>
 
       <Modal open={showAvatarModal} onClose={() => setShowAvatarModal(false)}>
-        <h3 className="text-base font-medium text-white mb-4">设置头像链接</h3>
+        <h3 className="text-base font-medium text-white mb-4">设置头像</h3>
         <input
-          value={avatarDraft}
-          onChange={(event) => setAvatarDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") saveAvatar();
-            if (event.key === "Escape") setShowAvatarModal(false);
+          ref={avatarFileInputRef}
+          type="file"
+          accept="image/jpeg,image/png"
+          className="hidden"
+          onChange={(event) => {
+            void handleAvatarFile(event.target.files?.[0]);
+            event.target.value = "";
           }}
-          placeholder="输入头像图片链接（URL）"
-          className="w-full rounded-lg border border-netease-border/60 bg-netease-dark px-3 py-2 text-sm text-white outline-none focus:border-netease-red/50"
-          autoFocus
         />
-        {avatarDraft.trim() && (
-          <div className="mt-3 flex items-center gap-3">
-            <img
-              src={avatarDraft.trim()}
-              alt="头像预览"
-              className="w-12 h-12 rounded-full object-cover border border-white/10"
-              onError={(e) => {
-                (e.target as HTMLImageElement).style.display = "none";
-              }}
-              onLoad={(e) => {
-                (e.target as HTMLImageElement).style.display = "";
-              }}
-            />
-            <span className="text-xs text-netease-muted">预览</span>
+        <div className="flex items-center gap-4">
+          <div className="flex h-20 w-20 flex-shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-white/5">
+            {avatarDraft ? (
+              <img src={avatarDraft} alt="头像预览" className="h-full w-full object-cover" />
+            ) : (
+              <span className="text-lg font-bold text-white/60">{nickname.charAt(0).toUpperCase()}</span>
+            )}
           </div>
-        )}
+          <div className="min-w-0 flex-1">
+            <button
+              type="button"
+              onClick={() => avatarFileInputRef.current?.click()}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-netease-border/60 px-3 py-1.5 text-sm text-white hover:bg-white/10 transition-colors"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              选择图片
+            </button>
+            <p className="mt-2 text-[11px] text-netease-muted">支持 JPG / PNG，自动裁剪为正方形并压缩，保存在本设备</p>
+          </div>
+        </div>
+        {avatarError && <p className="mt-3 text-xs text-netease-red">{avatarError}</p>}
         <div className="mt-4 flex justify-end gap-2">
+          {avatarDraft && (
+            <button
+              type="button"
+              onClick={() => setAvatarDraft("")}
+              className="mr-auto rounded-lg px-3 py-1.5 text-sm text-netease-muted hover:bg-red-500/10 hover:text-red-300 transition-colors"
+            >
+              移除头像
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setShowAvatarModal(false)}
@@ -509,9 +546,10 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
           <button
             type="button"
             onClick={saveAvatar}
-            className="rounded-lg bg-netease-red px-4 py-1.5 text-sm text-white hover:bg-netease-red/90 transition-colors"
+            disabled={avatarSaving || avatarDraft === avatar_url}
+            className="rounded-lg bg-netease-red px-4 py-1.5 text-sm text-white hover:bg-netease-red/90 transition-colors disabled:opacity-40"
           >
-            保存
+            {avatarSaving ? "保存中…" : "保存"}
           </button>
         </div>
       </Modal>

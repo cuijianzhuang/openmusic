@@ -745,12 +745,26 @@ function rememberUserNickname(room, userId, nickname) {
   room.userNicknames.set(userId, nick);
 }
 
+/** base64 头像（客户端已压到 128px）上限，与客户端 avatarImage.ts 保持一致 */
+const MAX_AVATAR_DATA_URL_LENGTH = 200 * 1024;
+
+/** 头像取值：jpg/png 的 base64 data URL（限长），或兼容旧的 http(s) 链接；非法值归空 */
+function normalizeAvatarUrl(avatarUrl) {
+  const raw = String(avatarUrl || "").trim();
+  if (!raw) return "";
+  if (raw.startsWith("data:")) {
+    if (!/^data:image\/(jpeg|png);base64,/.test(raw)) return "";
+    if (raw.length > MAX_AVATAR_DATA_URL_LENGTH) return "";
+    return raw;
+  }
+  if (!/^https?:\/\//i.test(raw)) return "";
+  return raw.slice(0, 500);
+}
+
 function rememberUserAvatar(room, userId, avatarUrl) {
   if (!userId) return;
   if (!room.userAvatarUrls) room.userAvatarUrls = new Map();
-  const url = String(avatarUrl || "")
-    .trim()
-    .slice(0, 500);
+  const url = normalizeAvatarUrl(avatarUrl);
   if (url) room.userAvatarUrls.set(userId, url);
   else room.userAvatarUrls.delete(userId);
 }
@@ -2177,7 +2191,9 @@ export function setUserAvatar(roomId, socketId, avatarUrl) {
   const user = room.users.get(socketId);
   if (!user) return { error: '未加入房间' };
 
-  const url = String(avatarUrl || '').trim().slice(0, 500);
+  const raw = String(avatarUrl || '').trim();
+  const url = normalizeAvatarUrl(raw);
+  if (raw && !url) return { error: '头像格式不支持或图片过大' };
   rememberUserAvatar(room, socketId, url);
   persistRoom(room);
   return { room: serializeRoom(room) };

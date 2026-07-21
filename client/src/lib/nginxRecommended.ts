@@ -1,6 +1,6 @@
 /** 首次部署完成后展示的 Nginx location 片段：静态直出 + 动态回 Node */
 
-const DEFAULT_APP_ROOT = '/www/sjbmusic';
+const DEFAULT_APP_ROOT = '/www/openmusic';
 
 const NGINX_LOCATIONS = String.raw`# 静态 Nginx 直出，动态回 Node（把下面的 location 放进站点 server 块）
 # 前端目录：__APP_ROOT__/client/dist   后端：127.0.0.1:4000

@@ -1117,6 +1117,22 @@ export function useSocket() {
     });
   }, []);
 
+  const setRoomJoinNotice = useCallback((options: {
+    enabled: boolean;
+    cooldownSec: number;
+  }): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
+    return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
+      'set_room_join_notice',
+      options,
+      { success: false, error: '连接超时，请重试' },
+    ).then((res) => {
+      if (res.success && res.room) {
+        applyRoomSnapshot(res.room);
+      }
+      return res;
+    });
+  }, []);
+
   const setSongRequestEnabled = useCallback((options: {
     enabled?: boolean;
     memberJumpEnabled?: boolean;
@@ -1354,6 +1370,8 @@ export function useSocket() {
     setRoomAnnouncement,
 
     setChatHistoryVisibleOnJoin,
+
+    setRoomJoinNotice,
 
     setSongRequestEnabled,
 

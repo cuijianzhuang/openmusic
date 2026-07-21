@@ -114,7 +114,7 @@ export interface ChatMessage {
   imageUrl?: string | null;
   imageKey?: string | null;
   asSticker?: boolean;
-  kind?: 'chat' | 'welcome' | 'system' | 'recall';
+  kind?: 'chat' | 'welcome' | 'system' | 'notice' | 'recall';
   mentions?: ChatMention[];
   replyTo?: ChatReplyRef | null;
   timestamp: number;
@@ -186,6 +186,10 @@ export interface RoomState {
   announcementText?: string;
   /** 进房是否可查看聊天历史（关闭时仅见进房后的消息） */
   chatHistoryVisibleOnJoin?: boolean;
+  /** 是否在聊天室提示“昵称进入房间” */
+  joinNoticeEnabled?: boolean;
+  /** 同一用户进房提醒的防重复间隔（秒），默认 180 */
+  joinNoticeCooldownSec?: number;
   /** 是否允许成员点歌（关闭后仅房主/管理员可点） */
   songRequestEnabled?: boolean;
   /** 是否允许成员为自己的点歌插队（默认关闭，房主/管理员始终可插队） */

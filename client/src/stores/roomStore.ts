@@ -61,7 +61,6 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
   avatar_url: localStorage.getItem('avatar_url') || '',
   setRoom: (room) => set({ room }),
   setNickname: (nickname) => {
-    console.log(111)
     localStorage.setItem('sjb_nickname', nickname);
     set({ nickname });
   },

@@ -83,7 +83,7 @@ function SetupPage() {
   const [redisOk, setRedisOk] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState<SetupResult | null>(null);
-  const [appRoot, setAppRoot] = useState('/www/sjbmusic');
+  const [appRoot, setAppRoot] = useState('/www/openmusic');
   const [showNginx, setShowNginx] = useState(true);
   const [dockerDefaults, setDockerDefaults] = useState<DockerDefaults | null>(null);
 
@@ -275,7 +275,7 @@ function SetupPage() {
                       <Input
                         value={appRoot}
                         onChange={(e) => setAppRoot(e.target.value)}
-                        placeholder="/www/sjbmusic"
+                        placeholder="/www/openmusic"
                         spellCheck={false}
                         style={{ fontFamily: 'monospace' }}
                       />
