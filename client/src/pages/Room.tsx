@@ -11,6 +11,7 @@ import { normalizeFmMode } from '../api/music/fmMode';
 import { addSongsToQueue, formatBulkAddToast } from '../lib/addSongsToQueue';
 import { rememberPlaylistImportHistory } from '../lib/playlistImportHistory';
 import { detectPlaylistLink } from '../lib/playlistLink';
+import { consumeLinuxdoReturnParam } from '../lib/linuxdoAuth';
 
 import type { FavoriteSong, MusicSource, RoomAudioQuality, RoomMemberSettings, RoomMemberTier, SearchResult, Song, SongHistoryItem } from '../types';
 
@@ -385,6 +386,11 @@ export default function Room() {
   }, [showToast]);
 
   const closeToast = useCallback(() => setToast(null), []);
+
+  useEffect(() => {
+    const result = consumeLinuxdoReturnParam();
+    if (result) showToast(result.message, result.type);
+  }, [showToast]);
 
   const isCreator = Boolean(room?.creatorId && mySocketId && room.creatorId === mySocketId);
   const songRequestBlockReason = getSongRequestBlockReason(
@@ -2152,6 +2158,7 @@ export default function Room() {
         users={room?.users ?? []}
         myUserId={mySocketId}
         transferSaving={transferSaving}
+        roomId={roomId}
         onClose={() => setSettingsOpen(false)}
         onSaveFmMode={handleSaveFmMode}
         onOpenMemberModal={handleOpenMemberModalFromSettings}

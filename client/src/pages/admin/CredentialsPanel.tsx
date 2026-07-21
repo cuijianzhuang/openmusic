@@ -1,7 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { KeyOutlined } from '@ant-design/icons';
-import { App, Button, Card, Col, Input, Row, Space, Tag, Typography } from 'antd';
+import { App, Button, Card, Col, Divider, Input, Row, Space, Tag, Typography } from 'antd';
 import { adminFetch } from './utils';
+
+interface LinuxdoAdminBinding {
+  id: string;
+  username: string;
+  avatarUrl: string;
+  boundAt: number;
+}
 
 export default function CredentialsPanel({
   adminUsername,
@@ -25,10 +32,42 @@ export default function CredentialsPanel({
   const [currentPassword, setCurrentPassword] = useState('');
   const [saving, setSaving] = useState(false);
   const touchedRef = useRef(false);
+  const [linuxdoEnabled, setLinuxdoEnabled] = useState(false);
+  const [linuxdoBound, setLinuxdoBound] = useState<LinuxdoAdminBinding | null>(null);
+  const [linuxdoUnbinding, setLinuxdoUnbinding] = useState(false);
 
   useEffect(() => {
     if (!touchedRef.current) setUsername(adminUsername);
   }, [adminUsername]);
+
+  useEffect(() => {
+    void adminFetch<{ enabled: boolean; bound: LinuxdoAdminBinding | null }>('/api/admin/linuxdo/status')
+      .then((status) => {
+        setLinuxdoEnabled(status.enabled);
+        setLinuxdoBound(status.bound);
+      })
+      .catch(() => setLinuxdoEnabled(false));
+
+    const url = new URL(window.location.href);
+    const result = url.searchParams.get('linuxdo');
+    if (result) {
+      url.searchParams.delete('linuxdo');
+      window.history.replaceState(null, '', url.pathname + url.search + url.hash);
+    }
+  }, []);
+
+  const unbindLinuxdo = async () => {
+    setLinuxdoUnbinding(true);
+    try {
+      await adminFetch('/api/admin/linuxdo/unbind', { method: 'POST' });
+      setLinuxdoBound(null);
+      message.success('已解绑 Linux.do 账号');
+    } catch (err) {
+      onError(err instanceof Error ? err.message : '解绑失败');
+    } finally {
+      setLinuxdoUnbinding(false);
+    }
+  };
 
   const save = async () => {
     if (saving) return;
@@ -139,6 +178,34 @@ export default function CredentialsPanel({
         密码以 scrypt 哈希存 Redis（不落盘）；新密码至少 8 位且不能是默认密码；修改后其它会话立即失效
       </Typography.Paragraph>
       {body}
+      {linuxdoEnabled && (
+        <>
+          <Divider style={{ margin: '20px 0 16px' }} />
+          <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>
+            Linux.do 登录
+          </Typography.Text>
+          <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>
+            绑定后可以用这个 Linux.do 账号直接登录后台，作为账号密码之外的另一种登录方式；不影响账号密码本身。
+          </Typography.Paragraph>
+          {linuxdoBound ? (
+            <Space align="center" style={{ width: '100%', justifyContent: 'space-between' }}>
+              <span>
+                已绑定：{linuxdoBound.username || linuxdoBound.id}
+                <Typography.Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
+                  {new Date(linuxdoBound.boundAt).toLocaleString()}
+                </Typography.Text>
+              </span>
+              <Button danger loading={linuxdoUnbinding} onClick={() => void unbindLinuxdo()}>
+                解绑
+              </Button>
+            </Space>
+          ) : (
+            <Button onClick={() => { window.location.href = '/api/admin/linuxdo/bind/start'; }}>
+              绑定 Linux.do 账号
+            </Button>
+          )}
+        </>
+      )}
     </Card>
   );
 }

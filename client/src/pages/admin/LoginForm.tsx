@@ -1,11 +1,35 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { SafetyCertificateOutlined, UserOutlined, LockOutlined } from '@ant-design/icons';
-import { Alert, Button, Card, Form, Input, Layout, Space, Typography } from 'antd';
+import { Alert, Button, Card, Divider, Form, Input, Layout, Space, Typography } from 'antd';
 import { adminFetch } from './utils';
+
+const LINUXDO_LOGIN_ERRORS: Record<string, string> = {
+  denied: '这个 Linux.do 账号还没有绑定管理员，请先用账号密码登录后在后台绑定',
+  locked: '登录尝试过于频繁，请稍后再试',
+  error: 'Linux.do 登录失败，请稍后再试',
+  expired: '登录已过期，请重试',
+};
 
 export default function LoginForm({ onLoggedIn }: { onLoggedIn: () => void }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [linuxdoEnabled, setLinuxdoEnabled] = useState(false);
+
+  useEffect(() => {
+    void adminFetch<{ enabled: boolean }>('/api/admin/linuxdo/status')
+      .then((status) => setLinuxdoEnabled(Boolean(status.enabled)))
+      .catch(() => setLinuxdoEnabled(false));
+
+    const url = new URL(window.location.href);
+    const result = url.searchParams.get('linuxdo');
+    if (result && result !== 'login_ok') {
+      setError(LINUXDO_LOGIN_ERRORS[result] || 'Linux.do 登录失败');
+    }
+    if (result) {
+      url.searchParams.delete('linuxdo');
+      window.history.replaceState(null, '', url.pathname + url.search + url.hash);
+    }
+  }, []);
 
   const submit = async (values: { username: string; password: string }) => {
     if (busy) return;
@@ -67,12 +91,23 @@ export default function LoginForm({ onLoggedIn }: { onLoggedIn: () => void }) {
                   autoComplete="current-password"
                 />
               </Form.Item>
-              <Form.Item style={{ marginBottom: 0 }}>
+              <Form.Item style={{ marginBottom: linuxdoEnabled ? 0 : undefined }}>
                 <Button type="primary" htmlType="submit" block loading={busy}>
                   登录
                 </Button>
               </Form.Item>
             </Form>
+            {linuxdoEnabled && (
+              <>
+                <Divider style={{ margin: 0 }}>或</Divider>
+                <Button
+                  block
+                  onClick={() => { window.location.href = '/api/admin/linuxdo/login/start'; }}
+                >
+                  使用 Linux.do 登录
+                </Button>
+              </>
+            )}
           </Space>
         </Card>
       </Layout.Content>
