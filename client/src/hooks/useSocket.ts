@@ -69,6 +69,8 @@ function getSocket(): Socket {
 
       withCredentials: true,
 
+      auth: { presenceUpdates: true },
+
       reconnection: true,
 
       reconnectionAttempts: Infinity,
@@ -504,6 +506,22 @@ let prefetchDebounceTimer = 0;
       }, 400);
     };
 
+    const onPresenceUpdate = (presence: Partial<RoomState> & Pick<RoomState, 'id' | 'users' | 'userCount'>) => {
+      const current = useRoomStore.getState().room;
+      if (!current || current.id !== presence.id) return;
+      debugLog('presence_update', debugLine({
+        roomId: presence.id,
+        users: presence.userCount,
+        ownerId: presence.ownerId,
+      }));
+      applyRoomSnapshot({
+        ...current,
+        ...presence,
+        users: presence.users,
+        userCount: presence.userCount,
+      });
+    };
+
     const onPlaybackState = (state: PlaybackState) => {
       schedulePlaybackState(state);
     };
@@ -586,6 +604,8 @@ let prefetchDebounceTimer = 0;
     };
 
     s.on('room_update', onRoomUpdate);
+
+    s.on('presence_update', onPresenceUpdate);
 
     s.on('playback_state', onPlaybackState);
 

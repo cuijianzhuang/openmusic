@@ -83,6 +83,7 @@ import {
   seekTo,
   getRoomInternal,
   buildPlaybackState,
+  buildQueueSnapshot,
   requestJump,
   reorderQueue,
   toggleQueueLike,
@@ -110,6 +111,8 @@ import {
   serializeRoomForViewer,
   prepareRoomBroadcast,
   roomUpdateForViewer,
+  prepareRoomPresence,
+  roomPresenceForViewer,
 } from './roomManager.js';
 import {
   isCyapiConfigured,
@@ -1485,8 +1488,13 @@ function flushRoomBroadcast(normalized) {
   const excludeSocketIds = pending?.excludeSocketIds?.size
     ? [...pending.excludeSocketIds]
     : undefined;
+  const presenceOnly = Boolean(pending?.presenceOnly);
   clearPendingRoomBroadcast(normalized);
-  doBroadcastRoomUpdate(normalized, { excludeSocketIds });
+  if (presenceOnly) {
+    doBroadcastRoomPresence(normalized);
+  } else {
+    doBroadcastRoomUpdate(normalized, { excludeSocketIds });
+  }
 }
 
 /**
@@ -1505,9 +1513,17 @@ function broadcastRoomUpdate(roomId, options = {}) {
 
   let pending = pendingRoomBroadcasts.get(normalized);
   if (!pending) {
-    pending = { timer: null, maxTimer: null, excludeSocketIds: new Set() };
+    pending = {
+      timer: null,
+      maxTimer: null,
+      excludeSocketIds: new Set(),
+      presenceOnly: Boolean(options.presenceOnly),
+    };
     pendingRoomBroadcasts.set(normalized, pending);
     pending.maxTimer = setTimeout(() => flushRoomBroadcast(normalized), ROOM_BROADCAST_MAX_WAIT_MS);
+  } else if (!options.presenceOnly) {
+    // 同一合并窗口内只要出现一次完整更新，就升级为完整 room_update。
+    pending.presenceOnly = false;
   }
 
   if (options.excludeSocketIds?.length) {
@@ -1516,6 +1532,53 @@ function broadcastRoomUpdate(roomId, options = {}) {
 
   if (pending.timer) clearTimeout(pending.timer);
   pending.timer = setTimeout(() => flushRoomBroadcast(normalized), ROOM_BROADCAST_DEBOUNCE_MS);
+}
+
+function broadcastRoomPresence(roomId) {
+  broadcastRoomUpdate(roomId, { presenceOnly: true });
+}
+
+function doBroadcastRoomPresence(roomId) {
+  const normalized = roomId?.toUpperCase();
+  if (!normalized) return;
+  const sockets = io.sockets.adapter.rooms.get(normalized);
+  if (!sockets?.size) return;
+
+  const prepared = prepareRoomPresence(normalized);
+  if (!prepared) return;
+
+  const personalized = [];
+  const legacy = [];
+  for (const sid of sockets) {
+    const viewerId = socketToUserId.get(sid);
+    const clientSocket = io.sockets.sockets.get(sid);
+    if (clientSocket?.handshake?.auth?.presenceUpdates !== true) {
+      legacy.push({ sid, viewerId });
+      continue;
+    }
+    const payload = roomPresenceForViewer(prepared, viewerId);
+    if (!payload) continue;
+    if (payload.userNicknames != null) personalized.push({ sid, payload });
+  }
+
+  if (personalized.length + legacy.length < sockets.size) {
+    let target = io.to(normalized);
+    for (const entry of personalized) target = target.except(entry.sid);
+    for (const entry of legacy) target = target.except(entry.sid);
+    target.emit('presence_update', roomPresenceForViewer(prepared));
+  }
+  for (const entry of personalized) {
+    io.to(entry.sid).emit('presence_update', entry.payload);
+  }
+
+  // 滚动发布或 CDN 缓存期间，旧客户端不认识 presence_update，继续给它完整快照。
+  if (legacy.length > 0) {
+    const full = prepareRoomBroadcast(normalized);
+    for (const entry of legacy) {
+      const payload = roomUpdateForViewer(full, entry.viewerId);
+      if (payload) io.to(entry.sid).emit('room_update', payload);
+    }
+  }
 }
 
 function doBroadcastRoomUpdate(roomId, options = {}) {
@@ -1627,6 +1690,31 @@ function emitPlaybackOnly(roomId) {
   broadcastPlaybackState(roomId);
 }
 
+/**
+ * 合并同房短时间内的多次 queue_snapshot（点赞/踩/拖动排序等高频操作），
+ * 避免每次点击都对全房扇出完整队列。取最后一次快照即可（队列是幂等全量）。
+ */
+const QUEUE_SNAPSHOT_DEBOUNCE_MS = 60;
+const pendingQueueSnapshots = new Map();
+
+function emitQueueSnapshot(roomId) {
+  const normalized = roomId?.toUpperCase();
+  if (!normalized) return;
+  if (pendingQueueSnapshots.has(normalized)) return;
+
+  const timer = setTimeout(() => {
+    pendingQueueSnapshots.delete(normalized);
+    const internal = getRoomInternal(normalized);
+    if (!internal) return;
+    const sockets = io.sockets.adapter.rooms.get(normalized);
+    if (!sockets?.size) return;
+    const snapshot = buildQueueSnapshot(internal);
+    if (snapshot) io.to(normalized).emit('queue_snapshot', snapshot);
+  }, QUEUE_SNAPSHOT_DEBOUNCE_MS);
+
+  pendingQueueSnapshots.set(normalized, timer);
+}
+
 async function advanceEndedRoomNow(roomId, expectedQueueId = '') {
   const internal = getRoomInternal(roomId);
   if (!internal?.current || !internal.isPlaying) return null;
@@ -1659,7 +1747,7 @@ async function advanceEndedRoomNow(roomId, expectedQueueId = '') {
 }
 
 io.on('connection', (socket) => {
-  socket.on('join_room', ({
+  socket.on('join_room', async ({
     roomId,
     nickname,
     password,
@@ -1690,7 +1778,7 @@ io.on('connection', (socket) => {
     }
 
     const deviceId = resolveDeviceIdFromCookieHeader(socket.handshake?.headers?.cookie || '');
-    const auth = verifyRoomPassword(id, password, { clientId: userId, deviceId });
+    const auth = await verifyRoomPassword(id, password, { clientId: userId, deviceId });
     if (!auth.ok) {
       if (!limitJoinPasswordFail(`joinfail:${ip}:${id}`)) {
         callback?.({ success: false, error: '尝试过于频繁，请稍后再试' });
@@ -1725,7 +1813,7 @@ io.on('connection', (socket) => {
       socket.leave(prevRoomId);
       const prevResult = removeUser(prevRoomId, prevUserId, socket.id);
       if (prevResult?.userRemoved && !prevResult.empty) {
-        broadcastRoomUpdate(prevRoomId);
+        broadcastRoomPresence(prevRoomId);
       }
     } else if (prevRoomId && prevRoomId !== id) {
       socket.leave(prevRoomId);
@@ -1798,9 +1886,9 @@ io.on('connection', (socket) => {
     });
 
     setImmediate(() => {
-      // 进房 ACK 已含完整快照，排除本人避免再收一次 40KB+ room_update
-      broadcastRoomUpdate(id, { excludeSocketIds: [socket.id] });
-      // room_update 广播省略 location，需单独补发新成员的归属地给房内其他人，
+      // 进房仅广播在线成员与角色，避免人数增长时重复推送 40KB+ 完整房间快照。
+      broadcastRoomPresence(id);
+      // presence_update 省略 location，需单独补发新成员的归属地给房内其他人，
       // 否则他们要等自己退出重进才能看到（进房 ACK 才带全量 location）
       if (location) {
         socket.to(id).emit('user_location', { userId, location });
@@ -2280,7 +2368,7 @@ io.on('connection', (socket) => {
     if (userId) {
       const result = removeUser(roomId, userId, socket.id);
       if (result?.userRemoved && !result.empty) {
-        broadcastRoomUpdate(roomId);
+        broadcastRoomPresence(roomId);
       }
     }
     callback?.({ success: true });
@@ -2316,7 +2404,7 @@ io.on('connection', (socket) => {
 
     emitRoomAndPlayback(roomId, result.room);
     emitSystemChat(roomId, result.systemMessage);
-    callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
+    callback?.({ success: true });
   });
 
   socket.on('remove_song', ({ queueId }, callback) => {
@@ -2337,7 +2425,7 @@ io.on('connection', (socket) => {
 
     broadcastRoomUpdate(roomId);
     emitSystemChat(roomId, result.systemMessage);
-    callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
+    callback?.({ success: true });
   });
 
   socket.on('clear_queue', (_payload, callback) => {
@@ -2357,7 +2445,7 @@ io.on('connection', (socket) => {
     }
 
     broadcastRoomUpdate(roomId);
-    callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
+    callback?.({ success: true });
   });
 
   socket.on('skip_song', async ({ reason } = {}, callback) => {
@@ -2378,7 +2466,7 @@ io.on('connection', (socket) => {
 
     emitRoomAndPlayback(roomId, result.room);
     emitSystemChat(roomId, result.systemMessage);
-    callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
+    callback?.({ success: true });
   });
 
   socket.on('finish_song', async ({ queueId }, callback) => {
@@ -2395,7 +2483,7 @@ io.on('connection', (socket) => {
     const advanced = await advanceEndedRoomNow(roomId, expectedQueueId);
     if (advanced) {
       emitRoomAndPlayback(roomId, advanced);
-      callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
+      callback?.({ success: true });
       return;
     }
 
@@ -2406,7 +2494,7 @@ io.on('connection', (socket) => {
     }
 
     emitRoomAndPlayback(roomId, result.room);
-    callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
+    callback?.({ success: true });
   });
 
   socket.on('request_jump', async ({ queueId }, callback) => {
@@ -2427,7 +2515,7 @@ io.on('connection', (socket) => {
 
     broadcastRoomUpdate(roomId);
     emitSystemChat(roomId, result.systemMessage);
-    callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
+    callback?.({ success: true });
   });
 
   socket.on('reorder_queue', ({ orderedQueueIds, movedQueueId }, callback) => {
@@ -2446,11 +2534,8 @@ io.on('connection', (socket) => {
       return;
     }
 
-    io.to(roomId).emit('queue_snapshot', {
-      queue: result.room.queue,
-      current: result.room.current,
-    });
-    callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
+    emitQueueSnapshot(roomId);
+    callback?.({ success: true });
   });
 
   socket.on('toggle_queue_like', ({ queueId }, callback) => {
@@ -2469,11 +2554,8 @@ io.on('connection', (socket) => {
       return;
     }
 
-    // 点赞会改队列排序：只推 queue/current，不下发整包 users
-    io.to(roomId).emit('queue_snapshot', {
-      queue: result.queue || [],
-      current: result.current || null,
-    });
+    // 点赞会改队列排序：只推 queue/current，不下发整包 users；高频点击合并广播
+    emitQueueSnapshot(roomId);
     emitSystemChat(roomId, result.systemMessage);
     callback?.({ success: true, liked: result.liked });
   });
@@ -2497,10 +2579,7 @@ io.on('connection', (socket) => {
     if (result.skipped) {
       emitRoomAndPlayback(roomId, result.room);
     } else {
-      io.to(roomId).emit('queue_snapshot', {
-        queue: result.room?.queue || [],
-        current: result.room?.current || null,
-      });
+      emitQueueSnapshot(roomId);
     }
     emitSystemChat(roomId, result.systemMessage);
     callback?.({
@@ -2509,7 +2588,6 @@ io.on('connection', (socket) => {
       skipped: result.skipped,
       dislikeCount: result.dislikeCount,
       threshold: result.threshold,
-      room: getViewerRoomPayload(socket, roomId),
     });
   });
 
@@ -2530,7 +2608,7 @@ io.on('connection', (socket) => {
     }
 
     broadcastRoomUpdate(roomId);
-    callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
+    callback?.({ success: true });
   });
 
   socket.on('reject_jump', ({ requestId }, callback) => {
@@ -2550,7 +2628,7 @@ io.on('connection', (socket) => {
     }
 
     broadcastRoomUpdate(roomId);
-    callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
+    callback?.({ success: true });
   });
 
   socket.on('request_skip', (_payload, callback) => {
@@ -2570,7 +2648,7 @@ io.on('connection', (socket) => {
     }
 
     broadcastRoomUpdate(roomId);
-    callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
+    callback?.({ success: true });
   });
 
   socket.on('approve_skip', async ({ requestId }, callback) => {
@@ -2590,7 +2668,7 @@ io.on('connection', (socket) => {
     }
 
     emitRoomAndPlayback(roomId, result.room);
-    callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
+    callback?.({ success: true });
   });
 
   socket.on('reject_skip', ({ requestId }, callback) => {
@@ -2610,7 +2688,7 @@ io.on('connection', (socket) => {
     }
 
     broadcastRoomUpdate(roomId);
-    callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
+    callback?.({ success: true });
   });
 
   socket.on('send_chat', async ({ text, mentions, replyTo, imageUrl, imageKey, asSticker }, callback) => {
@@ -2849,7 +2927,7 @@ io.on('connection', (socket) => {
       return;
     }
     emitPlaybackOnly(roomId);
-    callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
+    callback?.({ success: true });
   });
 
   socket.on('seek', ({ time }, callback) => {
@@ -2868,7 +2946,7 @@ io.on('connection', (socket) => {
       return;
     }
     emitPlaybackOnly(roomId);
-    callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
+    callback?.({ success: true });
   });
 
   socket.on('disconnect', () => {
@@ -2884,7 +2962,7 @@ io.on('connection', (socket) => {
       const result = removeUser(roomId, userId, socket.id);
       // 多端同用户仍在线、或房间已空：不必全房推送
       if (!result?.userRemoved || result.empty) return;
-      broadcastRoomUpdate(roomId);
+      broadcastRoomPresence(roomId);
     }, DISCONNECT_GRACE_MS);
   });
 });

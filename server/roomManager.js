@@ -1,5 +1,5 @@
 import { customAlphabet } from 'nanoid';
-import { scryptSync, randomBytes, timingSafeEqual } from 'crypto';
+import { scrypt, scryptSync, randomBytes, timingSafeEqual } from 'crypto';
 import { fetchMetingFmSong, normalizeFmMode, DEFAULT_FM_MODE, FM_MODE_OFF } from './metingFm.js';
 import {
   getRedisClient,
@@ -183,7 +183,7 @@ function hashPassword(password) {
   return `${salt.toString('hex')}:${hash.toString('hex')}`;
 }
 
-function verifyPassword(password, stored) {
+async function verifyPassword(password, stored) {
   if (!stored) return true;
   if (!password) return false;
   const normalized = normalizeRoomPasswordInput(password);
@@ -192,12 +192,17 @@ function verifyPassword(password, stored) {
   if (!saltHex || !hashHex) return false;
   const salt = Buffer.from(saltHex, 'hex');
   const expected = Buffer.from(hashHex, 'hex');
-  const actual = scryptSync(normalized, salt, 32);
+  const actual = await new Promise((resolve, reject) => {
+    scrypt(normalized, salt, 32, (error, derivedKey) => {
+      if (error) reject(error);
+      else resolve(derivedKey);
+    });
+  });
   if (expected.length !== actual.length) return false;
   return timingSafeEqual(expected, actual);
 }
 
-export function verifyRoomPassword(roomId, password, options = {}) {
+export async function verifyRoomPassword(roomId, password, options = {}) {
   const room = rooms.get(roomId?.toUpperCase());
   if (!room) return { ok: false, error: '房间不存在' };
 
@@ -229,7 +234,13 @@ export function verifyRoomPassword(roomId, password, options = {}) {
     if (!normalized) {
       return { ok: false, error: '请输入房间密码', needsPassword: true };
     }
-    if (!verifyPassword(password, room.passwordHash)) {
+    let valid = false;
+    try {
+      valid = await verifyPassword(password, room.passwordHash);
+    } catch {
+      valid = false;
+    }
+    if (!valid) {
       return { ok: false, error: '密码错误', needsPassword: true };
     }
   }
@@ -410,14 +421,25 @@ function restoreRoomFromStorage(data) {
 
 const pendingPersistRooms = new Map();
 let persistFlushScheduled = false;
+/** 单个事件循环 tick 最多序列化多少个房间，避免房间多时一次性卡住事件循环 */
+const PERSIST_FLUSH_CHUNK = 20;
 
 function flushPendingPersists() {
   persistFlushScheduled = false;
-  const batch = new Map(pendingPersistRooms);
-  pendingPersistRooms.clear();
+  if (pendingPersistRooms.size === 0) return;
 
-  for (const room of batch.values()) {
+  let processed = 0;
+  for (const [id, room] of pendingPersistRooms) {
+    pendingPersistRooms.delete(id);
     queueSaveRoomToStorage(snapshotRoomForStorage(room));
+    processed += 1;
+    if (processed >= PERSIST_FLUSH_CHUNK) break;
+  }
+
+  // 仍有剩余：让出事件循环，下一 tick 继续，避免大批房间同步序列化造成卡顿
+  if (pendingPersistRooms.size > 0) {
+    persistFlushScheduled = true;
+    setImmediate(flushPendingPersists);
   }
 }
 
@@ -503,6 +525,15 @@ function normalizeRoomName(name, roomId) {
 function bumpPlaybackState(room) {
   room.playbackVersion = (room.playbackVersion || 0) + 1;
   room.playbackUpdatedAt = Date.now();
+}
+
+/** 队列快照：仅 queue + current，用于点赞/踩/排序等结构变化的轻量广播 */
+export function buildQueueSnapshot(room) {
+  if (!room) return null;
+  return {
+    queue: room.queue.map(serializeQueueItemForRoom).filter(Boolean),
+    current: serializeQueueItemForRoom(room.current),
+  };
 }
 
 export function buildPlaybackState(room) {
@@ -3865,6 +3896,46 @@ export function roomUpdateForViewer(prepared, viewerUserId = null) {
     ...(viewerCanModerate ? moderatorExtras : {}),
     chatMuted: viewerUserId ? isUserChatMuted(room, viewerUserId) : false,
     // chatVisibleSince 仅进房 ACK 下发，后续广播省略以缩小载荷并便于整房共享
+  };
+}
+
+/**
+ * 成员进出只需要同步在线成员与角色，不重复广播队列、播放设置等完整房间状态。
+ * 这能把高并发进房时的广播从「完整房间快照 × 在线人数」缩小为轻量 presence 包。
+ */
+export function prepareRoomPresence(roomId) {
+  const room = rooms.get(roomId?.toUpperCase());
+  if (!room) return null;
+
+  return {
+    room,
+    shared: {
+      id: room.id,
+      ownerId: room.ownerId,
+      creatorId: room.creatorId ?? null,
+      adminIds: getOrderedAdminIds(room),
+      autoPromotedAdminIds: getOrderedAutoPromotedAdminIds(room),
+      users: Array.from(room.users.values()).map((user) => serializeUser(user, { includeLocation: false })),
+      userCount: room.users.size,
+      jumpRequests: room.jumpRequests,
+      skipRequests: room.skipRequests,
+    },
+    moderatorUserNicknames: null,
+  };
+}
+
+export function roomPresenceForViewer(prepared, viewerUserId = null) {
+  if (!prepared) return null;
+  const { room, shared } = prepared;
+  const viewerCanModerate = viewerUserId ? canModerate(room, viewerUserId) : false;
+  if (viewerCanModerate && !prepared.moderatorUserNicknames) {
+    prepared.moderatorUserNicknames = serializeUserNicknamesForViewer(room);
+  }
+  return {
+    ...shared,
+    ...(viewerCanModerate
+      ? { userNicknames: prepared.moderatorUserNicknames }
+      : {}),
   };
 }
 

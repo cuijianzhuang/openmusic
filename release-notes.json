@@ -1,6 +1,8 @@
 {
   "notes": [
-    "优化已知问题"
+    "新增主题色修改支持",
+    "房主侧设置内新增进房提示功能",
+    "优化其他已知问题"
   ],
-  "forcePrompt": false
+  "forcePrompt": true
 }
