@@ -133,6 +133,42 @@ npm run install:all && npm run build && npm start
 
 ---
 
+## 🔗 Linux.do 账号绑定（可选）
+
+绑定后可以用同一个 Linux.do 账号，在换设备 / 清了浏览器 Cookie 之后**找回房间房主身份**；后台管理员也可以额外绑定，作为账号密码之外的另一种登录方式。不绑定完全不影响匿名建房 / 加房 / 后台密码登录，默认不开启。
+
+### 1. 申请 OAuth 应用
+
+去 [connect.linux.do](https://connect.linux.do) 注册一个 OAuth 应用，拿到：
+
+- `client_id` / `client_secret`
+- 回调地址：`https://你的域名/api/auth/linuxdo/callback`（必须和后台登记的一致）
+- 真实的授权 / 令牌 / 用户信息接口地址（请以 Linux.do 官方文档为准，`.env.example` 里不提供默认值，照抄示例地址大概率无法工作）
+
+### 2. 填写配置
+
+在 `server/.env` 里填：
+
+```bash
+LINUXDO_CLIENT_ID=
+LINUXDO_CLIENT_SECRET=
+LINUXDO_REDIRECT_URI=https://你的域名/api/auth/linuxdo/callback
+LINUXDO_AUTHORIZE_URL=
+LINUXDO_TOKEN_URL=
+LINUXDO_USERINFO_URL=
+LINUXDO_SCOPE=read
+```
+
+全部留空即为关闭该功能。也可以不改 `.env`，直接在管理后台「运行时配置」里填，免重启生效。
+
+### 3. 怎么绑定
+
+- **房主绑定**：进入自己创建的房间 → 房间设置 → 「身份」标签页 → 绑定 Linux.do 账号。
+- **找回房主身份**：换了设备或清了 Cookie 导致不再被识别为房主时，进同一个房间 → 房间设置 → 「身份」标签页 → 用 Linux.do 找回房间身份（只有此前真绑定过的 Linux.do 账号才能找回成功）。
+- **后台备用登录**：先用账号密码登进管理后台 → 「管理员账号」卡片 → 绑定 Linux.do 账号，之后登录页会出现「使用 Linux.do 登录」按钮。Linux.do 本身不能凭空创建新的管理员权限，必须先有一个已登录的管理员账号才能发起绑定。
+
+---
+
 ## 📱 Android / iOS
 
 Capacitor 远程 URL 壳，前端更新无需重打包。GitHub Actions 提供 APK / IPA 构建。
