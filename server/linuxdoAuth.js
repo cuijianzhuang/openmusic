@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'crypto';
+import { createHmac, timingSafeEqual, randomBytes } from 'crypto';
 import { getRedisClient, isRedisEnabled } from './roomStorage.js';
 import { getRuntimeConfig, isLinuxdoConfigured } from './runtimeConfig.js';
 
@@ -10,10 +10,14 @@ const STATE_TTL_SEC = 10 * 60; // 授权跳转全程 10 分钟内完成，防止
 const BIND_PREFIX = 'openmusic:linuxdo:bind:'; // linuxdoId -> userId
 const PROFILE_PREFIX = 'openmusic:linuxdo:profile:'; // userId -> { linuxdoId, username, avatarUrl, boundAt }
 
+// 未配置 CLIENT_ID_SECRET 时的兜底：必须是进程启动时随机生成、不可预测的值——
+// 之前用固定字符串兜底，任何拿到这份开源代码的人都能算出同样的签名，
+// 使 state 形同虚设。随机兜底每次重启会变，但只影响「10 分钟内未完成的登录跳转」，
+// 不影响已持久化的绑定关系本身。
+const FALLBACK_STATE_SECRET = randomBytes(32).toString('hex');
+
 function stateSecret() {
-  // 复用会话签名同源的密钥；未配置 CLIENT_ID_SECRET 时随进程重启轮换，
-  // 只影响「10 分钟内未完成的登录跳转」，不影响已持久化的绑定关系本身。
-  return String(process.env.CLIENT_ID_SECRET || 'openmusic-linuxdo-state-fallback');
+  return String(process.env.CLIENT_ID_SECRET || FALLBACK_STATE_SECRET);
 }
 
 /**
@@ -143,8 +147,15 @@ export async function bindLinuxdoToUser(linuxdoId, userId, profile) {
 
   const existingUserId = await client.get(`${BIND_PREFIX}${linuxdoId}`);
   if (existingUserId && existingUserId !== userId) {
-    // 之前绑定给别的 userId 的旧关联需要先清掉，避免同一 linuxdoId 悬挂多份 profile
+    // 这个 linuxdoId 之前绑定给别的 userId 的旧关联需要先清掉，避免同一 linuxdoId 悬挂多份 profile
     await client.del(`${PROFILE_PREFIX}${existingUserId}`);
+  }
+
+  // 这个 userId 之前绑定过别的 linuxdoId 也要一并清掉，否则旧账号仍能找回这个身份
+  // （换绑后旧账号继续拥有恢复权限，等于换绑形同虚设）
+  const previousProfile = await getLinuxdoProfileForUser(userId);
+  if (previousProfile?.linuxdoId && previousProfile.linuxdoId !== linuxdoId) {
+    await client.del(`${BIND_PREFIX}${previousProfile.linuxdoId}`);
   }
 
   const record = {

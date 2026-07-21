@@ -76,16 +76,28 @@ update_git_pull() {
     exit 1
   fi
 
+  # 部署时给脚本 chmod +x、不同文件系统 / 编辑器保存方式等都可能只改动权限位、
+  # 不改内容，却会让 git 永远把它当成「本地改动」挡住更新。这类噪音直接忽略，
+  # 不影响真正的内容变更检测。仅设置本仓库局部配置，不影响其它项目。
+  git config core.fileMode false
+
   local path
   for path in "${UPDATE_SAFE_RESET_PATHS[@]}"; do
-    if [ -f "$path" ] && ! git diff --quiet -- "$path" 2>/dev/null; then
+    # 与 HEAD 比较：无论改动只在工作区还是已被 git add 暂存过，都能识别到，
+    # 避免「改动已 add 过 → git diff（不比对暂存区）看不到 → 误判为没有本地改动」。
+    if [ -f "$path" ] && ! git diff --quiet HEAD -- "$path" 2>/dev/null; then
       info "重置本地构建产物：$path"
-      git checkout -- "$path"
+      # 用 HEAD 显式指定版本：同时重置暂存区和工作区。只 checkout 工作区（不带 HEAD）
+      # 在改动已被 add 过时不生效——那样只会把工作区重置成暂存区里同样过时的内容。
+      git checkout HEAD -- "$path"
     fi
   done
 
-  if ! git diff --quiet -- . ':!package-lock.json' ':!server/package-lock.json' ':!client/package-lock.json' ':!client/tsconfig.tsbuildinfo' \
-      || ! git diff --cached --quiet; then
+  local exclude_args=()
+  for path in "${UPDATE_SAFE_RESET_PATHS[@]}"; do
+    exclude_args+=(":!$path")
+  done
+  if ! git diff --quiet HEAD -- . "${exclude_args[@]}"; then
     err "检测到其他未提交的本地改动，为避免覆盖已中止更新，请先自行处理（git status 查看）："
     git status --short
     exit 1

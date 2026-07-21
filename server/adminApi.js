@@ -51,16 +51,21 @@ import {
   isLinuxdoIdBoundToAdmin,
   bindAdminLinuxdo,
   unbindAdminLinuxdo,
+  getAdminGithubBinding,
+  isGithubIdBoundToAdmin,
+  bindAdminGithub,
+  unbindAdminGithub,
 } from './adminCredentials.js';
 import {
   isLinuxdoConfigured,
   signLinuxdoState,
-  verifyLinuxdoState,
-  sanitizeReturnPath,
   buildLinuxdoAuthorizeUrl,
-  exchangeLinuxdoCode,
-  fetchLinuxdoProfile,
 } from './linuxdoAuth.js';
+import {
+  isGithubConfigured,
+  signGithubState,
+  buildGithubAuthorizeUrl,
+} from './githubAuth.js';
 
 export { isAdminEnabled };
 
@@ -149,8 +154,12 @@ function adminCookieFlags(maxAgeSec, req) {
   // 与普通用户会话保持一致：生产模式强制 Secure，测试模式允许 HTTP。
   const useSecureCookie = (IS_PRODUCTION && !ALLOW_INSECURE_COOKIES) || req?.secure;
   const secure = useSecureCookie ? '; Secure' : '';
-  // Path 限定管理 API，降低被同站其它路径带出的面；Strict 降低 CSRF 风险
-  return `Path=/api/admin; Max-Age=${maxAgeSec}; HttpOnly; SameSite=Strict${secure}`;
+  // Path 限定管理 API，降低被同站其它路径带出的面。用 Lax 而非 Strict：
+  // Linux.do / GitHub OAuth 回调是从第三方域跳转回来的顶层 GET 导航，Strict 会导致
+  // 浏览器不带上这个 Cookie，绑定流程里的 verifySession 永远拿不到会话。真正的
+  // CSRF 防护是所有状态变更的 admin 接口都挂了 requireAdminOrigin（校验 Origin），
+  // 不依赖 SameSite=Strict，降级到 Lax 不会削弱这层防护。
+  return `Path=/api/admin; Max-Age=${maxAgeSec}; HttpOnly; SameSite=Lax${secure}`;
 }
 
 function setAdminSessionCookie(res, sid) {
@@ -501,26 +510,16 @@ export function mountAdminApi(app, { io, socketToRoom, socketToUserId, getClient
     res.redirect(buildLinuxdoAuthorizeUrl(state));
   });
 
-  app.get('/api/admin/linuxdo/callback', async (req, res) => {
+  // Linux.do / GitHub 的 OAuth 应用各自只能登记一个回调地址，房主绑定流程和这里的
+  // 后台绑定/登录用的是同一个 LINUXDO_REDIRECT_URI / GITHUB_REDIRECT_URI，所以第三方
+  // 授权完成后永远只会跳回 server/index.js 里注册的房主回调路由，这里单独注册的
+  // /api/admin/linuxdo/callback 实际永远不会被命中。真正处理 admin-bind / admin-login
+  // 的逻辑要交给 index.js 的共享回调按 state.purpose 分发调用，这里只导出处理函数。
+
+  async function handleLinuxdoAdminCallback(req, res, state, profile) {
     const ip = getClientIp?.(req) || req.ip || '';
     const entryPath = getAdminEntryPath();
     const fail = (reason) => res.redirect(`${entryPath}?linuxdo=${reason}`);
-
-    if (!isLinuxdoConfigured()) return fail('error');
-
-    const state = verifyLinuxdoState(req.query?.state);
-    if (!state || (state.purpose !== 'admin-bind' && state.purpose !== 'admin-login')) {
-      return fail('error');
-    }
-
-    let profile;
-    try {
-      const accessToken = await exchangeLinuxdoCode(req.query?.code);
-      profile = await fetchLinuxdoProfile(accessToken);
-    } catch (err) {
-      console.error('Linux.do 后台 OAuth 失败:', err?.message || err);
-      return fail('error');
-    }
 
     if (state.purpose === 'admin-bind') {
       // 跳转期间会话可能已过期，绑定前二次核验管理员身份
@@ -550,13 +549,76 @@ export function mountAdminApi(app, { io, socketToRoom, socketToUserId, getClient
     setAdminSessionCookie(res, sid);
     audit('login_ok', { via: 'linuxdo', linuxdoUsername: profile.username }, ip);
     return fail('login_ok');
-  });
+  }
 
   app.post('/api/admin/linuxdo/unbind', requireAdminOrigin, requireAdmin, async (req, res) => {
     const ip = getClientIp?.(req) || req.ip || '';
     const result = await unbindAdminLinuxdo();
     if (!result.success) return res.status(400).json({ error: result.error });
     audit('linuxdo_unbind', {}, ip);
+    res.json({ success: true });
+  });
+
+  // ---------- GitHub OAuth：后台登录的另一种额外方式（与 Linux.do 完全对称） ----------
+
+  app.get('/api/admin/github/status', (req, res) => {
+    if (!isGithubConfigured()) return res.json({ enabled: false, bound: null });
+    res.json({ enabled: true, bound: getAdminGithubBinding() });
+  });
+
+  app.get('/api/admin/github/bind/start', requireAdmin, (req, res) => {
+    if (!isGithubConfigured()) return res.status(400).json({ error: 'GitHub 登录未配置' });
+    const state = signGithubState({ purpose: 'admin-bind' });
+    res.redirect(buildGithubAuthorizeUrl(state));
+  });
+
+  app.get('/api/admin/github/login/start', (req, res) => {
+    if (!isGithubConfigured()) return res.status(400).json({ error: 'GitHub 登录未配置' });
+    const state = signGithubState({ purpose: 'admin-login' });
+    res.redirect(buildGithubAuthorizeUrl(state));
+  });
+
+  // 同上：/api/admin/github/callback 永远不会被 GitHub 命中，真正处理逻辑在
+  // handleGithubAdminCallback，由 index.js 的共享回调按 state.purpose 分发调用。
+
+  async function handleGithubAdminCallback(req, res, state, profile) {
+    const ip = getClientIp?.(req) || req.ip || '';
+    const entryPath = getAdminEntryPath();
+    const fail = (reason) => res.redirect(`${entryPath}?github=${reason}`);
+
+    if (state.purpose === 'admin-bind') {
+      if (!isAdminEnabled() || !verifySession(req)) return fail('expired');
+      const result = await bindAdminGithub(profile);
+      if (!result.success) return fail('error');
+      audit('github_bind', { githubUsername: profile.username }, ip);
+      return fail('bound');
+    }
+
+    const block = getLoginBlock(ip);
+    if (block.blocked) {
+      res.setHeader('Retry-After', String(block.retryAfterSec));
+      return fail('locked');
+    }
+    noteLoginAttempt(ip);
+
+    if (!isAdminEnabled() || !isGithubIdBoundToAdmin(profile.id)) {
+      noteLoginFailure(ip);
+      audit('login_fail', { via: 'github', githubUsername: profile.username }, ip);
+      return fail('denied');
+    }
+
+    noteLoginSuccess(ip);
+    const { sid } = createSession();
+    setAdminSessionCookie(res, sid);
+    audit('login_ok', { via: 'github', githubUsername: profile.username }, ip);
+    return fail('login_ok');
+  }
+
+  app.post('/api/admin/github/unbind', requireAdminOrigin, requireAdmin, async (req, res) => {
+    const ip = getClientIp?.(req) || req.ip || '';
+    const result = await unbindAdminGithub();
+    if (!result.success) return res.status(400).json({ error: result.error });
+    audit('github_unbind', {}, ip);
     res.json({ success: true });
   });
 
@@ -926,4 +988,7 @@ export function mountAdminApi(app, { io, socketToRoom, socketToUserId, getClient
     audit('destroy_room', { roomId, name: result.name, kicked: sidsToKick.length }, ip);
     res.json({ success: true, name: result.name });
   });
+
+  // Linux.do / GitHub 回调实际由 index.js 的共享房主回调路由分发调用（见上方注释）
+  return { handleLinuxdoAdminCallback, handleGithubAdminCallback };
 }

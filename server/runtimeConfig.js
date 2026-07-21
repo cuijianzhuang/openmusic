@@ -15,6 +15,7 @@ const SECRET_FIELDS = new Set([
   'apihzId',
   'apihzKey',
   'linuxdoClientSecret',
+  'githubClientSecret',
 ]);
 const QINIU_ZONES = new Set(['z0', 'z1', 'z2', 'na0', 'as0']);
 const ENC_PREFIX = 'enc:v1:';
@@ -64,6 +65,13 @@ function envDefaults() {
     linuxdoTokenUrl: envText('LINUXDO_TOKEN_URL'),
     linuxdoUserInfoUrl: envText('LINUXDO_USERINFO_URL'),
     linuxdoScope: envText('LINUXDO_SCOPE', 'read'),
+    // GitHub OAuth（房主身份绑定 / 后台登录）：只需在 https://github.com/settings/developers
+    // 注册一个 OAuth App 拿到 client_id / secret，授权 / 令牌 / 用户信息接口地址是 GitHub
+    // 公开且稳定的固定地址，写死在 server/githubAuth.js 里，不需要在这里配置。
+    githubClientId: envText('GITHUB_CLIENT_ID'),
+    githubClientSecret: envText('GITHUB_CLIENT_SECRET'),
+    githubRedirectUri: envText('GITHUB_REDIRECT_URI'),
+    githubScope: envText('GITHUB_SCOPE', 'read:user'),
     metingApiUrl: envText('METING_API_URL'),
     metingApiAuth: envText('METING_API_AUTH'),
     musicApis: [],
@@ -227,6 +235,10 @@ function normalize(config) {
     linuxdoTokenUrl: String(config.linuxdoTokenUrl || '').trim(),
     linuxdoUserInfoUrl: String(config.linuxdoUserInfoUrl || '').trim(),
     linuxdoScope: String(config.linuxdoScope || 'read').trim() || 'read',
+    githubClientId: String(config.githubClientId || '').trim(),
+    githubClientSecret: String(config.githubClientSecret || '').trim(),
+    githubRedirectUri: String(config.githubRedirectUri || '').trim(),
+    githubScope: String(config.githubScope || 'read:user').trim() || 'read:user',
     metingApiUrl: String(config.metingApiUrl || '').trim(),
     metingApiAuth: String(config.metingApiAuth || '').trim(),
     musicApis,
@@ -262,6 +274,11 @@ export function isLinuxdoConfigured(config = getRuntimeConfig()) {
     && config.linuxdoTokenUrl
     && config.linuxdoUserInfoUrl,
   );
+}
+
+/** GitHub OAuth 是否已具备可用配置（只需要客户端凭据，接口地址是固定的） */
+export function isGithubConfigured(config = getRuntimeConfig()) {
+  return Boolean(config.githubClientId && config.githubClientSecret);
 }
 
 function validateHttpUrl(value, label, { allowEmpty = false, allowList = false, allowPrivate = false } = {}) {

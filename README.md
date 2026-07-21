@@ -133,6 +133,53 @@ npm run install:all && npm run build && npm start
 
 ---
 
+## 🔗 第三方账号绑定（可选）
+
+支持 Linux.do 和 GitHub 两种，能力完全一样、互相独立，可以只开一个也可以都开：绑定后可以用同一个账号，在换设备 / 清了浏览器 Cookie 之后**找回房间房主身份**；后台管理员也可以额外绑定，作为账号密码之外的另一种登录方式。都不绑定完全不影响匿名建房 / 加房 / 后台密码登录，默认不开启。
+
+### 1. 申请 OAuth 应用
+
+**Linux.do**：去 [connect.linux.do](https://connect.linux.do) 注册，拿到 `client_id` / `client_secret`，回调地址填 `https://你的域名/api/auth/linuxdo/callback`；还需要向 Linux.do 官方文档核实真实的授权 / 令牌 / 用户信息接口地址（`.env.example` 里不提供默认值，照抄示例地址大概率无法工作）。
+
+**GitHub**：去 [github.com/settings/developers](https://github.com/settings/developers) 新建一个 OAuth App，拿到 `client_id` / `client_secret`，Authorization callback URL 填 `https://你的域名/api/auth/github/callback`。GitHub 的接口地址是固定的，不需要额外核实/配置。
+
+### 2. 填写配置
+
+在 `server/.env` 里填（两个都是可选，各自独立）：
+
+```bash
+# Linux.do
+LINUXDO_CLIENT_ID=
+LINUXDO_CLIENT_SECRET=
+LINUXDO_REDIRECT_URI=https://你的域名/api/auth/linuxdo/callback
+LINUXDO_AUTHORIZE_URL=
+LINUXDO_TOKEN_URL=
+LINUXDO_USERINFO_URL=
+LINUXDO_SCOPE=read
+
+# GitHub
+GITHUB_CLIENT_ID=
+GITHUB_CLIENT_SECRET=
+GITHUB_REDIRECT_URI=https://你的域名/api/auth/github/callback
+GITHUB_SCOPE=read:user
+```
+
+留空即为关闭对应功能。也可以不改 `.env`，直接在管理后台「运行时配置」里填，免重启生效。
+
+### 3. 怎么绑定
+
+- **房主绑定**：进入自己创建的房间 → 房间设置 → 「身份」标签页 → 绑定 Linux.do / GitHub 账号（两个开了哪个就显示哪个）。
+- **找回房主身份**：换了设备或清了 Cookie 导致不再被识别为房主时，进同一个房间 → 房间设置 → 「身份」标签页 → 用对应账号找回房间身份（只有此前真绑定过的账号才能找回成功）。
+- **后台备用登录**：先用账号密码登进管理后台 → 「管理员账号」卡片 → 绑定 Linux.do / GitHub 账号，之后登录页会出现对应的一键登录按钮。第三方账号本身不能凭空创建新的管理员权限，必须先有一个已登录的管理员账号才能发起绑定。
+
+---
+
+## 🛠️ 首页管理入口快捷方式
+
+首页默认不展示任何管理入口——部署向导生成的随机路径本身就是安全设计的一部分，不应该被公开链接出来。当你自己的浏览器**成功命中**过一次真实的管理入口后，会在本地 `localStorage` 记住这个路径，之后首页顶栏会悄悄出现一个小盾牌图标指向它，方便你自己快速进入；别人访问首页完全看不到，也不会泄露真实路径。
+
+---
+
 ## 📱 Android / iOS
 
 Capacitor 远程 URL 壳，前端更新无需重打包。GitHub Actions 提供 APK / IPA 构建。
