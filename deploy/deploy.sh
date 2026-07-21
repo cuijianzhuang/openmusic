@@ -76,6 +76,11 @@ update_git_pull() {
     exit 1
   fi
 
+  # 部署时给脚本 chmod +x、不同文件系统 / 编辑器保存方式等都可能只改动权限位、
+  # 不改内容，却会让 git 永远把它当成「本地改动」挡住更新。这类噪音直接忽略，
+  # 不影响真正的内容变更检测。仅设置本仓库局部配置，不影响其它项目。
+  git config core.fileMode false
+
   local path
   for path in "${UPDATE_SAFE_RESET_PATHS[@]}"; do
     # 与 HEAD 比较：无论改动只在工作区还是已被 git add 暂存过，都能识别到，
