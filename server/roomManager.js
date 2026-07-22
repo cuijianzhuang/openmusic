@@ -46,6 +46,8 @@ export const INITIAL_CHAT_LIMIT = 100;
 export const CHAT_PAGE_LIMIT = 50;
 const MAX_RANDOM_HISTORY = 200;
 const MAX_RANDOM_PREFETCH_ATTEMPTS = 20;
+/** 非控制者首次补种时长的最小合理值（毫秒），杜绝 durationMs:1 之类的恶意切歌 */
+const MIN_REPORTABLE_DURATION_MS = 1000;
 
 /** 播放顺序：顺序 / 乱序 / 单曲循环 / 列表循环 */
 export const PLAY_MODES = ["order", "shuffle", "loop-one", "loop-all"];
@@ -3826,6 +3828,16 @@ export function reportTrackDuration(roomId, userId, queueId, durationMs, connect
   if (!isController && existing > 0) return { error: "仅房主或管理员可上报时长" };
   // 允许缩短：CDN 截断预览时长常短于元数据，否则服务端永不 auto-advance
   if (existing > 0 && Math.abs(ms - existing) < 50) return { success: true, skipped: true };
+
+  // 非控制者首次补种时长时，禁止上报过小或小于当前已播放进度的值：
+  // 否则任意成员可凭 durationMs:1 触发 advanceEndedRoomNow 立即切歌。
+  // 合法补种时长必然 >= 已播放进度（歌未放完）且不小于最小合理歌曲时长。
+  if (!isController && existing === 0) {
+    const playedMs = Math.max(0, Math.floor(getPlaybackTime(room) * 1000));
+    if (ms < Math.max(playedMs, MIN_REPORTABLE_DURATION_MS)) {
+      return { error: "上报时长无效" };
+    }
+  }
 
   room.current.duration = Math.round(ms);
   persistRoom(room);

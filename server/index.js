@@ -2854,6 +2854,8 @@ io.on('connection', (socket) => {
   });
 
   socket.on('report_track_duration', async ({ queueId, durationMs }, callback) => {
+    if (rejectRateLimited(socket, limitSocketAction, 'report_track_duration', callback)) return;
+
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
       callback?.({ success: false, error: '未加入房间' });
