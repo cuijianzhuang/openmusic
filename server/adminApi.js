@@ -154,12 +154,15 @@ function adminCookieFlags(maxAgeSec, req) {
   // 与普通用户会话保持一致：生产模式强制 Secure，测试模式允许 HTTP。
   const useSecureCookie = (IS_PRODUCTION && !ALLOW_INSECURE_COOKIES) || req?.secure;
   const secure = useSecureCookie ? '; Secure' : '';
-  // Path 限定管理 API，降低被同站其它路径带出的面。用 Lax 而非 Strict：
+  // Path 限定在 /api 下，降低被同站其它路径带出的面。用 Lax 而非 Strict：
   // Linux.do / GitHub OAuth 回调是从第三方域跳转回来的顶层 GET 导航，Strict 会导致
   // 浏览器不带上这个 Cookie，绑定流程里的 verifySession 永远拿不到会话。真正的
   // CSRF 防护是所有状态变更的 admin 接口都挂了 requireAdminOrigin（校验 Origin），
   // 不依赖 SameSite=Strict，降级到 Lax 不会削弱这层防护。
-  return `Path=/api/admin; Max-Age=${maxAgeSec}; HttpOnly; SameSite=Lax${secure}`;
+  // 之所以是 /api 而不是更窄的 /api/admin：admin-bind/admin-login 复用的共享 OAuth
+  // 回调路由在 /api/auth/{provider}/callback 下，Path=/api/admin 会让浏览器在跳转回这个
+  // 回调时根本不带上这个 Cookie，verifySession 永远拿不到会话，绑定必然报"已过期"。
+  return `Path=/api; Max-Age=${maxAgeSec}; HttpOnly; SameSite=Lax${secure}`;
 }
 
 function setAdminSessionCookie(res, sid) {
