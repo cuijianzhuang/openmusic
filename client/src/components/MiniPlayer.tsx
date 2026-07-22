@@ -5,9 +5,11 @@ import { useRoomStore } from '../stores/roomStore';
 import { useAudioStore } from '../stores/audioStore';
 import { useSocket } from '../hooks/useSocket';
 import { canPauseInRoom, canSeekInRoom } from '../lib/roomPermissions';
+import { getTrackKey } from '../api/music';
+import { getSourceShortLabel } from '../lib/sourceLabels';
 
-import SourceBadge from './SourceBadge';
 import SongCover from './SongCover';
+import PlaybackQualityTag from './PlaybackQualityTag';
 
 import ProgressBar from './ProgressBar';
 import PlaybackProgressBar from './playback/PlaybackProgressBar';
@@ -54,6 +56,7 @@ export default memo(function MiniPlayer({
   const setTrackLoading = useAudioStore((s) => s.setTrackLoading);
   const seekPlayback = useAudioStore((s) => s.seekPlayback);
   const localPlayback = useAudioStore((s) => s.localPlayback);
+  const actualQualityByTrack = useAudioStore((s) => s.actualQualityByTrack);
   const { togglePlay, skipSong, requestSkip } = useSocket();
 
   const [skipError, setSkipError] = useState('');
@@ -61,6 +64,9 @@ export default memo(function MiniPlayer({
   const [reportOpen, setReportOpen] = useState(false);
   const mySocketId = useRoomStore((s) => s.mySocketId);
   const hasPendingSkip = skipRequests?.some((r) => r.requestedBy === mySocketId) ?? false;
+  const qualityLabel = current
+    ? (actualQualityByTrack[getTrackKey(current)] ?? null)
+    : null;
 
   const handlePlayPause = () => {
     if (!hasRoom) return;
@@ -159,8 +165,17 @@ export default memo(function MiniPlayer({
             className="control-cover bg-netease-card"
           />
               <div className="control-meta">
-                <div className="control-title">{current.name}</div>
-                <div className="control-artist">{current.artist}</div>
+                <div className="control-title flex min-w-0 items-center gap-1.5 !overflow-visible">
+                  <span className="min-w-0 truncate">{current.name}</span>
+                  <PlaybackQualityTag label={qualityLabel} source={current.source} />
+                </div>
+                <div className="control-artist truncate">
+                  <span className="text-white/70">{current.artist}</span>
+                  <span>
+                    {' · '}
+                    {getSourceShortLabel(current.source || 'netease')}
+                  </span>
+                </div>
               </div>
             </button>
             <FavoriteButton
@@ -338,21 +353,18 @@ export default memo(function MiniPlayer({
 
           <div className="min-w-0 hidden sm:block">
 
-            <div className="flex items-center gap-1 sm:gap-1.5">
-
-              <p className="text-sm font-medium truncate">{current.name}</p>
-
-              <SourceBadge source={current.source || 'netease'} className="hidden sm:inline-flex" />
-
+            <div className="flex min-w-0 items-center gap-1.5">
+              <p className="min-w-0 truncate text-sm font-medium">{current.name}</p>
+              <PlaybackQualityTag label={qualityLabel} source={current.source} />
             </div>
 
-            <p className="text-[11px] sm:text-xs text-netease-muted truncate">
-
-              {current.artist}
-              {current.requestedBy && (
-                <span className="text-netease-muted/70"> · {current.requestedBy}点的歌</span>
-              )}
-
+            <p className="truncate text-[11px] text-netease-muted sm:text-xs">
+              <span className="text-white/70">{current.artist}</span>
+              <span>
+                {' · '}
+                {getSourceShortLabel(current.source || 'netease')}
+                {current.requestedBy ? ` · ${current.requestedBy}点的歌` : ''}
+              </span>
             </p>
 
           </div>

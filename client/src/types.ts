@@ -184,6 +184,8 @@ export interface RoomState {
   announcementEnabled?: boolean;
   /** 公告内容 */
   announcementText?: string;
+  /** 房主自定义封面；有值时不再跟随当前歌曲封面 */
+  customCoverUrl?: string;
   /** 进房是否可查看聊天历史（关闭时仅见进房后的消息） */
   chatHistoryVisibleOnJoin?: boolean;
   /** 是否在聊天室提示“昵称进入房间” */
@@ -250,6 +252,8 @@ export interface RoomSummary {
   hasPassword: boolean;
   isLocked?: boolean;
   isPlaying: boolean;
+  /** 房主自定义封面（优先于 currentSong.pic） */
+  customCoverUrl?: string;
   currentSong: {
     name: string;
     artist: string;

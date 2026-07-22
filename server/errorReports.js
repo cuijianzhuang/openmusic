@@ -6,9 +6,11 @@ const reportKey = (id) => `openmusic:error_reports:${id}`;
 const generateId = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz', 14);
 const MAX_REPORTS = 100;
 const MAX_DESCRIPTION = 500;
-const MAX_SNAPSHOT = 48_000;
+const MAX_SNAPSHOT = 64_000;
+const MAX_SNAPSHOT_SECTIONS = 5;
+const MAX_SNAPSHOT_SECTION = 16_000;
 const MAX_EVENTS = 80;
-const MAX_META_STRING = 400;
+const MAX_META_STRING = 2048;
 const MAX_NOTE = 500;
 
 /** @type {Map<string, object>} */
@@ -46,15 +48,27 @@ function sanitizeEvents(raw) {
   }));
 }
 
+function sanitizeSnapshots(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.slice(0, MAX_SNAPSHOT_SECTIONS).map((item) => ({
+    id: cleanText(item?.id, 40),
+    title: cleanText(item?.title, 40),
+    content: cleanText(item?.content, MAX_SNAPSHOT_SECTION),
+  })).filter((item) => item.id && item.title && item.content);
+}
+
 function sanitizeReport(raw = {}) {
   const status = raw.status === 'resolved' ? 'resolved' : 'open';
+  const type = raw.type === 'feedback' ? 'feedback' : 'error';
   const note = cleanText(raw.note, MAX_NOTE);
   const ackedAt = Number(raw.solutionAckedAt);
   return {
     id: cleanText(raw.id, 32) || generateId(),
+    type,
     status,
     description: cleanText(raw.description, MAX_DESCRIPTION),
     snapshot: cleanText(raw.snapshot, MAX_SNAPSHOT),
+    snapshots: sanitizeSnapshots(raw.snapshots),
     events: sanitizeEvents(raw.events),
     meta: sanitizeMeta(raw.meta),
     ip: cleanText(raw.ip, 64),
@@ -72,6 +86,7 @@ function sanitizeReport(raw = {}) {
 function toSummary(report) {
   return {
     id: report.id,
+    type: report.type || 'error',
     status: report.status,
     description: report.description,
     ip: report.ip,
@@ -88,7 +103,8 @@ function toSummary(report) {
       href: report.meta?.href ?? null,
     },
     eventCount: Array.isArray(report.events) ? report.events.length : 0,
-    hasSnapshot: Boolean(report.snapshot),
+    snapshotCount: Array.isArray(report.snapshots) ? report.snapshots.length : 0,
+    hasSnapshot: Boolean(report.snapshot || report.snapshots?.length),
   };
 }
 
@@ -164,10 +180,12 @@ export async function createErrorReport(input = {}) {
 
   const report = sanitizeReport({
     id: generateId(),
+    type: input.type === 'feedback' ? 'feedback' : 'error',
     status: 'open',
     description,
-    snapshot: input.snapshot,
-    events: input.events,
+    snapshot: input.type === 'feedback' ? '' : input.snapshot,
+    snapshots: input.type === 'feedback' ? [] : input.snapshots,
+    events: input.type === 'feedback' ? [] : input.events,
     meta: input.meta,
     ip: input.ip,
     userId: input.userId,

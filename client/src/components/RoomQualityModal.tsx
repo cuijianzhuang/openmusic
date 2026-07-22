@@ -1,11 +1,13 @@
 import { createPortal } from 'react-dom';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { X } from 'lucide-react';
 import {
-  NETEASE_QUALITY_OPTIONS,
-  TENCENT_QUALITY_OPTIONS,
+  getQualityOptionsForSource,
   normalizeRoomAudioQuality,
+  refreshQualityCapabilities,
+  clampQualityToCapabilities,
 } from '../api/music/quality';
+import { useSiteFeaturesStore } from '../stores/siteFeaturesStore';
 import type { RoomAudioQuality } from '../types';
 
 interface Props {
@@ -17,17 +19,28 @@ interface Props {
 }
 
 export default function RoomQualityModal({ open, value, saving = false, onClose, onSave }: Props) {
+  const svipQualityEnabled = useSiteFeaturesStore((s) => s.svipQualityEnabled);
   const [draft, setDraft] = useState(() => normalizeRoomAudioQuality(value));
 
   useEffect(() => {
-    if (open) setDraft(normalizeRoomAudioQuality(value));
-  }, [open, value]);
+    if (!open) return;
+    void refreshQualityCapabilities();
+    const next = normalizeRoomAudioQuality(value);
+    setDraft({
+      netease: clampQualityToCapabilities('netease', next.netease),
+      tencent: clampQualityToCapabilities('tencent', next.tencent),
+    });
+  }, [open, value, svipQualityEnabled]);
+
+  const neteaseOptions = useMemo(() => getQualityOptionsForSource('netease'), [svipQualityEnabled]);
+  const tencentOptions = useMemo(() => getQualityOptionsForSource('tencent'), [svipQualityEnabled]);
 
   if (!open) return null;
 
   const current = draft;
-  const dirty = current.netease !== normalizeRoomAudioQuality(value).netease
-    || current.tencent !== normalizeRoomAudioQuality(value).tencent;
+  const baseline = normalizeRoomAudioQuality(value);
+  const dirty = current.netease !== clampQualityToCapabilities('netease', baseline.netease)
+    || current.tencent !== clampQualityToCapabilities('tencent', baseline.tencent);
 
   const handleNeteaseChange = (netease: string) => {
     setDraft((prev) => ({ ...prev, netease }));
@@ -68,7 +81,7 @@ export default function RoomQualityModal({ open, value, saving = false, onClose,
         </div>
 
         <p className="mb-4 text-xs leading-5 text-netease-muted">
-          仅影响你本机的播放与预加载，不影响房间内其他人。网络较慢时可选择较低音质以减少卡顿。
+          仅影响你本机的播放，网络较慢时可选择较低音质以减少卡顿
         </p>
 
         <div className="space-y-4">
@@ -78,7 +91,7 @@ export default function RoomQualityModal({ open, value, saving = false, onClose,
               <span className="text-sm text-netease-muted">红点</span>
             </div>
             <div className="flex flex-wrap gap-2">
-              {NETEASE_QUALITY_OPTIONS.map((opt) => (
+              {neteaseOptions.map((opt) => (
                 <button
                   key={opt.value}
                   type="button"
@@ -102,7 +115,7 @@ export default function RoomQualityModal({ open, value, saving = false, onClose,
               <span className="text-sm text-netease-muted">绿点</span>
             </div>
             <div className="flex flex-wrap gap-2">
-              {TENCENT_QUALITY_OPTIONS.map((opt) => (
+              {tencentOptions.map((opt) => (
                 <button
                   key={opt.value}
                   type="button"

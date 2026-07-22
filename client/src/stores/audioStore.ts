@@ -38,9 +38,14 @@ interface AudioStore {
   setPlaybackVersion: (playbackVersion: number) => void;
   trackReloadNonce: number;
   requestTrackReload: () => void;
+  /** 各曲目实际音质（按 trackKey；预取下一首时不会覆盖当前曲） */
+  actualQualityByTrack: Record<string, string>;
+  setActualQuality: (trackKey: string, label: string | null) => void;
   volume: number;
   setVolume: (volume: number) => void;
 }
+
+const MAX_QUALITY_TRACKS = 32;
 
 export const useAudioStore = create<AudioStore>((set) => ({
   trackLoading: false,
@@ -65,6 +70,27 @@ export const useAudioStore = create<AudioStore>((set) => ({
   setPlaybackVersion: (playbackVersion) => set({ playbackVersion }),
   trackReloadNonce: 0,
   requestTrackReload: () => set((state) => ({ trackReloadNonce: state.trackReloadNonce + 1 })),
+  actualQualityByTrack: {},
+  setActualQuality: (trackKey, label) => set((state) => {
+    if (!trackKey) return state;
+    const trimmed = label?.trim() || '';
+    const prev = state.actualQualityByTrack[trackKey];
+    if (!trimmed) {
+      if (!prev) return state;
+      const next = { ...state.actualQualityByTrack };
+      delete next[trackKey];
+      return { actualQualityByTrack: next };
+    }
+    if (prev === trimmed) return state;
+    const next = { ...state.actualQualityByTrack, [trackKey]: trimmed };
+    const keys = Object.keys(next);
+    if (keys.length > MAX_QUALITY_TRACKS) {
+      for (const key of keys.slice(0, keys.length - MAX_QUALITY_TRACKS)) {
+        delete next[key];
+      }
+    }
+    return { actualQualityByTrack: next };
+  }),
   volume: readStoredVolume(),
   setVolume: (volume) => {
     const next = Math.min(1, Math.max(0, volume));

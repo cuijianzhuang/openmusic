@@ -1104,6 +1104,19 @@ export function useSocket() {
     });
   }, []);
 
+  const setRoomCustomCover = useCallback((coverUrl: string): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
+    return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
+      'set_room_custom_cover',
+      { coverUrl },
+      { success: false, error: '连接超时，请重试' },
+    ).then((res) => {
+      if (res.success && res.room) {
+        applyRoomSnapshot(res.room);
+      }
+      return res;
+    });
+  }, []);
+
   const setChatHistoryVisibleOnJoin = useCallback((enabled: boolean): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
     return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
       'set_room_chat_history',
@@ -1368,6 +1381,8 @@ export function useSocket() {
     setRoomPlayMode,
 
     setRoomAnnouncement,
+
+    setRoomCustomCover,
 
     setChatHistoryVisibleOnJoin,
 

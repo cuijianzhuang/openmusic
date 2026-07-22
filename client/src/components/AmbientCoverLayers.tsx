@@ -1,60 +1,100 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { measureCoverLuminance, tuneCoverBackdrop, type CoverBackdropTuning } from '../lib/coverBackdrop';
-import { toProxiedMediaUrl } from '../lib/mediaProxyUrl';
-import { useSignedApiUrl } from '../lib/signedApiUrl';
+import { getCoverPixelSize } from '../lib/coverUrl';
+import { resolveSignedApiUrl, useSignedApiUrl } from '../lib/signedApiUrl';
 
 interface Props {
   coverUrl: string;
   className?: string;
 }
 
+type LoadStage = 'primary' | 'proxy';
+
 export default function AmbientCoverLayers({ coverUrl, className = 'absolute inset-0' }: Props) {
-  const [loaded, setLoaded] = useState(false);
+  const [stageFor, setStageFor] = useState<{ id: string; stage: LoadStage } | null>(null);
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
   const [tuning, setTuning] = useState<CoverBackdropTuning>(() => tuneCoverBackdrop(null));
-  // The proxy endpoint itself is protected by API signing. Build the local proxy
-  // URL first so the signature covers /api/media-proxy and its `url` query.
-  const proxiedCover = useMemo(() => toProxiedMediaUrl(coverUrl), [coverUrl]);
-  const signedCover = useSignedApiUrl(proxiedCover);
-  const displayUrl = signedCover || '';
+
+  const stage: LoadStage = stageFor?.id === coverUrl ? stageFor.stage : 'primary';
 
   useEffect(() => {
-    setLoaded(false);
+    setStageFor(null);
+    setLoadedFor(null);
     setTuning(tuneCoverBackdrop(null));
+  }, [coverUrl]);
 
+  const pixelSize = getCoverPixelSize('medium');
+  // 与 SongCover 一致：先直链，失败再走 media-proxy（避免代理限流导致背景偶发空白）
+  const proxyUrl = /^https?:\/\//i.test(coverUrl)
+    ? `/api/media-proxy?url=${encodeURIComponent(coverUrl)}${pixelSize ? `&size=${pixelSize}` : ''}`
+    : null;
+  const target = stage === 'proxy' && proxyUrl ? proxyUrl : coverUrl;
+  const signedCover = useSignedApiUrl(target);
+  const displayUrl = signedCover || '';
+  const loaded = Boolean(displayUrl) && loadedFor === displayUrl;
+
+  useEffect(() => {
     if (!displayUrl) return;
 
-    const probe = new Image();
-    probe.crossOrigin = 'anonymous';
-    probe.onload = () => {
-      setTuning(tuneCoverBackdrop(measureCoverLuminance(probe)));
-    };
-    probe.onerror = () => {
+    // 亮度采样单独走代理，避免给展示用 <img> 加 crossOrigin 导致部分 CDN 不显示
+    let cancelled = false;
+    const probeTarget = proxyUrl || (displayUrl.startsWith('/api/') ? displayUrl : null);
+    if (!probeTarget) {
       setTuning(tuneCoverBackdrop(null));
-    };
-    probe.src = displayUrl;
+      return;
+    }
+
+    void resolveSignedApiUrl(probeTarget).then((signedProbe) => {
+      if (cancelled || !signedProbe) return;
+      const probe = new Image();
+      probe.crossOrigin = 'anonymous';
+      probe.onload = () => {
+        if (!cancelled) setTuning(tuneCoverBackdrop(measureCoverLuminance(probe)));
+      };
+      probe.onerror = () => {
+        if (!cancelled) setTuning(tuneCoverBackdrop(null));
+      };
+      probe.src = signedProbe;
+    });
 
     return () => {
-      probe.onload = null;
-      probe.onerror = null;
+      cancelled = true;
     };
-  }, [displayUrl]);
+  }, [displayUrl, proxyUrl]);
 
   return (
     <div className={`${className} overflow-hidden`} aria-hidden>
       <div className="absolute inset-0 bg-surface-canvas" />
 
-      <img
-        src={displayUrl}
-        alt=""
-        crossOrigin="anonymous"
-        className="absolute inset-0 h-full w-full object-cover transition-[opacity,filter] duration-700"
-        style={{
-          opacity: loaded ? tuning.coverOpacity : 0,
-          filter: `blur(46px) brightness(${tuning.imgBrightness}) saturate(1.32) contrast(.96)`,
-          transform: 'scale(1.14)',
-        }}
-        onLoad={() => setLoaded(true)}
-      />
+      {displayUrl ? (
+        <img
+          key={displayUrl}
+          src={displayUrl}
+          alt=""
+          referrerPolicy="no-referrer"
+          decoding="async"
+          className="absolute inset-0 h-full w-full object-cover transition-[opacity,filter] duration-700"
+          style={{
+            opacity: loaded ? tuning.coverOpacity : 0,
+            filter: `blur(46px) brightness(${tuning.imgBrightness}) saturate(1.32) contrast(.96)`,
+            transform: 'scale(1.14)',
+          }}
+          ref={(img) => {
+            // 缓存命中时浏览器可能不再触发 onLoad，需主动检测 complete
+            if (img?.complete && img.naturalWidth > 0 && loadedFor !== displayUrl) {
+              queueMicrotask(() => setLoadedFor(displayUrl));
+            }
+          }}
+          onLoad={() => setLoadedFor(displayUrl)}
+          onError={() => {
+            if (stage === 'primary' && proxyUrl) {
+              setStageFor({ id: coverUrl, stage: 'proxy' });
+              return;
+            }
+            setLoadedFor(null);
+          }}
+        />
+      ) : null}
 
       <div
         className="absolute inset-0 transition-[background-color] duration-700"

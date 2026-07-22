@@ -132,11 +132,14 @@ export default function OverviewDashboard({
 
   const upstreams = overview.metingUpstreams || [];
   const healthyCount = upstreams.filter((u) => u.healthy && !u.disabled).length;
-  const disabledCount = upstreams.filter((u) => u.disabled).length;
   const unhealthyCount = upstreams.filter((u) => !u.healthy && !u.disabled).length;
-  const healthPct = upstreams.length
-    ? Math.round((healthyCount / upstreams.length) * 100)
-    : 100;
+  // 可用率按请求成功率，不因单上游短暂冷却就整表变 0
+  const totalOk = upstreams.reduce((sum, u) => sum + (u.okCount || 0), 0);
+  const totalHardFail = upstreams.reduce((sum, u) => sum + (u.failCount || 0), 0);
+  const hardTotal = totalOk + totalHardFail;
+  const healthPct = hardTotal > 0
+    ? Math.round((totalOk / hardTotal) * 100)
+    : (upstreams.length ? 100 : 100);
   const playPct = overview.roomCount > 0
     ? Math.round((overview.playingRooms / overview.roomCount) * 100)
     : 0;
@@ -167,12 +170,17 @@ export default function OverviewDashboard({
     },
     {
       title: '成功 / 失败',
-      width: 120,
+      width: 140,
       render: (_, up) => (
         <Typography.Text style={{ fontSize: 13 }}>
           <span style={{ color: '#16a34a' }}>{up.okCount}</span>
           <Typography.Text type="secondary"> / </Typography.Text>
           <span style={{ color: up.failCount ? '#dc2626' : undefined }}>{up.failCount}</span>
+          {up.softFailCount ? (
+            <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+              {' '}(+{up.softFailCount} 软)
+            </Typography.Text>
+          ) : null}
         </Typography.Text>
       ),
     },
@@ -361,7 +369,9 @@ export default function OverviewDashboard({
                     format={(p) => <span style={{ color: '#fff', fontSize: 12 }}>{p}%</span>}
                   />
                   <Typography.Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)' }}>
-                    {disabledCount > 0 ? `${disabledCount} 个已禁用` : '全部已启用'}
+                    {unhealthyCount > 0
+                      ? `${unhealthyCount} 个冷却中 · 成功率 ${healthPct}%`
+                      : `成功 ${totalOk} / 硬失败 ${totalHardFail}`}
                   </Typography.Text>
                 </Col>
               </Row>
@@ -473,16 +483,45 @@ export default function OverviewDashboard({
             dataSource={upstreams}
             pagination={false}
             expandable={{
-              expandedRowRender: (up) => (
-                up.lastError
-                  ? (
-                    <Typography.Text type="danger" style={{ fontSize: 12 }}>
-                      最近错误：{up.lastError}
+              expandedRowRender: (up) => {
+                const errors = up.recentErrors?.length
+                  ? up.recentErrors
+                  : (up.lastError
+                    ? [{ at: up.lastErrorAt || 0, message: up.lastError, type: '', id: '', server: '' }]
+                    : []);
+                if (errors.length === 0) return null;
+                return (
+                  <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                      最近失败记录（最多 {errors.length} 条）
                     </Typography.Text>
-                  )
-                  : null
-              ),
-              rowExpandable: (up) => Boolean(up.lastError),
+                    {errors.map((err, index) => (
+                      <Typography.Text
+                        key={`${err.at}-${index}`}
+                        type="danger"
+                        style={{ fontSize: 12, display: 'block' }}
+                      >
+                        {err.at
+                          ? `${new Date(err.at).toLocaleString()} · `
+                          : ''}
+                        {err.roomId || err.roomName
+                          ? `房间 ${err.roomName || err.roomId}`
+                            + (err.roomId && err.roomName ? ` (${err.roomId})` : '')
+                            + ' · '
+                          : ''}
+                        {err.userNickname || err.userId
+                          ? `用户 ${err.userNickname || err.userId} · `
+                          : ''}
+                        {err.server || err.type
+                          ? `[${[err.server, err.type, err.id].filter(Boolean).join(' / ')}] `
+                          : ''}
+                        {err.message}
+                      </Typography.Text>
+                    ))}
+                  </Space>
+                );
+              },
+              rowExpandable: (up) => Boolean(up.lastError || up.recentErrors?.length),
             }}
           />
         </Card>

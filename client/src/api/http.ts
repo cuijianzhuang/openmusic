@@ -48,10 +48,10 @@ export async function fetchWithTimeout(
     initFinal.credentials = 'include';
   }
 
-  if (needsApiSign(url) && sameOriginApi) {
+  const method = (init.method || 'GET').toUpperCase();
+  if (needsApiSign(url, method) && sameOriginApi) {
     await ensureSessionBootstrap();
     const parsed = new URL(url, window.location.origin);
-    const method = (init.method || 'GET').toUpperCase();
     const body = typeof init.body === 'string' ? init.body : '';
     const signHeaders = await buildApiSignHeaders(
       method,

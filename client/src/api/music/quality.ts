@@ -2,12 +2,36 @@ import type { MusicSource, RoomAudioQuality } from '../../types';
 import { useRoomStore } from '../../stores/roomStore';
 import { resolveEffectiveAudioQuality } from '../../stores/userQualityStore';
 import { useImmersiveModeStore } from '../../stores/immersiveModeStore';
+import { applySiteFeatures, isSvipQualityEnabled } from '../../stores/siteFeaturesStore';
+import { fetchWithTimeout } from '../http';
+import { requireSessionBootstrap } from '../../lib/sessionBootstrap';
 
-export type NeteaseQuality = 'standard' | 'exhigh' | 'lossless' | 'higher' | 'hires' | '128' | '320' | 'flac';
-export type TencentQuality = 'standard' | 'exhigh' | 'lossless' | '128' | '320' | 'flac';
+export type NeteaseQuality =
+  | 'standard'
+  | 'exhigh'
+  | 'lossless'
+  | 'higher'
+  | 'hires'
+  | 'jyeffect'
+  | 'sky'
+  | 'jymaster'
+  | 'dolby'
+  | '128'
+  | '320'
+  | 'flac';
+
+export type TencentQuality =
+  | 'standard'
+  | 'exhigh'
+  | 'lossless'
+  | 'atmos'
+  | 'master'
+  | '128'
+  | '320'
+  | 'flac';
 
 export const DEFAULT_ROOM_AUDIO_QUALITY: RoomAudioQuality = {
-  netease: 'hires',
+  netease: 'jyeffect',
   tencent: 'lossless',
 };
 
@@ -17,24 +41,38 @@ export const IMMERSIVE_PLAYBACK_QUALITY_CAP = 'exhigh';
 export interface QualityOption {
   value: string;
   label: string;
+  /** 需管理端开启 SVIP 音质才展示 */
+  svip?: boolean;
 }
 
 export const NETEASE_QUALITY_OPTIONS: QualityOption[] = [
-  { value: 'standard', label: '标准 ~128k' },
-  { value: 'higher', label: '较高 ~192k' },
-  { value: 'exhigh', label: '极高 ~320k' },
-  { value: 'lossless', label: '无损 FLAC' },
-  { value: 'hires', label: 'Hi-Res' },
+  { value: 'standard', label: '标准' },
+  { value: 'higher', label: '较高' },
+  { value: 'exhigh', label: '极高' },
+  { value: 'lossless', label: '无损' },
+  { value: 'hires', label: '高解析度无损' },
+  { value: 'jyeffect', label: '高清臻音' },
+  { value: 'sky', label: '沉浸环绕声', svip: true },
+  { value: 'jymaster', label: '超清母带', svip: true },
+  { value: 'dolby', label: '杜比全景声', svip: true },
 ];
 
 export const TENCENT_QUALITY_OPTIONS: QualityOption[] = [
-  { value: 'standard', label: '标准 ~128k' },
-  { value: 'exhigh', label: '极高 ~320k' },
-  { value: 'lossless', label: '无损 FLAC' },
+  { value: 'standard', label: '标准品质' },
+  { value: 'exhigh', label: 'HQ高品质' },
+  { value: 'lossless', label: 'SQ无损品质' },
+  { value: 'atmos', label: '臻品全景声', svip: true },
+  { value: 'master', label: '臻品母带', svip: true },
 ];
 
 const NETEASE_CANONICAL = new Set(NETEASE_QUALITY_OPTIONS.map((o) => o.value));
 const TENCENT_CANONICAL = new Set(TENCENT_QUALITY_OPTIONS.map((o) => o.value));
+const NETEASE_SVIP = new Set(
+  NETEASE_QUALITY_OPTIONS.filter((o) => o.svip).map((o) => o.value),
+);
+const TENCENT_SVIP = new Set(
+  TENCENT_QUALITY_OPTIONS.filter((o) => o.svip).map((o) => o.value),
+);
 
 /** API 别名 → 房间存储用的 canonical 值 */
 const QUALITY_ALIASES: Record<string, string> = {
@@ -43,16 +81,29 @@ const QUALITY_ALIASES: Record<string, string> = {
   flac: 'lossless',
 };
 
-const QUALITY_LABEL_MAP = new Map<string, string>();
-for (const opt of [...NETEASE_QUALITY_OPTIONS, ...TENCENT_QUALITY_OPTIONS]) {
-  if (!QUALITY_LABEL_MAP.has(opt.value)) {
-    QUALITY_LABEL_MAP.set(opt.value, opt.label);
+const NETEASE_LABEL_MAP = new Map(NETEASE_QUALITY_OPTIONS.map((opt) => [opt.value, opt.label]));
+const TENCENT_LABEL_MAP = new Map(TENCENT_QUALITY_OPTIONS.map((opt) => [opt.value, opt.label]));
+
+/** @param source 传入时按红点/绿点各自文案；不传则优先红点再绿点 */
+export function getQualityLabel(quality: string | undefined, source?: MusicSource): string {
+  if (!quality) return '默认';
+  const normalized = QUALITY_ALIASES[quality] || quality;
+  if (source === 'tencent') {
+    return TENCENT_LABEL_MAP.get(normalized) || NETEASE_LABEL_MAP.get(normalized) || quality;
   }
+  if (source === 'netease') {
+    return NETEASE_LABEL_MAP.get(normalized) || quality;
+  }
+  return NETEASE_LABEL_MAP.get(normalized)
+    || TENCENT_LABEL_MAP.get(normalized)
+    || quality;
 }
 
-export function getQualityLabel(quality: string | undefined): string {
-  if (!quality) return '默认';
-  return QUALITY_LABEL_MAP.get(quality) || quality;
+export function isSvipQualityValue(source: MusicSource, quality: string): boolean {
+  const normalized = QUALITY_ALIASES[quality] || quality;
+  if (source === 'netease') return NETEASE_SVIP.has(normalized);
+  if (source === 'tencent') return TENCENT_SVIP.has(normalized);
+  return false;
 }
 
 export function normalizeRoomAudioQuality(
@@ -63,23 +114,49 @@ export function normalizeRoomAudioQuality(
   const netease = QUALITY_ALIASES[rawNetease] || rawNetease;
   const tencent = QUALITY_ALIASES[rawTencent] || rawTencent;
   return {
-    netease: NETEASE_CANONICAL.has(netease) ? netease : 'lossless',
+    netease: NETEASE_CANONICAL.has(netease) ? netease : 'jyeffect',
     tencent: TENCENT_CANONICAL.has(tencent) ? tencent : 'lossless',
   };
+}
+
+/** 关闭 SVIP 时，把已选 SVIP 档降到当前可选的最高档 */
+export function clampQualityToCapabilities(source: MusicSource, quality: string): string {
+  const options = getQualityOptionsForSource(source);
+  const normalized = QUALITY_ALIASES[quality] || quality;
+  if (options.some((opt) => opt.value === normalized)) return normalized;
+  return options[options.length - 1]?.value || 'standard';
 }
 
 export function getRoomPlaybackQuality(source: MusicSource): string | undefined {
   const room = useRoomStore.getState().room;
   const quality = normalizeRoomAudioQuality(room?.audioQuality);
-  if (source === 'netease') return quality.netease;
-  if (source === 'tencent') return quality.tencent;
+  if (source === 'netease') return clampQualityToCapabilities('netease', quality.netease);
+  if (source === 'tencent') return clampQualityToCapabilities('tencent', quality.tencent);
   return undefined;
 }
 
 export function getQualityOptionsForSource(source: MusicSource): QualityOption[] {
-  if (source === 'netease') return NETEASE_QUALITY_OPTIONS;
-  if (source === 'tencent') return TENCENT_QUALITY_OPTIONS;
-  return [];
+  const all = source === 'netease'
+    ? NETEASE_QUALITY_OPTIONS
+    : source === 'tencent'
+      ? TENCENT_QUALITY_OPTIONS
+      : [];
+  if (isSvipQualityEnabled()) return all;
+  return all.filter((opt) => !opt.svip);
+}
+
+/** 打开音质面板前刷新管理端开关（避免长期会话错过后台改动） */
+export async function refreshQualityCapabilities(): Promise<boolean> {
+  try {
+    await requireSessionBootstrap();
+    const res = await fetchWithTimeout('/api/music/quality-capabilities', {}, 8000);
+    if (!res.ok) return isSvipQualityEnabled();
+    const data = await res.json() as { svipQualityEnabled?: boolean };
+    applySiteFeatures(data);
+    return Boolean(data.svipQualityEnabled);
+  } catch {
+    return isSvipQualityEnabled();
+  }
 }
 
 /** 沉浸模式：音质不超过极高；若用户设置更低则沿用设置 */
@@ -109,8 +186,8 @@ export function getUserPlaybackQuality(source: MusicSource): string | undefined 
   if (immersive.qualityCapActive || immersive.enabled) {
     quality = applyImmersivePlaybackQualityCap(quality);
   }
-  if (source === 'netease') return quality.netease;
-  if (source === 'tencent') return quality.tencent;
+  if (source === 'netease') return clampQualityToCapabilities('netease', quality.netease);
+  if (source === 'tencent') return clampQualityToCapabilities('tencent', quality.tencent);
   return undefined;
 }
 

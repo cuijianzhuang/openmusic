@@ -22,6 +22,9 @@ import type { QueueItem } from '../types';
 const DEBUG_FLAG_KEY = 'openmusic:debug';
 const DEBUG_INTERVAL_MS = 2000;
 const MAX_EVENTS = 120;
+const ERROR_REPORT_EVENT_LIMIT = 40;
+const ERROR_REPORT_SNAPSHOT_COUNT = 5;
+const ERROR_REPORT_SNAPSHOT_INTERVAL_MS = 400;
 
 type DebugEvent = {
   at: string;
@@ -188,6 +191,18 @@ function formatAudioSnapshot(
   return lines;
 }
 
+export type ErrorReportSnapshotSection = {
+  id: string;
+  title: string;
+  content: string;
+};
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
 function formatSnapshotText(reason: string): string {
   const lines: string[] = [];
   const at = new Date().toISOString();
@@ -225,8 +240,11 @@ function formatSnapshotText(reason: string): string {
       trackId: room.current.id,
       trackSource: room.current.source,
       trackName: room.current.name,
+      trackArtist: room.current.artist ?? null,
+      trackAlbum: room.current.album ?? null,
       trackDuration: room.current.duration ?? null,
     }));
+    if (room.current.url) lines.push(`trackUrlFull=${room.current.url}`);
   }
 
   const audio = getSharedAudio();
@@ -265,7 +283,7 @@ function formatSnapshotText(reason: string): string {
 
   lines.push(formatDriftHistogram());
 
-  const recent = state.events.slice(-12);
+  const recent = state.events.slice(reason === 'report' ? -ERROR_REPORT_EVENT_LIMIT : -12);
   if (recent.length > 0) {
     lines.push('recent_events:');
     for (const e of recent) {
@@ -285,44 +303,107 @@ export function getDebugEvents(): DebugEvent[] {
   return state.events.slice();
 }
 
-/** 错误上报用：快照 + 最近事件 + 基础环境信息（体积受控） */
-export function collectErrorReportBundle(description = ''): {
+export type ErrorReportType = 'error' | 'feedback';
+
+function buildErrorReportMeta(): Record<string, string | number | boolean | null> {
+  const { room, nickname, mySocketId, avatar_url, isOwner } = useRoomStore.getState();
+  const current = room?.current;
+  const audioStore = useAudioStore.getState();
+  const audio = getSharedAudio();
+  const audioSrc = audio.currentSrc || audio.src || '';
+  const socket = state.getSocket?.();
+  const trackKey = current ? `${current.source}-${current.id}` : null;
+
+  return {
+    href: typeof location !== 'undefined' ? location.href : '',
+    clientId: getClientId(),
+    userAgent: typeof navigator !== 'undefined' ? navigator.userAgent.slice(0, 300) : '',
+    language: typeof navigator !== 'undefined' ? navigator.language : '',
+    online: typeof navigator !== 'undefined' ? navigator.onLine : null,
+    hidden: typeof document !== 'undefined' ? document.hidden : null,
+    visibility: typeof document !== 'undefined' ? document.visibilityState : null,
+    roomId: room?.id ?? null,
+    roomName: room?.name ?? null,
+    nickname: nickname || null,
+    mySocketId: mySocketId || null,
+    isOwner: isOwner ?? null,
+    avatar_url: avatar_url || null,
+    socketConnected: socket?.connected ?? null,
+    socketId: socket?.id ?? null,
+    socketTransport: socket?.transport ?? null,
+    trackQueueId: current?.queueId ?? null,
+    trackName: current?.name ?? null,
+    trackArtist: current?.artist ?? null,
+    trackAlbum: current?.album ?? null,
+    trackSource: current?.source ?? null,
+    trackId: current?.id ?? null,
+    trackUrl: current?.url ?? null,
+    trackPic: current?.pic ?? null,
+    trackDuration: current?.duration ?? null,
+    trackActualQuality: trackKey ? (audioStore.actualQualityByTrack[trackKey] ?? null) : null,
+    audioSrc: audioSrc || null,
+    isPlaying: room?.isPlaying ?? null,
+    roomCurrentTime: room?.currentTime ?? null,
+    queueLen: room?.queue?.length ?? 0,
+    trackLoading: audioStore.trackLoading,
+    needsAudioUnlock: audioStore.needsAudioUnlock,
+    trackSourceError: current ? isTrackSourceError(current) : null,
+    lrcDurationMs: audioStore.lrcDurationMs,
+    mediaDurationMs: audioStore.mediaDurationMs,
+  };
+}
+
+/** 错误上报：连续采集多份完整 debug 快照 */
+async function collectReportSnapshots(): Promise<ErrorReportSnapshotSection[]> {
+  const snapshots: ErrorReportSnapshotSection[] = [];
+  for (let i = 0; i < ERROR_REPORT_SNAPSHOT_COUNT; i += 1) {
+    if (i > 0) {
+      await sleep(ERROR_REPORT_SNAPSHOT_INTERVAL_MS);
+    }
+    snapshots.push({
+      id: `snapshot-${i + 1}`,
+      title: `快照 ${i + 1}`,
+      content: formatSnapshotText(`report-${i + 1}`),
+    });
+  }
+  return snapshots;
+}
+
+/** 错误上报用：快照 + 最近事件 + 基础环境信息 */
+export async function collectErrorReportBundle(
+  description = '',
+  type: ErrorReportType = 'error',
+): Promise<{
+  type: ErrorReportType;
   description: string;
   snapshot: string;
+  snapshots: ErrorReportSnapshotSection[];
   events: DebugEvent[];
   meta: Record<string, string | number | boolean | null>;
-} {
-  const { room, nickname, mySocketId, avatar_url } = useRoomStore.getState();
-  const current = room?.current;
-  const socket = state.getSocket?.();
-  // 上报去掉完整媒体直链，避免把带鉴权参数的上游 URL 存进管理端
-  const snapshot = getDebugSnapshot()
-    .split('\n')
-    .filter((line) => !line.startsWith('audioSrcFull='))
-    .join('\n');
-  const events = state.events.slice(-80);
+}> {
+  const meta = buildErrorReportMeta();
+  if (type === 'feedback') {
+    return {
+      type: 'feedback',
+      description: String(description || '').trim().slice(0, 500),
+      snapshot: '',
+      snapshots: [],
+      events: [],
+      meta,
+    };
+  }
+  const snapshots = await collectReportSnapshots();
+  const snapshot = snapshots
+    .map((section) => `=== ${section.title} ===\n${section.content}`)
+    .join('\n\n')
+    .slice(0, 64_000);
   return {
+    type: 'error',
     description: String(description || '').trim().slice(0, 500),
-    snapshot: snapshot.slice(0, 48_000),
-    events,
-    meta: {
-      href: typeof location !== 'undefined' ? location.href : '',
-      clientId: getClientId(),
-      userAgent: typeof navigator !== 'undefined' ? navigator.userAgent.slice(0, 300) : '',
-      language: typeof navigator !== 'undefined' ? navigator.language : '',
-      online: typeof navigator !== 'undefined' ? navigator.onLine : null,
-      roomId: room?.id ?? null,
-      roomName: room?.name ?? null,
-      nickname: nickname || null,
-      mySocketId: mySocketId || null,
-      socketConnected: socket?.connected ?? null,
-      trackName: current?.name ?? null,
-      trackArtist: current?.artist ?? null,
-      trackSource: current?.source ?? null,
-      trackId: current?.id ?? null,
-      isPlaying: room?.isPlaying ?? null,
-      avatar_url: avatar_url
-    },
+    snapshot,
+    snapshots,
+    events: state.events.slice(-80),
+    meta,
   };
 }
 

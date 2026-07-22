@@ -1,3 +1,15 @@
+export interface MetingUpstreamRecentError {
+  at: number;
+  message: string;
+  type?: string;
+  id?: string;
+  server?: string;
+  userId?: string;
+  userNickname?: string;
+  roomId?: string;
+  roomName?: string;
+}
+
 export interface MetingUpstreamStatus {
   url: string;
   style?: string;
@@ -6,7 +18,12 @@ export interface MetingUpstreamStatus {
   cooldownRemainingSec: number;
   okCount: number;
   failCount: number;
+  softFailCount?: number;
+  /** 0–100，按硬失败口径：ok / (ok + fail) */
+  successRate?: number;
   lastError: string;
+  lastErrorAt?: number;
+  recentErrors?: MetingUpstreamRecentError[];
 }
 
 export interface AdminAuditEntry {
@@ -54,6 +71,8 @@ export interface RuntimeConfig {
   githubClientSecret: string;
   githubRedirectUri: string;
   githubScope: string;
+  /** 是否开放 SVIP 音质选项（需上游 Cookie 具备对应权益） */
+  svipQualityEnabled: boolean;
   metingApiUrl: string;
   metingApiAuth: string;
   metingSources: {
@@ -145,6 +164,7 @@ export interface SiteBanEntry {
 
 export interface ErrorReportSummary {
   id: string;
+  type: 'error' | 'feedback';
   status: 'open' | 'resolved';
   description: string;
   ip: string;
@@ -161,11 +181,19 @@ export interface ErrorReportSummary {
     href?: string | null;
   };
   eventCount: number;
+  snapshotCount?: number;
   hasSnapshot: boolean;
+}
+
+export interface ErrorReportSnapshotSection {
+  id: string;
+  title: string;
+  content: string;
 }
 
 export interface ErrorReportDetail extends ErrorReportSummary {
   snapshot: string;
+  snapshots?: ErrorReportSnapshotSection[];
   events: { at: string; name: string; line: string }[];
   meta: Record<string, string | number | boolean | null>;
 }

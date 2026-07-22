@@ -2,6 +2,7 @@ import { fetchWithTimeout } from '../api/http';
 import { rememberClientId } from './clientId';
 import { getDeviceId } from './deviceId';
 import { setApiSignKey } from './apiSign';
+import { applySiteFeatures } from '../stores/siteFeaturesStore';
 
 let bootstrapPromise: Promise<string | null> | null = null;
 
@@ -19,9 +20,11 @@ async function requestSessionBootstrap(): Promise<string | null> {
   const data = (await res.json()) as {
     clientId?: string;
     apiSignKey?: string;
+    features?: { svipQualityEnabled?: boolean };
   };
   // 非安全 HTTP 上 Web Crypto 可能不可用；此时服务端也不会要求请求签名。
   setApiSignKey(globalThis.crypto?.subtle ? data.apiSignKey : null);
+  applySiteFeatures(data.features);
   if (data.clientId) rememberClientId(data.clientId);
   return data.clientId || null;
 }

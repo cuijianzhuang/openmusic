@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Loader2, Sparkles } from 'lucide-react';
 import type { PlaylistSearchItem } from '../api/music/playlist';
 import {
@@ -7,9 +7,11 @@ import {
   getRecommendedPlaylists,
   getRecommendedPlaylistsFallback,
   peekRecommendedPlaylists,
+  PLATFORM_PLAYLIST_LIMIT,
 } from '../lib/recommendedPlaylists';
 
-const NETEASE_EXTRA_LIMIT = 4;
+const NETEASE_EXTRA_LIMIT = PLATFORM_PLAYLIST_LIMIT;
+const GRID_COLS_CLASS = 'grid grid-cols-4 gap-2';
 
 function playlistKey(playlist: PlaylistSearchItem) {
   return `${playlist.platform}-${playlist.id}`;
@@ -74,7 +76,7 @@ function PlaylistSkeleton({
   if (compact) {
     return (
       <div className="flex min-w-min gap-2.5 pb-1">
-        {Array.from({ length: 8 }, (_, i) => (
+        {Array.from({ length: CURATED_COUNT + NETEASE_EXTRA_LIMIT }, (_, i) => (
           <div key={i} className="flex w-20 flex-shrink-0 flex-col items-center">
             <div className={`${cardClass} skeleton-shimmer`} />
             <div className="mt-1 h-2 w-full rounded skeleton-shimmer" />
@@ -86,7 +88,7 @@ function PlaylistSkeleton({
 
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-2">
+      <div className={GRID_COLS_CLASS}>
         {Array.from({ length: CURATED_COUNT }, (_, i) => (
           <div key={`curated-${i}`} className="flex flex-col items-center">
             <div className={`${cardClass} skeleton-shimmer`} />
@@ -96,18 +98,24 @@ function PlaylistSkeleton({
           </div>
         ))}
       </div>
-      <div className="grid grid-cols-2 gap-2">
+      <div className={GRID_COLS_CLASS}>
         {Array.from({ length: NETEASE_EXTRA_LIMIT }, (_, i) => (
-          <Fragment key={`extra-skeleton-${i}`}>
-            {Array.from({ length: 2 }, (_, col) => (
-              <div key={col} className="flex h-full flex-col items-center">
-                <div className={`${cardClass} skeleton-shimmer`} />
-                <div className="mt-1 w-full space-y-1">
-                  <div className="h-2 w-full rounded skeleton-shimmer" />
-                </div>
-              </div>
-            ))}
-          </Fragment>
+          <div key={`netease-extra-${i}`} className="flex flex-col items-center">
+            <div className={`${cardClass} skeleton-shimmer`} />
+            <div className="mt-1 w-full space-y-1">
+              <div className="h-2 w-full rounded skeleton-shimmer" />
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className={GRID_COLS_CLASS}>
+        {Array.from({ length: NETEASE_EXTRA_LIMIT }, (_, i) => (
+          <div key={`qq-extra-${i}`} className="flex flex-col items-center">
+            <div className={`${cardClass} skeleton-shimmer`} />
+            <div className="mt-1 w-full space-y-1">
+              <div className="h-2 w-full rounded skeleton-shimmer" />
+            </div>
+          </div>
         ))}
       </div>
     </div>
@@ -246,29 +254,21 @@ export default function RecommendedPlaylistsPanel({
 
     return (
       <div className="space-y-3">
-        <div className="grid grid-cols-2 gap-2">
+        <div className={GRID_COLS_CLASS}>
           {curated.map(renderCard)}
         </div>
-        <div className="grid grid-cols-2 items-stretch gap-2">
-          {Array.from({ length: NETEASE_EXTRA_LIMIT }, (_, i) => (
-            <Fragment key={`extra-row-${i}`}>
-              {neteaseExtras[i] ? (
-                <div className="min-h-0">{renderCard(neteaseExtras[i])}</div>
-              ) : (
-                <div aria-hidden />
-              )}
-              {qqPlaylists[i] ? (
-                <div className="min-h-0">{renderCard(qqPlaylists[i])}</div>
-              ) : !loading && i === 0 && qqPlaylists.length === 0 ? (
-                <p className="flex min-h-full items-center justify-center px-1 py-2 text-center text-[10px] text-netease-muted">
-                  暂无推荐
-                </p>
-              ) : (
-                <div aria-hidden />
-              )}
-            </Fragment>
-          ))}
-        </div>
+        {neteaseExtras.length > 0 && (
+          <div className={GRID_COLS_CLASS}>
+            {neteaseExtras.map(renderCard)}
+          </div>
+        )}
+        {qqPlaylists.length > 0 ? (
+          <div className={GRID_COLS_CLASS}>
+            {qqPlaylists.map(renderCard)}
+          </div>
+        ) : !loading ? (
+          <p className="py-2 text-center text-[10px] text-netease-muted">暂无 QQ 推荐</p>
+        ) : null}
       </div>
     );
   };
@@ -287,16 +287,22 @@ export default function RecommendedPlaylistsPanel({
     );
   }
 
+  if (hideHeader) {
+    return (
+      <div className="px-3 py-3 pb-4">
+        {loading ? <PlaylistSkeleton /> : renderPlaylistGrid()}
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
-      {!hideHeader && (
       <div className="flex flex-shrink-0 items-center gap-1.5 border-t border-netease-border/50 px-4 py-1.5 lg:border-t-0">
         <Sparkles className="h-4 w-4 text-sky-400" />
         <h2 className="text-sm font-medium">热榜歌单</h2>
       </div>
-      )}
 
-      <div className={`min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-2 ${hideHeader ? 'pt-3' : ''}`}>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-2">
         {loading ? <PlaylistSkeleton /> : renderPlaylistGrid()}
       </div>
     </div>

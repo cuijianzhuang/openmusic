@@ -43,8 +43,10 @@ export const CURATED_NETEASE: PlaylistSearchItem[] = [
 const CURATED_NETEASE_IDS = new Set(CURATED_NETEASE.map((item) => item.id));
 const NETEASE_RECOMMEND_KEYWORD = '推荐';
 const QQ_RECOMMEND_KEYWORD = '热歌';
-const NETEASE_EXTRA_LIMIT = 4;
-const QQ_EXTRA_LIMIT = 4;
+/** 各平台推荐歌单条数（不含网易固定 curated 榜） */
+export const PLATFORM_PLAYLIST_LIMIT = 12;
+const NETEASE_EXTRA_LIMIT = PLATFORM_PLAYLIST_LIMIT;
+const QQ_EXTRA_LIMIT = PLATFORM_PLAYLIST_LIMIT;
 
 export const CURATED_COUNT = CURATED_NETEASE.length;
 
