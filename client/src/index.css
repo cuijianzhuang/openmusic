@@ -2040,22 +2040,18 @@ body.immersive-mode #hand-canvas {
 @keyframes immersive-shell-enter {
   from {
     opacity: 0;
-    filter: blur(6px);
   }
   to {
     opacity: 1;
-    filter: blur(0);
   }
 }
 
 @keyframes immersive-shell-exit {
   from {
     opacity: 1;
-    filter: blur(0);
   }
   to {
     opacity: 0;
-    filter: blur(8px);
   }
 }
 
