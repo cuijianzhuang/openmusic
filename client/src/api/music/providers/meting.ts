@@ -139,17 +139,30 @@ function createMetingProvider(
       return song.id ? song : null;
     },
     async getSongUrl(song, quality) {
-      if (isDirectPlayableUrl(song.url)) return song.url!;
+      if (isDirectPlayableUrl(song.url)) return { url: song.url! };
       const query = new URLSearchParams({ server: song.source, type: 'url', id: song.id });
       if (quality) query.set('quality', quality);
       const res = await fetchWithTimeout(`${API_BASE}?${query}`, { redirect: 'manual' });
       if (res.status >= 300 && res.status < 400) {
         const location = normalizeMetingTextUrl(res.headers.get('Location') || res.headers.get('location') || '');
-        if (isDirectPlayableUrl(location)) return location;
+        if (isDirectPlayableUrl(location)) return { url: location };
       }
       if (!res.ok) throw new Error('API 请求失败');
-      const text = normalizeMetingTextUrl(await res.text());
-      if (isDirectPlayableUrl(text)) return text;
+      const text = (await res.text()).trim();
+      if (text.startsWith('{')) {
+        try {
+          const data = JSON.parse(text) as { url?: unknown; quality?: unknown };
+          const url = normalizeMetingTextUrl(String(data.url || ''));
+          if (isDirectPlayableUrl(url)) {
+            const qualityLabel = String(data.quality || '').trim() || undefined;
+            return { url, qualityLabel };
+          }
+        } catch {
+          // fall through
+        }
+      }
+      const url = normalizeMetingTextUrl(text);
+      if (isDirectPlayableUrl(url)) return { url };
       throw new Error('empty url');
     },
     async getLyrics(song) {

@@ -41,6 +41,7 @@ import {
   prefetchUpcomingFromRoom,
   rememberSongUrl,
   resolveSongUrl,
+  syncActualQualityFromCache,
   isTrackSourceError,
   clearTrackSourceError,
   fetchServiceFallbackUrl,
@@ -117,7 +118,7 @@ function notifyLocalNetworkRecovery(song: QueueItem, options: { qualityDowngrade
   lastLocalRecoveryToastAt = now;
 
   const source = song.source || 'netease';
-  const lowestLabel = getQualityLabel(getLowestQuality(source) || undefined);
+  const lowestLabel = getQualityLabel(getLowestQuality(source) || undefined, source);
   if (options.qualityDowngraded) {
     notifyPlaybackToast(`网络不稳定，已自动切换为「${lowestLabel}」并重试`, 'error');
     return;
@@ -689,7 +690,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
                 invalidateUnloadedSongUrlCache(trackKey);
                 const preferred = getUserPlaybackQuality(live.source || 'netease');
                 notifyPlaybackToast(
-                  `网络已恢复，已切回「${getQualityLabel(preferred)}」`,
+                  `网络已恢复，已切回「${getQualityLabel(preferred, live.source || 'netease')}」`,
                   'success',
                 );
               }
@@ -821,6 +822,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     }
 
     if (shouldSkipTrackLoad(controller.audio, current.queueId)) {
+      syncActualQualityFromCache(current);
       return;
     }
 
@@ -858,9 +860,11 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
         setMediaDuration(null, null);
 
         let url: string;
+        let qualityLabel: string | undefined;
         try {
-          url = await resolveSongUrl(current);
-          url = (await refreshSignedApiUrl(url)) || url;
+          const resolved = await resolveSongUrl(current);
+          url = (await refreshSignedApiUrl(resolved.url)) || resolved.url;
+          qualityLabel = resolved.qualityLabel;
         } catch (err) {
           console.error('Failed to load song:', err);
           if (gen !== loadGeneration.current) return;
@@ -915,7 +919,10 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
         await waitForAudioMinimumReady(controller.audio);
         if (gen !== loadGeneration.current) return;
 
-        rememberSongUrl(trackKey, url);
+        rememberSongUrl(trackKey, url, qualityLabel);
+        if (qualityLabel) {
+          useAudioStore.getState().setActualQuality(trackKey, qualityLabel);
+        }
         syncMediaDuration(controller.audio, current, trackKey);
         tryFlushPendingSnapshot();
 

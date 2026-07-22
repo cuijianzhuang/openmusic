@@ -47,6 +47,7 @@ function roomSummarySignature(room: RoomSummary): string {
     room.hasPassword,
     room.isLocked ?? false,
     room.isPlaying,
+    room.customCoverUrl ?? '',
     song?.name ?? '',
     song?.artist ?? '',
     song?.pic ?? '',

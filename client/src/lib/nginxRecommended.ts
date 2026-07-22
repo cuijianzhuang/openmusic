@@ -108,8 +108,8 @@ location ^~ /assets/ {
 }
 
 location ^~ /qface/ {
-    expires 7d;
-    add_header Cache-Control "public, max-age=604800" always;
+    expires 365d;
+    add_header Cache-Control "public, max-age=31536000, immutable" always;
     access_log off;
     try_files $uri =404;
 }
@@ -125,6 +125,25 @@ location = /favicon.svg {
     expires 7d;
     add_header Cache-Control "public, max-age=604800" always;
     access_log off;
+}
+
+location = /favicon.ico {
+    expires 7d;
+    add_header Cache-Control "public, max-age=604800" always;
+    access_log off;
+}
+
+location = /apple-touch-icon.png {
+    expires 7d;
+    add_header Cache-Control "public, max-age=604800" always;
+    access_log off;
+}
+
+location = /site.webmanifest {
+    expires 7d;
+    add_header Cache-Control "public, max-age=604800" always;
+    access_log off;
+    default_type application/manifest+json;
 }
 
 location = /og-cover.png {

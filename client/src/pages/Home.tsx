@@ -106,6 +106,17 @@ function EqualizerBars({ className = '' }: { className?: string }) {
   );
 }
 
+/** 大厅封面：优先自定义封面，否则用接口带回的歌曲 CDN 直链（不走 meting type=pic） */
+function lobbyCoverUrl(room: Pick<RoomSummary, 'customCoverUrl' | 'currentSong'>): string | null {
+  const custom = String(room.customCoverUrl || '').trim();
+  if (custom.startsWith('data:image/')) return custom;
+  if (custom) {
+    const fromCustom = lobbyDirectCoverUrl(custom);
+    if (fromCustom) return fromCustom;
+  }
+  return lobbyDirectCoverUrl(room.currentSong?.pic);
+}
+
 const RoomCard = memo(function RoomCard({
   room,
   onJoin,
@@ -118,7 +129,7 @@ const RoomCard = memo(function RoomCard({
   const isActive = room.isPlaying && room.currentSong;
   const hardLocked = isLobbyHardLocked(room);
   const gradient = gradientForId(room.id);
-  const coverUrl = lobbyDirectCoverUrl(room.currentSong?.pic);
+  const coverUrl = lobbyCoverUrl(room);
 
   const cardRef = useRef<HTMLDivElement | HTMLButtonElement | null>(null);
   const frameRef = useRef<number | null>(null);
@@ -422,16 +433,42 @@ export default function Home() {
 
   useEffect(() => {
     fetchRooms();
-    const timer = setInterval(() => fetchRooms(true), 5000);
-    return () => clearInterval(timer);
+    const POLL_MS = 8000;
+    const timer = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      fetchRooms(true);
+    }, POLL_MS);
+    const onVisible = () => {
+      if (!document.hidden) fetchRooms(true);
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [fetchRooms]);
 
-  // 大厅预热热歌榜：进房时直接用缓存，避免左侧榜单再刷一下
+  // 空闲后再预热热歌榜 / Room chunk，避免与首屏房间列表抢带宽
   useEffect(() => {
-    void import('../api/music/toplist')
-      .then((m) => m.getNeteaseHotToplist(200))
-      .catch(() => {});
-    void import('../pages/Room');
+    let cancelled = false;
+    const warm = () => {
+      if (cancelled) return;
+      void import('../api/music/toplist')
+        .then((m) => m.getNeteaseHotToplist(200))
+        .catch(() => {});
+      void import('../pages/Room');
+    };
+    const ric = typeof window !== 'undefined'
+      ? (window as Window & { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number }).requestIdleCallback
+      : undefined;
+    const idleId = ric ? ric(warm, { timeout: 2500 }) : 0;
+    const timeoutId = ric ? 0 : window.setTimeout(warm, 1200);
+    return () => {
+      cancelled = true;
+      const cic = (window as Window & { cancelIdleCallback?: (id: number) => void }).cancelIdleCallback;
+      if (idleId && cic) cic(idleId);
+      if (timeoutId) window.clearTimeout(timeoutId);
+    };
   }, []);
 
   useEffect(() => {

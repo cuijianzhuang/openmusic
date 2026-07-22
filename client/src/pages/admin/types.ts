@@ -40,6 +40,8 @@ export interface SiteAnnouncementConfig {
 
 export interface RuntimeConfig {
   roomEmptyTtlMs: number;
+  /** 是否开放 SVIP 音质选项（需上游 Cookie 具备对应权益） */
+  svipQualityEnabled: boolean;
   metingApiUrl: string;
   metingApiAuth: string;
   metingSources: {

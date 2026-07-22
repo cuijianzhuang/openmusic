@@ -15,6 +15,7 @@ import {
 } from '../lib/memberTierPresets';
 import MemberTierBadge from './MemberTierBadge';
 import MemberQueueFrame from './MemberQueueFrame';
+import { getDisplayInitial } from '../lib/displayInitial';
 
 interface Props {
   open: boolean;
@@ -174,7 +175,7 @@ export default function RoomMemberModal({
                     }`}
                   >
                     <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-zinc-500 to-zinc-700 text-xs font-bold text-white">
-                      {user.nickname.charAt(0).toUpperCase()}
+                      {getDisplayInitial(user.nickname)}
                     </div>
                     <p className="min-w-0 flex-1 truncate text-sm text-white">{user.nickname}</p>
                     {tier ? <MemberTierBadge tier={tier} /> : (

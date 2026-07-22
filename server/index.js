@@ -67,6 +67,7 @@ import {
   setRoomFmMode,
   setRoomPlayMode,
   setRoomAnnouncement,
+  setRoomCustomCover,
   setChatHistoryVisibleOnJoin,
   setSongRequestEnabled,
   banRoomSong,
@@ -505,6 +506,28 @@ function normalizeMetingResolvedUrl(raw) {
   return text.startsWith('@') ? text.slice(1).trim() : text;
 }
 
+/** 解析 type=url 响应：兼容 JSON {url,quality} 与纯文本/重定向 URL */
+function parseMetingUrlPayload(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return null;
+
+  if (text.startsWith('{')) {
+    try {
+      const data = JSON.parse(text);
+      const url = normalizeMetingResolvedUrl(data?.url);
+      if (!url) return null;
+      const quality = typeof data?.quality === 'string' ? data.quality.trim() : '';
+      return { url, quality };
+    } catch {
+      return null;
+    }
+  }
+
+  const url = normalizeMetingResolvedUrl(text);
+  if (!url) return null;
+  return { url, quality: '' };
+}
+
 /** 网易云 outer/url 假直链（实为 404），当作无音源 */
 function isNeteaseOuterMediaUrl(url) {
   const text = String(url || '').trim();
@@ -549,16 +572,18 @@ async function resolveMetingMediaUrl(query, depth = 0) {
     return location;
   }
 
-  const text = normalizeMetingResolvedUrl(await response.text());
-  if (!text.startsWith('http')) throw new Error('Meting 未返回有效媒体地址');
-  if (isNeteaseOuterMediaUrl(text)) throw new Error('Meting 返回不可播外链');
+  const text = await response.text();
+  const payload = parseMetingUrlPayload(text);
+  const resolved = payload?.url || normalizeMetingResolvedUrl(text);
+  if (!resolved.startsWith('http')) throw new Error('Meting 未返回有效媒体地址');
+  if (isNeteaseOuterMediaUrl(resolved)) throw new Error('Meting 返回不可播外链');
 
-  const nested = parseMetingMediaQuery(text);
-  if (nested && isUnresolvedMetingMediaUrl(text)) {
+  const nested = parseMetingMediaQuery(resolved);
+  if (nested && isUnresolvedMetingMediaUrl(resolved)) {
     return resolveMetingMediaUrl(nested, depth + 1);
   }
 
-  return text;
+  return resolved;
 }
 
 /** media-proxy 误收到 Meting API 地址时，先解析为真实 CDN 地址 */
@@ -579,15 +604,23 @@ async function resolveMediaProxyFetchUrl(fetchUrl, thumbPx = 0) {
 }
 
 async function finalizeMetingTextResponse(body, metingType) {
-  const normalized = normalizeMetingResolvedUrl(body);
-  if (metingType !== 'url' || !normalized.startsWith('http')) return normalized;
+  const payload = metingType === 'url' ? parseMetingUrlPayload(body) : null;
+  const normalized = payload?.url || normalizeMetingResolvedUrl(body);
+  if (metingType !== 'url' || !normalized.startsWith('http')) {
+    return { url: normalized, quality: payload?.quality || '' };
+  }
   // outer/url 不可播：返回空，客户端按无音源处理并切歌
-  if (isNeteaseOuterMediaUrl(normalized)) return '';
-  if (!isUnresolvedMetingMediaUrl(normalized)) return normalized;
+  if (isNeteaseOuterMediaUrl(normalized)) return { url: '', quality: '' };
+  if (!isUnresolvedMetingMediaUrl(normalized)) {
+    return { url: normalized, quality: payload?.quality || '' };
+  }
 
   const nested = parseMetingMediaQuery(normalized);
-  if (!nested || nested.type !== 'url') return normalized;
-  return resolveMetingMediaUrl(nested);
+  if (!nested || nested.type !== 'url') {
+    return { url: normalized, quality: payload?.quality || '' };
+  }
+  const resolved = await resolveMetingMediaUrl(nested);
+  return { url: resolved, quality: payload?.quality || '' };
 }
 
 async function proxyMetingResponse(metingQuery, res, thumbPx = 0, metingType = '') {
@@ -599,10 +632,15 @@ async function proxyMetingResponse(metingQuery, res, thumbPx = 0, metingType = '
       location = resizeCoverForThumb(location, thumbPx);
     }
     if (location) {
-      // type=url/lrc 必须返回文本 URL，不能把浏览器重定向到第三方 CDN（fetch 会触发 CORS）
-      if (metingType === 'url' || metingType === 'lrc') {
+      // type=url/lrc 必须返回文本/JSON，不能把浏览器重定向到第三方 CDN（fetch 会触发 CORS）
+      if (metingType === 'url') {
         const body = await finalizeMetingTextResponse(location, metingType);
-        return res.type('text').send(body);
+        if (!body.url) return res.status(403).json({ error: 'no url' });
+        return res.json({ url: body.url, quality: body.quality || '' });
+      }
+      if (metingType === 'lrc') {
+        const body = await finalizeMetingTextResponse(location, metingType);
+        return res.type('text').send(body.url);
       }
       return res.redirect(response.status, location);
     }
@@ -611,9 +649,15 @@ async function proxyMetingResponse(metingQuery, res, thumbPx = 0, metingType = '
   const contentType = response.headers.get('content-type') || '';
   const text = await response.text();
 
-  if (metingType === 'url' || metingType === 'lrc') {
+  if (metingType === 'url') {
     const body = await finalizeMetingTextResponse(text, metingType);
-    return res.type('text').send(body);
+    if (!body.url) return res.status(403).json({ error: 'no url' });
+    return res.json({ url: body.url, quality: body.quality || '' });
+  }
+
+  if (metingType === 'lrc') {
+    const body = await finalizeMetingTextResponse(text, metingType);
+    return res.type('text').send(body.url);
   }
 
   if (contentType.includes('application/json') || text.startsWith('[') || text.startsWith('{')) {
@@ -769,6 +813,13 @@ app.get('/api/music/sources', (_req, res) => {
     },
   ];
   res.json(sources);
+});
+
+/** 本机音质能力：是否开放 SVIP 档（管理后台可开关） */
+app.get('/api/music/quality-capabilities', (req, res) => {
+  if (!requireSessionIdentity(req, res)) return;
+  const { svipQualityEnabled } = getRuntimeConfig();
+  res.json({ svipQualityEnabled: Boolean(svipQualityEnabled) });
 });
 
 app.get('/api/meting', async (req, res) => {
@@ -1117,8 +1168,12 @@ function requireSessionIdentity(req, res) {
 
 function sendBootstrapResponse(res, userId, iat, token, deviceId = null) {
   setIdentityCookieHeaders(res, userId, token, deviceId);
+  const runtime = getRuntimeConfig();
   const payload = {
     clientId: userId,
+    features: {
+      svipQualityEnabled: Boolean(runtime.svipQualityEnabled),
+    },
   };
   const requireRequestSign = res.req?.secure || !ALLOW_INSECURE_HTTP_API;
   if (isApiSignRequired() && requireRequestSign) {
@@ -1410,7 +1465,8 @@ app.use(express.static(clientDist, {
       return;
     }
     if (rel.startsWith('qface/') || rel.startsWith('vendor/')) {
-      res.setHeader('Cache-Control', 'public, max-age=604800');
+      // QQ 表情几乎不变，浏览器长缓存 1 年
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
     }
   },
 }));
@@ -2077,6 +2133,26 @@ io.on('connection', (socket) => {
     }
 
     const result = setRoomAnnouncement(roomId, getSocketUserId(socket), { enabled, text }, socket.id);
+    if (result.error) {
+      callback?.({ success: false, error: result.error });
+      return;
+    }
+
+    broadcastRoomUpdate(roomId);
+    callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
+  });
+
+  socket.on('set_room_custom_cover', ({ coverUrl }, callback) => {
+    if (rejectReadOnly(socket, callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, 'set_room_custom_cover', callback)) return;
+
+    const roomId = socketToRoom.get(socket.id);
+    if (!roomId) {
+      callback?.({ success: false, error: '未加入房间' });
+      return;
+    }
+
+    const result = setRoomCustomCover(roomId, getSocketUserId(socket), coverUrl, socket.id);
     if (result.error) {
       callback?.({ success: false, error: result.error });
       return;

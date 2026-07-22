@@ -4,6 +4,7 @@ import { useRoomStore } from "../stores/roomStore";
 import Modal from "./Modal";
 import { useSocket } from "../hooks/useSocket";
 import { fileToAvatarDataUrl, isSupportedAvatarFile } from "../lib/avatarImage";
+import { getDisplayInitial } from "../lib/displayInitial";
 import ChatImageLightbox from "./ChatImageLightbox";
 import { formatStayDuration } from "../lib/formatStayDuration";
 import { formatDisplayLocation } from "../lib/clientNetworkInfo";
@@ -255,7 +256,7 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
                   {getUserAvatar(user.id) ? (
                     <img src={getUserAvatar(user.id)} alt="" className="w-full h-full rounded-full object-cover" />
                   ) : (
-                    user.nickname.charAt(0).toUpperCase()
+                    getDisplayInitial(user.nickname)
                   )}
                   {user.id === creatorId && <Crown className="absolute -top-1 -right-1 w-3 h-3 text-amber-300" />}
                 </div>
@@ -327,7 +328,7 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
                       {getUserAvatar(user.id) ? (
                         <img src={getUserAvatar(user.id)} alt="" className="w-full h-full rounded-full object-cover" />
                       ) : (
-                        user.nickname.charAt(0).toUpperCase()
+                        getDisplayInitial(user.nickname)
                       )}
                       {isMe && (
                         <div className="absolute inset-0 flex items-center justify-center rounded-full bg-black/50 opacity-0 hover:opacity-100 transition-opacity">
@@ -506,7 +507,7 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
             {avatarDraft ? (
               <img src={avatarDraft} alt="头像预览" className="h-full w-full object-cover" />
             ) : (
-              <span className="text-lg font-bold text-white/60">{nickname.charAt(0).toUpperCase()}</span>
+              <span className="text-lg font-bold text-white/60">{getDisplayInitial(nickname)}</span>
             )}
           </div>
           <div className="min-w-0 flex-1">
