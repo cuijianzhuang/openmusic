@@ -72,6 +72,8 @@ function envDefaults() {
     githubClientSecret: envText('GITHUB_CLIENT_SECRET'),
     githubRedirectUri: envText('GITHUB_REDIRECT_URI'),
     githubScope: envText('GITHUB_SCOPE', 'read:user'),
+    /** 是否开放 SVIP 音质（网易沉浸环绕声/超清母带/杜比；QQ 臻品全景声/臻品母带） */
+    svipQualityEnabled: envText('SVIP_QUALITY_ENABLED') === '1' || envText('SVIP_QUALITY_ENABLED').toLowerCase() === 'true',
     metingApiUrl: envText('METING_API_URL'),
     metingApiAuth: envText('METING_API_AUTH'),
     musicApis: [],
@@ -239,6 +241,10 @@ function normalize(config) {
     githubClientSecret: String(config.githubClientSecret || '').trim(),
     githubRedirectUri: String(config.githubRedirectUri || '').trim(),
     githubScope: String(config.githubScope || 'read:user').trim() || 'read:user',
+    svipQualityEnabled: config.svipQualityEnabled === true
+      || config.svipQualityEnabled === 1
+      || String(config.svipQualityEnabled || '').trim().toLowerCase() === 'true'
+      || String(config.svipQualityEnabled || '').trim() === '1',
     metingApiUrl: String(config.metingApiUrl || '').trim(),
     metingApiAuth: String(config.metingApiAuth || '').trim(),
     musicApis,

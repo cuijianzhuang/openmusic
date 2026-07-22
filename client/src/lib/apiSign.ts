@@ -17,12 +17,19 @@ export function getApiSignKey(): string | null {
   return apiSignKey;
 }
 
-export function needsApiSign(url: string): boolean {
+function isPublicApiPathname(pathname: string, method = 'GET'): boolean {
+  if (PUBLIC_API_PATHS.has(pathname)) return true;
+  // 与服务端 isPublicApiPath 对齐：仅 GET 大厅列表免签
+  if (pathname === '/api/rooms' && method.toUpperCase() === 'GET') return true;
+  return false;
+}
+
+export function needsApiSign(url: string, method = 'GET'): boolean {
   try {
     const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
     const parsed = new URL(url, origin);
     if (!parsed.pathname.startsWith('/api/')) return false;
-    return !PUBLIC_API_PATHS.has(parsed.pathname);
+    return !isPublicApiPathname(parsed.pathname, method);
   } catch {
     return false;
   }

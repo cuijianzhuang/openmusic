@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   CheckCircleOutlined,
@@ -17,7 +17,6 @@ import {
   Button,
   Card,
   Checkbox,
-  Collapse,
   Col,
   Divider,
   Drawer,
@@ -31,6 +30,7 @@ import {
   Space,
   Switch,
   Table,
+  Tabs,
   Tag,
   Typography,
 } from 'antd';
@@ -66,6 +66,66 @@ import {
 } from './admin/utils';
 
 const { Header, Sider, Content } = Layout;
+
+const REPORT_DEBUG_PRE_STYLE: CSSProperties = {
+  margin: 0,
+  fontSize: 12,
+  lineHeight: 1.55,
+  minHeight: 360,
+  maxHeight: 'min(52vh, 520px)',
+  overflow: 'auto',
+  whiteSpace: 'pre-wrap',
+  wordBreak: 'break-all',
+  padding: '12px 14px',
+  background: 'rgba(0,0,0,0.02)',
+  borderRadius: 8,
+  border: '1px solid rgba(0,0,0,0.06)',
+};
+
+function buildReportDebugTabItems(report: ErrorReportDetail) {
+  const items = [
+    {
+      key: 'meta',
+      label: '上下文',
+      children: (
+        <pre style={REPORT_DEBUG_PRE_STYLE}>
+          {JSON.stringify(report.meta || {}, null, 2)}
+        </pre>
+      ),
+    },
+  ];
+
+  if (report.type !== 'feedback') {
+    const snapshotText = report.snapshot
+      || (report.snapshots?.length
+        ? report.snapshots.map((section) => `=== ${section.title} ===\n${section.content}`).join('\n\n')
+        : '');
+
+    if (snapshotText) {
+      items.push({
+        key: 'snapshots',
+        label: 'Debug 快照',
+        children: (
+          <pre style={REPORT_DEBUG_PRE_STYLE}>{snapshotText}</pre>
+        ),
+      });
+    }
+
+    items.push({
+      key: 'events',
+      label: `事件 (${report.events?.length || 0})`,
+      children: (
+        <pre style={REPORT_DEBUG_PRE_STYLE}>
+          {(report.events || [])
+            .map((ev) => `[${ev.at}] ${ev.name}${ev.line ? ` ${ev.line}` : ''}`.trimEnd())
+            .join('\n') || '（无）'}
+        </pre>
+      ),
+    });
+  }
+
+  return items;
+}
 
 function AdminPage() {
   const { message, modal } = App.useApp();
@@ -504,6 +564,10 @@ function AdminPage() {
   }, [entryPathDraft, message, navigate, refresh, savingPath]);
 
   const openReportCount = errorReports.filter((r) => r.status === 'open').length;
+  const reportDebugTabItems = useMemo(
+    () => (reportDetail ? buildReportDebugTabItems(reportDetail) : []),
+    [reportDetail],
+  );
 
   const handleTabChange = (tab: AdminTabId) => {
     setActiveTab(tab);
@@ -699,6 +763,15 @@ function AdminPage() {
   ];
 
   const reportColumns: ColumnsType<ErrorReportSummary> = [
+    {
+      title: '类型',
+      width: 88,
+      render: (_, report) => (
+        <Tag color={report.type === 'feedback' ? 'blue' : 'default'}>
+          {report.type === 'feedback' ? '意见' : '错误'}
+        </Tag>
+      ),
+    },
     {
       title: '状态',
       width: 96,
@@ -1400,10 +1473,10 @@ function AdminPage() {
           if (reportBusyId) return;
           setReportDetail(null);
         }}
-        width={560}
+        width={760}
         centered
         title="处理错误上报"
-        styles={{ body: { paddingTop: 12, paddingBottom: 8 } }}
+        styles={{ body: { paddingTop: 12, paddingBottom: 12 } }}
         footer={reportDetail ? (
           <Space wrap>
             <Button onClick={() => setReportDetail(null)}>关闭</Button>
@@ -1440,6 +1513,9 @@ function AdminPage() {
         ) : (
           <Space direction="vertical" size={12} style={{ width: '100%' }}>
             <Space wrap size={8} align="center">
+              <Tag color={reportDetail.type === 'feedback' ? 'blue' : 'default'} style={{ margin: 0 }}>
+                {reportDetail.type === 'feedback' ? '意见' : '错误'}
+              </Tag>
               <Tag color={reportDetail.status === 'open' ? 'warning' : 'success'} style={{ margin: 0 }}>
                 {reportDetail.status === 'open' ? '待处理' : '已处理'}
               </Tag>
@@ -1481,51 +1557,17 @@ function AdminPage() {
               </Form.Item>
             </Form>
 
-            <Collapse
+            <Tabs
               size="small"
-              ghost
-              items={[
-                {
-                  key: 'debug',
-                  label: (
-                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                      调试信息
-                      {reportDetail.events?.length ? ` · ${reportDetail.events.length} 条事件` : ''}
-                      {reportDetail.snapshot ? ' · 有快照' : ''}
-                    </Typography.Text>
-                  ),
-                  children: (
-                    <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                      <div>
-                        <Typography.Text type="secondary" style={{ fontSize: 11 }}>上下文</Typography.Text>
-                        <pre style={{ margin: '4px 0 0', fontSize: 11, maxHeight: 120, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                          {JSON.stringify(reportDetail.meta || {}, null, 2)}
-                        </pre>
-                      </div>
-                      <div>
-                        <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-                          Debug 事件（{reportDetail.events?.length || 0}）
-                        </Typography.Text>
-                        <pre style={{ margin: '4px 0 0', fontSize: 11, maxHeight: 140, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                          {(reportDetail.events || [])
-                            .map((ev) => `[${ev.at}] ${ev.name} ${ev.line}`)
-                            .join('\n') || '（无）'}
-                        </pre>
-                      </div>
-                      <div>
-                        <Typography.Text type="secondary" style={{ fontSize: 11 }}>Debug 快照</Typography.Text>
-                        <pre style={{ margin: '4px 0 0', fontSize: 11, maxHeight: 140, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                          {reportDetail.snapshot || '（无）'}
-                        </pre>
-                      </div>
-                      <Typography.Text type="secondary" copyable={{ text: reportDetail.id }} style={{ fontSize: 11 }}>
-                        ID {reportDetail.id}
-                      </Typography.Text>
-                    </Space>
-                  ),
-                },
-              ]}
+              type="card"
+              items={reportDebugTabItems}
+              style={{ width: '100%' }}
             />
+            {reportDetail && (
+              <Typography.Text type="secondary" copyable={{ text: reportDetail.id }} style={{ fontSize: 11 }}>
+                ID {reportDetail.id}
+              </Typography.Text>
+            )}
           </Space>
         )}
       </Modal>

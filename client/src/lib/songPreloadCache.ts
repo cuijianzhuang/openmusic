@@ -1,4 +1,4 @@
-import { getSongUrl, getTrackKey, searchSongs } from '../api/music';
+import { getSongUrlInfo, getTrackKey, searchSongs } from '../api/music';
 import { isHttpsPageContext } from './mediaProxyUrl';
 import { shouldProxySongPlaybackUrl } from './roomVisualPreset';
 import {
@@ -8,6 +8,7 @@ import {
 import {
   classifySongUrlFetchError,
   classifySongUrlFetchFailure,
+  isBlockedPlaybackUrl,
   type PlaybackErrorClass,
 } from './audioPlaybackError';
 import {
@@ -16,15 +17,18 @@ import {
   resetPlaybackQualityLock,
 } from './playbackQualityLock';
 import { useRoomStore } from '../stores/roomStore';
+import { useAudioStore } from '../stores/audioStore';
 import type { MusicSource, QueueItem, RoomState, SearchResult } from '../types';
 import { isMobileDevice } from './audioUnlock';
 
 const MAX_URL_CACHE = 24;
 const DEFAULT_PREFETCH_COUNT = 2;
-const URL_CACHE_STORAGE_KEY = 'openmusic:song-url-cache';
+const URL_CACHE_STORAGE_KEY = 'openmusic:song-url-cache:v2';
+
+type CachedUrlEntry = { url: string; qualityLabel?: string };
 
 type FetchUrlResult =
-  | { ok: true; url: string }
+  | { ok: true; url: string; qualityLabel?: string }
   | { ok: false; errorClass: PlaybackErrorClass };
 
 const urlCache = loadUrlCacheFromStorage();
@@ -77,12 +81,23 @@ export function pruneSourceErrors(activeSongs: Array<Pick<QueueItem, 'queueId' |
   if (changed) notifySourceErrors();
 }
 
-function loadUrlCacheFromStorage(): Map<string, string> {
+function loadUrlCacheFromStorage(): Map<string, CachedUrlEntry> {
   try {
     const raw = sessionStorage.getItem(URL_CACHE_STORAGE_KEY);
     if (!raw) return new Map();
-    const obj = JSON.parse(raw) as Record<string, string>;
-    return new Map(Object.entries(obj));
+    const obj = JSON.parse(raw) as Record<string, CachedUrlEntry | string>;
+    const map = new Map<string, CachedUrlEntry>();
+    for (const [key, value] of Object.entries(obj)) {
+      if (typeof value === 'string') {
+        map.set(key, { url: value });
+      } else if (value && typeof value === 'object' && typeof value.url === 'string') {
+        map.set(key, {
+          url: value.url,
+          qualityLabel: typeof value.qualityLabel === 'string' ? value.qualityLabel : undefined,
+        });
+      }
+    }
+    return map;
   } catch {
     return new Map();
   }
@@ -95,6 +110,13 @@ function persistUrlCacheToStorage() {
   } catch {
     // sessionStorage may be unavailable.
   }
+}
+
+function publishActualQuality(song: Pick<QueueItem, 'queueId' | 'id' | 'source'>, qualityLabel?: string) {
+  const label = qualityLabel?.trim();
+  // 无音质时不写 store：避免预取/缓存未带 quality 时把当前曲标签清掉
+  if (!label) return;
+  useAudioStore.getState().setActualQuality(trackKeyOf(song), label);
 }
 
 function trackKeyOf(song: Pick<QueueItem, 'queueId' | 'id' | 'source'>) {
@@ -183,12 +205,16 @@ async function fetchCrossSourceFallback(song: QueueItem): Promise<string | null>
     for (const candidate of candidates) {
       try {
         const quality = getLowestQuality(candidate.source) ?? getUserPlaybackQuality(candidate.source);
-        const url = await getSongUrl(candidate, quality);
-        if (!url) continue;
-        urlCache.set(urlCacheKey(song, getEffectivePlaybackQuality(song)), url);
+        const info = await getSongUrlInfo(candidate, quality);
+        if (!info.url || isBlockedPlaybackUrl(info.url)) continue;
+        urlCache.set(urlCacheKey(song, getEffectivePlaybackQuality(song)), {
+          url: info.url,
+          qualityLabel: info.qualityLabel,
+        });
         trimUrlCache();
         clearTrackSourceError(song);
-        return url;
+        publishActualQuality(song, info.qualityLabel);
+        return info.url;
       } catch {
         // 当前候选不可播放时继续尝试下一平台/版本。
       }
@@ -289,11 +315,21 @@ async function fetchSongUrlOnce(
     const cached = urlCache.get(key);
     if (cached) {
       // 历史缓存里的网易 outer/url 假直链不可播，丢弃后重新取链
-      if (/music\.163\.com\/song\/media\/outer\/url/i.test(cached)) {
+      if (/music\.163\.com\/song\/media\/outer\/url/i.test(cached.url)) {
+        urlCache.delete(key);
+        persistUrlCacheToStorage();
+      } else if (isBlockedPlaybackUrl(cached.url)) {
+        urlCache.delete(key);
+        persistUrlCacheToStorage();
+      } else if (
+        !cached.qualityLabel
+        && songSourceOf(song) !== 'kugou'
+      ) {
+        // 旧缓存没有实际音质字段，强制重取以拿到 type=url 的 quality
         urlCache.delete(key);
         persistUrlCacheToStorage();
       } else {
-        return { ok: true, url: cached };
+        return { ok: true, url: cached.url, qualityLabel: cached.qualityLabel };
       }
     }
   }
@@ -305,23 +341,26 @@ async function fetchSongUrlOnce(
   const promise = (async (): Promise<FetchUrlResult> => {
     try {
       let url: string | null = null;
+      let qualityLabel: string | undefined;
       try {
-        url = await getSongUrl({
+        const info = await getSongUrlInfo({
           id: song.id,
           source: songSourceOf(song),
           url: options.refresh ? undefined : song.url,
         }, quality);
+        url = info.url;
+        qualityLabel = info.qualityLabel;
       } catch (error) {
         return { ok: false, errorClass: classifySongUrlFetchError(error) };
       }
 
-      if (!url) {
+      if (!url || isBlockedPlaybackUrl(url)) {
         return { ok: false, errorClass: classifySongUrlFetchFailure(url) };
       }
 
-      urlCache.set(key, url);
+      urlCache.set(key, { url, qualityLabel });
       trimUrlCache();
-      return { ok: true, url };
+      return { ok: true, url, qualityLabel };
     } finally {
       pendingFetches.delete(pendingKey);
     }
@@ -345,7 +384,7 @@ async function tryLowestQualityFetch(
 async function fetchSongUrl(
   song: Pick<QueueItem, 'queueId' | 'id' | 'source' | 'url'>,
   options: { refresh?: boolean } = {},
-): Promise<string | null> {
+): Promise<CachedUrlEntry | null> {
   const source = songSourceOf(song);
   const quality = getEffectivePlaybackQuality(song);
   const lowest = getLowestQuality(source);
@@ -354,7 +393,8 @@ async function fetchSongUrl(
   const first = await fetchSongUrlOnce(song, quality, options);
   if (first.ok) {
     clearTrackSourceError(song);
-    return first.url;
+    publishActualQuality(song, first.qualityLabel);
+    return { url: first.url, qualityLabel: first.qualityLabel };
   }
 
   if (first.errorClass === 'temporary') {
@@ -371,11 +411,12 @@ async function fetchSongUrl(
   const fallback = await tryLowestQualityFetch(song);
   if (fallback.ok) {
     clearTrackSourceError(song);
-    return fallback.url;
+    publishActualQuality(song, fallback.qualityLabel);
+    return { url: fallback.url, qualityLabel: fallback.qualityLabel };
   }
 
   const crossSource = await fetchCrossSourceFallback(song as QueueItem);
-  if (crossSource) return crossSource;
+  if (crossSource) return { url: crossSource };
 
   if (useRoomStore.getState().isPlaybackLeader) {
     markTrackSourceError(song);
@@ -397,22 +438,38 @@ export async function fetchServiceFallbackUrl(
   }
 
   const fallback = await tryLowestQualityFetch(song);
-  if (fallback.ok) return fallback.url;
+  if (fallback.ok) {
+    publishActualQuality(song, fallback.qualityLabel);
+    return fallback.url;
+  }
   return fetchCrossSourceFallback(song);
 }
 
-export function rememberSongUrl(trackKey: string, url: string) {
-  urlCache.set(trackKey, url);
+export function rememberSongUrl(trackKey: string, url: string, qualityLabel?: string) {
+  const existing = urlCache.get(trackKey);
+  urlCache.set(trackKey, {
+    url,
+    qualityLabel: qualityLabel?.trim() || existing?.qualityLabel,
+  });
   trimUrlCache();
+}
+
+/** 从缓存恢复当前曲实际音质（跳过重新加载时用） */
+export function syncActualQualityFromCache(song: Pick<QueueItem, 'queueId' | 'id' | 'source' | 'url'>) {
+  const key = urlCacheKey(song, getEffectivePlaybackQuality(song));
+  const cached = urlCache.get(key) || urlCache.get(trackKeyOf(song));
+  if (cached?.qualityLabel) {
+    publishActualQuality(song, cached.qualityLabel);
+  }
 }
 
 export async function resolveSongUrl(
   song: QueueItem,
   options: { refresh?: boolean } = {},
-): Promise<string> {
-  const url = await fetchSongUrl(song, options);
-  if (!url) throw new Error('empty url');
-  return url;
+): Promise<{ url: string; qualityLabel?: string }> {
+  const result = await fetchSongUrl(song, options);
+  if (!result?.url) throw new Error('empty url');
+  return result;
 }
 
 /** 加入房间后立即预取当前歌曲 URL，缩短刷新后的加载等待 */
@@ -426,10 +483,13 @@ type UrlPrefetchSong = Pick<QueueItem, 'queueId' | 'id' | 'source' | 'url'>;
 /** 预取即将播放的曲目：队列下一首，或私人漫游 nextRandom */
 export function prefetchUpcomingFromRoom(
   room: Pick<RoomState, 'current' | 'queue' | 'nextRandom'> | null | undefined,
-  options: { count?: number } = {},
+  options: { count?: number; includeCurrent?: boolean } = {},
 ) {
   if (!room) return;
-  if (room.current) prefetchCurrentSong(room.current);
+  // 切换音质时勿重拉当前曲：否则会按新音质取链并覆盖「实际音质」标签，尽管仍在播旧档
+  if (options.includeCurrent !== false && room.current) {
+    prefetchCurrentSong(room.current);
+  }
   prefetchQueueSongs(room.queue ?? [], {
     current: room.current,
     nextRandom: room.nextRandom,

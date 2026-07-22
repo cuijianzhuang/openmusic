@@ -18,6 +18,8 @@ import { collectDeviceIdsForUser, isAccessBanned } from "./deviceIdentity.js";
 import { getRuntimeConfig } from "./runtimeConfig.js";
 import { resizeCoverForThumb } from "./coverUrl.js";
 import { isDirectCoverUrl, resolveSongCoverUrl } from "./resolveSongCover.js";
+import { isSongPlayableOnServer } from "./songPlayableProbe.js";
+import { runWithMetingRequestContext } from "./metingUpstream.js";
 
 const generateRoomId = customAlphabet("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", 6);
 const generateId = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 12);
@@ -46,6 +48,8 @@ export const INITIAL_CHAT_LIMIT = 100;
 export const CHAT_PAGE_LIMIT = 50;
 const MAX_RANDOM_HISTORY = 200;
 const MAX_RANDOM_PREFETCH_ATTEMPTS = 20;
+/** 非控制者首次补种时长的最小合理值（毫秒），杜绝 durationMs:1 之类的恶意切歌 */
+const MIN_REPORTABLE_DURATION_MS = 1000;
 
 /** 播放顺序：顺序 / 乱序 / 单曲循环 / 列表循环 */
 export const PLAY_MODES = ["order", "shuffle", "loop-one", "loop-all"];
@@ -145,8 +149,24 @@ const AUTO_ADVANCE_GRACE_SEC = 0.15;
 const SKIP_REQUEST_TTL_MS = 10_000;
 /** @type {Map<string, ReturnType<typeof setTimeout>>} */
 const skipRequestExpiryTimers = new Map();
-const NETEASE_CANONICAL = new Set(["standard", "higher", "exhigh", "lossless", "hires"]);
-const TENCENT_CANONICAL = new Set(["standard", "exhigh", "lossless"]);
+const NETEASE_CANONICAL = new Set([
+  "standard",
+  "higher",
+  "exhigh",
+  "lossless",
+  "hires",
+  "jyeffect",
+  "sky",
+  "jymaster",
+  "dolby",
+]);
+const TENCENT_CANONICAL = new Set([
+  "standard",
+  "exhigh",
+  "lossless",
+  "atmos",
+  "master",
+]);
 const QUALITY_ALIASES = {
   128: "standard",
   320: "exhigh",
@@ -154,12 +174,12 @@ const QUALITY_ALIASES = {
 };
 
 function normalizeRoomAudioQuality(input) {
-  const rawNetease = String(input?.netease || "hires");
+  const rawNetease = String(input?.netease || "jyeffect");
   const rawTencent = String(input?.tencent || "lossless");
   const netease = QUALITY_ALIASES[rawNetease] || rawNetease;
   const tencent = QUALITY_ALIASES[rawTencent] || rawTencent;
   return {
-    netease: NETEASE_CANONICAL.has(netease) ? netease : "lossless",
+    netease: NETEASE_CANONICAL.has(netease) ? netease : "jyeffect",
     tencent: TENCENT_CANONICAL.has(tencent) ? tencent : "lossless",
   };
 }
@@ -310,12 +330,13 @@ function snapshotRoomForStorage(room) {
     autoPromotedAdminIds: Array.from(room.autoPromotedAdminIds || []),
     userNicknames: Object.fromEntries(room.userNicknames || []),
     userAvatarUrls: Object.fromEntries(room.userAvatarUrls || []),
-    audioQuality: room.audioQuality ?? { netease: "hires", tencent: "lossless" },
+    audioQuality: room.audioQuality ?? { netease: "jyeffect", tencent: "lossless" },
     neteaseFmMode: normalizeFmMode(room.neteaseFmMode),
     fmModeBeforeOff: normalizeFmMode(room.fmModeBeforeOff),
     playMode: normalizePlayMode(room.playMode),
     announcementEnabled: Boolean(room.announcementEnabled),
     announcementText: String(room.announcementText || "").slice(0, MAX_ANNOUNCEMENT_LENGTH),
+    customCoverUrl: normalizeCustomCoverUrl(room.customCoverUrl),
     chatHistoryVisibleOnJoin: Boolean(room.chatHistoryVisibleOnJoin),
     joinNoticeEnabled: room.joinNoticeEnabled !== false,
     joinNoticeCooldownSec: normalizeJoinNoticeCooldownSec(room.joinNoticeCooldownSec),
@@ -377,6 +398,7 @@ function restoreRoomFromStorage(data) {
   room.playMode = normalizePlayMode(data.playMode);
   room.announcementEnabled = Boolean(data.announcementEnabled);
   room.announcementText = String(data.announcementText || "").slice(0, MAX_ANNOUNCEMENT_LENGTH);
+  room.customCoverUrl = normalizeCustomCoverUrl(data.customCoverUrl);
   room.chatHistoryVisibleOnJoin = Boolean(data.chatHistoryVisibleOnJoin);
   room.joinNoticeEnabled = data.joinNoticeEnabled !== false;
   room.joinNoticeCooldownSec = normalizeJoinNoticeCooldownSec(data.joinNoticeCooldownSec);
@@ -442,7 +464,8 @@ function persistRoom(room) {
 
 let cachedListRooms = null;
 let cachedListRoomsAt = 0;
-const LIST_ROOMS_CACHE_MS = 1500;
+/** 大厅列表为纯内存序列化，可稍长缓存；封面异步补齐后会主动失效 */
+const LIST_ROOMS_CACHE_MS = 5000;
 
 function invalidateRoomsListCache() {
   cachedListRooms = null;
@@ -505,9 +528,27 @@ export async function initRooms() {
 
 export { isRedisEnabled };
 
+function truncateByGrapheme(text, maxChars) {
+  const str = String(text || "");
+  const limit = Math.max(0, Number(maxChars) || 0);
+  if (!str || limit <= 0) return "";
+  if (typeof Intl !== "undefined" && Intl.Segmenter) {
+    const seg = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+    let out = "";
+    let count = 0;
+    for (const { segment } of seg.segment(str)) {
+      if (count >= limit) break;
+      out += segment;
+      count += 1;
+    }
+    return out;
+  }
+  return Array.from(str).slice(0, limit).join("");
+}
+
 function normalizeRoomName(name, roomId) {
   const trimmed = String(name || "").trim();
-  return trimmed.slice(0, 30) || `房间 ${roomId}`;
+  return truncateByGrapheme(trimmed, 30) || `房间 ${roomId}`;
 }
 
 function bumpPlaybackState(room) {
@@ -585,7 +626,7 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
     userNicknames: new Map(),
     userAvatarUrls: new Map(),
     audioQuality: {
-      netease: "hires",
+      netease: "jyeffect",
       tencent: "lossless",
     },
     neteaseFmMode: DEFAULT_FM_MODE,
@@ -593,6 +634,8 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
     playMode: DEFAULT_PLAY_MODE,
     announcementEnabled: false,
     announcementText: "",
+    /** 房主自定义封面；有值时房间/大厅不再跟随当前歌曲封面 */
+    customCoverUrl: "",
     /** 进房是否可查看历史聊天；默认关闭（仅看进房后的消息） */
     chatHistoryVisibleOnJoin: false,
     /** 普通成员进房时是否向聊天室推送短暂系统提示 */
@@ -749,6 +792,8 @@ function rememberUserNickname(room, userId, nickname) {
 
 /** base64 头像（客户端已压到 128px）上限，与客户端 avatarImage.ts 保持一致 */
 const MAX_AVATAR_DATA_URL_LENGTH = 200 * 1024;
+/** 房间封面轻度压缩（约 512px / q≈0.96），与客户端 roomCoverImage.ts 保持一致 */
+const MAX_CUSTOM_COVER_DATA_URL_LENGTH = 800 * 1024;
 
 /** 头像取值：jpg/png 的 base64 data URL（限长），或兼容旧的 http(s) 链接；非法值归空 */
 function normalizeAvatarUrl(avatarUrl) {
@@ -757,6 +802,19 @@ function normalizeAvatarUrl(avatarUrl) {
   if (raw.startsWith("data:")) {
     if (!/^data:image\/(jpeg|png);base64,/.test(raw)) return "";
     if (raw.length > MAX_AVATAR_DATA_URL_LENGTH) return "";
+    return raw;
+  }
+  if (!/^https?:\/\//i.test(raw)) return "";
+  return raw.slice(0, 500);
+}
+
+/** 房间自定义封面：空字符串表示取消自定义、跟随当前歌曲封面 */
+function normalizeCustomCoverUrl(coverUrl) {
+  const raw = String(coverUrl || "").trim();
+  if (!raw) return "";
+  if (raw.startsWith("data:")) {
+    if (!/^data:image\/(jpeg|png);base64,/.test(raw)) return "";
+    if (raw.length > MAX_CUSTOM_COVER_DATA_URL_LENGTH) return "";
     return raw;
   }
   if (!/^https?:\/\//i.test(raw)) return "";
@@ -1242,18 +1300,37 @@ export function createRoom({ name, password, creatorId, creatorDeviceId } = {}) 
 }
 
 const coverResolveInflight = new Map();
+/** 解析失败负缓存，避免每次 listRooms 都打慢上游 */
+const coverResolveFailedAt = new Map();
+const COVER_RESOLVE_FAIL_TTL_MS = 2 * 60 * 1000;
 
+function normalizeDirectCoverInPlace(song) {
+  if (!song || !isDirectCoverUrl(song.pic)) return false;
+  const normalized = resizeCoverForThumb(String(song.pic).trim(), 96) || String(song.pic).trim();
+  if (normalized === song.pic) return false;
+  song.pic = normalized;
+  return true;
+}
+
+/**
+ * 解析当前曲封面为 CDN 直链。成功返回 true（已写入 song.pic）。
+ * 不阻塞大厅列表：由 scheduleLobbyCoverResolve 后台调用。
+ */
 async function ensureCurrentSongCover(room) {
   const song = room.current;
-  if (!song?.id) return;
+  if (!song?.id) return false;
 
   if (isDirectCoverUrl(song.pic)) {
-    const normalized = resizeCoverForThumb(String(song.pic).trim(), 96) || String(song.pic).trim();
-    if (normalized !== song.pic) song.pic = normalized;
-    return;
+    if (normalizeDirectCoverInPlace(song)) persistRoom(room);
+    return true;
   }
 
   const key = `${song.source || "netease"}:${song.id}`;
+  const failedAt = coverResolveFailedAt.get(key);
+  if (failedAt && Date.now() - failedAt < COVER_RESOLVE_FAIL_TTL_MS) {
+    return false;
+  }
+
   let pending = coverResolveInflight.get(key);
   if (!pending) {
     pending = resolveSongCoverUrl(song.source || "netease", song.id, 96)
@@ -1265,9 +1342,33 @@ async function ensureCurrentSongCover(room) {
   }
 
   const url = await pending;
-  if (!url || room.current !== song) return;
+  if (!url) {
+    coverResolveFailedAt.set(key, Date.now());
+    return false;
+  }
+  coverResolveFailedAt.delete(key);
+  if (room.current !== song) return false;
   song.pic = url;
   persistRoom(room);
+  return true;
+}
+
+/** 后台补齐封面；成功后失效列表缓存，下一轮轮询即可带图 */
+function scheduleLobbyCoverResolve(room) {
+  const song = room.current;
+  if (!song?.id) return;
+  if (isDirectCoverUrl(song.pic)) {
+    if (normalizeDirectCoverInPlace(song)) persistRoom(room);
+    return;
+  }
+  const key = `${song.source || "netease"}:${song.id}`;
+  if (coverResolveInflight.has(key)) return;
+  const failedAt = coverResolveFailedAt.get(key);
+  if (failedAt && Date.now() - failedAt < COVER_RESOLVE_FAIL_TTL_MS) return;
+
+  void ensureCurrentSongCover(room).then((resolved) => {
+    if (resolved) invalidateRoomsListCache();
+  });
 }
 
 export async function listRooms() {
@@ -1277,7 +1378,10 @@ export async function listRooms() {
   }
 
   const visible = Array.from(rooms.values()).filter(isRoomVisibleInLobby);
-  await Promise.all(visible.map((room) => ensureCurrentSongCover(room)));
+  // 不阻塞响应：已有直链同步规范化，缺封面后台解析
+  for (const room of visible) {
+    scheduleLobbyCoverResolve(room);
+  }
 
   cachedListRooms = visible
     .map(serializeRoomSummary)
@@ -1293,7 +1397,7 @@ export async function listRooms() {
       if (typeDiff !== 0) return typeDiff;
       return b.userCount - a.userCount || b.createdAt - a.createdAt;
     });
-  cachedListRoomsAt = now;
+  cachedListRoomsAt = Date.now();
   return cachedListRooms;
 }
 
@@ -1447,6 +1551,23 @@ export function getRoom(roomId) {
   return room ? serializeRoom(room) : null;
 }
 
+/** 查找用户当前所在房间（用于音源失败日志归因） */
+export function findUserRoomPresence(userId) {
+  const id = String(userId || '').trim();
+  if (!id) return null;
+  for (const room of rooms.values()) {
+    const user = room.users.get(id);
+    if (!user) continue;
+    return {
+      userId: id,
+      userNickname: String(user.nickname || '').slice(0, 40),
+      roomId: room.id,
+      roomName: String(room.name || room.id).slice(0, 60),
+    };
+  }
+  return null;
+}
+
 export function roomExists(roomId) {
   return rooms.has(roomId?.toUpperCase());
 }
@@ -1566,9 +1687,7 @@ export function addUser(roomId, userId, nickname, options = {}) {
 }
 
 function normalizeNickname(nickname) {
-  return String(nickname || "")
-    .trim()
-    .slice(0, 20);
+  return truncateByGrapheme(String(nickname || "").trim(), 20);
 }
 
 function getUsedNicknames(room, excludeUserId = null) {
@@ -1589,11 +1708,14 @@ function ensureUniqueNickname(room, userId, preferred) {
   if (!used.has(base)) return base;
 
   for (let suffix = 1; suffix < 1000; suffix += 1) {
-    const candidate = `${base}${suffix}`.slice(0, 20);
+    const candidate = truncateByGrapheme(`${base}${suffix}`, 20);
     if (!used.has(candidate)) return candidate;
   }
 
-  return `${base.slice(0, 14)}${Date.now().toString(36).slice(-5)}`.slice(0, 20);
+  return truncateByGrapheme(
+    `${truncateByGrapheme(base, 14)}${Date.now().toString(36).slice(-5)}`,
+    20,
+  );
 }
 
 function updateRequesterNickname(item, socketId, nickname) {
@@ -1708,7 +1830,6 @@ export function setRoomAdmin(roomId, actorId, targetUserId, admin = true, connec
 
   refreshRoomOwner(room);
   persistRoom(room);
-  invalidateRoomsListCache();
   return {
     room: serializeRoom(room),
     message: admin ? `已将「${targetLabel}」设为管理员` : `已取消「${targetLabel}」的管理员`,
@@ -1732,7 +1853,6 @@ export function setRoomFmMode(roomId, actorId, mode, connectionId = null) {
   room.neteaseFmMode = nextMode;
   clearNextRandom(room);
   persistRoom(room);
-  invalidateRoomsListCache();
 
   if (!room.current && room.queue.length === 0) {
     void ensureNextRandom(room);
@@ -1791,7 +1911,6 @@ export function setRoomMemberTier(roomId, actorId, targetUserId, payload = {}, c
   );
 
   persistRoom(room);
-  invalidateRoomsListCache();
   return { room: serializeRoom(room) };
 }
 
@@ -1806,7 +1925,6 @@ export function removeRoomMemberTier(roomId, actorId, targetUserId, connectionId
 
   room.memberTiers.delete(userId);
   persistRoom(room);
-  invalidateRoomsListCache();
   return { room: serializeRoom(room) };
 }
 
@@ -1853,7 +1971,7 @@ export function postJoinNoticeMessage(roomId, userId) {
 
   room.lastJoinNoticeAt.set(userId, now);
   const nickname = formatActorName(user);
-  const message = appendSystemChatMessage(room, `${nickname}进入房间`);
+  const message = appendSystemChatMessage(room, `${nickname} 进入房间`);
   return message ? { ...message, kind: "notice" } : null;
 }
 
@@ -2048,6 +2166,24 @@ export function setRoomAnnouncement(roomId, actorId, options = {}, connectionId 
   }
 
   persistRoom(room);
+  return { room: serializeRoom(room) };
+}
+
+/** 房主设置自定义封面；传空字符串取消自定义，恢复跟随当前歌曲 */
+export function setRoomCustomCover(roomId, actorId, coverUrl, connectionId = null) {
+  const room = rooms.get(roomId);
+  if (!room) return { error: "房间不存在" };
+  const denied = requireCreator(room, actorId, connectionId);
+  if (denied) return denied;
+
+  const next = normalizeCustomCoverUrl(coverUrl);
+  if (String(coverUrl || "").trim() && !next) {
+    return { error: "封面无效，请使用 JPG/PNG 图片或 http(s) 链接" };
+  }
+
+  room.customCoverUrl = next;
+  persistRoom(room);
+  invalidateRoomsListCache();
   return { room: serializeRoom(room) };
 }
 
@@ -2829,6 +2965,9 @@ function setCurrentSong(room, song) {
   room.startedAt = Date.now();
   recordSongPlayHistory(room, song);
   bumpPlaybackState(room);
+  invalidateRoomsListCache();
+  // 切歌时预解析封面，大厅列表命中直链、无需等轮询再打上游
+  scheduleLobbyCoverResolve(room);
   if (room.queue.length === 0) void ensureNextRandom(room);
 }
 
@@ -2930,6 +3069,7 @@ async function playNextUnlocked(room, options = {}) {
       room.startedAt = null;
       room.randomLoading = true;
       bumpPlaybackState(room);
+      invalidateRoomsListCache();
       return;
     }
     setCurrentSong(room, item);
@@ -2944,6 +3084,7 @@ async function playNextUnlocked(room, options = {}) {
   // 漫游关闭时干净停机，不进入"漫游加载中"重试
   room.randomLoading = (room.neteaseFmMode || DEFAULT_FM_MODE) !== FM_MODE_OFF;
   bumpPlaybackState(room);
+  invalidateRoomsListCache();
 }
 
 async function playNext(room, options = {}) {
@@ -3015,8 +3156,27 @@ export async function skipSong(roomId, socketId, connectionId = null, options = 
   if (!isControllerConnection(room, socketId, connectionId)) return { error: "仅房主或管理员可切歌" };
 
   const user = room.users.get(socketId);
-  const songTitle = room.current ? formatSongTitle(room.current) : "";
+  const currentSong = room.current;
+  const songTitle = currentSong ? formatSongTitle(currentSong) : "";
   const reason = String(options.reason || "manual");
+
+  // 音源异常必须由服务端探测确认，不能凭主控本机取链失败全屋切歌
+  if (reason === "source_error") {
+    if (!currentSong) return { error: "当前没有正在播放的歌曲" };
+    const playable = await runWithMetingRequestContext(
+      {
+        userId: socketId,
+        userNickname: String(user?.nickname || "").slice(0, 40),
+        roomId: room.id,
+        roomName: String(room.name || room.id).slice(0, 60),
+      },
+      () => isSongPlayableOnServer(currentSong),
+    );
+    if (playable) {
+      return { error: "服务端检测音源正常，未切歌（可能是本机网络问题）" };
+    }
+  }
+
   await playNext(room, { allowFetchRandom: false, forceAdvance: true });
 
   let systemMessage = null;
@@ -3641,7 +3801,16 @@ function serializeLobbyCoverPic(pic) {
   return resizeCoverForThumb(raw, 96) || raw;
 }
 
+function serializeLobbyCustomCover(coverUrl) {
+  const raw = normalizeCustomCoverUrl(coverUrl);
+  if (!raw) return undefined;
+  if (raw.startsWith("data:")) return raw;
+  if (!isDirectCoverUrl(raw)) return undefined;
+  return resizeCoverForThumb(raw, 96) || raw;
+}
+
 function serializeRoomSummary(room) {
+  const customCoverUrl = serializeLobbyCustomCover(room.customCoverUrl);
   return {
     id: room.id,
     name: room.name,
@@ -3649,6 +3818,7 @@ function serializeRoomSummary(room) {
     hasPassword: Boolean(room.passwordHash),
     isLocked: Boolean(room.isLocked),
     isPlaying: room.isPlaying,
+    customCoverUrl,
     currentSong: room.current
       ? {
           name: room.current.name,
@@ -3827,6 +3997,16 @@ export function reportTrackDuration(roomId, userId, queueId, durationMs, connect
   // 允许缩短：CDN 截断预览时长常短于元数据，否则服务端永不 auto-advance
   if (existing > 0 && Math.abs(ms - existing) < 50) return { success: true, skipped: true };
 
+  // 非控制者首次补种时长时，禁止上报过小或小于当前已播放进度的值：
+  // 否则任意成员可凭 durationMs:1 触发 advanceEndedRoomNow 立即切歌。
+  // 合法补种时长必然 >= 已播放进度（歌未放完）且不小于最小合理歌曲时长。
+  if (!isController && existing === 0) {
+    const playedMs = Math.max(0, Math.floor(getPlaybackTime(room) * 1000));
+    if (ms < Math.max(playedMs, MIN_REPORTABLE_DURATION_MS)) {
+      return { error: "上报时长无效" };
+    }
+  }
+
   room.current.duration = Math.round(ms);
   persistRoom(room);
   return { success: true };
@@ -3869,6 +4049,7 @@ function serializeRoom(room, options = {}) {
     playMode: normalizePlayMode(room.playMode),
     announcementEnabled: Boolean(room.announcementEnabled),
     announcementText: String(room.announcementText || "").slice(0, MAX_ANNOUNCEMENT_LENGTH),
+    customCoverUrl: normalizeCustomCoverUrl(room.customCoverUrl) || undefined,
     chatHistoryVisibleOnJoin: Boolean(room.chatHistoryVisibleOnJoin),
     joinNoticeEnabled: room.joinNoticeEnabled !== false,
     joinNoticeCooldownSec: normalizeJoinNoticeCooldownSec(room.joinNoticeCooldownSec),
@@ -3928,6 +4109,7 @@ export function prepareRoomBroadcast(roomId) {
     playMode: normalizePlayMode(room.playMode),
     announcementEnabled: Boolean(room.announcementEnabled),
     announcementText: String(room.announcementText || "").slice(0, MAX_ANNOUNCEMENT_LENGTH),
+    customCoverUrl: normalizeCustomCoverUrl(room.customCoverUrl) || undefined,
     chatHistoryVisibleOnJoin: Boolean(room.chatHistoryVisibleOnJoin),
     joinNoticeEnabled: room.joinNoticeEnabled !== false,
     joinNoticeCooldownSec: normalizeJoinNoticeCooldownSec(room.joinNoticeCooldownSec),

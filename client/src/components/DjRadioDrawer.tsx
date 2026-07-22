@@ -1,17 +1,17 @@
 import { useEffect } from 'react';
-import { X, Sparkles } from 'lucide-react';
-import type { PlaylistSearchItem } from '../api/music/playlist';
-import RecommendedPlaylistsPanel from './RecommendedPlaylistsPanel';
+import { Radio, X } from 'lucide-react';
+import type { DjRadioItem } from '../api/music/djRadio';
+import DjRadioPanel from './DjRadioPanel';
 import { immersiveGlassModal, immersiveGlassScrim, immersiveGlassSheetHeader } from '../lib/immersiveGlass';
 
 interface Props {
   open: boolean;
   immersive?: boolean;
   onClose: () => void;
-  onSelectPlaylist: (playlist: PlaylistSearchItem) => Promise<void>;
+  onSelectRadio: (radio: DjRadioItem) => Promise<void>;
 }
 
-export default function RecommendedPlaylistsDrawer({ open, immersive = false, onClose, onSelectPlaylist }: Props) {
+export default function DjRadioDrawer({ open, immersive = false, onClose, onSelectRadio }: Props) {
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -23,8 +23,8 @@ export default function RecommendedPlaylistsDrawer({ open, immersive = false, on
 
   if (!open) return null;
 
-  const handleSelect = async (playlist: PlaylistSearchItem) => {
-    await onSelectPlaylist(playlist);
+  const handleSelect = async (radio: DjRadioItem) => {
+    await onSelectRadio(radio);
     onClose();
   };
 
@@ -34,7 +34,7 @@ export default function RecommendedPlaylistsDrawer({ open, immersive = false, on
         type="button"
         className={`absolute inset-0 ${immersive ? immersiveGlassScrim : 'bg-black/65 backdrop-blur-sm'}`}
         onClick={onClose}
-        aria-label="关闭热榜歌单"
+        aria-label="关闭音乐电台"
       />
       <div
         className={`relative z-10 flex min-h-0 max-h-[min(80vh,720px)] w-full max-w-2xl flex-col overflow-hidden shadow-2xl animate-fade-in ${
@@ -46,8 +46,8 @@ export default function RecommendedPlaylistsDrawer({ open, immersive = false, on
       >
         <div className={`flex flex-shrink-0 items-center justify-between gap-2 px-4 py-3 ${immersive ? immersiveGlassSheetHeader : 'border-b border-netease-border/40'}`}>
           <div className="flex min-w-0 items-center gap-2">
-            <Sparkles className="h-4 w-4 flex-shrink-0 text-sky-400" />
-            <h2 className="text-sm font-medium text-white">热榜歌单</h2>
+            <Radio className="h-4 w-4 flex-shrink-0 text-rose-400" />
+            <h2 className="text-sm font-medium text-white">音乐电台</h2>
           </div>
           <button
             type="button"
@@ -58,8 +58,8 @@ export default function RecommendedPlaylistsDrawer({ open, immersive = false, on
             <X className="h-5 w-5" />
           </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-          <RecommendedPlaylistsPanel hideHeader immersive={immersive} onSelectPlaylist={handleSelect} />
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <DjRadioPanel hideHeader immersive={immersive} onSelectRadio={handleSelect} />
         </div>
       </div>
     </div>

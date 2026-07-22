@@ -7,10 +7,49 @@ const URL_PROBE_TIMEOUT_MS = 5000;
 
 export const MAX_TEMP_PLAYBACK_RETRIES = 3;
 
+/** QQ 音乐偶发返回的占位直链域名（无媒体文件路径，仅裸域名） */
+const QQ_PLACEHOLDER_HOST = 'aqqmusic.tc.qq.com';
+
+/** pathname 末尾需带常见音频后缀，否则视为占位/无效直链 */
+const MEDIA_FILE_EXT = /\.(mp3|m4a|flac|ogg|wav|aac|wma)$/i;
+
+function isQqPlaceholderPlaybackUrl(parsed: URL): boolean {
+  if (parsed.hostname !== QQ_PLACEHOLDER_HOST) return false;
+  const pathname = parsed.pathname.replace(/\/+$/, '');
+  if (!pathname || pathname === '/') return true;
+  return !MEDIA_FILE_EXT.test(pathname);
+}
+
+export function isBlockedPlaybackUrl(url: string | undefined | null): boolean {
+  if (!url?.trim()) return false;
+  try {
+    const parsed = new URL(url.trim(), typeof window !== 'undefined' ? window.location.href : 'https://localhost');
+    return isQqPlaceholderPlaybackUrl(parsed);
+  } catch {
+    return false;
+  }
+}
+
+/** Meting / 曲库上游明确表示无可用播放地址 */
+export function isSourceUnavailableMessage(message: string | undefined | null): boolean {
+  const normalized = String(message || '').trim().toLowerCase();
+  return normalized === 'no url'
+    || normalized === 'empty url'
+    || normalized === 'blocked playback url';
+}
+
+export class SourceUnavailableError extends Error {
+  constructor(message = 'no url') {
+    super(message);
+    this.name = 'SourceUnavailableError';
+  }
+}
+
 function isInvalidPlaybackUrl(url: string | undefined | null): boolean {
   if (!url) return true;
   const trimmed = url.trim();
   if (!trimmed) return true;
+  if (isBlockedPlaybackUrl(trimmed)) return true;
   try {
     const parsed = new URL(trimmed, window.location.href);
     return !parsed.protocol.startsWith('http');
@@ -60,6 +99,8 @@ export function classifySongUrlFetchFailure(url: string | null | undefined): Pla
 }
 
 export function classifySongUrlFetchError(error: unknown): PlaybackErrorClass {
+  if (error instanceof SourceUnavailableError) return 'service';
+  if (error instanceof Error && isSourceUnavailableMessage(error.message)) return 'service';
   if (error instanceof TypeError) return 'temporary';
   if (error instanceof DOMException) {
     if (error.name === 'AbortError' || error.name === 'TimeoutError') return 'temporary';

@@ -1,12 +1,14 @@
 import { memo } from 'react';
-import SourceBadge from './SourceBadge';
+import { getSourceShortLabel } from '../lib/sourceLabels';
 import type { MusicSource } from '../types';
+import PlaybackQualityTag from './PlaybackQualityTag';
 
 interface Props {
   name: string;
   artist: string;
   source?: MusicSource;
   requestedBy?: string;
+  qualityLabel?: string | null;
   size?: 'default' | 'large';
 }
 
@@ -15,18 +17,28 @@ function SongInfoPanel({
   artist,
   source = 'netease',
   requestedBy,
+  qualityLabel,
   size = 'default',
 }: Props) {
   const large = size === 'large';
+  const metaParts = [
+    `歌手：${artist}`,
+    getSourceShortLabel(source),
+    requestedBy ? `${requestedBy} 点的歌` : '',
+  ].filter(Boolean);
 
   return (
     <div className={`flex-shrink-0 px-1 ${large ? 'pt-2 sm:pt-4 lg:pt-10 2xl:pt-14' : 'pt-4 lg:pt-10'} pb-2 sm:pb-4`}>
-      <div className="flex items-center gap-2 2xl:gap-4 min-w-0">
-        <h2 className={`font-semibold truncate ${large ? 'text-xl lg:text-2xl 2xl:text-4xl 3xl:text-5xl' : 'text-xl lg:text-2xl 2xl:text-3xl'}`}>{name}</h2>
-        <SourceBadge source={source} className={large ? '2xl:text-base 2xl:px-3 2xl:py-1 3xl:text-xl 3xl:px-4 3xl:py-1.5' : '2xl:text-sm 2xl:px-2 2xl:py-0.5'} />
+      <div className="flex min-w-0 items-center gap-2 2xl:gap-3">
+        <h2 className={`min-w-0 truncate font-semibold ${large ? 'text-xl lg:text-2xl 2xl:text-4xl 3xl:text-5xl' : 'text-xl lg:text-2xl 2xl:text-3xl'}`}>{name}</h2>
+        <PlaybackQualityTag
+          label={qualityLabel}
+          source={source}
+          className={large ? 'text-[11px] 2xl:text-sm px-2 py-1' : undefined}
+        />
       </div>
-      <p className={`text-white/50 mt-2 truncate ${large ? 'text-sm 2xl:text-xl 3xl:text-2xl' : 'text-sm 2xl:text-base'}`}>        歌手：{artist}
-        {requestedBy && <span className="text-white/30"> · {requestedBy} 点的歌</span>}
+      <p className={`mt-2 truncate text-white/65 ${large ? 'text-sm 2xl:text-xl 3xl:text-2xl' : 'text-sm 2xl:text-base'}`}>
+        {metaParts.join(' · ')}
       </p>
     </div>
   );

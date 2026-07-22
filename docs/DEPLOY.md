@@ -8,7 +8,7 @@
 
 ```bash
 # 下载 compose 文件
-curl -O https://raw.githubusercontent.com/wqqqqqq200/openmusic/main/docker-compose.full.yml
+curl -O https://raw.githubusercontent.com/qq01-hub/openmusic/main/docker-compose.full.yml
 
 # 准备持久化目录
 mkdir -p data/downloads

@@ -32,7 +32,7 @@ import { adminFetch } from './utils';
 
 type RuntimeTextField = Exclude<
   keyof RuntimeConfig,
-  'roomEmptyTtlMs' | 'configuredSecrets' | 'metingApiUrl' | 'metingApiAuth' | 'metingSources' | 'musicApis'
+  'roomEmptyTtlMs' | 'svipQualityEnabled' | 'configuredSecrets' | 'metingApiUrl' | 'metingApiAuth' | 'metingSources' | 'musicApis'
 >;
 
 interface RuntimeFieldDef {
@@ -231,6 +231,7 @@ export default function RuntimeConfigPanel({
   const applyLoadedConfig = (config: RuntimeConfig) => {
     setDraft({
       ...config,
+      svipQualityEnabled: Boolean(config.svipQualityEnabled),
       musicApis: Array.isArray(config.musicApis)
         ? config.musicApis.map((api) => ({
             ...api,
@@ -482,6 +483,29 @@ export default function RuntimeConfigPanel({
           <Typography.Text type="secondary">分钟后销毁空房</Typography.Text>
         </Space>
       </SettingsSection>
+  );
+
+  const qualitySection = (
+    <SettingsSection
+      title="音质能力"
+      description="控制房间内「我的音质」是否展示 SVIP 档。开启前请确认 Meting Cookie 具备对应会员；关闭后用户端不显示这些选项。"
+    >
+      <Space align="center">
+        <Switch
+          checked={Boolean(draft.svipQualityEnabled)}
+          onChange={(checked) => setDraft({ ...draft, svipQualityEnabled: checked })}
+          aria-label="开放 SVIP 音质"
+        />
+        <div>
+          <Typography.Text>开放 SVIP 音质</Typography.Text>
+          <div>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              红点：沉浸环绕声 / 超清母带 / 杜比全景声；绿点：臻品全景声 / 臻品母带
+            </Typography.Text>
+          </div>
+        </div>
+      </Space>
+    </SettingsSection>
   );
 
   const metingSection = (
@@ -972,6 +996,8 @@ export default function RuntimeConfigPanel({
       children: (
         <>
           {metingSection}
+          <Divider style={{ margin: 0 }} />
+          {qualitySection}
           <Divider style={{ margin: 0 }} />
           {customApiSection}
         </>

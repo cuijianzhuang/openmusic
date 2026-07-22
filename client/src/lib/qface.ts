@@ -10,6 +10,9 @@ import {
 
 const QFACE_BASE = `${import.meta.env.BASE_URL}qface/`;
 const MANIFEST_URL = `${QFACE_BASE}manifest.json`;
+const MANIFEST_STORAGE_KEY = 'openmusic:qface-manifest:v1';
+/** QQ 表情几乎不变，清单本地缓存 1 年，避免每次进房再拉 */
+const MANIFEST_TTL_MS = 365 * 24 * 60 * 60 * 1000;
 
 export interface QFaceItem {
   id: string;
@@ -82,6 +85,37 @@ function toFaceItems(entries: QFaceManifestEntry[]): QFaceItem[] {
   }));
 }
 
+function readStoredManifest(): QFaceItem[] | null {
+  try {
+    const raw = localStorage.getItem(MANIFEST_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as {
+      expiresAt?: number;
+      entries?: QFaceManifestEntry[];
+    };
+    if (!parsed?.entries?.length || Date.now() > Number(parsed.expiresAt || 0)) return null;
+    const faces = toFaceItems(parsed.entries.filter((entry) => entry?.id && entry?.text));
+    if (faces.length <= POPULAR_FACE_IDS.length) return null;
+    return faces;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredManifest(entries: QFaceManifestEntry[]): void {
+  try {
+    localStorage.setItem(MANIFEST_STORAGE_KEY, JSON.stringify({
+      expiresAt: Date.now() + MANIFEST_TTL_MS,
+      entries,
+    }));
+  } catch {
+    // quota / private mode
+  }
+}
+
+// 模块加载时同步灌入本地清单，进房首帧即可当「已加载」
+fullFacesCache = readStoredManifest();
+
 function getDisplayFaces(): QFaceItem[] {
   return fullFacesCache || buildPopularFaces();
 }
@@ -99,11 +133,20 @@ function warmupManifestFaces(): void {
 }
 
 async function fetchLocalManifest(): Promise<QFaceItem[]> {
-  const res = await fetch(MANIFEST_URL);
+  // 1 年有效期内直接用本地缓存，不再打网络
+  const stored = fullFacesCache || readStoredManifest();
+  if (stored) {
+    fullFacesCache = stored;
+    return stored;
+  }
+
+  const res = await fetch(MANIFEST_URL, { cache: 'force-cache' });
   if (!res.ok) throw new Error('本地表情 manifest 不存在');
   const data = (await res.json()) as QFaceManifestEntry[];
-  const faces = toFaceItems(data.filter((entry) => entry?.id && entry?.text));
+  const entries = data.filter((entry) => entry?.id && entry?.text);
+  const faces = toFaceItems(entries);
   if (faces.length <= POPULAR_FACE_IDS.length) throw new Error('本地表情 manifest 不完整');
+  writeStoredManifest(entries);
   return faces;
 }
 
@@ -255,6 +298,10 @@ export async function loadQQFaces(): Promise<QFaceItem[]> {
 }
 
 export function ensureQQFacesLoaded(): void {
-  if (fullFacesCache) return;
+  if (fullFacesCache) {
+    // 清单已缓存：只预热常用图（已解码则立刻返回），不再打 manifest
+    warmupManifestFaces();
+    return;
+  }
   void loadQQFaces();
 }

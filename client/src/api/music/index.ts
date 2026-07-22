@@ -11,6 +11,7 @@ import { getUserPlaybackQuality } from './quality';
 import { resizeCoverUrl, type CoverSize } from '../../lib/coverUrl';
 import { requireSessionBootstrap } from '../../lib/sessionBootstrap';
 import { signApiUrl } from '../../lib/signedApiUrl';
+import { isBlockedPlaybackUrl, SourceUnavailableError } from '../../lib/audioPlaybackError';
 import { mergeLyricTranslations } from '../../lib/immersiveLyricLines';
 
 function getProvider(source: MusicSource) {
@@ -71,20 +72,34 @@ export async function getSongById(source: MusicSource, id: string): Promise<Sear
   return getProvider(source).getSongById(id);
 }
 
+export async function getSongUrlInfo(
+  song: Pick<Song, 'id' | 'source' | 'url'>,
+  qualityOverride?: string,
+  options?: { proxy?: boolean },
+): Promise<{ url: string; qualityLabel?: string }> {
+  const source = song.source || 'netease';
+  const quality = qualityOverride ?? getUserPlaybackQuality(source);
+  const result = await getProvider(source).getSongUrl({ ...song, source }, quality);
+  if (!result.url || isBlockedPlaybackUrl(result.url)) {
+    throw new SourceUnavailableError('no url');
+  }
+  const useProxy = options?.proxy ?? shouldProxyPlaybackUrl(result.url, shouldProxySongPlaybackUrl());
+  let resolved = useProxy ? toProxiedMediaUrl(result.url) : result.url;
+  if (resolved.startsWith('/api/')) {
+    resolved = await signApiUrl(resolved);
+  }
+  return {
+    url: resolved,
+    qualityLabel: result.qualityLabel?.trim() || undefined,
+  };
+}
+
 export async function getSongUrl(
   song: Pick<Song, 'id' | 'source' | 'url'>,
   qualityOverride?: string,
   options?: { proxy?: boolean },
 ): Promise<string> {
-  const source = song.source || 'netease';
-  const quality = qualityOverride ?? getUserPlaybackQuality(source);
-  const url = await getProvider(source).getSongUrl({ ...song, source }, quality);
-  const useProxy = options?.proxy ?? shouldProxyPlaybackUrl(url, shouldProxySongPlaybackUrl());
-  const resolved = useProxy ? toProxiedMediaUrl(url) : url;
-  if (resolved.startsWith('/api/')) {
-    return signApiUrl(resolved);
-  }
-  return resolved;
+  return (await getSongUrlInfo(song, qualityOverride, options)).url;
 }
 
 export {
