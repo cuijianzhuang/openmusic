@@ -68,7 +68,7 @@ export function buildLinuxdoAuthorizeUrl(state) {
   url.searchParams.set('client_id', config.linuxdoClientId);
   url.searchParams.set('redirect_uri', config.linuxdoRedirectUri);
   url.searchParams.set('response_type', 'code');
-  url.searchParams.set('scope', config.linuxdoScope || 'read');
+  url.searchParams.set('scope', config.linuxdoScope || 'user');
   url.searchParams.set('state', state);
   return url.toString();
 }
