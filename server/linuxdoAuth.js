@@ -103,7 +103,8 @@ export async function exchangeLinuxdoCode(code) {
     body: body.toString(),
   });
   if (!response.ok) {
-    throw new Error(`Linux.do 令牌接口返回 ${response.status}`);
+    const detail = await response.text().catch(() => '');
+    throw new Error(`Linux.do 令牌接口返回 ${response.status}${detail ? `: ${detail.slice(0, 500)}` : ''}`);
   }
   const data = await response.json();
   const accessToken = String(data?.access_token || '').trim();
