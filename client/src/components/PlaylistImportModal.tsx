@@ -18,8 +18,11 @@ export { rememberPlaylistImportHistory } from '../lib/playlistImportHistory';
 
 const HINTS: Record<PlaylistPlatform, string> = {
   netease: '粘贴歌单分享文案或链接到下方。',
-  qq: '粘贴歌单分享链接或歌单 ID 到下方。',
+  qq: '请在 QQ 音乐打开歌单 → 分享到「QQ」或「我的电脑」，再把链接粘贴到下方。链接必须带 id= 参数才可解析。',
 };
+
+const QQ_EXAMPLE_LINK =
+  'https://i2.y.qq.com/n3/other/pages/details/playlist.html?platform=11&appshare=android_qq&appversion=20020008&id=9211556467&ADTAG=qfshare';
 
 const PLATFORM_LABELS: Record<PlaylistPlatform, string> = {
   netease: '红点',
@@ -223,12 +226,19 @@ export default function PlaylistImportModal({
           {HINTS[platform]}
         </p>
 
+        {platform === 'qq' && (
+          <div className={`mb-4 rounded-xl px-3 py-2.5 text-[11px] leading-relaxed text-white/55 ${immersive ? immersiveGlassInset : 'bg-white/[0.03] border border-white/8'}`}>
+            <p className="text-white/70">可用示例（其中 <span className="text-white/90">id=</span> 必须有）：</p>
+            <p className="mt-1 break-all font-mono text-white/45">{QQ_EXAMPLE_LINK}</p>
+          </div>
+        )}
+
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder={platform === 'netease'
             ? '粘贴分享链接、完整分享文案或歌单 ID...'
-            : '粘贴歌单分享链接或歌单 ID...'}
+            : '粘贴 QQ 分享链接（需含 id=）或歌单 ID...'}
           rows={4}
           disabled={loading}
           className={inputClass}

@@ -12,14 +12,6 @@ function wyrpEndpoint() {
   return `${getRuntimeConfig().cyapiBase}/wyrp.php`;
 }
 
-function tpshEndpoint() {
-  return `${getRuntimeConfig().cyapiBase}/tpsh.php`;
-}
-
-const IMAGE_MODERATION_TIMEOUT_MS = 15000;
-/** GET 查询串过长时改传 base64 本体，避免 URL 超限 */
-const MAX_PIC_QUERY_LEN = 6000;
-
 const MAX_RANDOM_RETRIES = 20;
 const LRC_TAIL_PADDING_MS = 20000;
 const RANDOM_DURATION_TIMEOUT_MS = 4000;
@@ -281,84 +273,3 @@ export async function getKugouSongDetail(id) {
   };
 }
 
-function normalizeCyapiImageParam(pic) {
-  const raw = String(pic || '').trim();
-  if (!raw) return '';
-
-  if (raw.startsWith('data:')) {
-    const comma = raw.indexOf(',');
-    if (comma < 0) return raw;
-    const body = raw.slice(comma + 1);
-    return body.length <= MAX_PIC_QUERY_LEN ? raw : body;
-  }
-
-  return raw;
-}
-
-function buildImageModerationError(data) {
-  const detail = String(
-    data?.violation_content
-    || data?.violation_type
-    || data?.violation
-    || data?.label
-    || data?.msg
-    || data?.message
-    || '',
-  ).trim();
-  if (detail) return `图片未通过审核：${detail}`;
-  return '图片未通过审核，请更换后发送';
-}
-
-/**
- * 迟言图片审核（tpsh）。未配置 CYAPI_KEY 时跳过。
- * @param {string} pic 图片 https URL 或 base64 / data URL
- */
-export async function moderateCyapiImage(pic) {
-  if (!isCyapiConfigured()) {
-    return { ok: true };
-  }
-
-  const picParam = normalizeCyapiImageParam(pic);
-  if (!picParam) return { ok: true };
-
-  try {
-    const params = withApiKey({ pic: picParam });
-    const query = params.toString();
-    if (query.length > 12000) {
-      return { ok: false, error: '图片过大，无法完成审核' };
-    }
-
-    const response = await fetchWithTimeout(
-      `${tpshEndpoint()}?${query}`,
-      {},
-      IMAGE_MODERATION_TIMEOUT_MS,
-    );
-
-    if (response.status === 403) {
-      return { ok: false, error: '图片审核服务未授权，请检查 CYAPI_KEY' };
-    }
-    if (response.status === 429) {
-      return { ok: false, error: '图片审核过于频繁，请稍后再试' };
-    }
-    if (!response.ok) {
-      return { ok: false, error: '图片审核暂时不可用，请稍后重试' };
-    }
-
-    const data = await response.json();
-    if (data?.is_violation === true) {
-      return { ok: false, error: buildImageModerationError(data) };
-    }
-    if (data?.is_violation === false) {
-      return { ok: true };
-    }
-
-    const code = Number(data?.code);
-    if (Number.isFinite(code) && code !== 0 && code !== 200) {
-      return { ok: false, error: data?.msg || data?.message || '图片审核失败，请稍后重试' };
-    }
-
-    return { ok: true };
-  } catch {
-    return { ok: false, error: '图片审核暂时不可用，请稍后重试' };
-  }
-}

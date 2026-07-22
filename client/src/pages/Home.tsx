@@ -16,6 +16,7 @@ import { areRoomListsEqual, isLobbyHardLocked, sortLobbyRooms } from '../lib/roo
 import { isMobileDevice } from '../lib/audioUnlock';
 import { ANDROID_APK_URL } from '../lib/androidDownload';
 import { IOS_IPA_URL } from '../lib/iosDownload';
+import { resizeCoverUrl } from '../lib/coverUrl';
 import {
   fetchSiteAnnouncement,
   markSiteAnnouncementSeen,
@@ -26,8 +27,20 @@ import Tooltip from '../components/Tooltip';
 import ClientDownloadModal from '../components/ClientDownloadModal';
 import SiteAnnouncementPopup from '../components/SiteAnnouncementPopup';
 import BrandMark from '../components/BrandMark';
-import SongCover from '../components/SongCover';
 import { getRememberedAdminEntryPath } from '../lib/adminEntryShortcut';
+
+/** 大厅只用接口带回的 CDN 直链，不走 meting type=pic 再查 */
+function lobbyDirectCoverUrl(pic?: string): string | null {
+  const raw = String(pic || '').trim();
+  if (!/^https?:\/\//i.test(raw)) return null;
+  try {
+    const parsed = new URL(raw);
+    if (parsed.searchParams.get('type') === 'pic') return null;
+  } catch {
+    return null;
+  }
+  return resizeCoverUrl(raw, 'thumb');
+}
 
 function GiteeIcon({ className }: { className?: string }) {
   return (
@@ -106,8 +119,7 @@ const RoomCard = memo(function RoomCard({
   const isActive = room.isPlaying && room.currentSong;
   const hardLocked = isLobbyHardLocked(room);
   const gradient = gradientForId(room.id);
-  const currentSong = room.currentSong;
-  const hasCover = Boolean(currentSong?.id && currentSong?.source);
+  const coverUrl = lobbyDirectCoverUrl(room.currentSong?.pic);
 
   const cardRef = useRef<HTMLDivElement | HTMLButtonElement | null>(null);
   const frameRef = useRef<number | null>(null);
@@ -191,17 +203,21 @@ const RoomCard = memo(function RoomCard({
           {/* 封面区块（倾斜时视差浮起） */}
           <div className="relative flex-shrink-0 transition-transform duration-300 ease-out [transform:translateZ(0)] group-hover:[transform:translateZ(45px)]">
             <div className={`relative w-16 h-16 sm:w-24 sm:h-24 rounded-2xl overflow-hidden bg-gradient-to-br ${gradient} flex items-center justify-center transition-all duration-300 shadow-[0_10px_22px_rgba(0,0,0,0.55),0_2px_5px_rgba(0,0,0,0.5),inset_0_1.5px_0_rgba(255,255,255,0.35),inset_0_-2px_4px_rgba(0,0,0,0.35)] ${hardLocked ? 'grayscale' : 'group-hover:shadow-[0_18px_36px_rgba(0,0,0,0.65),0_3px_7px_rgba(0,0,0,0.5),inset_0_1.5px_0_rgba(255,255,255,0.4),inset_0_-2px_4px_rgba(0,0,0,0.35)] group-hover:scale-105'}`}>
-              {hasCover && currentSong && (
-                <SongCover
-                  song={{ id: currentSong.id!, source: currentSong.source!, pic: currentSong.pic }}
-                  size="thumb"
+              {coverUrl && (
+                <img
+                  key={coverUrl}
+                  src={coverUrl}
+                  alt=""
+                  loading="lazy"
+                  decoding="async"
+                  referrerPolicy="no-referrer"
                   className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
                 />
               )}
-              {hasCover && <div className="absolute inset-0 bg-black/20" />}
+              {coverUrl && <div className="absolute inset-0 bg-black/20 pointer-events-none" />}
               {isActive && !hardLocked ? (
                 <EqualizerBars className="relative text-white drop-shadow-md scale-110" />
-              ) : !hasCover ? (
+              ) : !coverUrl ? (
                 <Disc3 className={`relative w-8 h-8 sm:w-10 sm:h-10 text-white/90 drop-shadow-md transition-transform duration-500 ${hardLocked ? '' : 'group-hover:rotate-[20deg]'}`} />
               ) : null}
             </div>
@@ -253,26 +269,26 @@ const RoomCard = memo(function RoomCard({
             )}
 
             {/* 底部状态栏：分隔线做成刻痕（上暗下亮） */}
-            <div className="flex items-center gap-5 mt-4 pt-3.5 border-t border-black/40 [box-shadow:inset_0_1px_0_rgba(255,255,255,0.08)] transition-colors">
-              <div className="flex items-center gap-2.5">
-                <span className="flex items-center gap-1.5 whitespace-nowrap rounded-lg px-2 py-1 text-xs font-semibold text-white/55 group-hover:text-white/85 transition-colors bg-gradient-to-b from-white/[0.09] to-white/[0.02] border border-white/10 shadow-[0_2px_4px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.12)]">
-                  <Users className="w-3.5 h-3.5 text-white/40 group-hover:text-emerald-400 group-hover:scale-110 transition-all duration-300" />
-                  {room.userCount} 人
+            <div className="flex items-center gap-2 sm:gap-5 mt-4 pt-3.5 border-t border-black/40 [box-shadow:inset_0_1px_0_rgba(255,255,255,0.08)] transition-colors">
+              <div className="flex min-w-0 items-center gap-1.5 sm:gap-2.5">
+                <span className="inline-flex flex-shrink-0 items-center gap-1 sm:gap-1.5 whitespace-nowrap rounded-lg px-1.5 sm:px-2 py-1 text-xs font-semibold text-white/55 group-hover:text-white/85 transition-colors bg-gradient-to-b from-white/[0.09] to-white/[0.02] border border-white/10 shadow-[0_2px_4px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.12)]">
+                  <Users className="w-3.5 h-3.5 flex-shrink-0 text-white/40 group-hover:text-emerald-400 group-hover:scale-110 transition-all duration-300" />
+                  {room.userCount}人
                 </span>
-                <span className="flex items-center gap-1.5 whitespace-nowrap rounded-lg px-2 py-1 text-xs font-semibold text-white/55 group-hover:text-white/85 transition-colors bg-gradient-to-b from-white/[0.09] to-white/[0.02] border border-white/10 shadow-[0_2px_4px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.12)]">
-                  <ListMusic className="w-3.5 h-3.5 text-white/40 group-hover:text-violet-400 group-hover:scale-110 transition-all duration-300" />
-                  {room.queueLength} 首
+                <span className="inline-flex flex-shrink-0 items-center gap-1 sm:gap-1.5 whitespace-nowrap rounded-lg px-1.5 sm:px-2 py-1 text-xs font-semibold text-white/55 group-hover:text-white/85 transition-colors bg-gradient-to-b from-white/[0.09] to-white/[0.02] border border-white/10 shadow-[0_2px_4px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.12)]">
+                  <ListMusic className="w-3.5 h-3.5 flex-shrink-0 text-white/40 group-hover:text-violet-400 group-hover:scale-110 transition-all duration-300" />
+                  {room.queueLength}首
                 </span>
               </div>
               
-              <span className="ml-auto">
+              <span className="ml-auto flex-shrink-0">
                 {hardLocked ? (
-                  <span className="flex items-center gap-1 text-xs text-red-400/60 font-medium">
+                  <span className="flex items-center gap-1 whitespace-nowrap text-xs text-red-400/60 font-medium">
                     <Lock className="w-3.5 h-3.5" />
                     已上锁
                   </span>
                 ) : (
-                  <span className="flex items-center gap-1 text-[13px] text-netease-red opacity-0 translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-300 font-bold">
+                  <span className="hidden sm:flex items-center gap-1 text-[13px] text-netease-red opacity-0 translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-300 font-bold">
                     立即加入
                     <ArrowRight className="w-4 h-4 transition-transform duration-300 group-hover:translate-x-0.5" />
                   </span>
@@ -410,6 +426,14 @@ export default function Home() {
     const timer = setInterval(() => fetchRooms(true), 5000);
     return () => clearInterval(timer);
   }, [fetchRooms]);
+
+  // 大厅预热热歌榜：进房时直接用缓存，避免左侧榜单再刷一下
+  useEffect(() => {
+    void import('../api/music/toplist')
+      .then((m) => m.getNeteaseHotToplist(200))
+      .catch(() => {});
+    void import('../pages/Room');
+  }, []);
 
   useEffect(() => {
     let cancelled = false;

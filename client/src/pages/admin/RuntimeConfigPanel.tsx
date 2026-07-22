@@ -55,7 +55,7 @@ const RUNTIME_FIELD_GROUPS: RuntimeFieldGroup[] = [
   {
     id: 'cyapi',
     title: '迟言 API',
-    purpose: '酷狗（蓝点）音乐搜索与播放；也可用于部分图片审核能力。不配置则蓝点音源不可用。',
+    purpose: '酷狗（蓝点）音乐搜索与播放。不配置则蓝点音源不可用。',
     fields: [
       { key: 'cyapiBase', label: 'API 地址', placeholder: 'https://cyapi.top/API' },
       { key: 'cyapiKey', label: 'API 密钥', secret: true },

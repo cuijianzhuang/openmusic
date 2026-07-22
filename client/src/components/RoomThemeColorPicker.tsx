@@ -209,11 +209,6 @@ export default function RoomThemeColorPicker() {
       >
         <Palette className="h-4 w-4" />
         <span className="hidden sm:inline">主题色</span>
-        <span
-          className="h-3 w-3 rounded-full border border-white/30 shadow-sm"
-          style={{ backgroundColor: color }}
-          aria-hidden="true"
-        />
       </button>
 
       {open && (
