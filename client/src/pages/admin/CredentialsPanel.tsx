@@ -192,25 +192,8 @@ export default function CredentialsPanel({
     </Space>
   );
 
-  if (bare) return body;
-
-  return (
-    <Card
-      title={(
-        <Space>
-          <KeyOutlined />
-          <span>管理员账号</span>
-          {forced && <Tag color="warning">必须修改</Tag>}
-          <Tag color={persisted ? 'success' : 'error'} style={{ marginLeft: 'auto' }}>
-            {persisted ? 'Redis 持久化' : 'Redis 未就绪'}
-          </Tag>
-        </Space>
-      )}
-    >
-      <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>
-        密码以 scrypt 哈希存 Redis（不落盘）；新密码至少 8 位且不能是默认密码；修改后其它会话立即失效
-      </Typography.Paragraph>
-      {body}
+  const oauthSections = (
+    <>
       {linuxdoEnabled && (
         <>
           <Divider style={{ margin: '20px 0 16px' }} />
@@ -267,6 +250,36 @@ export default function CredentialsPanel({
           )}
         </>
       )}
+    </>
+  );
+
+  if (bare) {
+    return (
+      <>
+        {body}
+        {oauthSections}
+      </>
+    );
+  }
+
+  return (
+    <Card
+      title={(
+        <Space>
+          <KeyOutlined />
+          <span>管理员账号</span>
+          {forced && <Tag color="warning">必须修改</Tag>}
+          <Tag color={persisted ? 'success' : 'error'} style={{ marginLeft: 'auto' }}>
+            {persisted ? 'Redis 持久化' : 'Redis 未就绪'}
+          </Tag>
+        </Space>
+      )}
+    >
+      <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>
+        密码以 scrypt 哈希存 Redis（不落盘）；新密码至少 8 位且不能是默认密码；修改后其它会话立即失效
+      </Typography.Paragraph>
+      {body}
+      {oauthSections}
     </Card>
   );
 }
