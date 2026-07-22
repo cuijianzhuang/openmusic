@@ -53,6 +53,31 @@ interface RuntimeFieldGroup {
 
 const RUNTIME_FIELD_GROUPS: RuntimeFieldGroup[] = [
   {
+    id: 'linuxdo',
+    title: 'Linux.do 登录',
+    purpose: '房主绑定/找回身份、后台管理员绑定登录都依赖这组配置。需要先在 connect.linux.do 注册应用，并向 Linux.do 核实真实的授权/令牌/用户信息接口地址——不要照抄示例值。授权/令牌/用户信息三个接口地址与客户端凭据均填写后才会启用。',
+    fields: [
+      { key: 'linuxdoClientId', label: 'Client ID' },
+      { key: 'linuxdoClientSecret', label: 'Client Secret', secret: true },
+      { key: 'linuxdoRedirectUri', label: '回调地址', placeholder: 'https://你的域名/api/auth/linuxdo/callback', tip: '需要与 Linux.do 应用里登记的回调地址完全一致；房主绑定/找回和后台绑定/登录共用这一个地址' },
+      { key: 'linuxdoAuthorizeUrl', label: '授权接口地址' },
+      { key: 'linuxdoTokenUrl', label: '令牌接口地址' },
+      { key: 'linuxdoUserInfoUrl', label: '用户信息接口地址' },
+      { key: 'linuxdoScope', label: 'Scope', placeholder: 'read' },
+    ],
+  },
+  {
+    id: 'github',
+    title: 'GitHub 登录',
+    purpose: '房主绑定/找回身份、后台管理员绑定登录都依赖这组配置。去 https://github.com/settings/developers 注册一个 OAuth App 即可，授权/令牌/用户信息接口地址是 GitHub 固定的公开地址，不需要单独配置。',
+    fields: [
+      { key: 'githubClientId', label: 'Client ID' },
+      { key: 'githubClientSecret', label: 'Client Secret', secret: true },
+      { key: 'githubRedirectUri', label: '回调地址', placeholder: 'https://你的域名/api/auth/github/callback', tip: '需要与 GitHub OAuth App 里登记的 Authorization callback URL 完全一致；房主绑定/找回和后台绑定/登录共用这一个地址' },
+      { key: 'githubScope', label: 'Scope', placeholder: 'read:user' },
+    ],
+  },
+  {
     id: 'cyapi',
     title: '迟言 API',
     purpose: '酷狗（蓝点）音乐搜索与播放。不配置则蓝点音源不可用。',
@@ -949,6 +974,17 @@ export default function RuntimeConfigPanel({
           {metingSection}
           <Divider style={{ margin: 0 }} />
           {customApiSection}
+        </>
+      ),
+    },
+    {
+      key: 'identity',
+      label: '身份登录',
+      children: (
+        <>
+          {fieldGroup('linuxdo')}
+          <Divider style={{ margin: 0 }} />
+          {fieldGroup('github')}
         </>
       ),
     },

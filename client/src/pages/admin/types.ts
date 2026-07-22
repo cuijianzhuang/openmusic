@@ -43,6 +43,17 @@ export interface SiteAnnouncementConfig {
 
 export interface RuntimeConfig {
   roomEmptyTtlMs: number;
+  linuxdoClientId: string;
+  linuxdoClientSecret: string;
+  linuxdoRedirectUri: string;
+  linuxdoAuthorizeUrl: string;
+  linuxdoTokenUrl: string;
+  linuxdoUserInfoUrl: string;
+  linuxdoScope: string;
+  githubClientId: string;
+  githubClientSecret: string;
+  githubRedirectUri: string;
+  githubScope: string;
   metingApiUrl: string;
   metingApiAuth: string;
   metingSources: {
