@@ -5,9 +5,11 @@ import { useRoomStore } from '../stores/roomStore';
 import { useAudioStore } from '../stores/audioStore';
 import { useSocket } from '../hooks/useSocket';
 import { canPauseInRoom, canSeekInRoom } from '../lib/roomPermissions';
+import { getTrackKey } from '../api/music';
+import { getSourceShortLabel } from '../lib/sourceLabels';
 
-import SourceBadge from './SourceBadge';
 import SongCover from './SongCover';
+import PlaybackQualityTag from './PlaybackQualityTag';
 
 import ProgressBar from './ProgressBar';
 import PlaybackProgressBar from './playback/PlaybackProgressBar';
@@ -54,6 +56,7 @@ export default memo(function MiniPlayer({
   const setTrackLoading = useAudioStore((s) => s.setTrackLoading);
   const seekPlayback = useAudioStore((s) => s.seekPlayback);
   const localPlayback = useAudioStore((s) => s.localPlayback);
+  const actualQualityByTrack = useAudioStore((s) => s.actualQualityByTrack);
   const { togglePlay, skipSong, requestSkip } = useSocket();
 
   const [skipError, setSkipError] = useState('');
@@ -61,6 +64,9 @@ export default memo(function MiniPlayer({
   const [reportOpen, setReportOpen] = useState(false);
   const mySocketId = useRoomStore((s) => s.mySocketId);
   const hasPendingSkip = skipRequests?.some((r) => r.requestedBy === mySocketId) ?? false;
+  const qualityLabel = current
+    ? (actualQualityByTrack[getTrackKey(current)] ?? null)
+    : null;
 
   const handlePlayPause = () => {
     if (!hasRoom) return;
@@ -159,8 +165,17 @@ export default memo(function MiniPlayer({
             className="control-cover bg-netease-card"
           />
               <div className="control-meta">
-                <div className="control-title">{current.name}</div>
-                <div className="control-artist">{current.artist}</div>
+                <div className="control-title flex min-w-0 items-center gap-1.5 !overflow-visible">
+                  <span className="min-w-0 truncate">{current.name}</span>
+                  <PlaybackQualityTag label={qualityLabel} source={current.source} />
+                </div>
+                <div className="control-artist truncate">
+                  <span className="text-white/70">{current.artist}</span>
+                  <span>
+                    {' · '}
+                    {getSourceShortLabel(current.source || 'netease')}
+                  </span>
+                </div>
               </div>
             </button>
             <FavoriteButton
@@ -215,7 +230,7 @@ export default memo(function MiniPlayer({
               </Tooltip>
             )}
 
-            <PlayModeButton className="mineradio-ctrl-btn h-8 w-8" iconClassName="h-4 w-4" />
+            <PlayModeButton className="mineradio-ctrl-btn hidden h-8 w-8 sm:flex" iconClassName="h-4 w-4" />
           </div>
 
           <div className="control-cluster modes">
@@ -225,12 +240,12 @@ export default memo(function MiniPlayer({
             />
           </div>
           <div className="control-cluster report">
-            <Tooltip content="上报错误">
+            <Tooltip content="上报错误/提交意见">
               <button
                 type="button"
                 onClick={() => setReportOpen(true)}
                 className="mineradio-ctrl-btn"
-                aria-label="上报错误"
+                aria-label="上报错误/提交意见"
               >
                 <Flag className="h-4 w-4" />
               </button>
@@ -338,21 +353,18 @@ export default memo(function MiniPlayer({
 
           <div className="min-w-0 hidden sm:block">
 
-            <div className="flex items-center gap-1 sm:gap-1.5">
-
-              <p className="text-sm font-medium truncate">{current.name}</p>
-
-              <SourceBadge source={current.source || 'netease'} className="hidden sm:inline-flex" />
-
+            <div className="flex min-w-0 items-center gap-1.5">
+              <p className="min-w-0 truncate text-sm font-medium">{current.name}</p>
+              <PlaybackQualityTag label={qualityLabel} source={current.source} />
             </div>
 
-            <p className="text-[11px] sm:text-xs text-netease-muted truncate">
-
-              {current.artist}
-              {current.requestedBy && (
-                <span className="text-netease-muted/70"> · {current.requestedBy}点的歌</span>
-              )}
-
+            <p className="truncate text-[11px] text-netease-muted sm:text-xs">
+              <span className="text-white/70">{current.artist}</span>
+              <span>
+                {' · '}
+                {getSourceShortLabel(current.source || 'netease')}
+                {current.requestedBy ? ` · ${current.requestedBy}点的歌` : ''}
+              </span>
             </p>
 
           </div>
@@ -417,26 +429,22 @@ export default memo(function MiniPlayer({
           </Tooltip>
         )}
 
-        <PlayModeButton className="h-8 w-8" iconClassName="h-4 w-4" />
+        <PlayModeButton className="hidden h-8 w-8 sm:flex" iconClassName="h-4 w-4" />
 
         <VolumeControl compact className="flex-shrink-0" />
         <FavoriteButton song={current} className="w-8 h-8 text-netease-muted hover:text-rose-300" />
+        <Tooltip content="上报错误/提交意见">
+          <button
+            type="button"
+            onClick={() => setReportOpen(true)}
+            className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center text-netease-muted transition-colors hover:text-white"
+            aria-label="上报错误/提交意见"
+          >
+            <Flag className="h-3.5 w-3.5" />
+          </button>
+        </Tooltip>
         </div>
 
-        </div>
-
-        <div className="pointer-events-none absolute inset-y-0 right-3 z-10 flex items-center sm:right-4">
-          <Tooltip content="上报错误">
-            <button
-              type="button"
-              onClick={() => setReportOpen(true)}
-              className="pointer-events-auto inline-flex h-8 flex-shrink-0 items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 text-[11px] text-netease-muted transition-colors hover:border-white/20 hover:bg-white/10 hover:text-white sm:px-2.5"
-              aria-label="上报错误"
-            >
-              <Flag className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">上报错误</span>
-            </button>
-          </Tooltip>
         </div>
 
       </div>

@@ -2,9 +2,7 @@ import { useEffect } from 'react';
 import { X, Sparkles } from 'lucide-react';
 import type { PlaylistSearchItem } from '../api/music/playlist';
 import RecommendedPlaylistsPanel from './RecommendedPlaylistsPanel';
-import { immersiveGlassDrawer, immersiveGlassScrim, immersiveGlassSheetHeader } from '../lib/immersiveGlass';
-
-const PANEL_WIDTH = 360;
+import { immersiveGlassModal, immersiveGlassScrim, immersiveGlassSheetHeader } from '../lib/immersiveGlass';
 
 interface Props {
   open: boolean;
@@ -31,24 +29,23 @@ export default function RecommendedPlaylistsDrawer({ open, immersive = false, on
   };
 
   return (
-    <div className={`fixed inset-0 z-[90] ${immersive ? '' : 'hidden lg:block'}`}>
+    <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
       <button
         type="button"
-        className={`absolute inset-0 ${immersive ? immersiveGlassScrim : 'bg-black/50 backdrop-blur-[1px]'}`}
+        className={`absolute inset-0 ${immersive ? immersiveGlassScrim : 'bg-black/65 backdrop-blur-sm'}`}
         onClick={onClose}
         aria-label="关闭热榜歌单"
       />
-      <aside
-        className={`absolute left-3 flex flex-col overflow-hidden shadow-2xl animate-fade-in ${
+      <div
+        className={`relative z-10 flex min-h-0 max-h-[min(80vh,720px)] w-full max-w-2xl flex-col overflow-hidden shadow-2xl animate-fade-in ${
           immersive
-            ? `${immersiveGlassDrawer} top-3 bottom-3 rounded-[22px]`
-            : 'top-[calc(3.5rem+env(safe-area-inset-top,0px))] bottom-[calc(5.25rem+env(safe-area-inset-bottom,0px))] rounded-3xl border border-netease-border/50 bg-[#101012]/95 backdrop-blur-xl'
+            ? immersiveGlassModal
+            : 'rounded-2xl border border-white/10 glass'
         }`}
-        style={{ width: PANEL_WIDTH, maxWidth: 'min(calc(100vw - 1.5rem), 360px)' }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className={`flex flex-shrink-0 items-center justify-between gap-2 px-4 py-3 ${immersive ? immersiveGlassSheetHeader : 'border-b border-netease-border/40'}`}>
-          <div className="flex items-center gap-2 min-w-0">
+          <div className="flex min-w-0 items-center gap-2">
             <Sparkles className="h-4 w-4 flex-shrink-0 text-sky-400" />
             <h2 className="text-sm font-medium text-white">热榜歌单</h2>
           </div>
@@ -61,10 +58,10 @@ export default function RecommendedPlaylistsDrawer({ open, immersive = false, on
             <X className="h-5 w-5" />
           </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-hidden">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           <RecommendedPlaylistsPanel hideHeader immersive={immersive} onSelectPlaylist={handleSelect} />
         </div>
-      </aside>
+      </div>
     </div>
   );
 }

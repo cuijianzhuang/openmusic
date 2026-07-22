@@ -13,9 +13,15 @@ export interface MusicProviderMeta {
 export interface MusicProvider extends MusicProviderMeta {
   search(keyword: string): Promise<SearchResult[]>;
   getSongById(id: string): Promise<SearchResult | null>;
-  getSongUrl(song: Pick<Song, 'id' | 'source' | 'url'>, quality?: string): Promise<string>;
+  getSongUrl(song: Pick<Song, 'id' | 'source' | 'url'>, quality?: string): Promise<SongUrlResult>;
   getLyrics(song: Pick<Song, 'id' | 'source' | 'lrc'>): Promise<string>;
   getCoverUrl(song: Pick<Song, 'id' | 'source' | 'pic'>): string;
+}
+
+export interface SongUrlResult {
+  url: string;
+  /** 上游返回的实际音质中文名，如「无损」「超清母带」 */
+  qualityLabel?: string;
 }
 
 export type { LyricLine, SearchResult, Song };

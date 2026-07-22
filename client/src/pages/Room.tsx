@@ -4,10 +4,11 @@ import { lazyWithRetry } from '../lib/lazyWithRetry';
 
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 
-import { Search, Loader2, Copy, Check, LogOut, X, Heart, Plus, Download, ListMusic, Upload, History, ListPlus, Pencil, Lock, LockOpen, ChevronLeft, ChevronRight, SlidersHorizontal, Shield, Maximize2, Smartphone } from 'lucide-react';
+import { Search, Loader2, Copy, Check, LogOut, X, Heart, Plus, Download, ListMusic, Upload, History, ListPlus, Pencil, Lock, LockOpen, ChevronLeft, SlidersHorizontal, Shield, Maximize2, Smartphone, ImagePlus } from 'lucide-react';
 
 import { searchAllSongs, getAvailableSources, type SearchFilterMode } from '../api/music';
 import { importPlaylist, searchPlaylists, type PlaylistSearchItem, type PlaylistPlatform, type PlaylistChannelFilter as PlaylistChannelFilterMode } from '../api/music/playlist';
+import { fetchDjPrograms, type DjRadioItem } from '../api/music/djRadio';
 import { normalizeFmMode } from '../api/music/fmMode';
 import { addSongsToQueue, formatBulkAddToast } from '../lib/addSongsToQueue';
 import { rememberPlaylistImportHistory } from '../lib/playlistImportHistory';
@@ -33,8 +34,9 @@ import {
 } from '../lib/roomPureMode';
 import { normalizeDislikeSkipMode } from '../lib/dislikeSkip';
 
-import { songKey, getCoverUrl } from '../api/music';
+import { songKey, getCoverUrl, getTrackKey } from '../api/music';
 import SongCover from '../components/SongCover';
+import { fileToRoomCoverDataUrl, isSupportedRoomCoverFile } from '../lib/roomCoverImage';
 
 import AudioEngine from '../components/AudioEngine';
 
@@ -50,9 +52,12 @@ import {
   SONG_RESULT_PAGE_SIZE_OPTIONS,
   type SongResultPageSize,
 } from '../lib/songResultPagination';
+import ConfirmModal from '../components/ConfirmModal';
 import FavoriteButton from '../components/FavoriteButton';
+import SongRowBadges from '../components/SongRowBadges';
 import PageSizeSelect from '../components/PageSizeSelect';
 import { useMediaQuery } from '../hooks/useMediaQuery';
+import { useRoomSongKeySets } from '../hooks/useRoomSongKeySets';
 import { useSongHistoryStore } from '../stores/songHistoryStore';
 
 import RoomFmModeBadge from '../components/RoomFmModeBadge';
@@ -104,6 +109,7 @@ import {
 const PlayerPage = lazyWithRetry(() => import('../components/PlayerPage'), 'PlayerPage');
 const PlaylistImportModal = lazyWithRetry(() => import('../components/PlaylistImportModal'), 'PlaylistImportModal');
 const RecommendedPlaylistsDrawer = lazyWithRetry(() => import('../components/RecommendedPlaylistsDrawer'), 'RecommendedPlaylistsDrawer');
+const DjRadioDrawer = lazyWithRetry(() => import('../components/DjRadioDrawer'), 'DjRadioDrawer');
 const ClientDownloadModal = lazyWithRetry(() => import('../components/ClientDownloadModal'), 'ClientDownloadModal');
 const RoomMemberModal = lazyWithRetry(() => import('../components/RoomMemberModal'), 'RoomMemberModal');
 const RoomSettingsModal = lazyWithRetry(() => import('../components/RoomSettingsModal'), 'RoomSettingsModal');
@@ -213,6 +219,8 @@ interface PlaylistSearchBackup {
   pageSize: SongResultPageSize;
 }
 
+type SearchDetailOrigin = 'radio' | 'recommend-playlist';
+
 
 export default function Room() {
 
@@ -257,7 +265,6 @@ export default function Room() {
   const canControlPlayback = useRoomStore((s) => s.canControlPlayback);
   const mySocketId = useRoomStore((s) => s.mySocketId);
   const exitReason = useRoomStore((s) => s.exitReason);
-  const isReconnecting = useRoomStore((s) => s.isReconnecting);
 
   const pureMode = usePureModeStore((s) => s.enabled);
   const setPureModeEnabled = usePureModeStore((s) => s.setEnabled);
@@ -277,8 +284,9 @@ export default function Room() {
     noindex: true,
   });
 
-  const { joinRoom, addSong, leaveRoom, listFavorites, setFavorite, importFavorites, renameRoomName, setRoomLock, setRoomFmMode, setRoomAnnouncement, setChatHistoryVisibleOnJoin, setRoomJoinNotice, setSongRequestEnabled, unbanRoomSong, setRoomMemberTier, removeRoomMemberTier, setRoomMemberSettings, loadSongHistory, transferOwner } = useSocket();
+  const { joinRoom, addSong, leaveRoom, listFavorites, setFavorite, importFavorites, renameRoomName, setRoomLock, setRoomFmMode, setRoomAnnouncement, setRoomCustomCover, setChatHistoryVisibleOnJoin, setRoomJoinNotice, setSongRequestEnabled, unbanRoomSong, setRoomMemberTier, removeRoomMemberTier, setRoomMemberSettings, loadSongHistory, transferOwner, clearQueue } = useSocket();
   const { applyFavorites } = useFavorites();
+  const { queueKeys, playedKeys } = useRoomSongKeySets();
 
 
 
@@ -296,6 +304,8 @@ export default function Room() {
   const [addingId, setAddingId] = useState<string | null>(null);
   const [addingPage, setAddingPage] = useState(false);
   const [listPageSongs, setListPageSongs] = useState<SearchResult[]>([]);
+  const [clearQueueConfirmOpen, setClearQueueConfirmOpen] = useState(false);
+  const [clearingQueue, setClearingQueue] = useState(false);
 
   const [copied, setCopied] = useState(false);
   const [searchedKeyword, setSearchedKeyword] = useState('');
@@ -307,8 +317,11 @@ export default function Room() {
   const [searchFilterMode, setSearchFilterMode] = useState<SearchFilterMode>('smart');
   const [playlistImportOpen, setPlaylistImportOpen] = useState(false);
   const [recommendDrawerOpen, setRecommendDrawerOpen] = useState(false);
+  const [djRadioDrawerOpen, setDjRadioDrawerOpen] = useState(false);
   const [downloadModalOpen, setDownloadModalOpen] = useState(false);
   const [isPlaylistResults, setIsPlaylistResults] = useState(false);
+  const [isRadioResults, setIsRadioResults] = useState(false);
+  const [searchDetailOrigin, setSearchDetailOrigin] = useState<SearchDetailOrigin | null>(null);
   const [playlistSearchResults, setPlaylistSearchResults] = useState<PlaylistSearchItem[]>([]);
   const [playlistSearchPage, setPlaylistSearchPage] = useState(1);
   const [playlistSearchPageSize, setPlaylistSearchPageSize] = useState<SongResultPageSize>(getStoredSongResultPageSize);
@@ -346,6 +359,11 @@ export default function Room() {
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameDraft, setRenameDraft] = useState('');
   const [renameSaving, setRenameSaving] = useState(false);
+  const [coverOpen, setCoverOpen] = useState(false);
+  const [coverDraft, setCoverDraft] = useState('');
+  const [coverError, setCoverError] = useState('');
+  const [coverSaving, setCoverSaving] = useState(false);
+  const coverFileInputRef = useRef<HTMLInputElement>(null);
   const [lockOpen, setLockOpen] = useState(false);
   const [lockPassword, setLockPassword] = useState('');
   const [lockSaving, setLockSaving] = useState(false);
@@ -362,6 +380,7 @@ export default function Room() {
   const [joinNoticeSaving, setJoinNoticeSaving] = useState(false);
   const lastSongRequestAtRef = useRef(0);
   const playlistSearchScrollRef = useRef<HTMLDivElement>(null);
+  const favoritesScrollRef = useRef<HTMLDivElement>(null);
   const songHistoryItems = useSongHistoryStore((s) => s.songs);
   const songHistoryLoading = useSongHistoryStore((s) => s.loading);
 
@@ -471,6 +490,72 @@ export default function Room() {
       showToast(res.error || '改名失败', 'error');
     }
   }, [renameDraft, renameSaving, renameRoomName, showToast]);
+
+  const openCoverModal = useCallback(() => {
+    if (!room || !isCreator) return;
+    setCoverDraft(room.customCoverUrl || '');
+    setCoverError('');
+    setCoverOpen(true);
+  }, [room, isCreator]);
+
+  const handleCoverFile = useCallback(async (file: File | undefined) => {
+    if (!file) return;
+    if (!isSupportedRoomCoverFile(file)) {
+      setCoverError('仅支持 JPG / PNG 图片');
+      return;
+    }
+    setCoverError('');
+    try {
+      setCoverDraft(await fileToRoomCoverDataUrl(file));
+    } catch (err) {
+      setCoverError(err instanceof Error ? err.message : '图片处理失败');
+    }
+  }, []);
+
+  const handleSaveCustomCover = useCallback(async () => {
+    if (coverSaving) return;
+    const next = coverDraft.trim();
+    const current = (room?.customCoverUrl || '').trim();
+    if (next === current) {
+      setCoverOpen(false);
+      return;
+    }
+    setCoverSaving(true);
+    const res = await setRoomCustomCover(next);
+    setCoverSaving(false);
+    if (res.success) {
+      setCoverOpen(false);
+      showToast(next ? '房间封面已自定义，将不再跟随歌曲变更' : '已取消自定义封面，恢复跟随歌曲', 'success');
+    } else {
+      showToast(res.error || '封面设置失败', 'error');
+    }
+  }, [coverDraft, coverSaving, room?.customCoverUrl, setRoomCustomCover, showToast]);
+
+  const handleClearCustomCover = useCallback(async () => {
+    if (coverSaving) return;
+    if (!(room?.customCoverUrl || '').trim()) {
+      setCoverDraft('');
+      setCoverOpen(false);
+      return;
+    }
+    setCoverSaving(true);
+    const res = await setRoomCustomCover('');
+    setCoverSaving(false);
+    if (res.success) {
+      setCoverDraft('');
+      setCoverOpen(false);
+      showToast('已取消自定义封面，恢复跟随歌曲', 'success');
+    } else {
+      showToast(res.error || '取消失败', 'error');
+    }
+  }, [coverSaving, room?.customCoverUrl, setRoomCustomCover, showToast]);
+
+  const headerCoverSong = useMemo(() => {
+    if (room?.customCoverUrl) {
+      return { id: 'room-custom-cover', source: 'netease' as const, pic: room.customCoverUrl };
+    }
+    return room?.current ?? null;
+  }, [room?.customCoverUrl, room?.current]);
 
   const openLockModal = useCallback(() => {
     setLockPassword('');
@@ -794,12 +879,12 @@ export default function Room() {
   }, [sources, searchFilterMode]);
 
   const handleSearchFilterChange = useCallback((next: SearchFilterMode) => {
-    if (isPlaylistResults) return;
+    if (isPlaylistResults || isRadioResults) return;
     setSearchFilterMode(next);
     if (searchedKeyword.trim()) {
       doSearch(searchedKeyword, next);
     }
-  }, [isPlaylistResults, searchedKeyword, doSearch]);
+  }, [isPlaylistResults, isRadioResults, searchedKeyword, doSearch]);
 
   const doPlaylistSearch = useCallback(async (
     keyword: string,
@@ -830,10 +915,6 @@ export default function Room() {
     }
   }, [playlistChannelFilter, playlistSearchPageSize, showToast]);
 
-  useEffect(() => {
-    playlistSearchScrollRef.current?.scrollTo({ top: 0, behavior: 'auto' });
-  }, [playlistSearchPage]);
-
   const handlePlaylistPageSizeChange = useCallback((next: SongResultPageSize) => {
     setPlaylistSearchPageSize(next);
     setStoredSongResultPageSize(next);
@@ -849,7 +930,11 @@ export default function Room() {
     }
   }, [searchedKeyword, activeSearchMode, doPlaylistSearch]);
 
-  const handlePlaylistImport = useCallback(async (platform: PlaylistPlatform, input: string) => {
+  const handlePlaylistImport = useCallback(async (
+    platform: PlaylistPlatform,
+    input: string,
+    options?: { deferOverlay?: boolean },
+  ) => {
     setPlaylistImportOpen(false);
     if (activeSearchMode === 'playlist' && searchedKeyword.trim() && playlistSearchResults.length > 0) {
       setPlaylistSearchBackup({
@@ -861,23 +946,41 @@ export default function Room() {
         pageSize: playlistSearchPageSize,
       });
     }
-    setSearching(true);
-    setIsPlaylistResults(true);
-    if (!isLgUp) {
-      setSearchMode('song');
+    const deferOverlay = options?.deferOverlay ?? false;
+
+    if (!deferOverlay) {
+      setSearching(true);
+      setIsPlaylistResults(true);
+      setIsRadioResults(false);
+      if (!isLgUp) {
+        setSearchMode('song');
+      }
+      setActiveSearchMode('song');
+      setOverlaySearchMode('song');
+      setPlaylistSearchResults([]);
+      setPlaylistSearchTotal(0);
+      setSearchedKeyword(`正在解析${platform === 'netease' ? '红点' : '绿点'}歌单…`);
+      setResults([]);
     }
-    setActiveSearchMode('song');
-    setOverlaySearchMode('song');
-    setPlaylistSearchResults([]);
-    setPlaylistSearchTotal(0);
-    setSearchedKeyword(`正在解析${platform === 'netease' ? '红点' : '绿点'}歌单…`);
-    setResults([]);
 
     try {
       const result = await importPlaylist(platform, input);
       if (result.playlistId) {
         rememberPlaylistImportHistory({ platform, playlistId: result.playlistId, name: result.name });
       }
+
+      if (deferOverlay) {
+        if (!isLgUp) {
+          setSearchMode('song');
+        }
+        setIsPlaylistResults(true);
+        setIsRadioResults(false);
+        setActiveSearchMode('song');
+        setOverlaySearchMode('song');
+        setPlaylistSearchResults([]);
+        setPlaylistSearchTotal(0);
+      }
+
       setResults(result.songs);
       setSearchedKeyword(`歌单：${result.name}`);
 
@@ -892,15 +995,71 @@ export default function Room() {
       setResults([]);
       setSearchedKeyword('');
       setIsPlaylistResults(false);
+      setIsRadioResults(false);
+      setSearchDetailOrigin(null);
       showToast(err instanceof Error ? err.message : '歌单解析失败', 'error');
     } finally {
-      setSearching(false);
+      if (!deferOverlay) {
+        setSearching(false);
+      }
     }
   }, [showToast, activeSearchMode, searchedKeyword, playlistSearchResults, playlistSearchPage, playlistSearchTotal, playlistChannelFilter, playlistSearchPageSize, isLgUp]);
 
   const handleRecommendPlaylistSelect = useCallback(async (playlist: PlaylistSearchItem) => {
-    await handlePlaylistImport(playlist.platform, playlist.id);
+    setSearchDetailOrigin('recommend-playlist');
+    await handlePlaylistImport(playlist.platform, playlist.id, { deferOverlay: true });
   }, [handlePlaylistImport]);
+
+  const handleDjRadioSelect = useCallback(async (radio: DjRadioItem) => {
+    if (activeSearchMode === 'playlist' && searchedKeyword.trim() && playlistSearchResults.length > 0) {
+      setPlaylistSearchBackup({
+        keyword: searchedKeyword,
+        results: playlistSearchResults,
+        page: playlistSearchPage,
+        total: playlistSearchTotal,
+        channel: playlistChannelFilter,
+        pageSize: playlistSearchPageSize,
+      });
+    }
+
+    try {
+      const result = await fetchDjPrograms(radio.id);
+      if (!isLgUp) {
+        setSearchMode('song');
+      }
+      setIsRadioResults(true);
+      setIsPlaylistResults(false);
+      setSearchDetailOrigin('radio');
+      setActiveSearchMode('song');
+      setOverlaySearchMode('song');
+      setPlaylistSearchResults([]);
+      setPlaylistSearchTotal(0);
+      setResults(result.songs);
+      setSearchedKeyword(`电台：${result.name || radio.name}`);
+
+      if (result.songs.length === 0) {
+        showToast('电台暂无可用节目', 'error');
+      } else {
+        showToast(`已加载 ${result.songs.length} 期节目，请在结果中自选点歌`, 'success');
+      }
+    } catch (err) {
+      setResults([]);
+      setSearchedKeyword('');
+      setIsRadioResults(false);
+      setSearchDetailOrigin(null);
+      showToast(err instanceof Error ? err.message : '电台加载失败', 'error');
+    }
+  }, [
+    showToast,
+    activeSearchMode,
+    searchedKeyword,
+    playlistSearchResults,
+    playlistSearchPage,
+    playlistSearchTotal,
+    playlistChannelFilter,
+    playlistSearchPageSize,
+    isLgUp,
+  ]);
 
   const handleSearch = useCallback(() => {
     const keyword = query.trim();
@@ -1024,6 +1183,8 @@ export default function Room() {
     setPlaylistSearchLoading(false);
     setSearchedKeyword('');
     setIsPlaylistResults(false);
+    setIsRadioResults(false);
+    setSearchDetailOrigin(null);
     setListPageSongs([]);
     setPlaylistSearchBackup(null);
     setActiveSearchMode('song');
@@ -1036,6 +1197,8 @@ export default function Room() {
       return;
     }
     setIsPlaylistResults(false);
+    setIsRadioResults(false);
+    setSearchDetailOrigin(null);
     setResults([]);
     setActiveSearchMode('playlist');
     setOverlaySearchMode('playlist');
@@ -1052,6 +1215,38 @@ export default function Room() {
     setPlaylistSearchPageSize(playlistSearchBackup.pageSize);
     setListPageSongs([]);
   }, [playlistSearchBackup, clearSearchResults, isLgUp]);
+
+  const handleBackFromDetail = useCallback(() => {
+    if (searchDetailOrigin === 'radio') {
+      setIsRadioResults(false);
+      setResults([]);
+      setSearchedKeyword('');
+      setSearching(false);
+      setSearchDetailOrigin(null);
+      setListPageSongs([]);
+      setActiveSearchMode('song');
+      setOverlaySearchMode('song');
+      setDjRadioDrawerOpen(true);
+      return;
+    }
+    if (searchDetailOrigin === 'recommend-playlist') {
+      setIsPlaylistResults(false);
+      setResults([]);
+      setSearchedKeyword('');
+      setSearching(false);
+      setSearchDetailOrigin(null);
+      setListPageSongs([]);
+      setActiveSearchMode('song');
+      setOverlaySearchMode('song');
+      setRecommendDrawerOpen(true);
+      return;
+    }
+    if (isPlaylistResults && playlistSearchBackup) {
+      handleBackToPlaylistSearch();
+    } else {
+      clearSearchResults();
+    }
+  }, [searchDetailOrigin, isPlaylistResults, playlistSearchBackup, handleBackToPlaylistSearch, clearSearchResults]);
 
   const handleAdd = useCallback(async (song: SearchResult) => {
     if (songRequestBlockReason) {
@@ -1238,9 +1433,11 @@ export default function Room() {
   const handleSaveUserQuality = useCallback((quality: RoomAudioQuality) => {
     useUserQualityStore.getState().setQuality(quality);
     const liveRoom = useRoomStore.getState().room;
-    const keepTrackKey = liveRoom?.current ? songKey(liveRoom.current) : null;
+    // 必须用 getTrackKey：URL 缓存键是 queueId-source，不是 songKey(source-id)
+    const keepTrackKey = liveRoom?.current ? getTrackKey(liveRoom.current) : null;
     invalidateUnloadedSongUrlCache(keepTrackKey);
-    if (liveRoom) prefetchUpcomingFromRoom(liveRoom);
+    // 只预取后续曲目；重拉当前曲会用新音质覆盖标签，尽管音频仍是旧档
+    if (liveRoom) prefetchUpcomingFromRoom(liveRoom, { includeCurrent: false });
     showToast('音质已更新，当前歌曲继续播放', 'success');
   }, [showToast]);
 
@@ -1353,9 +1550,9 @@ export default function Room() {
 
   const refreshPlaybackUrlCacheForQuality = useCallback(() => {
     const liveRoom = useRoomStore.getState().room;
-    const keepTrackKey = liveRoom?.current ? songKey(liveRoom.current) : null;
+    const keepTrackKey = liveRoom?.current ? getTrackKey(liveRoom.current) : null;
     invalidateUnloadedSongUrlCache(keepTrackKey);
-    if (liveRoom) prefetchUpcomingFromRoom(liveRoom);
+    if (liveRoom) prefetchUpcomingFromRoom(liveRoom, { includeCurrent: false });
   }, []);
 
   const runImmersiveExit = useCallback(async (kind: 'keep-bg' | 'cover-bg') => {
@@ -1684,7 +1881,31 @@ export default function Room() {
   const searchableCount = sources.filter((s) => s.supportsSearch).length;
   const qqImportEnabled = sources.some((s) => s.id === 'tencent' && s.supportsSearch);
   const queueCount = (room.current ? 1 : 0) + room.queue.length;
+  const canClearQueue = isOwner && room.queue.length > 0;
+
+  const handleClearQueue = useCallback(async () => {
+    if (clearingQueue) return;
+    setClearingQueue(true);
+    const res = await clearQueue();
+    setClearingQueue(false);
+    if (res.success) {
+      setClearQueueConfirmOpen(false);
+      showToast('已清空待播列表', 'success');
+    } else {
+      showToast(res.error || '清空失败', 'error');
+    }
+  }, [clearQueue, clearingQueue, showToast]);
   const showDesktopSearchOverlay = Boolean(searchedKeyword || searching || playlistSearchLoading);
+  const isCuratedDetailView = isPlaylistResults || isRadioResults;
+  const canBackFromDetail = isRadioResults
+    || searchDetailOrigin === 'recommend-playlist'
+    || (isPlaylistResults && Boolean(playlistSearchBackup));
+  const searchOverlayTitle = isRadioResults ? '电台详情' : isPlaylistResults ? '歌单详情' : '搜索结果';
+  const searchBackLabel = isRadioResults
+    ? '返回电台'
+    : searchDetailOrigin === 'recommend-playlist'
+      ? '返回热榜'
+      : '返回歌单';
   const showPlaylistSearch = activeSearchMode === 'playlist' && Boolean(searchedKeyword || playlistSearchLoading);
   const hasPlaylistSearchResults = showPlaylistSearch && playlistSearchResults.length > 0;
   const showPlaylistEmpty = showPlaylistSearch && !playlistSearchLoading && playlistSearchResults.length === 0;
@@ -1705,12 +1926,18 @@ export default function Room() {
       return `正在搜索歌单「${searchedKeyword}」...`;
     }
     if (searching) {
+      if (isRadioResults) return searchedKeyword;
       return isPlaylistResults ? searchedKeyword : `正在搜索「${searchedKeyword}」...`;
     }
     if (hasPlaylistSearchResults) return `找到 ${playlistSearchTotal || playlistSearchResults.length} 个相关歌单`; 
     if (results.length === 0) {
       if (showPlaylistSearch) return '没有找到相关歌单';
+      if (isRadioResults) return '电台暂无可用节目';
       return isPlaylistResults ? '歌单为空或链接无效' : `「${searchedKeyword}」无相关结果`;
+    }
+    if (isRadioResults) {
+      const name = searchedKeyword.replace(/^电台：/, '');
+      return `「${name}」共 ${results.length} 首，请自选点歌`;
     }
     if (isPlaylistResults) {
       const name = searchedKeyword.replace(/^歌单：/, '');
@@ -1743,9 +1970,20 @@ export default function Room() {
     >
       <div className="relative flex items-center justify-between px-4 py-2.5 sm:py-3 border-b border-netease-border/50 flex-shrink-0">
         <h2 className="text-sm font-medium">播放队列</h2>
-        <span className="text-xs text-netease-muted">
-          {queueCount > 0 ? `共 ${queueCount} 首` : '暂无歌曲'}
-        </span>
+        <div className="flex items-center gap-2">
+          {canClearQueue && (
+            <button
+              type="button"
+              onClick={() => setClearQueueConfirmOpen(true)}
+              className="text-xs text-netease-muted transition-colors hover:text-netease-red"
+            >
+              清空列表
+            </button>
+          )}
+          <span className="text-xs text-netease-muted">
+            {queueCount > 0 ? `共 ${queueCount} 首` : '暂无歌曲'}
+          </span>
+        </div>
         <QueueSystemToast />
       </div>
       <div className={`p-2 ${fillHeight ? 'flex-1 min-h-0 overflow-hidden flex flex-col' : ''}`}>
@@ -1873,6 +2111,7 @@ export default function Room() {
           page={playlistSearchPage}
           totalPages={playlistSearchTotalPages}
           disabled={playlistSearchLoading}
+          scrollRef={playlistSearchScrollRef}
           onPageChange={(p) => void doPlaylistSearch(searchedKeyword, p)}
         />
       </div>
@@ -1982,6 +2221,13 @@ export default function Room() {
       </button>
       <button
         type="button"
+        onClick={() => setDjRadioDrawerOpen(true)}
+        className={`whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] text-white/55 ${immersiveGlassChip}`}
+      >
+        音乐电台
+      </button>
+      <button
+        type="button"
         onClick={openFavorites}
         className={`whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] text-white/55 ${immersiveGlassChip}`}
       >
@@ -2000,12 +2246,24 @@ export default function Room() {
   const renderSearchResultsCore = (fillHeight = true, immersiveGlass = false) => (
     <div className={`flex min-h-0 flex-col ${fillHeight ? 'h-full flex-1' : ''}`}>
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2 border-b border-white/10 pb-2">
-        <p className="min-w-0 truncate text-xs text-white/55">{renderResultsSummary()}</p>
+        <div className="flex min-w-0 items-center gap-2">
+          {canBackFromDetail && (
+            <button
+              type="button"
+              onClick={handleBackFromDetail}
+              className="flex flex-shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-xs text-white/55 transition-colors hover:bg-white/10 hover:text-white"
+            >
+              <ChevronLeft className="h-4 w-4" />
+              {searchBackLabel}
+            </button>
+          )}
+          <p className="min-w-0 truncate text-xs text-white/55">{renderResultsSummary()}</p>
+        </div>
         <div className="flex flex-shrink-0 items-center gap-2">
           {showPlaylistSearch && (
             <PlaylistChannelFilter value={playlistChannelFilter} onChange={handlePlaylistChannelChange} />
           )}
-          {!searching && searchableCount > 0 && !isPlaylistResults && activeSearchMode === 'song' && (
+          {!searching && searchableCount > 0 && !isCuratedDetailView && activeSearchMode === 'song' && (
             <SearchFilterSelect value={searchFilterMode} onChange={handleSearchFilterChange} />
           )}
           {showSongListResults && renderBulkAddPageButton('px-2.5 py-1.5')}
@@ -2025,7 +2283,7 @@ export default function Room() {
         )}
         {!searching && !playlistSearchLoading && searchedKeyword && !hasPlaylistSearchResults && results.length === 0 && (
           <p className="animate-fade-in py-10 text-center text-white/45">
-            {showPlaylistEmpty ? '没有找到相关歌单' : isPlaylistResults ? '歌单为空或链接无效' : '换个关键词试试'}
+            {showPlaylistEmpty ? '没有找到相关歌单' : isRadioResults ? '电台暂无可用节目' : isPlaylistResults ? '歌单为空或链接无效' : '换个关键词试试'}
           </p>
         )}
         {hasPlaylistSearchResults && renderPlaylistSearchList(true, immersiveGlass)}
@@ -2087,8 +2345,12 @@ export default function Room() {
               setImmersiveExitPromptOpen(true);
             }}
             onPanelFocusChange={setImmersivePanelFocus}
-            searchBar={immersiveSearchBar}
-            searchExtras={immersiveSearchExtras}
+            searchBar={
+              showDesktopSearchOverlay && isCuratedDetailView ? null : immersiveSearchBar
+            }
+            searchExtras={
+              showDesktopSearchOverlay && isCuratedDetailView ? null : immersiveSearchExtras
+            }
             showSearchResults={showDesktopSearchOverlay}
             searchResults={
               showDesktopSearchOverlay ? (
@@ -2229,19 +2491,45 @@ export default function Room() {
 
           <div className="flex items-center justify-between gap-2 min-w-0">
 
-            {room.current && !pureMode && (
-              <div className="relative hidden flex-shrink-0 sm:block">
-                <SongCover
-                  song={room.current}
-                  eager
-                  className="h-11 w-11 rounded-xl border border-white/10 bg-surface-raised object-cover shadow-lg shadow-black/30"
-                />
-                {room.isPlaying && (
-                  <span className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full border-2 border-surface-base bg-netease-red shadow-md shadow-netease-red/30">
-                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
-                  </span>
-                )}
-              </div>
+            {(headerCoverSong || isCreator) && !pureMode && (
+              <Tooltip side="bottom" content={isCreator ? (room.customCoverUrl ? '自定义封面（点击修改）' : '设置房间封面') : undefined}>
+                <div className="relative hidden flex-shrink-0 sm:block">
+                  {isCreator ? (
+                    <button
+                      type="button"
+                      onClick={openCoverModal}
+                      className="group relative block rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-netease-red/60"
+                      aria-label={room.customCoverUrl ? '修改房间封面' : '设置房间封面'}
+                    >
+                      {headerCoverSong ? (
+                        <SongCover
+                          song={headerCoverSong}
+                          eager
+                          className="h-11 w-11 rounded-xl border border-white/10 bg-surface-raised object-cover shadow-lg shadow-black/30 transition-opacity group-hover:opacity-80"
+                        />
+                      ) : (
+                        <span className="flex h-11 w-11 items-center justify-center rounded-xl border border-dashed border-white/20 bg-surface-raised text-netease-muted transition-colors group-hover:border-white/40 group-hover:text-white">
+                          <ImagePlus className="h-4 w-4" />
+                        </span>
+                      )}
+                      <span className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-xl bg-black/50 opacity-0 transition-opacity group-hover:opacity-100">
+                        <ImagePlus className="h-4 w-4 text-white" />
+                      </span>
+                    </button>
+                  ) : headerCoverSong ? (
+                    <SongCover
+                      song={headerCoverSong}
+                      eager
+                      className="h-11 w-11 rounded-xl border border-white/10 bg-surface-raised object-cover shadow-lg shadow-black/30"
+                    />
+                  ) : null}
+                  {room.isPlaying && headerCoverSong && (
+                    <span className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full border-2 border-surface-base bg-netease-red shadow-md shadow-netease-red/30">
+                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
+                    </span>
+                  )}
+                </div>
+              </Tooltip>
             )}
 
             <div className="min-w-0">
@@ -2264,6 +2552,18 @@ export default function Room() {
                         aria-label="修改房间名"
                       >
                         <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                    </Tooltip>
+                    <Tooltip side="bottom" content={room.customCoverUrl ? '修改房间封面' : '设置房间封面'}>
+                      <button
+                        type="button"
+                        onClick={openCoverModal}
+                        className={`flex-shrink-0 rounded-lg p-1 transition-colors hover:bg-white/10 sm:hidden ${
+                          room.customCoverUrl ? 'text-amber-400' : 'text-netease-muted hover:text-white'
+                        }`}
+                        aria-label={room.customCoverUrl ? '修改房间封面' : '设置房间封面'}
+                      >
+                        <ImagePlus className="w-3.5 h-3.5" />
                       </button>
                     </Tooltip>
                     <Tooltip side="bottom" content={room.isLocked ? '房间已上锁' : '房间上锁'}>
@@ -2331,8 +2631,8 @@ export default function Room() {
                 <span className="inline-flex h-5 items-center whitespace-nowrap text-[10px] leading-none text-netease-muted">
                   {room.userCount} 人在线
                 </span>
-                <RoomQualityBadge onClick={() => setQualityOpen(true)} />
                 <RoomFmModeBadge fmMode={room.neteaseFmMode} />
+                <RoomQualityBadge onClick={() => setQualityOpen(true)} />
                 {room.songRequestEnabled === false && (
                   <span className="inline-flex h-5 items-center text-[10px] leading-none text-amber-400/90 bg-amber-400/10 px-1.5 rounded-full">禁止点歌</span>
                 )}
@@ -2475,13 +2775,6 @@ export default function Room() {
 
       </header>
 
-      {isReconnecting && (
-        <div className="relative z-20 flex flex-shrink-0 items-center justify-center gap-2 border-b border-amber-400/20 bg-amber-400/10 px-3 py-1.5 text-xs text-amber-200">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          <span>连接已断开，正在自动重新加入房间…</span>
-        </div>
-      )}
-
       <div className={`relative z-10 flex-1 min-h-0 mx-auto w-full px-3 sm:px-4 pt-3 sm:pt-4 pb-[calc(4.75rem+env(safe-area-inset-bottom,0px))] overflow-y-auto lg:overflow-hidden ${pureMode ? 'max-w-3xl' : 'max-w-[1680px]'}`}>
 
         <div className={`flex flex-col gap-3 lg:gap-4 lg:h-full lg:min-h-0 ${pureMode ? '' : 'lg:grid lg:grid-cols-[320px_minmax(0,1fr)_340px]'}`}>
@@ -2516,9 +2809,16 @@ export default function Room() {
                   <button
                     type="button"
                     onClick={() => setRecommendDrawerOpen(true)}
-                    className="hidden lg:inline-flex rounded-lg px-2 py-1 text-[11px] sm:text-xs text-white/75 hover:bg-white/10 hover:text-white transition-colors whitespace-nowrap"
+                    className="rounded-lg px-2 py-1 text-[11px] sm:text-xs text-white/75 hover:bg-white/10 hover:text-white transition-colors whitespace-nowrap"
                   >
                     热榜歌单
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDjRadioDrawerOpen(true)}
+                    className="rounded-lg px-2 py-1 text-[11px] sm:text-xs text-white/75 hover:bg-white/10 hover:text-white transition-colors whitespace-nowrap"
+                  >
+                    音乐电台
                   </button>
                 </div>
                 {searchableCount > 0 && (
@@ -2590,18 +2890,18 @@ export default function Room() {
           >
             <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-netease-border/50 flex-shrink-0">
               <div className="min-w-0 flex items-center gap-2">
-                {isPlaylistResults && playlistSearchBackup && (
+                {canBackFromDetail && (
                   <button
                     type="button"
-                    onClick={handleBackToPlaylistSearch}
+                    onClick={handleBackFromDetail}
                     className="flex flex-shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-xs text-netease-muted hover:bg-white/10 hover:text-white transition-colors"
                   >
                     <ChevronLeft className="w-4 h-4" />
-                    返回歌单
+                    {searchBackLabel}
                   </button>
                 )}
                 <div className="min-w-0">
-                  <h2 className="text-sm font-medium text-white">{isPlaylistResults ? '歌单详情' : '搜索结果'}</h2>
+                  <h2 className="text-sm font-medium text-white">{searchOverlayTitle}</h2>
                   <p className="text-xs text-netease-muted mt-0.5 truncate">
                     {renderResultsSummary()}
                   </p>
@@ -2611,7 +2911,7 @@ export default function Room() {
                 {showPlaylistSearch && (
                   <PlaylistChannelFilter value={playlistChannelFilter} onChange={handlePlaylistChannelChange} />
                 )}
-                {!searching && searchableCount > 0 && !isPlaylistResults && (
+                {!searching && searchableCount > 0 && !isCuratedDetailView && (
                   activeSearchMode === 'song' && <SearchFilterSelect value={searchFilterMode} onChange={handleSearchFilterChange} />
                 )}
                 {showSongListResults && renderBulkAddPageButton('px-2.5 py-1.5')}
@@ -2625,17 +2925,19 @@ export default function Room() {
                 </button>
               </div>
             </div>
+            {!isCuratedDetailView && (
             <div className="flex-shrink-0 px-3 pt-3">
               {overlaySearchBar}
             </div>
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3 pt-2">
+            )}
+            <div className={`flex min-h-0 flex-1 flex-col overflow-hidden p-3 ${isCuratedDetailView ? 'pt-3' : 'pt-2'}`}>
               {searching && searchedKeyword && !showPlaylistSearch && <SearchSkeleton fillHeight />}
               {showPlaylistSkeleton && (
                 <SearchSkeleton fillHeight count={playlistSearchPageSize} showPaginationFooter={false} />
               )}
               {!searching && !playlistSearchLoading && searchedKeyword && !hasPlaylistSearchResults && results.length === 0 && (
                 <p className="text-center text-netease-muted py-10 animate-fade-in">
-                  {showPlaylistEmpty ? '没有找到相关歌单' : (isPlaylistResults ? '歌单为空或链接无效' : '换个关键词试试')}
+                  {showPlaylistEmpty ? '没有找到相关歌单' : isRadioResults ? '电台暂无可用节目' : isPlaylistResults ? '歌单为空或链接无效' : '换个关键词试试'}
                 </p>
               )}
               {hasPlaylistSearchResults && renderPlaylistSearchList(true)}
@@ -2829,7 +3131,7 @@ export default function Room() {
                 />
               </div>
             </div>
-            <div className="min-h-0 flex-1 overflow-y-auto p-3">
+            <div ref={favoritesScrollRef} className="min-h-0 flex-1 overflow-y-auto p-3">
               {favoritesLoading ? (
                 <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-netease-red" /></div>
               ) : filteredFavorites.length === 0 ? (
@@ -2868,7 +3170,10 @@ export default function Room() {
                           <p className="truncate text-sm font-medium">{song.name}</p>
                           <p className="truncate text-xs text-netease-muted">{song.artist}{song.album ? ` · ${song.album}` : ''}</p>
                         </div>
-                        <SourceBadge source={song.source} variant="muted" />
+                        <SongRowBadges
+                          song={song}
+                          status={{ inQueue: queueKeys.has(key), played: playedKeys.has(key) }}
+                        />
                         <button
                           type="button"
                           onClick={() => void handleAdd(song as SearchResult)}
@@ -2901,26 +3206,12 @@ export default function Room() {
                     <span className="ml-1 text-netease-muted/50">共 {filteredFavorites.length} 首</span>
                   </span>
                 </div>
-                <div className="flex items-center justify-between gap-2">
-                  <button
-                    type="button"
-                    disabled={favoritePage <= 1}
-                    onClick={() => setFavoritePage((page) => Math.max(1, page - 1))}
-                    className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-netease-muted transition-colors hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
-                  >
-                    <ChevronLeft className="h-3.5 w-3.5" />
-                    上一页
-                  </button>
-                  <button
-                    type="button"
-                    disabled={favoritePage >= favoriteTotalPages}
-                    onClick={() => setFavoritePage((page) => Math.min(favoriteTotalPages, page + 1))}
-                    className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-netease-muted transition-colors hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
-                  >
-                    下一页
-                    <ChevronRight className="h-3.5 w-3.5" />
-                  </button>
-                </div>
+                <PageNumberPagination
+                  page={favoritePage}
+                  totalPages={favoriteTotalPages}
+                  scrollRef={favoritesScrollRef}
+                  onPageChange={setFavoritePage}
+                />
               </div>
             )}
           </div>
@@ -2935,6 +3226,18 @@ export default function Room() {
       {pureMode && isLgUp && <PureModeChatDock />}
       </div>
 
+      {clearQueueConfirmOpen && (
+        <ConfirmModal
+          title="清空列表"
+          message="确定清空播放队列中的待播歌曲吗？正在播放的曲目不会停止。"
+          confirmLabel="清空"
+          confirmVariant="danger"
+          loading={clearingQueue}
+          onConfirm={() => void handleClearQueue()}
+          onCancel={() => setClearQueueConfirmOpen(false)}
+        />
+      )}
+
       {recommendDrawerOpen &&
         createPortal(
           <Suspense fallback={null}>
@@ -2943,6 +3246,19 @@ export default function Room() {
               immersive={immersiveMode}
               onClose={() => setRecommendDrawerOpen(false)}
               onSelectPlaylist={handleRecommendPlaylistSelect}
+            />
+          </Suspense>,
+          document.body,
+        )}
+
+      {djRadioDrawerOpen &&
+        createPortal(
+          <Suspense fallback={null}>
+            <DjRadioDrawer
+              open={djRadioDrawerOpen}
+              immersive={immersiveMode}
+              onClose={() => setDjRadioDrawerOpen(false)}
+              onSelectRadio={handleDjRadioSelect}
             />
           </Suspense>,
           document.body,
@@ -2988,6 +3304,98 @@ export default function Room() {
               {renameSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : null}
               保存
             </button>
+          </div>
+        </div>,
+        document.body,
+      )}
+
+      {coverOpen && createPortal(
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <button type="button" className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setCoverOpen(false)} aria-label="关闭" />
+          <div className="relative w-full max-w-sm glass rounded-2xl border border-white/10 shadow-2xl p-6 animate-fade-in">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-white">房间封面</h2>
+              <button type="button" onClick={() => setCoverOpen(false)} className="p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/10"><X className="w-5 h-5" /></button>
+            </div>
+            <p className="mb-4 text-xs text-netease-muted">
+              自定义后房间与首页封面将固定显示，不再跟随当前歌曲变更。取消自定义后恢复跟随歌曲封面。
+            </p>
+            <input
+              ref={coverFileInputRef}
+              type="file"
+              accept="image/jpeg,image/png"
+              className="hidden"
+              onChange={(event) => {
+                void handleCoverFile(event.target.files?.[0]);
+                event.target.value = '';
+              }}
+            />
+            <div className="flex items-center gap-4">
+              <div className="flex h-20 w-20 flex-shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-white/5">
+                {coverDraft ? (
+                  <img src={coverDraft} alt="封面预览" className="h-full w-full object-cover" />
+                ) : headerCoverSong && !room?.customCoverUrl ? (
+                  <SongCover
+                    song={headerCoverSong}
+                    size="thumb"
+                    className="h-full w-full object-cover opacity-70"
+                  />
+                ) : (
+                  <ImagePlus className="h-7 w-7 text-white/40" />
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <button
+                  type="button"
+                  onClick={() => coverFileInputRef.current?.click()}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-netease-border/60 px-3 py-1.5 text-sm text-white hover:bg-white/10 transition-colors"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  选择图片
+                </button>
+                <p className="mt-2 text-[11px] text-netease-muted">支持 JPG / PNG，裁剪为正方形，几乎不压缩以保清晰</p>
+              </div>
+            </div>
+            {coverError && <p className="mt-3 text-xs text-netease-red">{coverError}</p>}
+            <div className="mt-5 flex flex-wrap items-center gap-2">
+              {room?.customCoverUrl ? (
+                <button
+                  type="button"
+                  onClick={() => void handleClearCustomCover()}
+                  disabled={coverSaving}
+                  className="mr-auto rounded-lg px-3 py-2 text-sm text-netease-muted transition-colors hover:bg-red-500/10 hover:text-red-300 disabled:opacity-50"
+                >
+                  取消自定义
+                </button>
+              ) : coverDraft ? (
+                <button
+                  type="button"
+                  onClick={() => { setCoverDraft(''); setCoverError(''); }}
+                  disabled={coverSaving}
+                  className="mr-auto rounded-lg px-3 py-2 text-sm text-netease-muted transition-colors hover:bg-white/10 hover:text-white disabled:opacity-50"
+                >
+                  清除选择
+                </button>
+              ) : (
+                <span className="mr-auto" />
+              )}
+              <button
+                type="button"
+                onClick={() => setCoverOpen(false)}
+                className="rounded-lg px-4 py-2 text-sm text-netease-muted hover:bg-white/10 hover:text-white transition-colors"
+              >
+                关闭
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleSaveCustomCover()}
+                disabled={coverSaving || coverDraft.trim() === (room?.customCoverUrl || '').trim() || !coverDraft.trim()}
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-netease-red px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-netease-red/85 disabled:opacity-40"
+              >
+                {coverSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                保存封面
+              </button>
+            </div>
           </div>
         </div>,
         document.body,

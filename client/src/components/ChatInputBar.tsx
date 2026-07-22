@@ -59,13 +59,7 @@ type MentionOption =
   | { type: 'all' }
   | { type: 'user'; user: RoomUser };
 
-type SendProgress = 'idle' | 'uploading' | 'checking-text' | 'checking-image' | 'sending';
-
-function needsImageModeration(imageUrl?: string, imageKey?: string): boolean {
-  if (!String(imageUrl || '').trim()) return false;
-  // 本地表情包跳过服务端图片审核
-  return !String(imageKey || '').startsWith('local-sticker:');
-}
+type SendProgress = 'idle' | 'uploading' | 'checking-text' | 'sending';
 
 function sendProgressLabel(progress: SendProgress): string {
   switch (progress) {
@@ -73,8 +67,6 @@ function sendProgressLabel(progress: SendProgress): string {
       return '正在压缩并上传…';
     case 'checking-text':
       return '违禁词检测中…';
-    case 'checking-image':
-      return '图片监测中…';
     case 'sending':
       return '发送中…';
     default:
@@ -195,7 +187,6 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
 
   const beginSendProgress = useCallback((options: {
     hasText?: boolean;
-    hasImageModeration?: boolean;
     uploading?: boolean;
   }) => {
     clearSendProgressTimer();
@@ -203,23 +194,8 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
       setSendProgress('uploading');
       return;
     }
-    const hasText = Boolean(options.hasText);
-    const hasImage = Boolean(options.hasImageModeration);
-    if (hasText && hasImage) {
-      // 与服务端顺序一致：先文本再图片，避免长时间无反馈
+    if (options.hasText) {
       setSendProgress('checking-text');
-      sendProgressTimerRef.current = window.setTimeout(() => {
-        setSendProgress('checking-image');
-        sendProgressTimerRef.current = null;
-      }, 650);
-      return;
-    }
-    if (hasText) {
-      setSendProgress('checking-text');
-      return;
-    }
-    if (hasImage) {
-      setSendProgress('checking-image');
       return;
     }
     setSendProgress('sending');
@@ -392,7 +368,6 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
 
     const mentions = buildMentions(messageText);
     const currentReplyTo = replyTo;
-    const checkImage = needsImageModeration(currentImage?.url, currentImage?.key);
 
     onStickToBottom();
     clearEditor();
@@ -403,7 +378,6 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
     setError('');
     beginSendProgress({
       hasText: Boolean(messageText),
-      hasImageModeration: checkImage,
     });
 
     if (messageText) {
@@ -423,7 +397,7 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
         endSendProgress();
         return;
       }
-      if (checkImage) beginSendProgress({ hasImageModeration: true });
+      beginSendProgress({});
     }
 
     const res = await sendChat(messageText, {
@@ -463,7 +437,7 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
     onReplyChange(null);
     setSending(true);
     setError('');
-    beginSendProgress({ hasImageModeration: needsImageModeration(imageUrl) });
+    beginSendProgress({});
 
     const res = await sendChat('', { imageUrl, asSticker: true, replyTo: currentReplyTo });
     finishStickerSend(currentReplyTo, res.success, res.error);
@@ -487,7 +461,7 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
         const file = await ensureImageFile(blob, 'sticker');
         if (!file) throw new Error('仅支持 JPG、PNG、GIF、WebP 图片');
         const uploaded = await uploadChatImage(roomMeta.id, file);
-        beginSendProgress({ hasImageModeration: needsImageModeration(uploaded.url, uploaded.key) });
+        beginSendProgress({});
         res = await sendChat('', {
           imageUrl: uploaded.url,
           imageKey: uploaded.key,
@@ -495,7 +469,7 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
           replyTo: currentReplyTo,
         });
       } else {
-        beginSendProgress({ hasImageModeration: needsImageModeration(imageUrl, imageKey) });
+        beginSendProgress({});
         res = await sendChat('', {
           imageUrl,
           imageKey,

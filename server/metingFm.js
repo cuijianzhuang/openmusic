@@ -1,5 +1,5 @@
 import { formatMetingFetchError } from './metingFetch.js';
-import { fetchMetingApi } from './metingUpstream.js';
+import { fetchMetingApi, runWithMetingRequestContext } from './metingUpstream.js';
 
 export const DEFAULT_FM_MODE = 'DEFAULT';
 
@@ -91,7 +91,15 @@ export async function fetchMetingFmSong(fmMode = DEFAULT_FM_MODE) {
   for (let i = 0; i < MAX_FM_RETRIES; i += 1) {
     if (i > 0) await sleep(FM_RETRY_BACKOFF_MS * i);
     try {
-      const response = await fetchMetingApi(buildFmQuery(fmMode), {}, 12000);
+      const response = await runWithMetingRequestContext(
+        {
+          userId: '',
+          userNickname: '系统',
+          roomId: '',
+          roomName: '私人漫游',
+        },
+        () => fetchMetingApi(buildFmQuery(fmMode), {}, 12000),
+      );
       if (!response.ok) continue;
 
       const text = await response.text();

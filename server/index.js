@@ -11,6 +11,7 @@ import {
   getMetingUpstreamBases,
   getMetingUpstreamStatus,
   startMetingHealthProbe,
+  runWithMetingRequestContext,
 } from './metingUpstream.js';
 import { fetchCustomMusicApi, hasCustomMusicApi } from './customMusicApi.js';
 import { fetchLrcapiLyrics, getLrcapiUpstreamStatus } from './lrcapiUpstream.js';
@@ -67,6 +68,7 @@ import {
   setRoomFmMode,
   setRoomPlayMode,
   setRoomAnnouncement,
+  setRoomCustomCover,
   setChatHistoryVisibleOnJoin,
   setSongRequestEnabled,
   banRoomSong,
@@ -114,12 +116,12 @@ import {
   roomUpdateForViewer,
   prepareRoomPresence,
   roomPresenceForViewer,
+  findUserRoomPresence,
 } from './roomManager.js';
 import {
   isCyapiConfigured,
   searchKugouMusic,
   getKugouSongDetail,
-  moderateCyapiImage,
 } from './cyapi.js';
 import { importNeteasePlaylist, importQqPlaylist, fetchNeteasePlaylistMetas } from './playlistImport.js';
 import { fetchNeteaseHotToplist } from './neteaseToplist.js';
@@ -128,7 +130,6 @@ import {
   createChatImageUploadToken,
   isQiniuConfigured,
 } from './qiniuOss.js';
-import { isLocalStickerImageKey } from './localSticker.js';
 import {
   isApihzStickerConfigured,
   searchApihzStickers,
@@ -541,6 +542,28 @@ function normalizeMetingResolvedUrl(raw) {
   return text.startsWith('@') ? text.slice(1).trim() : text;
 }
 
+/** 解析 type=url 响应：兼容 JSON {url,quality} 与纯文本/重定向 URL */
+function parseMetingUrlPayload(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return null;
+
+  if (text.startsWith('{')) {
+    try {
+      const data = JSON.parse(text);
+      const url = normalizeMetingResolvedUrl(data?.url);
+      if (!url) return null;
+      const quality = typeof data?.quality === 'string' ? data.quality.trim() : '';
+      return { url, quality };
+    } catch {
+      return null;
+    }
+  }
+
+  const url = normalizeMetingResolvedUrl(text);
+  if (!url) return null;
+  return { url, quality: '' };
+}
+
 /** 网易云 outer/url 假直链（实为 404），当作无音源 */
 function isNeteaseOuterMediaUrl(url) {
   const text = String(url || '').trim();
@@ -585,16 +608,18 @@ async function resolveMetingMediaUrl(query, depth = 0) {
     return location;
   }
 
-  const text = normalizeMetingResolvedUrl(await response.text());
-  if (!text.startsWith('http')) throw new Error('Meting 未返回有效媒体地址');
-  if (isNeteaseOuterMediaUrl(text)) throw new Error('Meting 返回不可播外链');
+  const text = await response.text();
+  const payload = parseMetingUrlPayload(text);
+  const resolved = payload?.url || normalizeMetingResolvedUrl(text);
+  if (!resolved.startsWith('http')) throw new Error('Meting 未返回有效媒体地址');
+  if (isNeteaseOuterMediaUrl(resolved)) throw new Error('Meting 返回不可播外链');
 
-  const nested = parseMetingMediaQuery(text);
-  if (nested && isUnresolvedMetingMediaUrl(text)) {
+  const nested = parseMetingMediaQuery(resolved);
+  if (nested && isUnresolvedMetingMediaUrl(resolved)) {
     return resolveMetingMediaUrl(nested, depth + 1);
   }
 
-  return text;
+  return resolved;
 }
 
 /** media-proxy 误收到 Meting API 地址时，先解析为真实 CDN 地址 */
@@ -615,15 +640,23 @@ async function resolveMediaProxyFetchUrl(fetchUrl, thumbPx = 0) {
 }
 
 async function finalizeMetingTextResponse(body, metingType) {
-  const normalized = normalizeMetingResolvedUrl(body);
-  if (metingType !== 'url' || !normalized.startsWith('http')) return normalized;
+  const payload = metingType === 'url' ? parseMetingUrlPayload(body) : null;
+  const normalized = payload?.url || normalizeMetingResolvedUrl(body);
+  if (metingType !== 'url' || !normalized.startsWith('http')) {
+    return { url: normalized, quality: payload?.quality || '' };
+  }
   // outer/url 不可播：返回空，客户端按无音源处理并切歌
-  if (isNeteaseOuterMediaUrl(normalized)) return '';
-  if (!isUnresolvedMetingMediaUrl(normalized)) return normalized;
+  if (isNeteaseOuterMediaUrl(normalized)) return { url: '', quality: '' };
+  if (!isUnresolvedMetingMediaUrl(normalized)) {
+    return { url: normalized, quality: payload?.quality || '' };
+  }
 
   const nested = parseMetingMediaQuery(normalized);
-  if (!nested || nested.type !== 'url') return normalized;
-  return resolveMetingMediaUrl(nested);
+  if (!nested || nested.type !== 'url') {
+    return { url: normalized, quality: payload?.quality || '' };
+  }
+  const resolved = await resolveMetingMediaUrl(nested);
+  return { url: resolved, quality: payload?.quality || '' };
 }
 
 async function proxyMetingResponse(metingQuery, res, thumbPx = 0, metingType = '') {
@@ -635,10 +668,15 @@ async function proxyMetingResponse(metingQuery, res, thumbPx = 0, metingType = '
       location = resizeCoverForThumb(location, thumbPx);
     }
     if (location) {
-      // type=url/lrc 必须返回文本 URL，不能把浏览器重定向到第三方 CDN（fetch 会触发 CORS）
-      if (metingType === 'url' || metingType === 'lrc') {
+      // type=url/lrc 必须返回文本/JSON，不能把浏览器重定向到第三方 CDN（fetch 会触发 CORS）
+      if (metingType === 'url') {
         const body = await finalizeMetingTextResponse(location, metingType);
-        return res.type('text').send(body);
+        if (!body.url) return res.status(403).json({ error: 'no url' });
+        return res.json({ url: body.url, quality: body.quality || '' });
+      }
+      if (metingType === 'lrc') {
+        const body = await finalizeMetingTextResponse(location, metingType);
+        return res.type('text').send(body.url);
       }
       return res.redirect(response.status, location);
     }
@@ -647,9 +685,15 @@ async function proxyMetingResponse(metingQuery, res, thumbPx = 0, metingType = '
   const contentType = response.headers.get('content-type') || '';
   const text = await response.text();
 
-  if (metingType === 'url' || metingType === 'lrc') {
+  if (metingType === 'url') {
     const body = await finalizeMetingTextResponse(text, metingType);
-    return res.type('text').send(body);
+    if (!body.url) return res.status(403).json({ error: 'no url' });
+    return res.json({ url: body.url, quality: body.quality || '' });
+  }
+
+  if (metingType === 'lrc') {
+    const body = await finalizeMetingTextResponse(text, metingType);
+    return res.type('text').send(body.url);
   }
 
   if (contentType.includes('application/json') || text.startsWith('[') || text.startsWith('{')) {
@@ -738,7 +782,8 @@ app.get('/api/music/netease/playlists/meta', async (req, res) => {
 });
 
 app.get('/api/music/netease/playlists/search', async (req, res) => {
-  if (!requireSessionIdentity(req, res)) return;
+  const identity = requireSessionIdentity(req, res);
+  if (!identity) return;
   if (!limitProxyRequest(proxyLimitKey('playlist-search', req))) {
     return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
   }
@@ -749,7 +794,16 @@ app.get('/api/music/netease/playlists/search', async (req, res) => {
   if (!keyword) return res.json({ playlists: [], total: 0, page, limit });
 
   try {
-    const response = await fetchMetingApi({ server: 'netease', type: 'search_playlist', id: keyword }, {}, 10000);
+    const presence = findUserRoomPresence(identity.userId);
+    const response = await runWithMetingRequestContext(
+      {
+        userId: identity.userId,
+        userNickname: presence?.userNickname || '',
+        roomId: presence?.roomId || '',
+        roomName: presence?.roomName || '',
+      },
+      () => fetchMetingApi({ server: 'netease', type: 'search_playlist', id: keyword }, {}, 10000),
+    );
     if (!response.ok) return res.status(response.status).json({ error: '红点歌单搜索失败' });
     const data = await response.json();
     const playlists = Array.isArray(data) ? data : [];
@@ -807,14 +861,31 @@ app.get('/api/music/sources', (_req, res) => {
   res.json(sources);
 });
 
-app.get('/api/meting', async (req, res) => {
+/** 本机音质能力：是否开放 SVIP 档（管理后台可开关） */
+app.get('/api/music/quality-capabilities', (req, res) => {
   if (!requireSessionIdentity(req, res)) return;
+  const { svipQualityEnabled } = getRuntimeConfig();
+  res.json({ svipQualityEnabled: Boolean(svipQualityEnabled) });
+});
+
+app.get('/api/meting', async (req, res) => {
+  const identity = requireSessionIdentity(req, res);
+  if (!identity) return;
 
   try {
     const thumbPx = parseInt(String(req.query.size || ''), 10) || 0;
     const query = { ...req.query };
     delete query.size;
-    await proxyMetingResponse(query, res, thumbPx, String(query.type || ''));
+    const presence = findUserRoomPresence(identity.userId);
+    await runWithMetingRequestContext(
+      {
+        userId: identity.userId,
+        userNickname: presence?.userNickname || '',
+        roomId: presence?.roomId || '',
+        roomName: presence?.roomName || '',
+      },
+      () => proxyMetingResponse(query, res, thumbPx, String(query.type || '')),
+    );
   } catch (err) {
     console.error('Meting proxy error:', formatMetingFetchError(err));
     res.status(502).json({ error: '无法连接 Meting API，请检查 METING_API_URL 配置' });
@@ -823,7 +894,8 @@ app.get('/api/meting', async (req, res) => {
 
 /** HTTPS 站点下代理 http 音频/封面，避免浏览器混合内容警告 */
 app.get('/api/media-proxy', async (req, res) => {
-  if (!requireSessionIdentity(req, res)) return;
+  const identity = requireSessionIdentity(req, res);
+  if (!identity) return;
   if (!limitProxyRequest(proxyLimitKey('media', req))) {
     return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
   }
@@ -847,9 +919,20 @@ app.get('/api/media-proxy', async (req, res) => {
   }
   // 不再限制媒体域名白名单，仅拦截内网地址
 
+  const presence = findUserRoomPresence(identity.userId);
+  const metingCtx = {
+    userId: identity.userId,
+    userNickname: presence?.userNickname || '',
+    roomId: presence?.roomId || '',
+    roomName: presence?.roomName || '',
+  };
+
   try {
     if (parseMetingMediaQuery(raw)) {
-      fetchUrl = await resolveMediaProxyFetchUrl(raw, thumbPx);
+      fetchUrl = await runWithMetingRequestContext(
+        metingCtx,
+        () => resolveMediaProxyFetchUrl(raw, thumbPx),
+      );
     } else if (thumbPx > 0) {
       fetchUrl = resizeCoverForThumb(raw, thumbPx);
     } else {
@@ -1153,8 +1236,12 @@ function requireSessionIdentity(req, res) {
 
 function sendBootstrapResponse(res, userId, iat, token, deviceId = null) {
   setIdentityCookieHeaders(res, userId, token, deviceId);
+  const runtime = getRuntimeConfig();
   const payload = {
     clientId: userId,
+    features: {
+      svipQualityEnabled: Boolean(runtime.svipQualityEnabled),
+    },
   };
   const requireRequestSign = res.req?.secure || !ALLOW_INSECURE_HTTP_API;
   if (isApiSignRequired() && requireRequestSign) {
@@ -1419,8 +1506,10 @@ app.post('/api/error-reports', async (req, res) => {
   }
 
   const result = await createErrorReport({
+    type: req.body?.type,
     description: req.body?.description,
     snapshot: req.body?.snapshot,
+    snapshots: req.body?.snapshots,
     events: req.body?.events,
     meta: req.body?.meta,
     ip,
@@ -1453,8 +1542,8 @@ app.post('/api/error-reports/:id/ack-solution', async (req, res) => {
   res.json({ success: true });
 });
 
-app.get('/api/rooms', (_req, res) => {
-  res.json(listRooms());
+app.get('/api/rooms', async (_req, res) => {
+  res.json(await listRooms());
 });
 
 app.post('/api/rooms', (req, res) => {
@@ -1639,7 +1728,8 @@ app.use(express.static(clientDist, {
       return;
     }
     if (rel.startsWith('qface/') || rel.startsWith('vendor/')) {
-      res.setHeader('Cache-Control', 'public, max-age=604800');
+      // QQ 表情几乎不变，浏览器长缓存 1 年
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
     }
   },
 }));
@@ -2315,6 +2405,26 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
+  socket.on('set_room_custom_cover', ({ coverUrl }, callback) => {
+    if (rejectReadOnly(socket, callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, 'set_room_custom_cover', callback)) return;
+
+    const roomId = socketToRoom.get(socket.id);
+    if (!roomId) {
+      callback?.({ success: false, error: '未加入房间' });
+      return;
+    }
+
+    const result = setRoomCustomCover(roomId, getSocketUserId(socket), coverUrl, socket.id);
+    if (result.error) {
+      callback?.({ success: false, error: result.error });
+      return;
+    }
+
+    broadcastRoomUpdate(roomId);
+    callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
+  });
+
   socket.on('set_room_chat_history', ({ enabled }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
     if (rejectRateLimited(socket, limitSocketAction, 'set_room_chat_history', callback)) return;
@@ -2978,15 +3088,6 @@ io.on('connection', (socket) => {
       }
     }
 
-    const imageContent = String(imageUrl || '').trim();
-    if (imageContent && !isLocalStickerImageKey(imageKey)) {
-      const imageModeration = await moderateCyapiImage(imageContent);
-      if (!imageModeration.ok) {
-        callback?.({ success: false, error: imageModeration.error });
-        return;
-      }
-    }
-
     const result = addChatMessage(roomId, getSocketUserId(socket), text, {
       mentions,
       replyTo,
@@ -3092,6 +3193,8 @@ io.on('connection', (socket) => {
   });
 
   socket.on('report_track_duration', async ({ queueId, durationMs }, callback) => {
+    if (rejectRateLimited(socket, limitSocketAction, 'report_track_duration', callback)) return;
+
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
       callback?.({ success: false, error: '未加入房间' });

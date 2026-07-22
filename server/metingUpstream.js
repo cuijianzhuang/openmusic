@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { fetchMeting, formatMetingFetchError } from './metingFetch.js';
 import { fetchCustomMusicApi } from './customMusicApi.js';
 import { getRuntimeConfig } from './runtimeConfig.js';
@@ -6,11 +7,45 @@ import { getRuntimeConfig } from './runtimeConfig.js';
 // 与 URL 一一对应；只填一个则应用到所有上游。
 const FAIL_COOLDOWN_MS = 60_000;
 const UPSTREAM_ATTEMPTS = 2;
+const MAX_RECENT_ERRORS = 20;
+
+/** HTTP/Socket 请求上下文：失败日志归因到用户与房间 */
+const metingRequestContext = new AsyncLocalStorage();
+
+export function runWithMetingRequestContext(context, fn) {
+  return metingRequestContext.run(context && typeof context === 'object' ? context : {}, fn);
+}
+
+export function getMetingRequestContext() {
+  return metingRequestContext.getStore() || {};
+}
 
 let upstreams = [];
 let upstreamSignature = '';
 
 let rrCursor = 0;
+
+function pushRecentError(upstream, message, query = {}) {
+  const ctx = getMetingRequestContext();
+  const entry = {
+    at: Date.now(),
+    message: String(message || '未知错误').trim().slice(0, 240),
+    type: String(query?.type || '').slice(0, 32),
+    id: String(query?.id || '').slice(0, 80),
+    server: String(query?.server || '').slice(0, 32),
+    userId: String(ctx.userId || '').slice(0, 64),
+    userNickname: String(ctx.userNickname || '').slice(0, 40),
+    roomId: String(ctx.roomId || '').slice(0, 32),
+    roomName: String(ctx.roomName || '').slice(0, 60),
+  };
+  if (!Array.isArray(upstream.recentErrors)) upstream.recentErrors = [];
+  upstream.recentErrors.unshift(entry);
+  if (upstream.recentErrors.length > MAX_RECENT_ERRORS) {
+    upstream.recentErrors.length = MAX_RECENT_ERRORS;
+  }
+  upstream.lastError = entry.message;
+  upstream.lastErrorAt = entry.at;
+}
 
 function syncUpstreams() {
   const config = getRuntimeConfig();
@@ -39,7 +74,10 @@ function syncUpstreams() {
       cooldownUntil: reuseHealth ? old.cooldownUntil : 0,
       okCount: reuseHealth ? old.okCount : 0,
       failCount: reuseHealth ? old.failCount : 0,
+      softFailCount: reuseHealth ? (old.softFailCount || 0) : 0,
       lastError: reuseHealth ? old.lastError : '',
+      lastErrorAt: reuseHealth ? old.lastErrorAt : 0,
+      recentErrors: reuseHealth && Array.isArray(old.recentErrors) ? old.recentErrors : [],
       disabled: Boolean(old?.disabled),
       lastProbeAt: reuseHealth ? old.lastProbeAt : 0,
       lastProbeOk: reuseHealth ? old.lastProbeOk : null,
@@ -70,20 +108,31 @@ function findUpstream(url) {
 export function getMetingUpstreamStatus() {
   syncUpstreams();
   const now = Date.now();
-  return upstreams.map((u) => ({
-    url: u.base,
-    type: 'meting',
-    disabled: Boolean(u.disabled),
-    healthy: !u.disabled && now >= u.cooldownUntil,
-    cooldownRemainingSec: u.disabled
-      ? 0
-      : Math.max(0, Math.ceil((u.cooldownUntil - now) / 1000)),
-    okCount: u.okCount,
-    failCount: u.failCount,
-    lastError: u.lastError,
-    lastProbeAgoSec: u.lastProbeAt ? Math.max(0, Math.round((now - u.lastProbeAt) / 1000)) : null,
-    lastProbeOk: u.lastProbeOk,
-  }));
+  return upstreams.map((u) => {
+    const okCount = u.okCount || 0;
+    const failCount = u.failCount || 0;
+    const softFailCount = u.softFailCount || 0;
+    const hardTotal = okCount + failCount;
+    return {
+      url: u.base,
+      type: 'meting',
+      disabled: Boolean(u.disabled),
+      healthy: !u.disabled && now >= u.cooldownUntil,
+      cooldownRemainingSec: u.disabled
+        ? 0
+        : Math.max(0, Math.ceil((u.cooldownUntil - now) / 1000)),
+      okCount,
+      failCount,
+      softFailCount,
+      /** 硬失败口径的成功率，不受单曲无源软失败、短暂冷却影响 */
+      successRate: hardTotal > 0 ? Math.round((okCount / hardTotal) * 100) : 100,
+      lastError: u.lastError,
+      lastErrorAt: u.lastErrorAt || 0,
+      recentErrors: Array.isArray(u.recentErrors) ? u.recentErrors.slice(0, MAX_RECENT_ERRORS) : [],
+      lastProbeAgoSec: u.lastProbeAt ? Math.max(0, Math.round((now - u.lastProbeAt) / 1000)) : null,
+      lastProbeOk: u.lastProbeOk,
+    };
+  });
 }
 
 /** 手动清除冷却，立即参与调度（已禁用的上游仍保持禁用） */
@@ -91,7 +140,7 @@ export function resetMetingUpstreamCooldown(url) {
   const upstream = findUpstream(url);
   if (!upstream) return { success: false, error: '上游不存在' };
   upstream.cooldownUntil = 0;
-  upstream.lastError = '';
+  // 仅解除冷却，保留失败记录便于排查
   return { success: true, upstream: getMetingUpstreamStatus().find((u) => u.url === upstream.base) };
 }
 
@@ -148,16 +197,23 @@ async function requestUpstream(upstream, query, options, timeoutMs) {
   throw lastError || new Error('音源请求失败');
 }
 
-function markFailure(upstream, err) {
+function markFailure(upstream, err, query = {}) {
   upstream.failCount += 1;
   upstream.cooldownUntil = Date.now() + FAIL_COOLDOWN_MS;
-  upstream.lastError = typeof err === 'string' ? err : formatMetingFetchError(err);
+  const message = typeof err === 'string' ? err : formatMetingFetchError(err);
+  pushRecentError(upstream, message, query);
+}
+
+/** 单曲无源等软失败：记日志与 softFailCount，不冷却、不拉低可用率 */
+function markSoftFailure(upstream, message, query = {}) {
+  upstream.softFailCount = (upstream.softFailCount || 0) + 1;
+  pushRecentError(upstream, message, query);
 }
 
 function markSuccess(upstream) {
   upstream.okCount += 1;
   upstream.cooldownUntil = 0;
-  upstream.lastError = '';
+  // 保留 lastError / recentErrors，方便后台查看历史失败
 }
 
 /**
@@ -198,7 +254,7 @@ export async function fetchMetingApi(query, options = {}, timeoutMs = 10000) {
         continue;
       }
       if (response.status >= 400) {
-        markFailure(upstream, `上游返回 ${response.status}`);
+        markFailure(upstream, `上游返回 ${response.status}`, query);
         lastError = new Error(`Meting 上游返回 ${response.status}（${upstream.base}）`);
         continue;
       }
@@ -210,6 +266,7 @@ export async function fetchMetingApi(query, options = {}, timeoutMs = 10000) {
           const text = typeof response.clone === 'function' ? await response.clone().text() : await response.text();
           const normalized = String(text || '').trim().replace(/^['"]|['"]$/g, '').trim();
           if (!normalized || normalized === 'null' || normalized === '[]' || normalized === '{}') {
+            markSoftFailure(upstream, '返回空播放地址', query);
             emptyUrlResponse = response;
             continue;
           }
@@ -221,6 +278,7 @@ export async function fetchMetingApi(query, options = {}, timeoutMs = 10000) {
               (host === 'music.163.com' || host === 'www.music.163.com')
               && /\/song\/media\/outer\/url/i.test(parsed.pathname)
             ) {
+              markSoftFailure(upstream, '返回网易云不可播外链', query);
               emptyUrlResponse = response;
               continue;
             }
@@ -247,7 +305,7 @@ export async function fetchMetingApi(query, options = {}, timeoutMs = 10000) {
       }
       return response;
     } catch (err) {
-      markFailure(upstream, err);
+      markFailure(upstream, err, query);
       lastError = err;
     }
   }
@@ -277,19 +335,19 @@ async function probeUpstream(upstream) {
   try {
     const response = await fetchMeting(buildUpstreamUrl(upstream, PROBE_QUERY), {}, PROBE_TIMEOUT_MS);
     if (response.status >= 400 && response.status !== 404) {
-      markFailure(upstream, `健康探测返回 ${response.status}`);
+      markFailure(upstream, `健康探测返回 ${response.status}`, PROBE_QUERY);
       upstream.lastProbeOk = false;
       return;
     }
     const wasUnhealthy = Date.now() < upstream.cooldownUntil;
     upstream.cooldownUntil = 0;
-    upstream.lastError = '';
+    // 不清除 lastError / recentErrors，后台仍可查看历史失败
     upstream.lastProbeOk = true;
     if (wasUnhealthy) {
       console.log(`Meting 上游恢复：${upstream.base}`);
     }
   } catch (err) {
-    markFailure(upstream, err);
+    markFailure(upstream, err, PROBE_QUERY);
     upstream.lastProbeOk = false;
   }
 }

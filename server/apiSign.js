@@ -61,6 +61,8 @@ const OAUTH_PUBLIC_GET_PATHS = new Set([
 export function isPublicApiPath(req) {
   const path = req.path || '';
   if (path === '/api/health' || path === '/api/app-version' || path === '/api/site-announcement') return true;
+  // 大厅房间列表仅公开摘要，无敏感字段；公开后首屏可与会话并行加载
+  if (path === '/api/rooms' && req.method === 'GET') return true;
   if (path === '/api/session/bootstrap' && req.method === 'POST') return true;
   // OAuth 找回/后台登录场景下浏览器可能压根没有房主身份 Cookie（这正是找回要解决的问题），
   // 这几条路由自己会按 purpose 做对应的身份/会话校验，不能被这里的通用身份门槛提前拦掉。

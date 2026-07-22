@@ -61,10 +61,6 @@ function SongResultList({
     onPageResultsChange?.(pageResults);
   }, [pageResults, onPageResultsChange]);
 
-  useEffect(() => {
-    scrollBodyRef.current?.scrollTo({ top: 0, behavior: 'auto' });
-  }, [page]);
-
   // 翻页 / 换关键词 / 卸载时停掉试听，避免后台继续播
   useEffect(() => {
     stopSongPreview({ resumeRoom: true });
@@ -131,6 +127,7 @@ function SongResultList({
           page={page}
           totalPages={totalPages}
           onPageChange={setPage}
+          scrollRef={scrollBodyRef}
         />
       </div>
     </div>

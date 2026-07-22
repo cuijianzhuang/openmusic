@@ -1,4 +1,5 @@
-import { resolveEffectiveAudioQuality } from '../stores/userQualityStore';
+import { AudioLines } from 'lucide-react';
+import { resolveEffectiveAudioQuality, useUserQualityStore } from '../stores/userQualityStore';
 import { useRoomStore } from '../stores/roomStore';
 import { getQualityLabel } from '../api/music/quality';
 import type { RoomAudioQuality } from '../types';
@@ -10,41 +11,70 @@ interface Props {
   onClick?: () => void;
 }
 
-const META_TEXT = 'status-chip whitespace-nowrap';
+function shortenQualityLabel(label: string, source: 'netease' | 'tencent'): string {
+  const map: Record<string, string> = {
+    标准: '标准',
+    标准品质: '标准',
+    较高: '较高',
+    极高: '极高',
+    HQ高品质: 'HQ',
+    无损: '无损',
+    SQ无损品质: 'SQ',
+    高解析度无损: 'Hi-Res',
+    高清臻音: '臻音',
+    沉浸环绕声: '环绕',
+    超清母带: '母带',
+    杜比全景声: 'Dolby',
+    臻品全景声: '全景',
+    臻品母带: '母带',
+  };
+  return map[label] || getQualityLabel(label, source);
+}
 
 export default function RoomQualityBadge({ audioQuality, className = '', onClick }: Props) {
   const roomQuality = useRoomStore((s) => s.room?.audioQuality);
-  const quality = resolveEffectiveAudioQuality(audioQuality ?? roomQuality);
+  // 订阅本机音质，保证「我的音质」改完后左上角即时同步
+  const userQuality = useUserQualityStore((s) => s.quality);
+  const quality = resolveEffectiveAudioQuality(userQuality ?? audioQuality ?? roomQuality);
+
+  const neteaseLabel = getQualityLabel(quality.netease, 'netease');
+  const tencentLabel = getQualityLabel(quality.tencent, 'tencent');
+  const neteaseShort = shortenQualityLabel(neteaseLabel, 'netease');
+  const tencentShort = shortenQualityLabel(tencentLabel, 'tencent');
 
   const content = (
     <>
-      <Tooltip content={`红点音质：${getQualityLabel(quality.netease)}`}>
-        <span className="whitespace-nowrap">
-          <span className="text-netease-red">红点</span>
-          {' '}
-          {getQualityLabel(quality.netease)}
+      <AudioLines className="h-3 w-3 text-white/35" aria-hidden />
+      <Tooltip content={`红点：${neteaseLabel}`}>
+        <span className="inline-flex items-center gap-1">
+          <span className="h-1.5 w-1.5 rounded-full bg-netease-red" aria-hidden />
+          <span className="text-white/75">{neteaseShort}</span>
         </span>
       </Tooltip>
-      <span className="text-white/20" aria-hidden>·</span>
-      <Tooltip content={`绿点音质：${getQualityLabel(quality.tencent)}`}>
-        <span className="whitespace-nowrap">
-          <span className="text-[#31c27c]">绿点</span>
-          {' '}
-          {getQualityLabel(quality.tencent)}
+      <span className="text-white/15" aria-hidden>/</span>
+      <Tooltip content={`绿点：${tencentLabel}`}>
+        <span className="inline-flex items-center gap-1">
+          <span className="h-1.5 w-1.5 rounded-full bg-[#31c27c]" aria-hidden />
+          <span className="text-white/75">{tencentShort}</span>
         </span>
       </Tooltip>
     </>
   );
 
+  const baseClass =
+    `inline-flex h-5 items-center gap-1.5 whitespace-nowrap rounded-md border border-white/10 ` +
+    `bg-white/[0.04] px-1.5 text-[10px] font-medium leading-none tracking-wide text-netease-muted ` +
+    className;
+
   if (!onClick) {
-    return <div className={`${META_TEXT} ${className}`}>{content}</div>;
+    return <div className={baseClass}>{content}</div>;
   }
 
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`${META_TEXT} text-left font-normal transition-opacity hover:opacity-80 ${className}`}
+      className={`${baseClass} transition-colors hover:border-white/20 hover:bg-white/[0.07] hover:text-white`}
       aria-label="设置我的音质"
     >
       {content}

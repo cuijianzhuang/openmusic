@@ -2,7 +2,7 @@ import { memo, useState, useEffect } from 'react';
 import { Flame, Plus, Loader2 } from 'lucide-react';
 import type { SearchResult } from '../types';
 import { songKey } from '../api/music';
-import { getNeteaseHotToplist } from '../api/music/toplist';
+import { getNeteaseHotToplist, peekNeteaseHotToplist } from '../api/music/toplist';
 import SongCover from './SongCover';
 import TruncateTip from './TruncateTip';
 
@@ -37,7 +37,7 @@ function ToplistRow({
 }) {
   return (
     <div
-      className="group flex items-center gap-2 rounded-lg px-1.5 py-1.5 transition-colors hover:bg-white/[0.04]"
+      className="group flex items-center gap-2 rounded-lg px-1.5 py-1.5 transition-colors hover:bg-white/[0.04] [content-visibility:auto] [contain-intrinsic-size:auto_48px]"
       title="双击点歌"
       onDoubleClick={() => onAdd()}
     >
@@ -124,41 +124,35 @@ export default memo(function HotSongPanel({
   embedded = false,
   compactLimit = COMPACT_LIMIT,
 }: Props) {
-  const [title, setTitle] = useState('网易云热榜');
-  const [songs, setSongs] = useState<SearchResult[]>([]);
-  const [loading, setLoading] = useState(true);
+  const cached = peekNeteaseHotToplist(TOPLIST_LIMIT);
+  const [title, setTitle] = useState(cached?.name?.trim() || '网易云热榜');
+  const [songs, setSongs] = useState<SearchResult[]>(() => cached?.songs ?? []);
+  const [loading, setLoading] = useState(() => !cached);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    let cancelled = false;
+    // 当日缓存已命中：不请求、不 setState，避免进房再闪一次
+    if (peekNeteaseHotToplist(TOPLIST_LIMIT)) return;
 
-    const load = async (silent = false) => {
-      if (!silent) setLoading(true);
-      try {
-        const data = await getNeteaseHotToplist(TOPLIST_LIMIT);
+    let cancelled = false;
+    setLoading(true);
+    void getNeteaseHotToplist(TOPLIST_LIMIT)
+      .then((data) => {
         if (cancelled) return;
         setTitle(data.name?.trim() || '网易云热榜');
         setSongs(data.songs);
         setError('');
-      } catch (err: unknown) {
+      })
+      .catch((err: unknown) => {
         if (cancelled) return;
-        if (!silent) {
-          setError(err instanceof Error ? err.message : '加载失败');
-        }
-      } finally {
-        if (!cancelled && !silent) setLoading(false);
-      }
-    };
-
-    void load();
-    const timer = window.setInterval(() => {
-      if (document.hidden) return;
-      void load(true);
-    }, 60 * 60 * 1000);
+        setError(err instanceof Error ? err.message : '加载失败');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
 
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
     };
   }, []);
 

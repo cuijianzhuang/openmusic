@@ -10,7 +10,7 @@ import { useAudioStore } from '../stores/audioStore';
 
 import { useSocket } from '../hooks/useSocket';
 
-import { getCoverUrl } from '../api/music';
+import { getCoverUrl, getTrackKey } from '../api/music';
 import { useTrackLyrics } from '../hooks/useTrackLyrics';
 
 import SyncedLyricsPane from './playback/SyncedLyricsPane';
@@ -51,6 +51,7 @@ export default memo(function PlayerPage({ onClose }: Props) {
   const setTrackLoading = useAudioStore((s) => s.setTrackLoading);
   const seekPlayback = useAudioStore((s) => s.seekPlayback);
   const localPlayback = useAudioStore((s) => s.localPlayback);
+  const actualQualityByTrack = useAudioStore((s) => s.actualQualityByTrack);
   const { togglePlay, skipSong, requestSkip } = useSocket();
 
   const [skipError, setSkipError] = useState('');
@@ -60,6 +61,9 @@ export default memo(function PlayerPage({ onClose }: Props) {
 
 
   const current = room?.current;
+  const qualityLabel = current
+    ? (actualQualityByTrack[getTrackKey(current)] ?? null)
+    : null;
   const lyrics = useTrackLyrics(current);
 
   const isPlaying = room?.isPlaying ?? false;
@@ -177,6 +181,7 @@ export default memo(function PlayerPage({ onClose }: Props) {
             artist={current.artist}
             source={current.source || 'netease'}
             requestedBy={current.requestedBy}
+            qualityLabel={qualityLabel}
             size="large"
           />
 
