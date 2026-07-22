@@ -63,7 +63,7 @@ const RUNTIME_FIELD_GROUPS: RuntimeFieldGroup[] = [
       { key: 'linuxdoAuthorizeUrl', label: '授权接口地址' },
       { key: 'linuxdoTokenUrl', label: '令牌接口地址' },
       { key: 'linuxdoUserInfoUrl', label: '用户信息接口地址' },
-      { key: 'linuxdoScope', label: 'Scope', placeholder: 'read' },
+      { key: 'linuxdoScope', label: 'Scope', placeholder: 'user' },
     ],
   },
   {

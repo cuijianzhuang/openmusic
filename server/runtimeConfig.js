@@ -64,7 +64,7 @@ function envDefaults() {
     linuxdoAuthorizeUrl: envText('LINUXDO_AUTHORIZE_URL'),
     linuxdoTokenUrl: envText('LINUXDO_TOKEN_URL'),
     linuxdoUserInfoUrl: envText('LINUXDO_USERINFO_URL'),
-    linuxdoScope: envText('LINUXDO_SCOPE', 'read'),
+    linuxdoScope: envText('LINUXDO_SCOPE', 'user'),
     // GitHub OAuth（房主身份绑定 / 后台登录）：只需在 https://github.com/settings/developers
     // 注册一个 OAuth App 拿到 client_id / secret，授权 / 令牌 / 用户信息接口地址是 GitHub
     // 公开且稳定的固定地址，写死在 server/githubAuth.js 里，不需要在这里配置。
@@ -236,7 +236,7 @@ function normalize(config) {
     linuxdoAuthorizeUrl: String(config.linuxdoAuthorizeUrl || '').trim(),
     linuxdoTokenUrl: String(config.linuxdoTokenUrl || '').trim(),
     linuxdoUserInfoUrl: String(config.linuxdoUserInfoUrl || '').trim(),
-    linuxdoScope: String(config.linuxdoScope || 'read').trim() || 'read',
+    linuxdoScope: String(config.linuxdoScope || 'user').trim() || 'user',
     githubClientId: String(config.githubClientId || '').trim(),
     githubClientSecret: String(config.githubClientSecret || '').trim(),
     githubRedirectUri: String(config.githubRedirectUri || '').trim(),
