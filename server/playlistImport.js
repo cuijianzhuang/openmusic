@@ -45,12 +45,20 @@ export function parseQqPlaylistId(input) {
 
   const url = extractUrlFromText(text);
   if (!/\.qq\.com/i.test(url)) return null;
-  if (!/playlist|songlist|details/i.test(url) && !/[?&]id=\d+/i.test(url)) return null;
 
-  const idMatch = url.match(/[?&]id=(\d+)/i)
-    || url.match(/\/playlist\/(\d+)/i)
-    || url.match(/\/songlist\/(\d+)/i);
-  return idMatch ? idMatch[1] : null;
+  // QQ 分享到 QQ / 我的电脑：i2.y.qq.com/.../details/playlist.html?...&id=歌单ID
+  // 以 id= 为准；兼容旧版 playlist/songlist 路径与 dissid
+  const idMatch = url.match(/[?&]id=(\d{4,})/i)
+    || url.match(/[?&]dissid=(\d{4,})/i)
+    || url.match(/\/playlist\/(\d{4,})/i)
+    || url.match(/\/songlist\/(\d{4,})/i);
+  if (!idMatch) return null;
+
+  const looksLikePlaylist = /playlist|songlist|details|taoge|diss/i.test(url)
+    || /[?&](?:id|dissid)=\d{4,}/i.test(url);
+  if (!looksLikePlaylist) return null;
+
+  return idMatch[1];
 }
 
 /** @deprecated 使用 parseQqPlaylistId */
@@ -184,19 +192,27 @@ async function fetchQqPlaylistName(playlistId) {
   return meta?.name || null;
 }
 
-async function fetchMetingPlaylist(server, playlistId) {
-  const response = await fetchMetingApi(
-    { server, type: 'playlist', id: playlistId },
-    { headers: NETEASE_HEADERS },
-    60000,
-  );
-  if (!response.ok) throw new Error('歌单请求失败');
+async function fetchMetingPlaylist(server, playlistId, { retries = 1 } = {}) {
+  try {
+    const response = await fetchMetingApi(
+      { server, type: 'playlist', id: playlistId },
+      { headers: NETEASE_HEADERS },
+      60000,
+    );
+    if (!response.ok) throw new Error('歌单请求失败');
 
-  const data = await response.json();
-  if (!Array.isArray(data)) {
-    throw new Error(typeof data?.error === 'string' ? data.error : '歌单数据格式异常');
+    const data = await response.json();
+    if (!Array.isArray(data)) {
+      throw new Error(typeof data?.error === 'string' ? data.error : '歌单数据格式异常');
+    }
+    return data;
+  } catch (err) {
+    if (retries > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      return fetchMetingPlaylist(server, playlistId, { retries: retries - 1 });
+    }
+    throw err;
   }
-  return data;
 }
 
 async function importMetingPlaylist(server, playlistId, defaultName) {
@@ -243,14 +259,22 @@ export async function importNeteasePlaylist(input) {
 export async function importQqPlaylist(input) {
   const playlistId = parseQqPlaylistId(input);
   if (!playlistId) {
-    throw new Error('无法识别绿点歌单链接，请按提示获取分享链接');
+    throw new Error(
+      '无法识别绿点歌单链接。请在 QQ 音乐将歌单分享到「QQ / 我的电脑」，粘贴带 id= 的链接（例如 …playlist.html?…&id=9211556467）',
+    );
   }
 
-  const [result, name] = await Promise.all([
-    importMetingPlaylist('tencent', playlistId, '绿点歌单'),
-    fetchQqPlaylistName(playlistId),
-  ]);
+  try {
+    const [result, name] = await Promise.all([
+      importMetingPlaylist('tencent', playlistId, '绿点歌单'),
+      fetchQqPlaylistName(playlistId),
+    ]);
 
-  if (name) result.name = name;
-  return result;
+    if (name) result.name = name;
+    return result;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : '';
+    if (msg.includes('无法识别')) throw err;
+    throw new Error('歌单解析失败，请检查歌单链接是否正确');
+  }
 }

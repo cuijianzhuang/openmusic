@@ -16,6 +16,8 @@ import { deleteRoomChatImages, validateChatImageForRoom, validateExternalChatIma
 import { isLocalStickerImageKey, validateLocalStickerImage } from "./localSticker.js";
 import { collectDeviceIdsForUser, isAccessBanned } from "./deviceIdentity.js";
 import { getRuntimeConfig } from "./runtimeConfig.js";
+import { resizeCoverForThumb } from "./coverUrl.js";
+import { isDirectCoverUrl, resolveSongCoverUrl } from "./resolveSongCover.js";
 
 const generateRoomId = customAlphabet("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", 6);
 const generateId = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 12);
@@ -1239,14 +1241,45 @@ export function createRoom({ name, password, creatorId, creatorDeviceId } = {}) 
   return serializeRoom(room);
 }
 
-export function listRooms() {
+const coverResolveInflight = new Map();
+
+async function ensureCurrentSongCover(room) {
+  const song = room.current;
+  if (!song?.id) return;
+
+  if (isDirectCoverUrl(song.pic)) {
+    const normalized = resizeCoverForThumb(String(song.pic).trim(), 96) || String(song.pic).trim();
+    if (normalized !== song.pic) song.pic = normalized;
+    return;
+  }
+
+  const key = `${song.source || "netease"}:${song.id}`;
+  let pending = coverResolveInflight.get(key);
+  if (!pending) {
+    pending = resolveSongCoverUrl(song.source || "netease", song.id, 96)
+      .catch(() => "")
+      .finally(() => {
+        coverResolveInflight.delete(key);
+      });
+    coverResolveInflight.set(key, pending);
+  }
+
+  const url = await pending;
+  if (!url || room.current !== song) return;
+  song.pic = url;
+  persistRoom(room);
+}
+
+export async function listRooms() {
   const now = Date.now();
   if (cachedListRooms && now - cachedListRoomsAt < LIST_ROOMS_CACHE_MS) {
     return cachedListRooms;
   }
 
-  cachedListRooms = Array.from(rooms.values())
-    .filter(isRoomVisibleInLobby)
+  const visible = Array.from(rooms.values()).filter(isRoomVisibleInLobby);
+  await Promise.all(visible.map((room) => ensureCurrentSongCover(room)));
+
+  cachedListRooms = visible
     .map(serializeRoomSummary)
     .sort((a, b) => {
       // 大厅：开放播放 → … → 密码锁 → 无密码硬锁（不可进）最后
@@ -3602,6 +3635,12 @@ function calculatePlaybackTime(room, now = Date.now()) {
   return room.currentTime || 0;
 }
 
+function serializeLobbyCoverPic(pic) {
+  const raw = String(pic || "").trim();
+  if (!isDirectCoverUrl(raw)) return undefined;
+  return resizeCoverForThumb(raw, 96) || raw;
+}
+
 function serializeRoomSummary(room) {
   return {
     id: room.id,
@@ -3616,7 +3655,7 @@ function serializeRoomSummary(room) {
           artist: room.current.artist,
           id: room.current.id,
           source: room.current.source,
-          pic: room.current.pic,
+          pic: serializeLobbyCoverPic(room.current.pic),
         }
       : null,
     queueLength: room.queue.length,

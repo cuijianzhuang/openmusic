@@ -24,9 +24,14 @@ export function detectPlaylistLink(input: string): PlaylistPlatform | null {
     return 'netease';
   }
 
-  // QQ 音乐：歌单分享路径 playlist / songlist / taoge，或旧版 dissid 参数
+  // QQ 音乐：分享到 QQ/我的电脑 的 details/playlist.html?id=…，或旧版 playlist/songlist/taoge/dissid
   if (/\.qq\.com/i.test(url)) {
-    if (/\/(playlist|songlist)\b/i.test(url) || /taoge/i.test(url) || /[?&]dissid=\d+/i.test(url)) {
+    if (
+      /\/(playlist|songlist)\b/i.test(url)
+      || /\/details\/playlist/i.test(url)
+      || /taoge/i.test(url)
+      || /[?&](?:id|dissid)=\d{4,}/i.test(url)
+    ) {
       return 'qq';
     }
   }

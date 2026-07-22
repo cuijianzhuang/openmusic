@@ -59,16 +59,16 @@ export default function ErrorReportModal({ open, onClose }: Props) {
 
   return (
     <Modal open={open} onClose={close} panelClassName="relative w-full max-w-md animate-fade-in rounded-2xl border border-white/10 bg-netease-dark p-5 shadow-2xl">
-      <h3 className="text-base font-semibold text-white">上报错误</h3>
+      <h3 className="text-base font-semibold text-white">上报错误/提交意见</h3>
       <p className="mt-1 text-xs text-white/50">
-        描述你遇到的问题；提交时会附带当前播放状态与近期调试日志，便于管理员排查。
+        描述你遇到的问题或想提的意见；提交时会附带当前播放状态与近期调试日志，便于管理员排查。
       </p>
       <textarea
         value={description}
         onChange={(e) => setDescription(e.target.value)}
         maxLength={500}
         rows={5}
-        placeholder="例如：切歌后没声音 / 歌词不同步 / 进房失败…"
+        placeholder="例如：切歌后没声音 / 歌词不同步 / 希望增加某某功能…"
         className="mt-3 w-full resize-y rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white outline-none placeholder:text-white/30"
         disabled={busy}
       />
