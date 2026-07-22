@@ -32,6 +32,7 @@ import { normalizeDislikeSkipMode } from '../lib/dislikeSkip';
 
 import { songKey, getCoverUrl } from '../api/music';
 import SongCover from '../components/SongCover';
+import HotSongPanel from '../components/HotSongPanel';
 
 import AudioEngine from '../components/AudioEngine';
 
@@ -112,7 +113,6 @@ const ImmersiveTransitionOverlay = lazy(() => import('../components/immersive/Im
 const ChatPanel = lazy(() => import('../components/ChatPanel'));
 const PureModeChatDock = lazy(() => import('../components/PureModeChatDock'));
 const QueuePanel = lazy(() => import('../components/QueuePanel'));
-const HotSongPanel = lazy(() => import('../components/HotSongPanel'));
 const OnlineUsers = lazy(() => import('../components/OnlineUsers'));
 const RoomAmbientBackground = lazy(() => import('../components/RoomAmbientBackground'));
 const MiniPlayer = lazy(() => import('../components/MiniPlayer'));

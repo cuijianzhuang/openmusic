@@ -426,6 +426,14 @@ export default function Home() {
     return () => clearInterval(timer);
   }, [fetchRooms]);
 
+  // 大厅预热热歌榜：进房时直接用缓存，避免左侧榜单再刷一下
+  useEffect(() => {
+    void import('../api/music/toplist')
+      .then((m) => m.getNeteaseHotToplist(200))
+      .catch(() => {});
+    void import('../pages/Room');
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     void fetchSiteAnnouncement().then((announcement) => {
