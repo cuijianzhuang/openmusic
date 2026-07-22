@@ -1,5 +1,7 @@
+import { type RefObject } from 'react';
 import { ChevronLeft, ChevronRight, ChevronsLeft } from 'lucide-react';
 import { buildPageNumbers } from '../lib/pagination';
+import { useScrollToTopOnPageChange } from '../hooks/useScrollToTopOnPageChange';
 import Tooltip from './Tooltip';
 
 interface Props {
@@ -10,6 +12,7 @@ interface Props {
   showFirst?: boolean;
   showPrevNext?: boolean;
   className?: string;
+  scrollRef?: RefObject<HTMLElement | null>;
 }
 
 export default function PageNumberPagination({
@@ -20,7 +23,10 @@ export default function PageNumberPagination({
   showFirst = true,
   showPrevNext = true,
   className = '',
+  scrollRef,
 }: Props) {
+  useScrollToTopOnPageChange(page, scrollRef);
+
   if (totalPages <= 1) return null;
 
   const items = buildPageNumbers(page, totalPages);

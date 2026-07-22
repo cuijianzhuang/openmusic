@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 
-import { Search, Loader2, Copy, Check, LogOut, X, Heart, Plus, Download, ListMusic, Upload, History, ListPlus, Pencil, Lock, LockOpen, ChevronLeft, ChevronRight, SlidersHorizontal, Shield, Maximize2, Smartphone, ImagePlus } from 'lucide-react';
+import { Search, Loader2, Copy, Check, LogOut, X, Heart, Plus, Download, ListMusic, Upload, History, ListPlus, Pencil, Lock, LockOpen, ChevronLeft, SlidersHorizontal, Shield, Maximize2, Smartphone, ImagePlus } from 'lucide-react';
 
 import { searchAllSongs, getAvailableSources, type SearchFilterMode } from '../api/music';
 import { importPlaylist, searchPlaylists, type PlaylistSearchItem, type PlaylistPlatform, type PlaylistChannelFilter as PlaylistChannelFilterMode } from '../api/music/playlist';
@@ -50,9 +50,12 @@ import {
   SONG_RESULT_PAGE_SIZE_OPTIONS,
   type SongResultPageSize,
 } from '../lib/songResultPagination';
+import ConfirmModal from '../components/ConfirmModal';
 import FavoriteButton from '../components/FavoriteButton';
+import SongRowBadges from '../components/SongRowBadges';
 import PageSizeSelect from '../components/PageSizeSelect';
 import { useMediaQuery } from '../hooks/useMediaQuery';
+import { useRoomSongKeySets } from '../hooks/useRoomSongKeySets';
 import { useSongHistoryStore } from '../stores/songHistoryStore';
 
 import RoomFmModeBadge from '../components/RoomFmModeBadge';
@@ -278,8 +281,9 @@ export default function Room() {
     noindex: true,
   });
 
-  const { joinRoom, addSong, leaveRoom, listFavorites, setFavorite, importFavorites, renameRoomName, setRoomLock, setRoomFmMode, setRoomAnnouncement, setRoomCustomCover, setChatHistoryVisibleOnJoin, setRoomJoinNotice, setSongRequestEnabled, unbanRoomSong, setRoomMemberTier, removeRoomMemberTier, setRoomMemberSettings, loadSongHistory, transferOwner } = useSocket();
+  const { joinRoom, addSong, leaveRoom, listFavorites, setFavorite, importFavorites, renameRoomName, setRoomLock, setRoomFmMode, setRoomAnnouncement, setRoomCustomCover, setChatHistoryVisibleOnJoin, setRoomJoinNotice, setSongRequestEnabled, unbanRoomSong, setRoomMemberTier, removeRoomMemberTier, setRoomMemberSettings, loadSongHistory, transferOwner, clearQueue } = useSocket();
   const { applyFavorites } = useFavorites();
+  const { queueKeys, playedKeys } = useRoomSongKeySets();
 
 
 
@@ -297,6 +301,8 @@ export default function Room() {
   const [addingId, setAddingId] = useState<string | null>(null);
   const [addingPage, setAddingPage] = useState(false);
   const [listPageSongs, setListPageSongs] = useState<SearchResult[]>([]);
+  const [clearQueueConfirmOpen, setClearQueueConfirmOpen] = useState(false);
+  const [clearingQueue, setClearingQueue] = useState(false);
 
   const [copied, setCopied] = useState(false);
   const [searchedKeyword, setSearchedKeyword] = useState('');
@@ -371,6 +377,7 @@ export default function Room() {
   const [joinNoticeSaving, setJoinNoticeSaving] = useState(false);
   const lastSongRequestAtRef = useRef(0);
   const playlistSearchScrollRef = useRef<HTMLDivElement>(null);
+  const favoritesScrollRef = useRef<HTMLDivElement>(null);
   const songHistoryItems = useSongHistoryStore((s) => s.songs);
   const songHistoryLoading = useSongHistoryStore((s) => s.loading);
 
@@ -886,10 +893,6 @@ export default function Room() {
       setPlaylistSearchLoading(false);
     }
   }, [playlistChannelFilter, playlistSearchPageSize, showToast]);
-
-  useEffect(() => {
-    playlistSearchScrollRef.current?.scrollTo({ top: 0, behavior: 'auto' });
-  }, [playlistSearchPage]);
 
   const handlePlaylistPageSizeChange = useCallback((next: SongResultPageSize) => {
     setPlaylistSearchPageSize(next);
@@ -1857,6 +1860,20 @@ export default function Room() {
   const searchableCount = sources.filter((s) => s.supportsSearch).length;
   const qqImportEnabled = sources.some((s) => s.id === 'tencent' && s.supportsSearch);
   const queueCount = (room.current ? 1 : 0) + room.queue.length;
+  const canClearQueue = isOwner && room.queue.length > 0;
+
+  const handleClearQueue = useCallback(async () => {
+    if (clearingQueue) return;
+    setClearingQueue(true);
+    const res = await clearQueue();
+    setClearingQueue(false);
+    if (res.success) {
+      setClearQueueConfirmOpen(false);
+      showToast('已清空待播列表', 'success');
+    } else {
+      showToast(res.error || '清空失败', 'error');
+    }
+  }, [clearQueue, clearingQueue, showToast]);
   const showDesktopSearchOverlay = Boolean(searchedKeyword || searching || playlistSearchLoading);
   const isCuratedDetailView = isPlaylistResults || isRadioResults;
   const canBackFromDetail = isRadioResults
@@ -1932,9 +1949,20 @@ export default function Room() {
     >
       <div className="relative flex items-center justify-between px-4 py-2.5 sm:py-3 border-b border-netease-border/50 flex-shrink-0">
         <h2 className="text-sm font-medium">播放队列</h2>
-        <span className="text-xs text-netease-muted">
-          {queueCount > 0 ? `共 ${queueCount} 首` : '暂无歌曲'}
-        </span>
+        <div className="flex items-center gap-2">
+          {canClearQueue && (
+            <button
+              type="button"
+              onClick={() => setClearQueueConfirmOpen(true)}
+              className="text-xs text-netease-muted transition-colors hover:text-netease-red"
+            >
+              清空列表
+            </button>
+          )}
+          <span className="text-xs text-netease-muted">
+            {queueCount > 0 ? `共 ${queueCount} 首` : '暂无歌曲'}
+          </span>
+        </div>
         <QueueSystemToast />
       </div>
       <div className={`p-2 ${fillHeight ? 'flex-1 min-h-0 overflow-hidden flex flex-col' : ''}`}>
@@ -2062,6 +2090,7 @@ export default function Room() {
           page={playlistSearchPage}
           totalPages={playlistSearchTotalPages}
           disabled={playlistSearchLoading}
+          scrollRef={playlistSearchScrollRef}
           onPageChange={(p) => void doPlaylistSearch(searchedKeyword, p)}
         />
       </div>
@@ -3063,7 +3092,7 @@ export default function Room() {
                 />
               </div>
             </div>
-            <div className="min-h-0 flex-1 overflow-y-auto p-3">
+            <div ref={favoritesScrollRef} className="min-h-0 flex-1 overflow-y-auto p-3">
               {favoritesLoading ? (
                 <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-netease-red" /></div>
               ) : filteredFavorites.length === 0 ? (
@@ -3102,7 +3131,10 @@ export default function Room() {
                           <p className="truncate text-sm font-medium">{song.name}</p>
                           <p className="truncate text-xs text-netease-muted">{song.artist}{song.album ? ` · ${song.album}` : ''}</p>
                         </div>
-                        <SourceBadge source={song.source} variant="muted" />
+                        <SongRowBadges
+                          song={song}
+                          status={{ inQueue: queueKeys.has(key), played: playedKeys.has(key) }}
+                        />
                         <button
                           type="button"
                           onClick={() => void handleAdd(song as SearchResult)}
@@ -3135,26 +3167,12 @@ export default function Room() {
                     <span className="ml-1 text-netease-muted/50">共 {filteredFavorites.length} 首</span>
                   </span>
                 </div>
-                <div className="flex items-center justify-between gap-2">
-                  <button
-                    type="button"
-                    disabled={favoritePage <= 1}
-                    onClick={() => setFavoritePage((page) => Math.max(1, page - 1))}
-                    className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-netease-muted transition-colors hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
-                  >
-                    <ChevronLeft className="h-3.5 w-3.5" />
-                    上一页
-                  </button>
-                  <button
-                    type="button"
-                    disabled={favoritePage >= favoriteTotalPages}
-                    onClick={() => setFavoritePage((page) => Math.min(favoriteTotalPages, page + 1))}
-                    className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-netease-muted transition-colors hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
-                  >
-                    下一页
-                    <ChevronRight className="h-3.5 w-3.5" />
-                  </button>
-                </div>
+                <PageNumberPagination
+                  page={favoritePage}
+                  totalPages={favoriteTotalPages}
+                  scrollRef={favoritesScrollRef}
+                  onPageChange={setFavoritePage}
+                />
               </div>
             )}
           </div>
@@ -3168,6 +3186,18 @@ export default function Room() {
 
       {pureMode && isLgUp && <PureModeChatDock />}
       </div>
+
+      {clearQueueConfirmOpen && (
+        <ConfirmModal
+          title="清空列表"
+          message="确定清空播放队列中的待播歌曲吗？正在播放的曲目不会停止。"
+          confirmLabel="清空"
+          confirmVariant="danger"
+          loading={clearingQueue}
+          onConfirm={() => void handleClearQueue()}
+          onCancel={() => setClearQueueConfirmOpen(false)}
+        />
+      )}
 
       {recommendDrawerOpen &&
         createPortal(

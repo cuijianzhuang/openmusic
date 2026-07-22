@@ -2833,8 +2833,8 @@ export function clearQueue(roomId, userId, connectionId = null) {
   const room = rooms.get(roomId);
   if (!room) return { error: "房间不存在" };
 
-  if (!isControllerConnection(room, userId, connectionId)) {
-    return { error: "仅房主或管理员可清空队列" };
+  if (!isOwnerConnection(room, userId, connectionId)) {
+    return { error: "仅房主可清空队列" };
   }
 
   room.queue = [];
