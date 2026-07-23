@@ -69,6 +69,10 @@ export function formatAuditAction(entry: AdminAuditEntry) {
       return `更新站点公告（${entry.enabled ? '启用' : '停用'}）`;
     case 'set_room_protection':
       return `${entry.enabled ? '开启' : '关闭'}房间保活 ${entry.roomId || ''}`;
+    case 'review_permanent_application':
+      return `${entry.approved ? '通过' : '拒绝'}常驻申请 ${entry.roomId || ''}${
+        entry.reason ? `：${entry.reason}` : ''
+      }`;
     case 'meting_reset_cooldown':
       return `重置上游冷却 ${entry.url || ''}`;
     case 'meting_set_disabled':
@@ -111,15 +115,17 @@ export type AdminRoomStatusFilter =
   | 'password'
   | 'locked'
   | 'protected'
+  | 'pending_permanent'
   | 'empty';
 
 export const ADMIN_ROOM_STATUS_FILTERS: { value: AdminRoomStatusFilter; label: string }[] = [
+  { value: 'pending_permanent', label: '待审常驻' },
   { value: 'playing', label: '播放中' },
   { value: 'paused', label: '已暂停' },
   { value: 'idle', label: '未播放' },
   { value: 'password', label: '有密码' },
   { value: 'locked', label: '已上锁' },
-  { value: 'protected', label: '保活' },
+  { value: 'protected', label: '常驻' },
   { value: 'empty', label: '空房间' },
 ];
 
@@ -137,6 +143,8 @@ function roomMatchesStatusFilter(room: AdminRoom, tag: AdminRoomStatusFilter): b
       return room.isLocked;
     case 'protected':
       return room.protectedFromDestroy;
+    case 'pending_permanent':
+      return room.permanentApplication?.status === 'pending';
     case 'empty':
       return room.userCount === 0;
     default:
@@ -167,6 +175,9 @@ function roomActivityRank(room: AdminRoom): number {
 }
 
 function compareAdminRooms(a: AdminRoom, b: AdminRoom): number {
+  const ap = a.permanentApplication?.status === 'pending' ? 0 : 1;
+  const bp = b.permanentApplication?.status === 'pending' ? 0 : 1;
+  if (ap !== bp) return ap - bp;
   const rankDiff = roomActivityRank(a) - roomActivityRank(b);
   if (rankDiff !== 0) return rankDiff;
   if (a.userCount !== b.userCount) return b.userCount - a.userCount;

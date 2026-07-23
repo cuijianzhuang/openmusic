@@ -120,7 +120,13 @@ import {
   prepareRoomPresence,
   roomPresenceForViewer,
   findUserRoomPresence,
+  requestRoomPermanent,
+  cancelRoomPermanentRequest,
 } from './roomManager.js';
+import {
+  listPendingPermanentNoticesForUser,
+  ackPermanentDecisionNotice,
+} from './permanentApplication.js';
 import {
   isCyapiConfigured,
   searchKugouMusic,
@@ -1584,6 +1590,36 @@ app.post('/api/error-reports/:id/ack-solution', async (req, res) => {
   res.json({ success: true });
 });
 
+app.get('/api/permanent-decisions/pending', async (req, res) => {
+  const identity = resolveIdentityFromRequest(req);
+  if (!identity?.userId) {
+    return res.status(401).json({ error: '会话未就绪，请刷新页面后重试' });
+  }
+  const notices = await listPendingPermanentNoticesForUser(identity.userId);
+  res.json({
+    notices: notices.map((item) => ({
+      id: item.id,
+      roomId: item.roomId,
+      roomName: item.roomName,
+      approved: Boolean(item.approved),
+      reason: item.reason || '',
+      at: item.at,
+    })),
+  });
+});
+
+app.post('/api/permanent-decisions/:id/ack', async (req, res) => {
+  const identity = resolveIdentityFromRequest(req);
+  if (!identity?.userId) {
+    return res.status(401).json({ error: '会话未就绪，请刷新页面后重试' });
+  }
+  const result = await ackPermanentDecisionNotice(req.params.id, identity.userId);
+  if (!result.success) {
+    return res.status(400).json({ error: result.error });
+  }
+  res.json({ success: true });
+});
+
 app.get('/api/rooms', async (_req, res) => {
   res.json(await listRooms());
 });
@@ -2320,6 +2356,18 @@ io.on('connection', (socket) => {
             socket.emit('error_report_solution', notice);
           }
         }).catch(() => {});
+        void listPendingPermanentNoticesForUser(userId).then((notices) => {
+          for (const notice of notices) {
+            socket.emit('room_permanent_decision', {
+              id: notice.id,
+              roomId: notice.roomId,
+              roomName: notice.roomName,
+              approved: Boolean(notice.approved),
+              reason: notice.reason || '',
+              at: notice.at,
+            });
+          }
+        }).catch(() => {});
       }
     });
 
@@ -2421,6 +2469,73 @@ io.on('connection', (socket) => {
 
     broadcastRoomUpdate(roomId);
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
+  });
+
+  socket.on('apply_room_permanent', async ({ note } = {}, callback) => {
+    if (rejectReadOnly(socket, callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, 'apply_room_permanent', callback)) return;
+
+    const roomId = socketToRoom.get(socket.id);
+    if (!roomId) {
+      callback?.({ success: false, error: '未加入房间' });
+      return;
+    }
+
+    const result = await requestRoomPermanent(
+      roomId,
+      getSocketUserId(socket),
+      socket.id,
+      note,
+    );
+    if (result.error) {
+      callback?.({ success: false, error: result.error });
+      return;
+    }
+
+    broadcastRoomUpdate(roomId);
+    callback?.({
+      success: true,
+      room: getViewerRoomPayload(socket, roomId),
+      application: result.application,
+    });
+  });
+
+  socket.on('cancel_room_permanent', async (_payload, callback) => {
+    if (rejectReadOnly(socket, callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, 'cancel_room_permanent', callback)) return;
+
+    const roomId = socketToRoom.get(socket.id);
+    if (!roomId) {
+      callback?.({ success: false, error: '未加入房间' });
+      return;
+    }
+
+    const result = await cancelRoomPermanentRequest(
+      roomId,
+      getSocketUserId(socket),
+      socket.id,
+    );
+    if (result.error) {
+      callback?.({ success: false, error: result.error });
+      return;
+    }
+
+    broadcastRoomUpdate(roomId);
+    callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
+  });
+
+  socket.on('ack_room_permanent_decision', async ({ id } = {}, callback) => {
+    const userId = getSocketUserId(socket);
+    if (!userId) {
+      callback?.({ success: false, error: '会话无效' });
+      return;
+    }
+    const result = await ackPermanentDecisionNotice(id, userId);
+    if (!result.success) {
+      callback?.({ success: false, error: result.error });
+      return;
+    }
+    callback?.({ success: true });
   });
 
   socket.on('set_room_fm_mode', ({ mode }, callback) => {

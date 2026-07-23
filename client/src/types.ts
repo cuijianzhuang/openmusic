@@ -193,6 +193,15 @@ export interface RoomState {
   announcementText?: string;
   /** 房主自定义封面；有值时不再跟随当前歌曲封面 */
   customCoverUrl?: string;
+  /** 仅创建者可见：房间是否常驻（空房不销毁） */
+  protectedFromDestroy?: boolean;
+  /** 仅创建者可见：常驻申请进度 */
+  permanentApplication?: {
+    status: 'pending';
+    appliedAt: number;
+    applicantNickname?: string;
+    note?: string;
+  } | null;
   /** 进房是否可查看聊天历史（关闭时仅见进房后的消息） */
   chatHistoryVisibleOnJoin?: boolean;
   /** 是否在聊天室提示“昵称进入房间” */

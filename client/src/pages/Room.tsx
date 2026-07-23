@@ -284,7 +284,7 @@ export default function Room() {
     noindex: true,
   });
 
-  const { joinRoom, addSong, leaveRoom, listFavorites, setFavorite, importFavorites, renameRoomName, setRoomLock, setRoomFmMode, setRoomAnnouncement, setRoomCustomCover, setChatHistoryVisibleOnJoin, setRoomJoinNotice, setSongRequestEnabled, unbanRoomSong, addRoomForbiddenWord, removeRoomForbiddenWord, setRoomMemberTier, removeRoomMemberTier, setRoomMemberSettings, loadSongHistory, transferOwner, clearQueue } = useSocket();
+  const { joinRoom, addSong, leaveRoom, listFavorites, setFavorite, importFavorites, renameRoomName, setRoomLock, setRoomFmMode, setRoomAnnouncement, setRoomCustomCover, setChatHistoryVisibleOnJoin, setRoomJoinNotice, setSongRequestEnabled, unbanRoomSong, addRoomForbiddenWord, removeRoomForbiddenWord, setRoomMemberTier, removeRoomMemberTier, setRoomMemberSettings, loadSongHistory, transferOwner, applyRoomPermanent, cancelRoomPermanent, clearQueue } = useSocket();
   const { applyFavorites } = useFavorites();
   const { queueKeys, playedKeys } = useRoomSongKeySets();
 
@@ -370,6 +370,7 @@ export default function Room() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [fmSaving, setFmSaving] = useState(false);
   const [transferSaving, setTransferSaving] = useState(false);
+  const [permanentSaving, setPermanentSaving] = useState(false);
   const [announcementSaving, setAnnouncementSaving] = useState(false);
   const [announcementPopupOpen, setAnnouncementPopupOpen] = useState(false);
   const [memberOpen, setMemberOpen] = useState(false);
@@ -1344,6 +1345,30 @@ export default function Room() {
       showToast(res.error || '转让失败', 'error');
     }
   }, [transferSaving, transferOwner, showToast]);
+
+  const handleApplyPermanent = useCallback(async (note?: string) => {
+    if (permanentSaving) return;
+    setPermanentSaving(true);
+    const res = await applyRoomPermanent(note);
+    setPermanentSaving(false);
+    if (res.success) {
+      showToast('常驻申请已提交，请等待管理员审核', 'success');
+    } else {
+      showToast(res.error || '提交失败', 'error');
+    }
+  }, [permanentSaving, applyRoomPermanent, showToast]);
+
+  const handleCancelPermanent = useCallback(async () => {
+    if (permanentSaving) return;
+    setPermanentSaving(true);
+    const res = await cancelRoomPermanent();
+    setPermanentSaving(false);
+    if (res.success) {
+      showToast('已撤销常驻申请', 'success');
+    } else {
+      showToast(res.error || '撤销失败', 'error');
+    }
+  }, [permanentSaving, cancelRoomPermanent, showToast]);
 
   const handleSaveAnnouncement = useCallback(async (options: { enabled: boolean; text: string }) => {
     if (announcementSaving) return;
@@ -2468,6 +2493,9 @@ export default function Room() {
         myUserId={mySocketId}
         transferSaving={transferSaving}
         roomId={roomId}
+        protectedFromDestroy={Boolean(room?.protectedFromDestroy)}
+        permanentApplication={room?.permanentApplication ?? null}
+        permanentSaving={permanentSaving}
         onClose={() => setSettingsOpen(false)}
         onSaveFmMode={handleSaveFmMode}
         onOpenMemberModal={handleOpenMemberModalFromSettings}
@@ -2476,6 +2504,8 @@ export default function Room() {
         onSaveJoinNotice={handleSaveJoinNotice}
         onSaveSongRequest={handleSaveSongRequestSettings}
         onTransferOwner={handleTransferOwner}
+        onApplyPermanent={handleApplyPermanent}
+        onCancelPermanent={handleCancelPermanent}
       />
       </Suspense>
 

@@ -129,6 +129,12 @@ const RoomCard = memo(function RoomCard({
   const hardLocked = isLobbyHardLocked(room);
   const gradient = gradientForId(room.id);
   const coverUrl = lobbyCoverUrl(room);
+  const [coverFailed, setCoverFailed] = useState(false);
+  const showCover = Boolean(coverUrl) && !coverFailed;
+
+  useEffect(() => {
+    setCoverFailed(false);
+  }, [coverUrl]);
 
   const cardRef = useRef<HTMLDivElement | HTMLButtonElement | null>(null);
   const frameRef = useRef<number | null>(null);
@@ -212,21 +218,22 @@ const RoomCard = memo(function RoomCard({
           {/* 封面区块（倾斜时视差浮起） */}
           <div className="relative flex-shrink-0 transition-transform duration-300 ease-out [transform:translateZ(0)] group-hover:[transform:translateZ(45px)]">
             <div className={`relative w-16 h-16 sm:w-24 sm:h-24 rounded-2xl overflow-hidden bg-gradient-to-br ${gradient} flex items-center justify-center transition-all duration-300 shadow-[0_10px_22px_rgba(0,0,0,0.55),0_2px_5px_rgba(0,0,0,0.5),inset_0_1.5px_0_rgba(255,255,255,0.35),inset_0_-2px_4px_rgba(0,0,0,0.35)] ${hardLocked ? 'grayscale' : 'group-hover:shadow-[0_18px_36px_rgba(0,0,0,0.65),0_3px_7px_rgba(0,0,0,0.5),inset_0_1.5px_0_rgba(255,255,255,0.4),inset_0_-2px_4px_rgba(0,0,0,0.35)] group-hover:scale-105'}`}>
-              {coverUrl && (
+              {showCover && (
                 <img
-                  key={coverUrl}
-                  src={coverUrl}
+                  key={coverUrl!}
+                  src={coverUrl!}
                   alt=""
                   loading="lazy"
                   decoding="async"
                   referrerPolicy="no-referrer"
+                  onError={() => setCoverFailed(true)}
                   className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
                 />
               )}
-              {coverUrl && <div className="absolute inset-0 bg-black/20 pointer-events-none" />}
+              {showCover && <div className="absolute inset-0 bg-black/20 pointer-events-none" />}
               {isActive && !hardLocked ? (
                 <EqualizerBars className="relative text-white drop-shadow-md scale-110" />
-              ) : !coverUrl ? (
+              ) : !showCover ? (
                 <Disc3 className={`relative w-8 h-8 sm:w-10 sm:h-10 text-white/90 drop-shadow-md transition-transform duration-500 ${hardLocked ? '' : 'group-hover:rotate-[20deg]'}`} />
               ) : null}
             </div>

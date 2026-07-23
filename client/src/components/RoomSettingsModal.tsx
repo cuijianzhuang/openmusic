@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Crown, Minus, Plus, Sparkles, X } from 'lucide-react';
+import { Crown, Minus, Plus, Sparkles, ShieldCheck, X } from 'lucide-react';
 import { NETEASE_FM_MODE_OPTIONS, getFmModeLabel, normalizeFmMode, FM_MODE_OFF, DEFAULT_FM_MODE } from '../api/music/fmMode';
 import type { BannedSong, ForbiddenWord, RoomUser } from '../types';
 import type { DislikeSkipMode } from '../lib/dislikeSkip';
@@ -31,7 +31,7 @@ const FORBIDDEN_WORD_MAX_LEN = 20;
 const COOLDOWN_OPTIONS = [0, 10, 30, 60, 120] as const;
 const QUEUE_LIMIT_OPTIONS = [50, 100, 200] as const;
 
-type SettingsTab = 'fm' | 'member' | 'transfer' | 'identity' | 'announcement' | 'chat' | 'songRequest';
+type SettingsTab = 'fm' | 'member' | 'transfer' | 'identity' | 'announcement' | 'chat' | 'songRequest' | 'permanent';
 
 export interface SongRequestSettings {
   enabled: boolean;
@@ -97,6 +97,13 @@ interface Props {
   myUserId?: string | null;
   transferSaving?: boolean;
   roomId?: string;
+  protectedFromDestroy?: boolean;
+  permanentApplication?: {
+    status: 'pending';
+    appliedAt?: number;
+    note?: string;
+  } | null;
+  permanentSaving?: boolean;
   onClose: () => void;
   onSaveFmMode: (mode: string) => void;
   onOpenMemberModal: () => void;
@@ -105,6 +112,8 @@ interface Props {
   onSaveJoinNotice: (settings: { enabled: boolean; cooldownMinutes: number }) => void;
   onSaveSongRequest: (settings: SongRequestSettings) => void;
   onTransferOwner?: (userId: string) => void | Promise<void>;
+  onApplyPermanent?: (note?: string) => void | Promise<void>;
+  onCancelPermanent?: () => void | Promise<void>;
 }
 
 function clampInt(value: number, min: number, max: number) {
@@ -242,6 +251,9 @@ export default function RoomSettingsModal({
   myUserId = null,
   transferSaving = false,
   roomId,
+  protectedFromDestroy = false,
+  permanentApplication = null,
+  permanentSaving = false,
   onClose,
   onSaveFmMode,
   onOpenMemberModal,
@@ -250,6 +262,8 @@ export default function RoomSettingsModal({
   onSaveJoinNotice,
   onSaveSongRequest,
   onTransferOwner,
+  onApplyPermanent,
+  onCancelPermanent,
 }: Props) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('announcement');
   const [draftAnnouncementEnabled, setDraftAnnouncementEnabled] = useState(announcementEnabled);
@@ -261,6 +275,7 @@ export default function RoomSettingsModal({
   const [showDefaultForbiddenWords, setShowDefaultForbiddenWords] = useState(false);
   const [transferTargetId, setTransferTargetId] = useState<string | null>(null);
   const [confirmTransfer, setConfirmTransfer] = useState(false);
+  const [permanentNote, setPermanentNote] = useState('');
   const [linuxdoEnabled, setLinuxdoEnabled] = useState(false);
   const [linuxdoBound, setLinuxdoBound] = useState<LinuxdoBinding | null>(null);
   const [linuxdoUnbinding, setLinuxdoUnbinding] = useState(false);
@@ -296,6 +311,7 @@ export default function RoomSettingsModal({
     if (isOwner) {
       items.push({ id: 'fm', label: '漫游' });
       items.push({ id: 'member', label: '贵宾' });
+      items.push({ id: 'permanent', label: '常驻' });
       items.push({ id: 'transfer', label: '转让' });
     }
     if (canModerate) {
@@ -448,10 +464,7 @@ export default function RoomSettingsModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex flex-shrink-0 items-center justify-between border-b border-white/10 px-5 py-4">
-          <div>
-            <h2 className="text-base font-semibold text-white">房间设置</h2>
-            <p className="mt-0.5 text-xs text-netease-muted">漫游、贵宾、转让、公告、聊天与点歌规则</p>
-          </div>
+          <h2 className="text-base font-semibold text-white">房间设置</h2>
           <button
             type="button"
             onClick={onClose}
@@ -522,6 +535,66 @@ export default function RoomSettingsModal({
               <p className="mt-2 text-[10px] text-netease-muted">
                 当前：{getFmModeLabel(currentFm)}
               </p>
+            </section>
+          )}
+
+          {activeTab === 'permanent' && isOwner && (
+            <section>
+              <div className="mb-2 flex items-center gap-2">
+                <ShieldCheck className="h-4 w-4 text-emerald-400" />
+                <h3 className="text-sm font-medium text-white">申请常驻</h3>
+              </div>
+              <p className="mb-3 text-xs text-netease-muted">
+                常驻房间在无人时也不会被自动销毁。提交后由管理员审核，通过或拒绝都会弹窗通知你。
+              </p>
+
+              {protectedFromDestroy ? (
+                <div className="rounded-xl border border-emerald-400/20 bg-emerald-400/10 px-3 py-3">
+                  <p className="text-sm font-medium text-emerald-300">当前已是常驻房间</p>
+                  <p className="mt-1 text-xs text-white/50">空房也会保留，无需再次申请。</p>
+                </div>
+              ) : permanentApplication?.status === 'pending' ? (
+                <div className="space-y-3">
+                  <div className="rounded-xl border border-amber-400/20 bg-amber-400/10 px-3 py-3">
+                    <p className="text-sm font-medium text-amber-300">审核中</p>
+                    <p className="mt-1 text-xs text-white/50">
+                      已提交申请，请耐心等待管理员处理。
+                      {permanentApplication.appliedAt
+                        ? `（${new Date(permanentApplication.appliedAt).toLocaleString()}）`
+                        : ''}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={permanentSaving || !onCancelPermanent}
+                    onClick={() => void onCancelPermanent?.()}
+                    className="w-full rounded-xl border border-white/10 bg-white/[0.03] py-2.5 text-sm text-white/80 transition-colors hover:bg-white/[0.06] disabled:opacity-50"
+                  >
+                    {permanentSaving ? '处理中…' : '撤销申请'}
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <label className="block">
+                    <span className="mb-1.5 block text-xs text-netease-muted">申请说明（可选）</span>
+                    <textarea
+                      value={permanentNote}
+                      onChange={(e) => setPermanentNote(e.target.value.slice(0, 120))}
+                      rows={3}
+                      placeholder="例如：长期听歌房间，希望保留设置与队列"
+                      className="w-full resize-none rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white outline-none placeholder:text-white/25 focus:border-white/20"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    disabled={permanentSaving || !onApplyPermanent}
+                    onClick={() => void onApplyPermanent?.(permanentNote.trim())}
+                    className="w-full rounded-xl bg-netease-red py-2.5 text-sm font-medium text-white transition-colors hover:bg-netease-red/90 disabled:opacity-50"
+                  >
+                    {permanentSaving ? '提交中…' : '提交常驻申请'}
+                  </button>
+                </div>
+              )}
             </section>
           )}
 
@@ -601,22 +674,21 @@ export default function RoomSettingsModal({
           )}
 
           {activeTab === 'identity' && (
-            <section className="space-y-5">
-              {linuxdoEnabled && (
-                <div>
-                  <div className="mb-2 flex items-center gap-2">
-                    <Crown className="h-4 w-4 text-amber-400" />
-                    <h3 className="text-sm font-medium text-white">Linux.do 身份</h3>
-                  </div>
-                  {isOwner ? (
-                    <>
-                      <p className="mb-3 text-xs text-netease-muted">
-                        绑定 Linux.do 账号后，即使换设备或清除了浏览器 Cookie，也能用同一个 Linux.do 账号登录找回这个房间的房主身份。
-                      </p>
+            <section className="space-y-4">
+              {isOwner ? (
+                <>
+                  <p className="text-xs text-netease-muted">
+                    绑定账号后，换设备或清除 Cookie 仍可用同一账号找回房主身份。
+                  </p>
+                  {linuxdoEnabled && (
+                    <div>
+                      <p className="mb-2 text-xs font-medium text-white/70">Linux.do</p>
                       {linuxdoBound ? (
                         <div className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3">
                           <div className="min-w-0">
-                            <p className="truncate text-sm text-white">已绑定：{linuxdoBound.username || linuxdoBound.linuxdoId}</p>
+                            <p className="truncate text-sm text-white">
+                              已绑定：{linuxdoBound.username || linuxdoBound.linuxdoId}
+                            </p>
                             <p className="mt-0.5 text-[11px] text-netease-muted">
                               {new Date(linuxdoBound.boundAt).toLocaleString()}
                             </p>
@@ -642,42 +714,20 @@ export default function RoomSettingsModal({
                           onClick={() => roomId && startLinuxdoBind(roomId, window.location.pathname)}
                           className="w-full rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-medium text-black transition-colors hover:bg-amber-400 disabled:opacity-50"
                         >
-                          绑定 Linux.do 账号
+                          绑定 Linux.do
                         </button>
                       )}
-                    </>
-                  ) : (
-                    <>
-                      <p className="mb-3 text-xs text-netease-muted">
-                        如果你是这个房间的房主，但因为换设备或清除 Cookie 而不再被识别为房主，可以用当初绑定的 Linux.do 账号登录找回身份。
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => startLinuxdoRecover(window.location.pathname)}
-                        className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white transition-colors hover:bg-white/[0.06]"
-                      >
-                        用 Linux.do 找回房间身份
-                      </button>
-                    </>
+                    </div>
                   )}
-                </div>
-              )}
-
-              {githubEnabled && (
-                <div>
-                  <div className="mb-2 flex items-center gap-2">
-                    <Crown className="h-4 w-4 text-amber-400" />
-                    <h3 className="text-sm font-medium text-white">GitHub 身份</h3>
-                  </div>
-                  {isOwner ? (
-                    <>
-                      <p className="mb-3 text-xs text-netease-muted">
-                        绑定 GitHub 账号后，即使换设备或清除了浏览器 Cookie，也能用同一个 GitHub 账号登录找回这个房间的房主身份。
-                      </p>
+                  {githubEnabled && (
+                    <div>
+                      <p className="mb-2 text-xs font-medium text-white/70">GitHub</p>
                       {githubBound ? (
                         <div className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3">
                           <div className="min-w-0">
-                            <p className="truncate text-sm text-white">已绑定：{githubBound.username || githubBound.githubId}</p>
+                            <p className="truncate text-sm text-white">
+                              已绑定：{githubBound.username || githubBound.githubId}
+                            </p>
                             <p className="mt-0.5 text-[11px] text-netease-muted">
                               {new Date(githubBound.boundAt).toLocaleString()}
                             </p>
@@ -703,25 +753,38 @@ export default function RoomSettingsModal({
                           onClick={() => roomId && startGithubBind(roomId, window.location.pathname)}
                           className="w-full rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-medium text-black transition-colors hover:bg-amber-400 disabled:opacity-50"
                         >
-                          绑定 GitHub 账号
+                          绑定 GitHub
                         </button>
                       )}
-                    </>
-                  ) : (
-                    <>
-                      <p className="mb-3 text-xs text-netease-muted">
-                        如果你是这个房间的房主，但因为换设备或清除 Cookie 而不再被识别为房主，可以用当初绑定的 GitHub 账号登录找回身份。
-                      </p>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <p className="text-xs leading-relaxed text-netease-muted">
+                    换设备或清除 Cookie 后不再是房主时，可用当初绑定的账号找回身份。
+                  </p>
+                  <div className="space-y-2">
+                    {linuxdoEnabled && (
+                      <button
+                        type="button"
+                        onClick={() => startLinuxdoRecover(window.location.pathname)}
+                        className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white transition-colors hover:bg-white/[0.06]"
+                      >
+                        Linux.do 找回
+                      </button>
+                    )}
+                    {githubEnabled && (
                       <button
                         type="button"
                         onClick={() => startGithubRecover(window.location.pathname)}
                         className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white transition-colors hover:bg-white/[0.06]"
                       >
-                        用 GitHub 找回房间身份
+                        GitHub 找回
                       </button>
-                    </>
-                  )}
-                </div>
+                    )}
+                  </div>
+                </>
               )}
             </section>
           )}

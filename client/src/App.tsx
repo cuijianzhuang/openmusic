@@ -2,6 +2,7 @@ import { Suspense, useEffect, useState } from 'react';
 import { Routes, Route, useLocation } from 'react-router-dom';
 import AppUpdateGate from './components/AppUpdateGate';
 import ErrorReportSolutionGate from './components/ErrorReportSolutionGate';
+import PermanentDecisionGate from './components/PermanentDecisionGate';
 import { rememberAdminEntryPath } from './lib/adminEntryShortcut';
 import { lazyWithRetry } from './lib/lazyWithRetry';
 
@@ -150,6 +151,7 @@ export default function App() {
     <div className="h-full">
       {!setupRequired && <AppUpdateGate />}
       {!setupRequired && <ErrorReportSolutionGate />}
+      {!setupRequired && <PermanentDecisionGate />}
       <Suspense fallback={<RouteFallback />}>
         {setupRequired ? (
           <Setup />

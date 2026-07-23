@@ -49,6 +49,8 @@ export interface AdminAuditEntry {
   via?: string;
   linuxdoUsername?: string;
   githubUsername?: string;
+  approved?: boolean;
+  reason?: string;
 }
 
 export interface SiteAnnouncementConfig {
@@ -242,6 +244,14 @@ export interface AdminRoom {
   queueLength: number;
   createdAt: number;
   protectedFromDestroy: boolean;
+  ownerNickname?: string;
+  permanentApplication?: {
+    status: 'pending';
+    appliedAt: number;
+    applicantNickname?: string;
+    note?: string;
+    applicantId?: string;
+  } | null;
 }
 
 export type AdminTabId = 'overview' | 'rooms' | 'bans' | 'reports' | 'notify' | 'settings' | 'audit';

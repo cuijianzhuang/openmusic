@@ -20,6 +20,16 @@ import { resizeCoverForThumb } from "./coverUrl.js";
 import { isDirectCoverUrl, resolveSongCoverUrl } from "./resolveSongCover.js";
 import { isSongPlayableOnServer } from "./songPlayableProbe.js";
 import { runWithMetingRequestContext } from "./metingUpstream.js";
+import {
+  applyPermanentResidence,
+  cancelPermanentApplication,
+  clearPermanentApplicationForRoom,
+  getPermanentApplication,
+  listPermanentApplications,
+  peekPermanentApplication,
+  reviewPermanentApplication,
+  toPublicPermanentApplication,
+} from "./permanentApplication.js";
 
 const generateRoomId = customAlphabet("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", 6);
 const generateId = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 12);
@@ -1656,8 +1666,101 @@ export function listRoomsForAdmin() {
       queueLength: room.queue.length,
       createdAt: room.createdAt,
       protectedFromDestroy: protectedRoomIds.has(room.id),
+      permanentApplication: null,
+      ownerNickname: (() => {
+        const oid = room.ownerId || room.creatorId;
+        return oid ? (room.users.get(oid)?.nickname || "") : "";
+      })(),
     }))
     .sort((a, b) => b.userCount - a.userCount || b.createdAt - a.createdAt);
+}
+
+/** 管理后台房间列表（含常驻申请，待审优先） */
+export async function listRoomsForAdminDetailed() {
+  const base = listRoomsForAdmin();
+  const apps = await listPermanentApplications();
+  const byId = new Map(apps.map((item) => [item.roomId, item]));
+  return base
+    .map((room) => {
+      const app = byId.get(room.id);
+      return {
+        ...room,
+        permanentApplication: app
+          ? {
+              status: app.status,
+              appliedAt: app.appliedAt,
+              applicantNickname: app.applicantNickname,
+              note: app.note || "",
+              applicantId: app.applicantId,
+            }
+          : null,
+      };
+    })
+    .sort((a, b) => {
+      const ap = a.permanentApplication?.status === "pending" ? 0 : 1;
+      const bp = b.permanentApplication?.status === "pending" ? 0 : 1;
+      if (ap !== bp) return ap - bp;
+      return b.userCount - a.userCount || b.createdAt - a.createdAt;
+    });
+}
+
+/** 房主申请房间常驻（空房不销毁） */
+export async function requestRoomPermanent(roomId, actorId, connectionId = null, note = "") {
+  const room = rooms.get(roomId?.toUpperCase?.() ? roomId.toUpperCase() : String(roomId || "").toUpperCase());
+  if (!room) return { error: "房间不存在" };
+  const denied = requireCreator(room, actorId, connectionId);
+  if (denied) return denied;
+
+  const user = room.users.get(actorId);
+  const result = await applyPermanentResidence({
+    roomId: room.id,
+    roomName: room.name,
+    applicantId: actorId,
+    applicantNickname: user?.nickname || "房主",
+    note,
+    alreadyProtected: protectedRoomIds.has(room.id),
+  });
+  if (!result.success) return { error: result.error };
+  return {
+    room: serializeRoom(room, { forUserId: actorId }),
+    application: toPublicPermanentApplication(result.application),
+  };
+}
+
+/** 房主撤销常驻申请 */
+export async function cancelRoomPermanentRequest(roomId, actorId, connectionId = null) {
+  const id = String(roomId || "").toUpperCase();
+  const room = rooms.get(id);
+  if (!room) return { error: "房间不存在" };
+  const denied = requireCreator(room, actorId, connectionId);
+  if (denied) return denied;
+
+  const result = await cancelPermanentApplication(id, actorId);
+  if (!result.success) return { error: result.error };
+  return { room: serializeRoom(room, { forUserId: actorId }) };
+}
+
+/** 管理后台审核常驻申请 */
+export async function reviewRoomPermanentApplication(roomId, { approved, reason } = {}) {
+  const id = String(roomId || "").toUpperCase();
+  const result = await reviewPermanentApplication({ roomId: id, approved, reason });
+  if (!result.success) return { success: false, error: result.error };
+
+  if (result.approved) {
+    const protect = await setRoomProtectedFromDestroy(id, true);
+    if (!protect.success) {
+      // 审核记录已清，尽量补回申请态不现实；返回错误让管理员手动保活
+      return { success: false, error: protect.error || "通过失败：无法写入常驻状态" };
+    }
+  }
+
+  return {
+    success: true,
+    approved: result.approved,
+    notice: result.notice,
+    application: result.application,
+    protectedFromDestroy: protectedRoomIds.has(id),
+  };
 }
 
 /** 管理后台：设置房间是否跳过无人超时销毁。 */
@@ -1707,6 +1810,7 @@ export function adminDestroyRoom(roomId) {
   if (redis) {
     void redis.sRem(PROTECTED_ROOMS_REDIS_KEY, id).catch((err) => console.error(`Redis: 清理房间 ${id} 保活状态失败:`, err.message));
   }
+  void clearPermanentApplicationForRoom(id);
   rooms.delete(id);
   invalidateRoomsListCache();
   deleteRoomChatImages(id)
@@ -4359,6 +4463,13 @@ function serializeRoom(room, options = {}) {
     forbiddenWords: viewerCanModerate ? serializeForbiddenWords(ensureForbiddenWords(room)) : undefined,
     memberTiers: serializeMemberTiersMap(room.memberTiers),
     memberSettings: serializeMemberSettings(room.memberSettings),
+    // 仅创建者可见：常驻状态与申请进度
+    ...(forUserId && isRoomCreator(room, forUserId)
+      ? {
+          protectedFromDestroy: protectedRoomIds.has(room.id),
+          permanentApplication: toPublicPermanentApplication(peekPermanentApplication(room.id)),
+        }
+      : {}),
   };
 }
 
@@ -4434,9 +4545,16 @@ export function roomUpdateForViewer(prepared, viewerUserId = null) {
   if (!prepared) return null;
   const { room, shared, moderatorExtras } = prepared;
   const viewerCanModerate = viewerUserId ? canModerate(room, viewerUserId) : false;
+  const creatorExtras = viewerUserId && isRoomCreator(room, viewerUserId)
+    ? {
+        protectedFromDestroy: protectedRoomIds.has(room.id),
+        permanentApplication: toPublicPermanentApplication(peekPermanentApplication(room.id)),
+      }
+    : {};
   return {
     ...shared,
     ...(viewerCanModerate ? moderatorExtras : {}),
+    ...creatorExtras,
     chatMuted: viewerUserId ? isUserChatMuted(room, viewerUserId) : false,
     // chatVisibleSince 仅进房 ACK 下发，后续广播省略以缩小载荷并便于整房共享
   };

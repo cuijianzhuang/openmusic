@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { useNavigate } from 'react-router-dom';
 import {
   CheckCircleOutlined,
+  CheckOutlined,
+  CloseOutlined,
   DeleteOutlined,
   LogoutOutlined,
   MenuOutlined,
@@ -32,6 +34,7 @@ import {
   Table,
   Tabs,
   Tag,
+  Tooltip,
   Typography,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
@@ -138,6 +141,9 @@ function AdminPage() {
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [protectingId, setProtectingId] = useState<string | null>(null);
+  const [permanentReviewingId, setPermanentReviewingId] = useState<string | null>(null);
+  const [rejectPermanentRoom, setRejectPermanentRoom] = useState<AdminRoom | null>(null);
+  const [rejectPermanentReason, setRejectPermanentReason] = useState('');
   const [entryPathDraft, setEntryPathDraft] = useState(
     () => (typeof window !== 'undefined' ? window.location.pathname : ''),
   );
@@ -355,14 +361,46 @@ function AdminPage() {
         method: 'PUT',
         body: JSON.stringify({ enabled: !room.protectedFromDestroy }),
       });
-      message.success(room.protectedFromDestroy ? '已取消房间保活' : '已设为保活');
+      message.success(room.protectedFromDestroy ? '已取消房间常驻' : '已设为常驻');
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : '更新房间保活状态失败');
+      setError(err instanceof Error ? err.message : '更新房间常驻状态失败');
     } finally {
       setProtectingId(null);
     }
   }, [message, refresh]);
+
+  const reviewPermanentApplication = useCallback(async (
+    room: AdminRoom,
+    approved: boolean,
+    reason = '',
+  ) => {
+    setPermanentReviewingId(room.id);
+    try {
+      await adminFetch(`/api/admin/rooms/${room.id}/permanent-application`, {
+        method: 'POST',
+        body: JSON.stringify({ approved, reason }),
+      });
+      message.success(approved ? `已通过「${room.name}」的常驻申请` : `已拒绝「${room.name}」的常驻申请`);
+      setRejectPermanentRoom(null);
+      setRejectPermanentReason('');
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '审核常驻申请失败');
+    } finally {
+      setPermanentReviewingId(null);
+    }
+  }, [message, refresh]);
+
+  const submitRejectPermanent = useCallback(() => {
+    if (!rejectPermanentRoom) return;
+    const reason = rejectPermanentReason.trim();
+    if (!reason) {
+      message.warning('请填写拒绝原因');
+      return;
+    }
+    void reviewPermanentApplication(rejectPermanentRoom, false, reason);
+  }, [rejectPermanentReason, rejectPermanentRoom, reviewPermanentApplication, message]);
 
   const resetUpstreamCooldown = useCallback(async (url: string) => {
     setUpstreamBusyUrl(url);
@@ -564,6 +602,10 @@ function AdminPage() {
   }, [entryPathDraft, message, navigate, refresh, savingPath]);
 
   const openReportCount = errorReports.filter((r) => r.status === 'open').length;
+  const pendingPermanentCount = useMemo(
+    () => rooms.filter((room) => room.permanentApplication?.status === 'pending').length,
+    [rooms],
+  );
   const reportDebugTabItems = useMemo(
     () => (reportDetail ? buildReportDebugTabItems(reportDetail) : []),
     [reportDetail],
@@ -583,7 +625,13 @@ function AdminPage() {
           {tab.label}
         </Badge>
       )
-      : tab.label,
+      : tab.id === 'rooms' && pendingPermanentCount > 0
+        ? (
+          <Badge count={pendingPermanentCount} size="small" offset={[8, 0]}>
+            {tab.label}
+          </Badge>
+        )
+        : tab.label,
   }));
 
   useEffect(() => {
@@ -603,123 +651,154 @@ function AdminPage() {
   const roomColumns: ColumnsType<AdminRoom> = [
     {
       title: '房间',
-      width: 200,
+      width: 156,
+      ellipsis: true,
       render: (_, room) => (
-        <Space direction="vertical" size={0}>
-          <Typography.Text strong ellipsis style={{ maxWidth: 180 }}>
+        <div style={{ minWidth: 0 }}>
+          <Typography.Text strong ellipsis style={{ display: 'block', maxWidth: 144 }}>
             {room.name}
           </Typography.Text>
           <Typography.Text type="secondary" code style={{ fontSize: 11 }}>
             {room.id}
           </Typography.Text>
-        </Space>
+        </div>
       ),
     },
     {
       title: '状态',
-      width: 160,
-      render: (_, room) => (
-        <Space size={[4, 4]} wrap>
-          {room.hasPassword && <Tag color="gold">密码</Tag>}
-          {room.isLocked && <Tag color="red">上锁</Tag>}
-          {room.protectedFromDestroy && <Tag color="green">保活</Tag>}
-          {!room.hasPassword && !room.isLocked && !room.protectedFromDestroy && (
-            <Typography.Text type="secondary">—</Typography.Text>
-          )}
-        </Space>
-      ),
+      width: 132,
+      render: (_, room) => {
+        const pending = room.permanentApplication?.status === 'pending';
+        const tags = [
+          pending ? <Tag key="pending" color="orange">待审</Tag> : null,
+          room.protectedFromDestroy ? <Tag key="protected" color="green">常驻</Tag> : null,
+          room.hasPassword ? <Tag key="password" color="gold">密码</Tag> : null,
+          room.isLocked ? <Tag key="locked" color="red">上锁</Tag> : null,
+        ].filter(Boolean);
+        return tags.length > 0
+          ? <Space size={[4, 4]} wrap>{tags}</Space>
+          : <Typography.Text type="secondary">—</Typography.Text>;
+      },
     },
     {
       title: '在线',
-      width: 72,
+      width: 56,
       align: 'center',
-      render: (_, room) => (
-        <Typography.Text>{room.userCount}</Typography.Text>
-      ),
+      dataIndex: 'userCount',
     },
     {
-      title: '当前播放',
+      title: '播放',
       ellipsis: true,
       render: (_, room) => (
         room.currentSong ? (
-          <Space size={6}>
-            <Tag color={room.isPlaying ? 'processing' : 'default'} style={{ margin: 0 }}>
-              {room.isPlaying ? '播放中' : '已暂停'}
-            </Tag>
-            <Typography.Text ellipsis style={{ maxWidth: 220 }}>
-              {room.currentSong.name}
-              <Typography.Text type="secondary"> · {room.currentSong.artist}</Typography.Text>
-            </Typography.Text>
-          </Space>
+          <Typography.Text ellipsis style={{ maxWidth: 240 }}>
+            {room.isPlaying ? '▶ ' : '⏸ '}
+            {room.currentSong.name}
+            <Typography.Text type="secondary"> · {room.currentSong.artist}</Typography.Text>
+          </Typography.Text>
         ) : (
-          <Typography.Text type="secondary">未在播放</Typography.Text>
+          <Typography.Text type="secondary">—</Typography.Text>
         )
       ),
     },
     {
       title: '队列',
-      width: 64,
+      width: 52,
       align: 'center',
       dataIndex: 'queueLength',
     },
     {
       title: '操作',
-      width: 200,
+      width: 148,
       fixed: 'right',
-      render: (_, room) => (
-        <Space size="small" onClick={(e) => e.stopPropagation()}>
-          <Button
-            size="small"
-            type={room.protectedFromDestroy ? 'primary' : 'default'}
-            ghost={room.protectedFromDestroy}
-            icon={<SafetyCertificateOutlined />}
-            loading={protectingId === room.id}
-            onClick={(e) => {
-              e.stopPropagation();
-              void toggleRoomProtection(room);
-            }}
-          >
-            {room.protectedFromDestroy ? '取消保活' : '保活'}
-          </Button>
-          {pendingDeleteId === room.id ? (
-            <Space size={4}>
-              <Button
-                size="small"
-                danger
-                type="primary"
-                loading={deletingId === room.id}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void dissolveRoom(room);
-                }}
-              >
-                确认
-              </Button>
-              <Button
-                size="small"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setPendingDeleteId(null);
-                }}
-              >
-                取消
-              </Button>
-            </Space>
-          ) : (
-            <Button
-              size="small"
-              danger
-              icon={<DeleteOutlined />}
-              onClick={(e) => {
-                e.stopPropagation();
-                setPendingDeleteId(room.id);
-              }}
-            >
-              解散
-            </Button>
-          )}
-        </Space>
-      ),
+      render: (_, room) => {
+        const pending = room.permanentApplication?.status === 'pending';
+        const busy = protectingId === room.id || permanentReviewingId === room.id;
+        return (
+          <Space size={4} onClick={(e) => e.stopPropagation()}>
+            {pending ? (
+              <>
+                <Tooltip title="通过常驻申请">
+                  <Button
+                    size="small"
+                    type="primary"
+                    icon={<CheckOutlined />}
+                    loading={busy}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void reviewPermanentApplication(room, true);
+                    }}
+                  />
+                </Tooltip>
+                <Tooltip title="拒绝申请">
+                  <Button
+                    size="small"
+                    danger
+                    icon={<CloseOutlined />}
+                    loading={busy}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setRejectPermanentRoom(room);
+                      setRejectPermanentReason('');
+                    }}
+                  />
+                </Tooltip>
+              </>
+            ) : (
+              <Tooltip title={room.protectedFromDestroy ? '取消常驻' : '设为常驻'}>
+                <Button
+                  size="small"
+                  type={room.protectedFromDestroy ? 'primary' : 'default'}
+                  ghost={room.protectedFromDestroy}
+                  icon={<SafetyCertificateOutlined />}
+                  loading={busy}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void toggleRoomProtection(room);
+                  }}
+                />
+              </Tooltip>
+            )}
+            {pendingDeleteId === room.id ? (
+              <>
+                <Button
+                  size="small"
+                  danger
+                  type="primary"
+                  loading={deletingId === room.id}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void dissolveRoom(room);
+                  }}
+                >
+                  确认
+                </Button>
+                <Button
+                  size="small"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPendingDeleteId(null);
+                  }}
+                >
+                  取消
+                </Button>
+              </>
+            ) : (
+              <Tooltip title="解散房间">
+                <Button
+                  size="small"
+                  danger
+                  icon={<DeleteOutlined />}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPendingDeleteId(room.id);
+                  }}
+                />
+              </Tooltip>
+            )}
+          </Space>
+        );
+      },
     },
   ];
 
@@ -871,30 +950,36 @@ function AdminPage() {
         return (
           <Card
             title="房间列表"
+            size="small"
             extra={(
-              <Typography.Text type="secondary">
-                {roomsKeyword || roomsStatusFilter.length > 0
-                  ? `筛选 ${filteredRooms.length} / 共 ${rooms.length} 个活跃房间`
-                  : `共 ${rooms.length} 个活跃房间`}
-                {' · 点击行展开成员并快捷封禁'}
-              </Typography.Text>
+              <Space size={12} wrap>
+                {pendingPermanentCount > 0 && (
+                  <Tag color="orange">{pendingPermanentCount} 个待审常驻</Tag>
+                )}
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  {roomsKeyword || roomsStatusFilter.length > 0
+                    ? `${filteredRooms.length} / ${rooms.length} 个房间`
+                    : `${rooms.length} 个活跃房间`}
+                </Typography.Text>
+              </Space>
             )}
           >
-            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-              <Row gutter={[12, 12]} align="middle">
-                <Col xs={24} lg={10}>
+            <Space direction="vertical" size="small" style={{ width: '100%' }}>
+              <Row gutter={[8, 8]} align="middle">
+                <Col xs={24} md={11}>
                   <Input.Search
-                    placeholder="搜索房间名、ID、成员、IP、歌曲"
+                    placeholder="搜索房间、成员、IP、歌曲"
                     allowClear
+                    size="middle"
                     value={roomsKeyword}
                     onChange={(e) => setRoomsKeyword(e.target.value)}
                   />
                 </Col>
-                <Col xs={24} lg={10}>
+                <Col xs={20} md={10}>
                   <Select
                     mode="multiple"
                     allowClear
-                    placeholder="状态筛选（满足任一）"
+                    placeholder="状态筛选"
                     style={{ width: '100%' }}
                     value={roomsStatusFilter}
                     options={ADMIN_ROOM_STATUS_FILTERS}
@@ -902,7 +987,7 @@ function AdminPage() {
                     maxTagCount="responsive"
                   />
                 </Col>
-                <Col xs={24} lg={4}>
+                <Col xs={4} md={3}>
                   <Button
                     block
                     disabled={!roomsKeyword && roomsStatusFilter.length === 0}
@@ -911,16 +996,19 @@ function AdminPage() {
                       setRoomsStatusFilter([]);
                     }}
                   >
-                    重置筛选
+                    重置
                   </Button>
                 </Col>
               </Row>
               <Table
                 rowKey="id"
-                size="middle"
+                size="small"
                 columns={roomColumns}
                 dataSource={filteredRooms}
-                scroll={{ x: 960 }}
+                scroll={{ x: 820 }}
+                rowClassName={(room) => (
+                  room.permanentApplication?.status === 'pending' ? 'admin-room-row-pending' : ''
+                )}
                 pagination={{
                   current: roomsPage,
                   pageSize: roomsPageSize,
@@ -932,16 +1020,21 @@ function AdminPage() {
                   showTotal: (total) => `共 ${total} 条`,
                   showSizeChanger: true,
                   pageSizeOptions: [10, 15, 20, 50],
+                  size: 'small',
                 }}
                 locale={{ emptyText: rooms.length === 0 ? '当前没有活跃房间' : '没有匹配的房间' }}
                 onRow={(room) => ({
-                  style: room.users.length > 0 ? { cursor: 'pointer' } : undefined,
+                  style: (room.users.length > 0 || room.permanentApplication?.status === 'pending')
+                    ? { cursor: 'pointer' }
+                    : undefined,
                 })}
                 expandable={{
                   expandRowByClick: true,
-                  rowExpandable: (room) => room.users.length > 0,
+                  rowExpandable: (room) => (
+                    room.users.length > 0 || room.permanentApplication?.status === 'pending'
+                  ),
                   expandIcon: ({ expanded, onExpand, record }) => (
-                    record.users.length > 0 ? (
+                    (record.users.length > 0 || record.permanentApplication?.status === 'pending') ? (
                       <RightOutlined
                         rotate={expanded ? 90 : 0}
                         onClick={(e) => onExpand(record, e)}
@@ -955,60 +1048,91 @@ function AdminPage() {
                       <span style={{ display: 'inline-block', width: 11 }} />
                     )
                   ),
-                  expandedRowRender: (room) => (
-                    <Table
-                      size="small"
-                      pagination={false}
-                      rowKey="id"
-                      dataSource={room.users}
-                      columns={[
-                        {
-                          title: '昵称',
-                          dataIndex: 'nickname',
-                          width: 140,
-                        },
-                        {
-                          title: 'IP',
-                          render: (_, u) => (
-                            u.clientIp ? (
-                              <Space size={8}>
-                                <Typography.Text code copyable={{ text: u.clientIp }}>
-                                  {u.clientIp}
+                  expandedRowRender: (room) => {
+                    const app = room.permanentApplication;
+                    return (
+                      <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                        {app?.status === 'pending' && (
+                          <Alert
+                            type="warning"
+                            showIcon
+                            message="常驻申请待审核"
+                            description={(
+                              <Space direction="vertical" size={4}>
+                                <Typography.Text style={{ fontSize: 12 }}>
+                                  申请人：{app.applicantNickname || room.ownerNickname || '房主'}
+                                  {app.appliedAt ? ` · ${formatAuditTime(app.appliedAt)}` : ''}
                                 </Typography.Text>
-                                <Button size="small" onClick={() => quickBan('ip', u.clientIp!)}>
-                                  封禁 IP
-                                </Button>
+                                {app.note ? (
+                                  <Typography.Text style={{ fontSize: 12 }}>
+                                    说明：{app.note}
+                                  </Typography.Text>
+                                ) : null}
                               </Space>
-                            ) : (
-                              <Typography.Text type="secondary">—</Typography.Text>
-                            )
-                          ),
-                        },
-                        {
-                          title: '设备 ID',
-                          render: (_, u) => (
-                            u.deviceId ? (
-                              <Space size={8}>
-                                <Typography.Text
-                                  code
-                                  copyable={{ text: u.deviceId }}
-                                  ellipsis
-                                  style={{ maxWidth: 220 }}
-                                >
-                                  {u.deviceId}
-                                </Typography.Text>
-                                <Button size="small" onClick={() => quickBan('device', u.deviceId!)}>
-                                  封禁设备
-                                </Button>
-                              </Space>
-                            ) : (
-                              <Typography.Text type="secondary">—</Typography.Text>
-                            )
-                          ),
-                        },
-                      ]}
-                    />
-                  ),
+                            )}
+                          />
+                        )}
+                        {room.users.length > 0 ? (
+                          <Table
+                            size="small"
+                            pagination={false}
+                            rowKey="id"
+                            dataSource={room.users}
+                            columns={[
+                              {
+                                title: '昵称',
+                                dataIndex: 'nickname',
+                                width: 120,
+                              },
+                              {
+                                title: 'IP',
+                                render: (_, u) => (
+                                  u.clientIp ? (
+                                    <Space size={8}>
+                                      <Typography.Text code copyable={{ text: u.clientIp }}>
+                                        {u.clientIp}
+                                      </Typography.Text>
+                                      <Button size="small" onClick={() => quickBan('ip', u.clientIp!)}>
+                                        封禁
+                                      </Button>
+                                    </Space>
+                                  ) : (
+                                    <Typography.Text type="secondary">—</Typography.Text>
+                                  )
+                                ),
+                              },
+                              {
+                                title: '设备 ID',
+                                render: (_, u) => (
+                                  u.deviceId ? (
+                                    <Space size={8}>
+                                      <Typography.Text
+                                        code
+                                        copyable={{ text: u.deviceId }}
+                                        ellipsis
+                                        style={{ maxWidth: 200 }}
+                                      >
+                                        {u.deviceId}
+                                      </Typography.Text>
+                                      <Button size="small" onClick={() => quickBan('device', u.deviceId!)}>
+                                        封禁
+                                      </Button>
+                                    </Space>
+                                  ) : (
+                                    <Typography.Text type="secondary">—</Typography.Text>
+                                  )
+                                ),
+                              },
+                            ]}
+                          />
+                        ) : (
+                          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                            当前无在线成员
+                          </Typography.Text>
+                        )}
+                      </Space>
+                    );
+                  },
                 }}
               />
             </Space>
@@ -1572,7 +1696,41 @@ function AdminPage() {
         )}
       </Modal>
 
+      <Modal
+        title="拒绝常驻申请"
+        open={Boolean(rejectPermanentRoom)}
+        onCancel={() => {
+          setRejectPermanentRoom(null);
+          setRejectPermanentReason('');
+        }}
+        onOk={submitRejectPermanent}
+        okText="确认拒绝"
+        okButtonProps={{ danger: true, loading: Boolean(permanentReviewingId) }}
+        cancelText="取消"
+        destroyOnClose
+      >
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+            房间「{rejectPermanentRoom?.name}」的申请将被拒绝，原因会弹窗通知房主。
+          </Typography.Text>
+          <Input.TextArea
+            value={rejectPermanentReason}
+            onChange={(e) => setRejectPermanentReason(e.target.value)}
+            placeholder="请填写拒绝原因（必填）"
+            maxLength={200}
+            rows={3}
+            showCount
+          />
+        </Space>
+      </Modal>
+
       <style>{`
+        .admin-room-row-pending > td {
+          background: #fffbe6 !important;
+        }
+        .admin-room-row-pending:hover > td {
+          background: #fff7cc !important;
+        }
         .admin-page-header.ant-layout-header {
           height: 56px !important;
           line-height: 56px !important;

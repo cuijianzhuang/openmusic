@@ -1,15 +1,21 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import {
   listRoomsForAdmin,
+  listRoomsForAdminDetailed,
   adminDestroyRoom,
   isRedisEnabled,
   setRoomProtectedFromDestroy,
+  reviewRoomPermanentApplication,
   broadcastAdminSystemMessage,
   getRoomInternal,
   removeUser,
   prepareRoomBroadcast,
   roomUpdateForViewer,
 } from './roomManager.js';
+import {
+  listPendingPermanentNoticesForUser,
+  ackPermanentDecisionNotice,
+} from './permanentApplication.js';
 import { getRedisClient } from './roomStorage.js';
 import {
   getMetingUpstreamStatus,
@@ -406,6 +412,26 @@ function emitErrorReportSolutionToUser(io, socketToUserId, report) {
     const sock = io.sockets.sockets.get(sid);
     if (!sock) continue;
     sock.emit('error_report_solution', notice);
+    delivered += 1;
+  }
+  return delivered;
+}
+
+function emitPermanentDecisionToUser(io, socketToUserId, notice) {
+  if (!notice?.id || !notice?.userId) return 0;
+  let delivered = 0;
+  for (const [sid, uid] of socketToUserId.entries()) {
+    if (uid !== notice.userId) continue;
+    const sock = io.sockets.sockets.get(sid);
+    if (!sock) continue;
+    sock.emit('room_permanent_decision', {
+      id: notice.id,
+      roomId: notice.roomId,
+      roomName: notice.roomName,
+      approved: Boolean(notice.approved),
+      reason: notice.reason || '',
+      at: notice.at,
+    });
     delivered += 1;
   }
   return delivered;
@@ -821,8 +847,8 @@ export function mountAdminApi(app, { io, socketToRoom, socketToUserId, getClient
     res.json({ ok: true, announcement: result.announcement });
   });
 
-  app.get('/api/admin/rooms', requireAdmin, (_req, res) => {
-    res.json({ rooms: listRoomsForAdmin() });
+  app.get('/api/admin/rooms', requireAdmin, async (_req, res) => {
+    res.json({ rooms: await listRoomsForAdminDetailed() });
   });
 
   app.put('/api/admin/rooms/:id/protection', requireAdminOrigin, requireAdmin, requireAdminSetupComplete, async (req, res) => {
@@ -837,6 +863,26 @@ export function mountAdminApi(app, { io, socketToRoom, socketToUserId, getClient
       enabled: result.protectedFromDestroy,
     }, ip);
     res.json(result);
+  });
+
+  app.post('/api/admin/rooms/:id/permanent-application', requireAdminOrigin, requireAdmin, requireAdminSetupComplete, async (req, res) => {
+    const roomId = String(req.params.id || '').toUpperCase();
+    const ip = getClientIp?.(req) || req.ip || '';
+    const approved = Boolean(req.body?.approved);
+    const reason = String(req.body?.reason || '').trim();
+    const result = await reviewRoomPermanentApplication(roomId, { approved, reason });
+    if (!result.success) {
+      return res.status(400).json({ error: result.error || '审核失败' });
+    }
+
+    const delivered = emitPermanentDecisionToUser(io, socketToUserId, result.notice);
+    audit('review_permanent_application', {
+      roomId,
+      approved,
+      reason: approved ? undefined : reason,
+      delivered,
+    }, ip);
+    res.json({ ...result, delivered });
   });
 
   app.post('/api/admin/meting/reset-cooldown', requireAdminOrigin, requireAdmin, requireAdminSetupComplete, (req, res) => {

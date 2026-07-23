@@ -157,6 +157,26 @@ export function subscribeErrorReportSolution(
   };
 }
 
+export interface PermanentDecisionNoticePayload {
+  id: string;
+  roomId: string;
+  roomName: string;
+  approved: boolean;
+  reason?: string;
+  at?: number;
+}
+
+/** 订阅常驻申请审核结果 */
+export function subscribePermanentDecision(
+  handler: (notice: PermanentDecisionNoticePayload) => void,
+): () => void {
+  const s = getSocket();
+  s.on('room_permanent_decision', handler);
+  return () => {
+    s.off('room_permanent_decision', handler);
+  };
+}
+
 
 function emitWithAck<TResponse>(
   event: string,
@@ -1065,6 +1085,32 @@ export function useSocket() {
     });
   }, []);
 
+  const applyRoomPermanent = useCallback((note?: string): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
+    return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
+      'apply_room_permanent',
+      { note: note || '' },
+      { success: false, error: '连接超时，请重试' },
+    ).then((res) => {
+      if (res.success && res.room) {
+        applyRoomSnapshot(res.room);
+      }
+      return res;
+    });
+  }, []);
+
+  const cancelRoomPermanent = useCallback((): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
+    return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
+      'cancel_room_permanent',
+      {},
+      { success: false, error: '连接超时，请重试' },
+    ).then((res) => {
+      if (res.success && res.room) {
+        applyRoomSnapshot(res.room);
+      }
+      return res;
+    });
+  }, []);
+
   const setRoomFmMode = useCallback((mode: string): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
     return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
       'set_room_fm_mode',
@@ -1405,6 +1451,9 @@ export function useSocket() {
     renameRoomName,
 
     setRoomLock,
+
+    applyRoomPermanent,
+    cancelRoomPermanent,
 
     setRoomFmMode,
 

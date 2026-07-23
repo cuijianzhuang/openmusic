@@ -25,7 +25,7 @@ export const ADMIN_TABS: { id: AdminTabId; label: string; icon: ReactNode }[] = 
 
 export const TAB_META: Record<AdminTabId, { title: string; description: string }> = {
   overview: { title: '概览', description: '实时运行状态与音源健康' },
-  rooms: { title: '房间管理', description: '查看在线房间，设置保活或解散' },
+  rooms: { title: '房间管理', description: '审核常驻申请、管理房间状态与解散' },
   bans: { title: '全站封禁', description: '按 IP 或设备封禁，阻止进房和建房' },
   reports: { title: '错误上报', description: '用户提交的问题反馈与调试日志' },
   notify: { title: '公告广播', description: '首页公告与全房间系统通知' },
