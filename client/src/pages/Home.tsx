@@ -367,11 +367,7 @@ export default function Home() {
   const setNickname = useRoomStore((s) => s.setNickname);
   const { leaveRoom } = useSocket();
 
-  usePageSeo({
-    title: '一起听歌 · 房间大厅',
-    description: '创建或加入点歌房间，和好友一起听歌、多人实时同步播放；支持多音源搜索点歌与歌词跟唱。',
-    path: '/',
-  });
+  usePageSeo({ path: '/' });
 
   const [rooms, setRooms] = useState<RoomSummary[]>([]);
   const [roomsLoading, setRoomsLoading] = useState(true);
