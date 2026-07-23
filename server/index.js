@@ -2160,7 +2160,38 @@ async function advanceEndedRoomNow(roomId, expectedQueueId = '') {
   return advanced;
 }
 
+/**
+ * 给这一个 socket 实例的 .on() 包一层统一兜底：下面几十个事件处理器大多没有自己的
+ * try/catch，处理器内部抛错或 async 函数 reject 时，原本会直接变成一个未处理的异常/
+ * rejection —— 客户端等待的 ack callback 永远不会被调用（界面卡死），情况更差时还可能
+ * 直接影响进程稳定性。改成猴子补丁的方式统一兜底，不用逐个去改 50 处注册代码。
+ */
+function hardenSocketHandlers(target) {
+  const originalOn = target.on.bind(target);
+  target.on = (event, handler) => {
+    if (typeof handler !== 'function') return originalOn(event, handler);
+    return originalOn(event, (...args) => {
+      const callback = typeof args[args.length - 1] === 'function' ? args[args.length - 1] : null;
+      const reportFailure = (err) => {
+        console.error(`socket 事件 "${event}" 处理失败:`, err?.message || err);
+        callback?.({ success: false, error: '服务器内部错误，请重试' });
+      };
+      try {
+        const result = handler(...args);
+        if (result && typeof result.catch === 'function') {
+          result.catch(reportFailure);
+        }
+      } catch (err) {
+        reportFailure(err);
+      }
+    });
+  };
+  return target;
+}
+
 io.on('connection', (socket) => {
+  hardenSocketHandlers(socket);
+
   socket.on('join_room', async ({
     roomId,
     nickname,

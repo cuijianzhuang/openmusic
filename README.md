@@ -158,7 +158,7 @@ LINUXDO_REDIRECT_URI=https://你的域名/api/auth/linuxdo/callback
 LINUXDO_AUTHORIZE_URL=
 LINUXDO_TOKEN_URL=
 LINUXDO_USERINFO_URL=
-LINUXDO_SCOPE=read
+LINUXDO_SCOPE=user
 
 # GitHub
 GITHUB_CLIENT_ID=
@@ -173,7 +173,9 @@ GITHUB_SCOPE=read:user
 
 - **房主绑定**：进入自己创建的房间 → 房间设置 → 「身份」标签页 → 绑定 Linux.do / GitHub 账号（两个开了哪个就显示哪个）。
 - **找回房主身份**：换了设备或清了 Cookie 导致不再被识别为房主时，进同一个房间 → 房间设置 → 「身份」标签页 → 用对应账号找回房间身份（只有此前真绑定过的账号才能找回成功）。
-- **后台备用登录**：先用账号密码登进管理后台 → 「管理员账号」卡片 → 绑定 Linux.do / GitHub 账号，之后登录页会出现对应的一键登录按钮。第三方账号本身不能凭空创建新的管理员权限，必须先有一个已登录的管理员账号才能发起绑定。
+- **后台备用登录**：先用账号密码登进管理后台 →「系统设置」→「安全与账号」标签页 → 绑定 Linux.do / GitHub 账号，之后登录页会出现对应的一键登录按钮。第三方账号本身不能凭空创建新的管理员权限，必须先有一个已登录的管理员账号才能发起绑定。（注意区分：Client ID / Secret 等接入参数填在「身份登录」标签页，绑定按钮在「安全与账号」标签页——这是两个不同的页面。）
+
+> **常见报错排查**：回调地址（redirect_uri）必须在「OAuth 应用后台」和「本项目配置」两处**逐字符完全一致**，包括协议、域名、路径、有没有结尾斜杠。任何一处填错（比如路径打成 `/oauth2/callback/xxx` 而不是 `/api/auth/xxx/callback`）都会导致跳转回来后报错或 404，且往往两边都要改、只改一边没用。
 
 ---
 
