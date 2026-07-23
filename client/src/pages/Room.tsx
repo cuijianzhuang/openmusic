@@ -284,7 +284,7 @@ export default function Room() {
     noindex: true,
   });
 
-  const { joinRoom, addSong, leaveRoom, listFavorites, setFavorite, importFavorites, renameRoomName, setRoomLock, setRoomFmMode, setRoomAnnouncement, setRoomCustomCover, setChatHistoryVisibleOnJoin, setRoomJoinNotice, setSongRequestEnabled, unbanRoomSong, setRoomMemberTier, removeRoomMemberTier, setRoomMemberSettings, loadSongHistory, transferOwner, clearQueue } = useSocket();
+  const { joinRoom, addSong, leaveRoom, listFavorites, setFavorite, importFavorites, renameRoomName, setRoomLock, setRoomFmMode, setRoomAnnouncement, setRoomCustomCover, setChatHistoryVisibleOnJoin, setRoomJoinNotice, setSongRequestEnabled, unbanRoomSong, addRoomForbiddenWord, removeRoomForbiddenWord, setRoomMemberTier, removeRoomMemberTier, setRoomMemberSettings, loadSongHistory, transferOwner, clearQueue } = useSocket();
   const { applyFavorites } = useFavorites();
   const { queueKeys, playedKeys } = useRoomSongKeySets();
 
@@ -378,6 +378,7 @@ export default function Room() {
   const [songRequestSaving, setSongRequestSaving] = useState(false);
   const [chatHistorySaving, setChatHistorySaving] = useState(false);
   const [joinNoticeSaving, setJoinNoticeSaving] = useState(false);
+  const [forbiddenWordSaving, setForbiddenWordSaving] = useState(false);
   const lastSongRequestAtRef = useRef(0);
   const playlistSearchScrollRef = useRef<HTMLDivElement>(null);
   const favoritesScrollRef = useRef<HTMLDivElement>(null);
@@ -1426,6 +1427,31 @@ export default function Room() {
     }
   }, [songRequestSaving, unbanRoomSong, showToast]);
 
+  const handleAddForbiddenWord = useCallback(async (word: string) => {
+    if (forbiddenWordSaving) return false;
+    setForbiddenWordSaving(true);
+    const res = await addRoomForbiddenWord(word);
+    setForbiddenWordSaving(false);
+    if (res.success) {
+      showToast('已添加违禁词', 'success');
+      return true;
+    }
+    showToast(res.error || '添加违禁词失败', 'error');
+    return false;
+  }, [forbiddenWordSaving, addRoomForbiddenWord, showToast]);
+
+  const handleRemoveForbiddenWord = useCallback(async (word: string) => {
+    if (forbiddenWordSaving) return;
+    setForbiddenWordSaving(true);
+    const res = await removeRoomForbiddenWord(word);
+    setForbiddenWordSaving(false);
+    if (res.success) {
+      showToast('已删除违禁词', 'success');
+    } else {
+      showToast(res.error || '删除违禁词失败', 'error');
+    }
+  }, [forbiddenWordSaving, removeRoomForbiddenWord, showToast]);
+
   const handleOpenMemberModalFromSettings = useCallback(() => {
     setSettingsOpen(false);
     setMemberOpen(true);
@@ -2433,6 +2459,10 @@ export default function Room() {
         songRequestSaving={songRequestSaving}
         bannedSongs={room?.bannedSongs ?? []}
         onUnbanSong={handleUnbanSong}
+        forbiddenWords={room?.forbiddenWords ?? []}
+        forbiddenWordSaving={forbiddenWordSaving}
+        onAddForbiddenWord={handleAddForbiddenWord}
+        onRemoveForbiddenWord={handleRemoveForbiddenWord}
         memberTierCount={Object.keys(room?.memberTiers ?? {}).length}
         users={room?.users ?? []}
         myUserId={mySocketId}

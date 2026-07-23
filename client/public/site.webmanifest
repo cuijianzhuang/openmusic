@@ -1,11 +1,12 @@
 {
   "name": "OpenMusic",
   "short_name": "OpenMusic",
-  "description": "一起听歌 · 多人实时点歌",
+  "description": "一起听歌 - 和喜欢的人 听同一首歌",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#101012",
   "theme_color": "#ec4141",
+  "lang": "zh-CN",
   "icons": [
     {
       "src": "/favicon-192.png",

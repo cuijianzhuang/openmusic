@@ -40,6 +40,153 @@ const MAX_CLEAR_SONGS_ON_LEAVE_DELAY_SEC = 24 * 60 * 60;
 const DEFAULT_JOIN_NOTICE_COOLDOWN_SEC = 3 * 60;
 const MAX_JOIN_NOTICE_COOLDOWN_SEC = 24 * 60 * 60;
 const MAX_BANNED_SONGS = 100;
+const MAX_FORBIDDEN_WORDS = 150;
+const MAX_FORBIDDEN_WORD_LEN = 20;
+/** 新房间默认违禁词；房主可删除，排序时排在自定义词之后 */
+const DEFAULT_FORBIDDEN_WORDS = [
+  "傻逼",
+  "傻B",
+  "傻比",
+  "傻叉",
+  "煞笔",
+  "煞B",
+  "沙比",
+  "沙B",
+  "傻屌",
+  "傻吊",
+  "傻缺",
+  "傻帽",
+  "傻狗",
+  "蠢逼",
+  "死逼",
+  "烂逼",
+  "臭逼",
+  "装逼",
+  "逼样",
+  "逼养的",
+  "sb",
+  "脑残",
+  "脑瘫",
+  "智障",
+  "弱智",
+  "低能",
+  "白痴",
+  "蠢货",
+  "蠢猪",
+  "蠢驴",
+  "废物",
+  "人渣",
+  "畜生",
+  "杂种",
+  "杂碎",
+  "婊子",
+  "婊砸",
+  "贱人",
+  "贱货",
+  "臭婊子",
+  "婊子养的",
+  "烂货",
+  "破鞋",
+  "狗东西",
+  "狗日的",
+  "狗娘养的",
+  "狗崽子",
+  "狗逼",
+  "狗比",
+  "去死",
+  "找死",
+  "去死吧",
+  "去死啊",
+  "死全家",
+  "全家死光",
+  "你妈死了",
+  "死妈",
+  "草泥马",
+  "操你妈",
+  "操你妈逼",
+  "操你",
+  "操你全家",
+  "操你祖宗",
+  "草你妈",
+  "草你妈逼",
+  "操尼玛",
+  "日你妈",
+  "日你全家",
+  "日你",
+  "干你妈",
+  "干你全家",
+  "干你",
+  "你妈的",
+  "去你妈的",
+  "妈的逼",
+  "妈逼",
+  "你妈逼",
+  "你妈逼的",
+  "你麻痹",
+  "你麻痹的",
+  "麻痹的",
+  "尼玛",
+  "妈了个逼",
+  "操他妈",
+  "他妈的",
+  "他吗的",
+  "特么的",
+  "我操你",
+  "我操",
+  "我草",
+  "卧槽",
+  "cnm",
+  "wcnm",
+  "nmsl",
+  "nmb",
+  "nm",
+  "rnm",
+  "tmd",
+  "mlgb",
+  "mmp",
+  "滚你妈",
+  "滚蛋",
+  "滚犊子",
+  "滚开",
+  "你大爷",
+  "神经病",
+  "吃屎",
+  "混蛋",
+  "浑蛋",
+  "妈蛋",
+  "鸡巴",
+  "鸡吧",
+  "几把",
+  "臭鸡巴",
+  "鸡巴脸",
+  "屌",
+  "吊毛",
+  "屌毛",
+  "逗比",
+  "二逼",
+  "二B",
+  "王八蛋",
+  "龟孙子",
+  "绿帽子",
+  "骚货",
+  "骚逼",
+  "约炮",
+  "一夜情",
+  "操你妹",
+  "日你妹",
+  "操你爹",
+  "肏",
+  "艹你妈",
+  "靠你妈",
+  "撸管",
+  "打飞机",
+  "fuck",
+  "fucking",
+  "shit",
+  "bitch",
+  "asshole",
+  "bastard",
+];
 const MAX_CHAT_MESSAGES = 300;
 /** 同一设备（非 IP）：办公室共用出口 IP 不应互相挤占 */
 const MAX_ACCOUNTS_PER_DEVICE_PER_ROOM = 2;
@@ -289,14 +436,13 @@ function scheduleRoomDestroy(roomId, ttlMsOverride) {
   }, ttlMs);
 }
 
-/** 房间是否含值得跨重启保留的内容（队列 / 当前曲 / 历史 / 聊天 / 已知成员） */
+/** 房间是否含值得跨重启保留的内容（队列 / 当前曲 / 点歌历史） */
 function roomHasPersistableContent(room) {
   if (!room) return false;
   if (room.queue.length > 0) return true;
   if (room.current || room.isPlaying) return true;
   if ((room.songHistory?.length ?? 0) > 0) return true;
-  if ((room.messages?.length ?? 0) > 0) return true;
-  if ((room.knownUserIds?.size ?? 0) > 0) return true;
+  // 仅有聊天记录或 knownUserIds 不足以长期保活，否则空房会堆积
   return false;
 }
 
@@ -356,6 +502,7 @@ function snapshotRoomForStorage(room) {
     clearSongsOnLeaveEnabled: Boolean(room.clearSongsOnLeaveEnabled),
     clearSongsOnLeaveDelaySec: normalizeClearSongsOnLeaveDelaySec(room.clearSongsOnLeaveDelaySec),
     bannedSongs: serializeBannedSongs(room.bannedSongs),
+    forbiddenWords: serializeForbiddenWords(ensureForbiddenWords(room)),
     memberTiers: serializeMemberTiersMap(room.memberTiers),
     memberSettings: serializeMemberSettings(room.memberSettings),
     createdAt: room.createdAt,
@@ -418,6 +565,7 @@ function restoreRoomFromStorage(data) {
   room.clearSongsOnLeaveEnabled = Boolean(data.clearSongsOnLeaveEnabled);
   room.clearSongsOnLeaveDelaySec = normalizeClearSongsOnLeaveDelaySec(data.clearSongsOnLeaveDelaySec ?? DEFAULT_CLEAR_SONGS_ON_LEAVE_DELAY_SEC);
   room.bannedSongs = restoreBannedSongs(data.bannedSongs);
+  room.forbiddenWords = restoreForbiddenWords(data.forbiddenWords);
   room.memberTiers = restoreMemberTiersFromStorage(data.memberTiers);
   room.memberSettings = normalizeMemberSettings(data.memberSettings);
   room.createdAt = data.createdAt ?? Date.now();
@@ -493,19 +641,19 @@ export async function initRooms() {
   const stored = await loadAllRoomsFromStorage();
 
   const restartGraceMs = getRuntimeConfig().roomRestartGraceMs;
+  const emptyTtlMs = getRuntimeConfig().roomEmptyTtlMs;
   let preservedCount = 0;
   for (const data of stored) {
     const room = restoreRoomFromStorage(data);
     rooms.set(room.id, room);
     if (room.users.size === 0) {
-      // 重启不应解散仍有内容的房间：无内容的空壳按正常空房 TTL 清理，
-      // 有内容的房间予以保留（配置了重启宽限期时超期无人重连才清理）。
+      // 重启时 socket 全断，房间会短暂无人。有队列/当前曲的房间给重连宽限期；
+      // 宽限期未配置或为 0 时，回退到正常空房 TTL，避免空房永远不销毁。
       if (!roomHasPersistableContent(room)) {
         scheduleRoomDestroy(room.id);
-      } else if (restartGraceMs > 0) {
-        scheduleRoomDestroy(room.id, restartGraceMs);
-        preservedCount += 1;
       } else {
+        const graceMs = restartGraceMs > 0 ? restartGraceMs : emptyTtlMs;
+        scheduleRoomDestroy(room.id, graceMs);
         preservedCount += 1;
       }
     }
@@ -661,6 +809,7 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
     clearSongsOnLeaveDelaySec: DEFAULT_CLEAR_SONGS_ON_LEAVE_DELAY_SEC,
     pendingLeaveClears: new Map(),
     bannedSongs: [],
+    forbiddenWords: createDefaultForbiddenWords(),
     lastSongRequestAt: new Map(),
     memberTiers: new Map(),
     memberSettings: { ...DEFAULT_MEMBER_SETTINGS },
@@ -1088,6 +1237,88 @@ function ensureLastSongRequestAt(room) {
 function ensureBannedSongs(room) {
   if (!Array.isArray(room.bannedSongs)) room.bannedSongs = [];
   return room.bannedSongs;
+}
+
+function normalizeForbiddenWord(word) {
+  return String(word || "")
+    .trim()
+    .toLowerCase();
+}
+
+function serializeForbiddenWord(entry) {
+  const word = String(entry?.word || "")
+    .trim()
+    .slice(0, MAX_FORBIDDEN_WORD_LEN);
+  if (!word) return null;
+  return {
+    word,
+    isDefault: Boolean(entry?.isDefault),
+    addedAt: Number(entry?.addedAt) || Date.now(),
+  };
+}
+
+function sortForbiddenWords(list) {
+  return [...list].sort((a, b) => {
+    const aDefault = Boolean(a.isDefault);
+    const bDefault = Boolean(b.isDefault);
+    if (aDefault !== bDefault) return aDefault ? 1 : -1;
+    return (Number(a.addedAt) || 0) - (Number(b.addedAt) || 0);
+  });
+}
+
+function serializeForbiddenWords(list) {
+  const source = Array.isArray(list) ? list : [];
+  const seen = new Set();
+  const result = [];
+  for (const entry of source) {
+    const item = serializeForbiddenWord(entry);
+    if (!item) continue;
+    const key = normalizeForbiddenWord(item.word);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    result.push(item);
+    if (result.length >= MAX_FORBIDDEN_WORDS) break;
+  }
+  return sortForbiddenWords(result);
+}
+
+function createDefaultForbiddenWords(now = Date.now()) {
+  return serializeForbiddenWords(
+    DEFAULT_FORBIDDEN_WORDS.map((word, index) => ({
+      word,
+      isDefault: true,
+      addedAt: now + index,
+    })),
+  );
+}
+
+/**
+ * 旧房间无此字段时种入默认词；已有数组（含空数组）表示房主已管理过，原样恢复。
+ */
+function restoreForbiddenWords(list) {
+  if (list === undefined || list === null) {
+    return createDefaultForbiddenWords();
+  }
+  return serializeForbiddenWords(Array.isArray(list) ? list : []);
+}
+
+function ensureForbiddenWords(room) {
+  if (!Array.isArray(room.forbiddenWords)) {
+    room.forbiddenWords = createDefaultForbiddenWords();
+  }
+  return room.forbiddenWords;
+}
+
+function findForbiddenWordInText(room, text) {
+  const content = String(text || "");
+  if (!content) return null;
+  const lowered = content.toLowerCase();
+  for (const entry of ensureForbiddenWords(room)) {
+    const word = String(entry?.word || "").trim();
+    if (!word) continue;
+    if (lowered.includes(word.toLowerCase())) return word;
+  }
+  return null;
 }
 
 function normalizeBannedSongName(name) {
@@ -2309,6 +2540,55 @@ export function unbanRoomSong(roomId, actorId, name, connectionId = null) {
   room.bannedSongs = ensureBannedSongs(room).filter((entry) => normalizeBannedSongName(entry.name) !== normalized);
   if (room.bannedSongs.length === before) {
     return { error: "歌曲不在禁播列表中" };
+  }
+
+  persistRoom(room);
+  return { room: serializeRoom(room) };
+}
+
+export function addRoomForbiddenWord(roomId, actorId, word, connectionId = null) {
+  const room = rooms.get(roomId);
+  if (!room) return { error: "房间不存在" };
+  const denied = requireModerator(room, actorId, connectionId);
+  if (denied) return denied;
+
+  const entry = serializeForbiddenWord({
+    word,
+    isDefault: false,
+    addedAt: Date.now(),
+  });
+  if (!entry) return { error: "请输入违禁词" };
+
+  const list = ensureForbiddenWords(room);
+  const key = normalizeForbiddenWord(entry.word);
+  if (list.some((item) => normalizeForbiddenWord(item.word) === key)) {
+    return { error: "该违禁词已存在" };
+  }
+  if (list.length >= MAX_FORBIDDEN_WORDS) {
+    return { error: `违禁词最多 ${MAX_FORBIDDEN_WORDS} 个` };
+  }
+
+  list.push(entry);
+  room.forbiddenWords = serializeForbiddenWords(list);
+  persistRoom(room);
+  return { room: serializeRoom(room) };
+}
+
+export function removeRoomForbiddenWord(roomId, actorId, word, connectionId = null) {
+  const room = rooms.get(roomId);
+  if (!room) return { error: "房间不存在" };
+  const denied = requireModerator(room, actorId, connectionId);
+  if (denied) return denied;
+
+  const key = normalizeForbiddenWord(word);
+  if (!key) return { error: "违禁词无效" };
+
+  const before = ensureForbiddenWords(room).length;
+  room.forbiddenWords = ensureForbiddenWords(room).filter(
+    (entry) => normalizeForbiddenWord(entry.word) !== key,
+  );
+  if (room.forbiddenWords.length === before) {
+    return { error: "违禁词不在列表中" };
   }
 
   persistRoom(room);
@@ -3643,6 +3923,13 @@ export function addChatMessage(roomId, userId, text, options = {}) {
   if (!content && !imageUrl) return { error: "消息不能为空" };
   if (content.length > 500) return { error: "消息过长" };
 
+  if (content) {
+    const hit = findForbiddenWordInText(room, content);
+    if (hit) {
+      return { error: "消息包含违禁词，请修改后发送" };
+    }
+  }
+
   const user = room.users.get(userId);
   if (isUserChatMuted(room, userId)) {
     return { error: room.muteAll ? "当前房间已全体禁言" : "你已被禁言" };
@@ -4069,6 +4356,7 @@ function serializeRoom(room, options = {}) {
     clearSongsOnLeaveEnabled: Boolean(room.clearSongsOnLeaveEnabled),
     clearSongsOnLeaveDelaySec: normalizeClearSongsOnLeaveDelaySec(room.clearSongsOnLeaveDelaySec),
     bannedSongs: viewerCanModerate ? serializeBannedSongs(room.bannedSongs) : undefined,
+    forbiddenWords: viewerCanModerate ? serializeForbiddenWords(ensureForbiddenWords(room)) : undefined,
     memberTiers: serializeMemberTiersMap(room.memberTiers),
     memberSettings: serializeMemberSettings(room.memberSettings),
   };
@@ -4136,6 +4424,7 @@ export function prepareRoomBroadcast(roomId) {
     mutedUserIds: Array.from(room.mutedUserIds || []),
     userNicknames: serializeUserNicknamesForViewer(room),
     bannedSongs: serializeBannedSongs(room.bannedSongs),
+    forbiddenWords: serializeForbiddenWords(ensureForbiddenWords(room)),
   };
 
   return { room, shared, moderatorExtras };

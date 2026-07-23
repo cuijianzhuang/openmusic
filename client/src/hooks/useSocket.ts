@@ -1203,6 +1203,36 @@ export function useSocket() {
     });
   }, []);
 
+  const addRoomForbiddenWord = useCallback((
+    word: string,
+  ): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
+    return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
+      'add_room_forbidden_word',
+      { word },
+      { success: false, error: '连接超时，请重试' },
+    ).then((res) => {
+      if (res.success && res.room) {
+        applyRoomSnapshot(res.room);
+      }
+      return res;
+    });
+  }, []);
+
+  const removeRoomForbiddenWord = useCallback((
+    word: string,
+  ): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
+    return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
+      'remove_room_forbidden_word',
+      { word },
+      { success: false, error: '连接超时，请重试' },
+    ).then((res) => {
+      if (res.success && res.room) {
+        applyRoomSnapshot(res.room);
+      }
+      return res;
+    });
+  }, []);
+
   const setRoomAudioQuality = useCallback((quality: { netease: string; tencent: string }): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
     return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
       'set_room_audio_quality',
@@ -1393,6 +1423,10 @@ export function useSocket() {
     banRoomSong,
 
     unbanRoomSong,
+
+    addRoomForbiddenWord,
+
+    removeRoomForbiddenWord,
 
     setRoomAudioQuality,
 
