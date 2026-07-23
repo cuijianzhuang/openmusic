@@ -13,8 +13,8 @@ import { normalizeFmMode } from '../api/music/fmMode';
 import { addSongsToQueue, formatBulkAddToast } from '../lib/addSongsToQueue';
 import { rememberPlaylistImportHistory } from '../lib/playlistImportHistory';
 import { detectPlaylistLink } from '../lib/playlistLink';
-import { consumeLinuxdoReturnParam, fetchLinuxdoStatus } from '../lib/linuxdoAuth';
-import { consumeGithubReturnParam, fetchGithubStatus } from '../lib/githubAuth';
+import { consumeLinuxdoReturnParam, fetchLinuxdoStatus, type LinuxdoBinding } from '../lib/linuxdoAuth';
+import { consumeGithubReturnParam, fetchGithubStatus, type GithubBinding } from '../lib/githubAuth';
 
 import type { FavoriteSong, MusicSource, RoomAudioQuality, RoomMemberSettings, RoomMemberTier, SearchResult, Song, SongHistoryItem } from '../types';
 
@@ -430,11 +430,29 @@ export default function Room() {
 
   // 找回身份入口需要对所有人可见：换设备/清 Cookie 后正是不再被识别为房主/管理员的状态，
   // 不能把这个入口也一起挡在 canModerate 后面，否则找回功能在它本该生效的场景里反而打不开。
-  const [identityRecoveryAvailable, setIdentityRecoveryAvailable] = useState(false);
+  // 进房预取 OAuth 状态，避免打开设置时「身份」栏异步闪现。
+  const [identityProviders, setIdentityProviders] = useState<{
+    linuxdoEnabled: boolean;
+    githubEnabled: boolean;
+    linuxdoBound: LinuxdoBinding | null;
+    githubBound: GithubBinding | null;
+  }>({
+    linuxdoEnabled: false,
+    githubEnabled: false,
+    linuxdoBound: null,
+    githubBound: null,
+  });
+  const identityRecoveryAvailable = identityProviders.linuxdoEnabled || identityProviders.githubEnabled;
   useEffect(() => {
     let cancelled = false;
     void Promise.all([fetchLinuxdoStatus(), fetchGithubStatus()]).then(([linuxdo, github]) => {
-      if (!cancelled) setIdentityRecoveryAvailable(linuxdo.enabled || github.enabled);
+      if (cancelled) return;
+      setIdentityProviders({
+        linuxdoEnabled: linuxdo.enabled,
+        githubEnabled: github.enabled,
+        linuxdoBound: linuxdo.bound,
+        githubBound: github.bound,
+      });
     });
     return () => {
       cancelled = true;
@@ -2496,6 +2514,10 @@ export default function Room() {
         protectedFromDestroy={Boolean(room?.protectedFromDestroy)}
         permanentApplication={room?.permanentApplication ?? null}
         permanentSaving={permanentSaving}
+        identityLinuxdoEnabled={identityProviders.linuxdoEnabled}
+        identityGithubEnabled={identityProviders.githubEnabled}
+        identityLinuxdoBound={identityProviders.linuxdoBound}
+        identityGithubBound={identityProviders.githubBound}
         onClose={() => setSettingsOpen(false)}
         onSaveFmMode={handleSaveFmMode}
         onOpenMemberModal={handleOpenMemberModalFromSettings}

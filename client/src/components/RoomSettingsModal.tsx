@@ -104,6 +104,11 @@ interface Props {
     note?: string;
   } | null;
   permanentSaving?: boolean;
+  /** 进房已预取：避免打开弹窗后「身份」栏才闪现 */
+  identityLinuxdoEnabled?: boolean;
+  identityGithubEnabled?: boolean;
+  identityLinuxdoBound?: LinuxdoBinding | null;
+  identityGithubBound?: GithubBinding | null;
   onClose: () => void;
   onSaveFmMode: (mode: string) => void;
   onOpenMemberModal: () => void;
@@ -254,6 +259,10 @@ export default function RoomSettingsModal({
   protectedFromDestroy = false,
   permanentApplication = null,
   permanentSaving = false,
+  identityLinuxdoEnabled = false,
+  identityGithubEnabled = false,
+  identityLinuxdoBound = null,
+  identityGithubBound = null,
   onClose,
   onSaveFmMode,
   onOpenMemberModal,
@@ -276,11 +285,11 @@ export default function RoomSettingsModal({
   const [transferTargetId, setTransferTargetId] = useState<string | null>(null);
   const [confirmTransfer, setConfirmTransfer] = useState(false);
   const [permanentNote, setPermanentNote] = useState('');
-  const [linuxdoEnabled, setLinuxdoEnabled] = useState(false);
-  const [linuxdoBound, setLinuxdoBound] = useState<LinuxdoBinding | null>(null);
+  const [linuxdoEnabled, setLinuxdoEnabled] = useState(identityLinuxdoEnabled);
+  const [linuxdoBound, setLinuxdoBound] = useState<LinuxdoBinding | null>(identityLinuxdoBound);
   const [linuxdoUnbinding, setLinuxdoUnbinding] = useState(false);
-  const [githubEnabled, setGithubEnabled] = useState(false);
-  const [githubBound, setGithubBound] = useState<GithubBinding | null>(null);
+  const [githubEnabled, setGithubEnabled] = useState(identityGithubEnabled);
+  const [githubBound, setGithubBound] = useState<GithubBinding | null>(identityGithubBound);
   const [githubUnbinding, setGithubUnbinding] = useState(false);
   const wasOpenRef = useRef(false);
   const appliedAnnouncementRef = useRef({ enabled: announcementEnabled, text: announcementText });
@@ -325,7 +334,7 @@ export default function RoomSettingsModal({
     return items;
   }, [isOwner, canModerate, linuxdoEnabled, githubEnabled]);
 
-  // 仅在弹框从关闭→打开时初始化 tab/草稿，避免 room_update 反复把 tab 打回「漫游」
+  // 打开弹窗时 tabs 可能刚因预取变为含「身份」；若仍停留在旧首 tab 则不强制跳转
   useEffect(() => {
     const justOpened = open && !wasOpenRef.current;
     wasOpenRef.current = open;
@@ -342,7 +351,18 @@ export default function RoomSettingsModal({
     appliedSongRequestRef.current = songRequest;
     setTransferTargetId(null);
     setConfirmTransfer(false);
-    setActiveTab(tabs[0]?.id ?? 'announcement');
+    setPermanentNote('');
+    const initialTabs: SettingsTab[] = [];
+    if (isOwner) {
+      initialTabs.push('fm', 'member', 'permanent', 'transfer');
+    }
+    if (canModerate) {
+      initialTabs.push('announcement', 'chat', 'songRequest');
+    }
+    if (identityLinuxdoEnabled || identityGithubEnabled) {
+      initialTabs.push('identity');
+    }
+    setActiveTab(initialTabs[0] ?? 'announcement');
   }, [
     open,
     announcementEnabled,
@@ -350,7 +370,10 @@ export default function RoomSettingsModal({
     joinNoticeEnabled,
     joinNoticeCooldownMinutes,
     songRequest,
-    tabs,
+    isOwner,
+    canModerate,
+    identityLinuxdoEnabled,
+    identityGithubEnabled,
   ]);
 
   useEffect(() => {
@@ -365,7 +388,21 @@ export default function RoomSettingsModal({
   }, [open, transferCandidates, transferTargetId]);
 
   useEffect(() => {
+    if (open) return;
+    setLinuxdoEnabled(identityLinuxdoEnabled);
+    setGithubEnabled(identityGithubEnabled);
+    setLinuxdoBound(identityLinuxdoBound);
+    setGithubBound(identityGithubBound);
+  }, [open, identityLinuxdoEnabled, identityGithubEnabled, identityLinuxdoBound, identityGithubBound]);
+
+  useEffect(() => {
     if (!open) return;
+    // 打开瞬间先用进房预取值，避免「身份」栏后闪
+    setLinuxdoEnabled(identityLinuxdoEnabled);
+    setGithubEnabled(identityGithubEnabled);
+    setLinuxdoBound(identityLinuxdoBound);
+    setGithubBound(identityGithubBound);
+
     let cancelled = false;
     void fetchLinuxdoStatus().then((status) => {
       if (cancelled) return;
@@ -380,7 +417,7 @@ export default function RoomSettingsModal({
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [open, identityLinuxdoEnabled, identityGithubEnabled, identityLinuxdoBound, identityGithubBound]);
 
   // 打开期间：服务端公告变化时，若用户未编辑（草稿仍等于上次应用值），则跟随服务端
   useEffect(() => {
@@ -464,7 +501,9 @@ export default function RoomSettingsModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex flex-shrink-0 items-center justify-between border-b border-white/10 px-5 py-4">
-          <h2 className="text-base font-semibold text-white">房间设置</h2>
+          <h2 className="text-base font-semibold text-white">
+            {!isOwner && activeTab === 'identity' ? '找回身份' : '房间设置'}
+          </h2>
           <button
             type="button"
             onClick={onClose}
@@ -674,95 +713,87 @@ export default function RoomSettingsModal({
           )}
 
           {activeTab === 'identity' && (
-            <section className="space-y-4">
+            <section className="space-y-3">
               {isOwner ? (
                 <>
                   <p className="text-xs text-netease-muted">
-                    绑定账号后，换设备或清除 Cookie 仍可用同一账号找回房主身份。
+                    绑定后换设备可用同一账号找回房主身份。
                   </p>
-                  {linuxdoEnabled && (
-                    <div>
-                      <p className="mb-2 text-xs font-medium text-white/70">Linux.do</p>
-                      {linuxdoBound ? (
-                        <div className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3">
-                          <div className="min-w-0">
-                            <p className="truncate text-sm text-white">
-                              已绑定：{linuxdoBound.username || linuxdoBound.linuxdoId}
-                            </p>
-                            <p className="mt-0.5 text-[11px] text-netease-muted">
-                              {new Date(linuxdoBound.boundAt).toLocaleString()}
-                            </p>
-                          </div>
+                  <div className="space-y-2">
+                    {linuxdoEnabled && (
+                      <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5">
+                        <span className="w-16 flex-shrink-0 text-xs text-white/50">Linux.do</span>
+                        {linuxdoBound ? (
+                          <>
+                            <span className="min-w-0 flex-1 truncate text-sm text-white">
+                              {linuxdoBound.username || linuxdoBound.linuxdoId}
+                            </span>
+                            <button
+                              type="button"
+                              disabled={linuxdoUnbinding}
+                              onClick={async () => {
+                                setLinuxdoUnbinding(true);
+                                const result = await unbindLinuxdo();
+                                setLinuxdoUnbinding(false);
+                                if (result.success) setLinuxdoBound(null);
+                              }}
+                              className="flex-shrink-0 rounded-lg px-2.5 py-1 text-xs text-red-300 transition-colors hover:bg-red-500/10 disabled:opacity-50"
+                            >
+                              {linuxdoUnbinding ? '…' : '解绑'}
+                            </button>
+                          </>
+                        ) : (
                           <button
                             type="button"
-                            disabled={linuxdoUnbinding}
-                            onClick={async () => {
-                              setLinuxdoUnbinding(true);
-                              const result = await unbindLinuxdo();
-                              setLinuxdoUnbinding(false);
-                              if (result.success) setLinuxdoBound(null);
-                            }}
-                            className="flex-shrink-0 rounded-lg px-3 py-1.5 text-xs text-red-300 transition-colors hover:bg-red-500/10 disabled:opacity-50"
+                            disabled={!roomId}
+                            onClick={() => roomId && startLinuxdoBind(roomId, window.location.pathname)}
+                            className="ml-auto flex-shrink-0 rounded-lg bg-amber-500 px-3 py-1 text-xs font-medium text-black transition-colors hover:bg-amber-400 disabled:opacity-50"
                           >
-                            {linuxdoUnbinding ? '解绑中…' : '解绑'}
+                            绑定
                           </button>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          disabled={!roomId}
-                          onClick={() => roomId && startLinuxdoBind(roomId, window.location.pathname)}
-                          className="w-full rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-medium text-black transition-colors hover:bg-amber-400 disabled:opacity-50"
-                        >
-                          绑定 Linux.do
-                        </button>
-                      )}
-                    </div>
-                  )}
-                  {githubEnabled && (
-                    <div>
-                      <p className="mb-2 text-xs font-medium text-white/70">GitHub</p>
-                      {githubBound ? (
-                        <div className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3">
-                          <div className="min-w-0">
-                            <p className="truncate text-sm text-white">
-                              已绑定：{githubBound.username || githubBound.githubId}
-                            </p>
-                            <p className="mt-0.5 text-[11px] text-netease-muted">
-                              {new Date(githubBound.boundAt).toLocaleString()}
-                            </p>
-                          </div>
+                        )}
+                      </div>
+                    )}
+                    {githubEnabled && (
+                      <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5">
+                        <span className="w-16 flex-shrink-0 text-xs text-white/50">GitHub</span>
+                        {githubBound ? (
+                          <>
+                            <span className="min-w-0 flex-1 truncate text-sm text-white">
+                              {githubBound.username || githubBound.githubId}
+                            </span>
+                            <button
+                              type="button"
+                              disabled={githubUnbinding}
+                              onClick={async () => {
+                                setGithubUnbinding(true);
+                                const result = await unbindGithub();
+                                setGithubUnbinding(false);
+                                if (result.success) setGithubBound(null);
+                              }}
+                              className="flex-shrink-0 rounded-lg px-2.5 py-1 text-xs text-red-300 transition-colors hover:bg-red-500/10 disabled:opacity-50"
+                            >
+                              {githubUnbinding ? '…' : '解绑'}
+                            </button>
+                          </>
+                        ) : (
                           <button
                             type="button"
-                            disabled={githubUnbinding}
-                            onClick={async () => {
-                              setGithubUnbinding(true);
-                              const result = await unbindGithub();
-                              setGithubUnbinding(false);
-                              if (result.success) setGithubBound(null);
-                            }}
-                            className="flex-shrink-0 rounded-lg px-3 py-1.5 text-xs text-red-300 transition-colors hover:bg-red-500/10 disabled:opacity-50"
+                            disabled={!roomId}
+                            onClick={() => roomId && startGithubBind(roomId, window.location.pathname)}
+                            className="ml-auto flex-shrink-0 rounded-lg bg-amber-500 px-3 py-1 text-xs font-medium text-black transition-colors hover:bg-amber-400 disabled:opacity-50"
                           >
-                            {githubUnbinding ? '解绑中…' : '解绑'}
+                            绑定
                           </button>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          disabled={!roomId}
-                          onClick={() => roomId && startGithubBind(roomId, window.location.pathname)}
-                          className="w-full rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-medium text-black transition-colors hover:bg-amber-400 disabled:opacity-50"
-                        >
-                          绑定 GitHub
-                        </button>
-                      )}
-                    </div>
-                  )}
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </>
               ) : (
                 <>
                   <p className="text-xs leading-relaxed text-netease-muted">
-                    换设备或清除 Cookie 后不再是房主时，可用当初绑定的账号找回身份。
+                    换设备或清除 Cookie 后，可用当初绑定的账号找回房主身份。
                   </p>
                   <div className="space-y-2">
                     {linuxdoEnabled && (
