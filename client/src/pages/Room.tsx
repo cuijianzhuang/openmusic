@@ -405,6 +405,19 @@ export default function Room() {
 
   const closeToast = useCallback(() => setToast(null), []);
 
+  const handleClearQueue = useCallback(async () => {
+    if (clearingQueue) return;
+    setClearingQueue(true);
+    const res = await clearQueue();
+    setClearingQueue(false);
+    if (res.success) {
+      setClearQueueConfirmOpen(false);
+      showToast('已清空待播列表', 'success');
+    } else {
+      showToast(res.error || '清空失败', 'error');
+    }
+  }, [clearQueue, clearingQueue, showToast]);
+
   const isCreator = Boolean(room?.creatorId && mySocketId && room.creatorId === mySocketId);
   const songRequestBlockReason = getSongRequestBlockReason(
     room,
@@ -1861,19 +1874,6 @@ export default function Room() {
   const qqImportEnabled = sources.some((s) => s.id === 'tencent' && s.supportsSearch);
   const queueCount = (room.current ? 1 : 0) + room.queue.length;
   const canClearQueue = isOwner && room.queue.length > 0;
-
-  const handleClearQueue = useCallback(async () => {
-    if (clearingQueue) return;
-    setClearingQueue(true);
-    const res = await clearQueue();
-    setClearingQueue(false);
-    if (res.success) {
-      setClearQueueConfirmOpen(false);
-      showToast('已清空待播列表', 'success');
-    } else {
-      showToast(res.error || '清空失败', 'error');
-    }
-  }, [clearQueue, clearingQueue, showToast]);
   const showDesktopSearchOverlay = Boolean(searchedKeyword || searching || playlistSearchLoading);
   const isCuratedDetailView = isPlaylistResults || isRadioResults;
   const canBackFromDetail = isRadioResults
