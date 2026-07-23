@@ -1,6 +1,7 @@
 import { Suspense, useEffect, useState } from 'react';
 import { Routes, Route, useLocation } from 'react-router-dom';
 import AppUpdateGate from './components/AppUpdateGate';
+import AppErrorBoundary from './components/AppErrorBoundary';
 import ErrorReportSolutionGate from './components/ErrorReportSolutionGate';
 import PermanentDecisionGate from './components/PermanentDecisionGate';
 import { rememberAdminEntryPath } from './lib/adminEntryShortcut';
@@ -89,6 +90,7 @@ function AdminGate() {
 }
 
 export default function App() {
+  const location = useLocation();
   const [setupRequired, setSetupRequired] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -152,18 +154,20 @@ export default function App() {
       {!setupRequired && <AppUpdateGate />}
       {!setupRequired && <ErrorReportSolutionGate />}
       {!setupRequired && <PermanentDecisionGate />}
-      <Suspense fallback={<RouteFallback />}>
-        {setupRequired ? (
-          <Setup />
-        ) : (
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/room/:roomId" element={<Room />} />
-            <Route path="/tv/:roomId" element={<TvDisplay />} />
-            <Route path="*" element={<AdminGate />} />
-          </Routes>
-        )}
-      </Suspense>
+      <AppErrorBoundary key={location.pathname}>
+        <Suspense fallback={<RouteFallback />}>
+          {setupRequired ? (
+            <Setup />
+          ) : (
+            <Routes>
+              <Route path="/" element={<Home />} />
+              <Route path="/room/:roomId" element={<Room />} />
+              <Route path="/tv/:roomId" element={<TvDisplay />} />
+              <Route path="*" element={<AdminGate />} />
+            </Routes>
+          )}
+        </Suspense>
+      </AppErrorBoundary>
     </div>
   );
 }
