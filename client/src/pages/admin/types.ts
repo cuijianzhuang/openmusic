@@ -60,6 +60,7 @@ export interface SiteAnnouncementConfig {
 
 export interface RuntimeConfig {
   roomEmptyTtlMs: number;
+  roomRestartGraceMs?: number;
   linuxdoClientId: string;
   linuxdoClientSecret: string;
   linuxdoRedirectUri: string;
@@ -86,6 +87,7 @@ export interface RuntimeConfig {
   cyapiBase: string;
   cyapiKey: string;
   vmyLrcUrl: string;
+  lrcapiUrl?: string;
   qiniuAccessKey: string;
   qiniuSecretKey: string;
   qiniuBucket: string;
@@ -94,6 +96,18 @@ export interface RuntimeConfig {
   apihzBaseUrl: string;
   apihzId: string;
   apihzKey: string;
+  /** SEO：留空则前端/公开接口回退内置默认 */
+  seoTitle: string;
+  seoDescription: string;
+  seoKeywords: string;
+  seoSiteName: string;
+  seoCanonicalUrl: string;
+  seoBaiduVerification: string;
+  seoOgImage: string;
+  seoHeroHeadline: string;
+  seoHeroSubline: string;
+  seoAboutTitle: string;
+  seoAboutText: string;
   configuredSecrets: Record<string, boolean>;
 }
 

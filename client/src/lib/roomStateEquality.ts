@@ -1,5 +1,6 @@
 import type {
   BannedSong,
+  ForbiddenWord,
   JumpRequest,
   QueueItem,
   RoomMemberTier,
@@ -91,6 +92,18 @@ function bannedSongsEqual(a: BannedSong[] | undefined, b: BannedSong[] | undefin
     const l = left[i];
     const r = right[i];
     if (l.source !== r.source || l.id !== r.id) return false;
+  }
+  return true;
+}
+
+function forbiddenWordsEqual(a: ForbiddenWord[] | undefined, b: ForbiddenWord[] | undefined): boolean {
+  const left = a || [];
+  const right = b || [];
+  if (left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i += 1) {
+    const l = left[i];
+    const r = right[i];
+    if (l.word !== r.word || Boolean(l.isDefault) !== Boolean(r.isDefault)) return false;
   }
   return true;
 }
@@ -196,6 +209,7 @@ export function isRoomStateEquivalent(a: RoomState, b: RoomState): boolean {
     && a.songRequestCooldownSec === b.songRequestCooldownSec
     && a.queueMaxLength === b.queueMaxLength
     && bannedSongsEqual(a.bannedSongs, b.bannedSongs)
+    && forbiddenWordsEqual(a.forbiddenWords, b.forbiddenWords)
     && memberTiersEqual(a.memberTiers, b.memberTiers)
     && memberSettingsEqual(a.memberSettings, b.memberSettings);
 }

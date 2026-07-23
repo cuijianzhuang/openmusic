@@ -4,6 +4,7 @@ const PUBLIC_API_PATHS = new Set([
   '/api/health',
   '/api/app-version',
   '/api/site-announcement',
+  '/api/site-seo',
   '/api/session/bootstrap',
 ]);
 

@@ -32,7 +32,26 @@ import { adminFetch } from './utils';
 
 type RuntimeTextField = Exclude<
   keyof RuntimeConfig,
-  'roomEmptyTtlMs' | 'svipQualityEnabled' | 'configuredSecrets' | 'metingApiUrl' | 'metingApiAuth' | 'metingSources' | 'musicApis'
+  | 'roomEmptyTtlMs'
+  | 'roomRestartGraceMs'
+  | 'svipQualityEnabled'
+  | 'configuredSecrets'
+  | 'metingApiUrl'
+  | 'metingApiAuth'
+  | 'metingSources'
+  | 'musicApis'
+  | 'seoTitle'
+  | 'seoDescription'
+  | 'seoKeywords'
+  | 'seoSiteName'
+  | 'seoCanonicalUrl'
+  | 'seoBaiduVerification'
+  | 'seoOgImage'
+  | 'seoHeroHeadline'
+  | 'seoHeroSubline'
+  | 'seoAboutTitle'
+  | 'seoAboutText'
+  | 'lrcapiUrl'
 >;
 
 interface RuntimeFieldDef {
@@ -109,7 +128,7 @@ const RUNTIME_FIELD_GROUPS: RuntimeFieldGroup[] = [
   {
     id: 'apihz',
     title: '接口盒子',
-    purpose: '表情包搜索与聊天敏感词检测共用。不配置则表情搜索 / 敏感词过滤不可用。',
+    purpose: '用于表情包搜索。不配置则表情搜索不可用。',
     fields: [
       { key: 'apihzBaseUrl', label: 'API 地址', placeholder: 'https://cn.apihz.cn/api' },
       { key: 'apihzId', label: '用户 ID', secret: true },
@@ -232,6 +251,17 @@ export default function RuntimeConfigPanel({
     setDraft({
       ...config,
       svipQualityEnabled: Boolean(config.svipQualityEnabled),
+      seoTitle: config.seoTitle || '',
+      seoDescription: config.seoDescription || '',
+      seoKeywords: config.seoKeywords || '',
+      seoSiteName: config.seoSiteName || '',
+      seoCanonicalUrl: config.seoCanonicalUrl || '',
+      seoBaiduVerification: config.seoBaiduVerification || '',
+      seoOgImage: config.seoOgImage || '',
+      seoHeroHeadline: config.seoHeroHeadline || '',
+      seoHeroSubline: config.seoHeroSubline || '',
+      seoAboutTitle: config.seoAboutTitle || '',
+      seoAboutText: config.seoAboutText || '',
       musicApis: Array.isArray(config.musicApis)
         ? config.musicApis.map((api) => ({
             ...api,
@@ -986,10 +1016,133 @@ export default function RuntimeConfigPanel({
     return group ? renderFieldGroup(group) : null;
   };
 
+  const seoSection = (
+    <SettingsSection
+      title="搜索引擎优化"
+      description="只改搜索引擎看到的标题、描述、关键词等，不影响首页可见界面。留空用内置默认；关键词请写正常人会搜的词（一起听歌、多人听歌、异地一起听歌）。"
+    >
+      <Row gutter={[12, 12]}>
+        <Col span={24}>
+          <Typography.Text type="secondary" style={{ fontSize: 11 }}>页面标题（建议 60 字内）</Typography.Text>
+          <Input
+            value={draft.seoTitle}
+            maxLength={120}
+            placeholder="一起听歌 - 和喜欢的人 听同一首歌 | OpenMusic"
+            onChange={(e) => setDraft({ ...draft, seoTitle: e.target.value })}
+          />
+        </Col>
+        <Col span={24}>
+          <Typography.Text type="secondary" style={{ fontSize: 11 }}>站点名称（OG / 结构化数据）</Typography.Text>
+          <Input
+            value={draft.seoSiteName}
+            maxLength={80}
+            placeholder="OpenMusic"
+            onChange={(e) => setDraft({ ...draft, seoSiteName: e.target.value })}
+          />
+        </Col>
+        <Col span={24}>
+          <Typography.Text type="secondary" style={{ fontSize: 11 }}>页面描述（建议 80–160 字）</Typography.Text>
+          <Input.TextArea
+            value={draft.seoDescription}
+            maxLength={300}
+            rows={3}
+            showCount
+            placeholder="想和朋友一起听歌？OpenMusic 免费在线一起听歌……"
+            onChange={(e) => setDraft({ ...draft, seoDescription: e.target.value })}
+          />
+        </Col>
+        <Col span={24}>
+          <Typography.Text type="secondary" style={{ fontSize: 11 }}>关键词（英文逗号分隔，口语词靠前）</Typography.Text>
+          <Input.TextArea
+            value={draft.seoKeywords}
+            maxLength={400}
+            rows={2}
+            showCount
+            placeholder="一起听歌,多人听歌,和朋友一起听歌,两个人一起听歌,情侣一起听歌,异地一起听歌,..."
+            onChange={(e) => setDraft({ ...draft, seoKeywords: e.target.value })}
+          />
+        </Col>
+        <Col xs={24} sm={12}>
+          <Typography.Text type="secondary" style={{ fontSize: 11 }}>规范主域（sitemap / canonical）</Typography.Text>
+          <Input
+            value={draft.seoCanonicalUrl}
+            maxLength={200}
+            placeholder="https://qqovo.top"
+            onChange={(e) => setDraft({ ...draft, seoCanonicalUrl: e.target.value })}
+          />
+          <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>
+            必须是最终不 301 的 https 域名；优先于环境变量 SITE_CANONICAL_URL
+          </Typography.Text>
+        </Col>
+        <Col xs={24} sm={12}>
+          <Typography.Text type="secondary" style={{ fontSize: 11 }}>百度站长验证码</Typography.Text>
+          <Input
+            value={draft.seoBaiduVerification}
+            maxLength={120}
+            placeholder="粘贴 baidu-site-verification 的 content"
+            onChange={(e) => setDraft({ ...draft, seoBaiduVerification: e.target.value })}
+          />
+        </Col>
+        <Col span={24}>
+          <Typography.Text type="secondary" style={{ fontSize: 11 }}>OG 分享图（路径或完整 URL）</Typography.Text>
+          <Input
+            value={draft.seoOgImage}
+            maxLength={500}
+            placeholder="/og-cover.png"
+            onChange={(e) => setDraft({ ...draft, seoOgImage: e.target.value })}
+          />
+        </Col>
+        <Col xs={24} sm={12}>
+          <Typography.Text type="secondary" style={{ fontSize: 11 }}>爬虫主标题（不影响首页 H1）</Typography.Text>
+          <Input
+            value={draft.seoHeroHeadline}
+            maxLength={40}
+            placeholder="和喜欢的人"
+            onChange={(e) => setDraft({ ...draft, seoHeroHeadline: e.target.value })}
+          />
+        </Col>
+        <Col xs={24} sm={12}>
+          <Typography.Text type="secondary" style={{ fontSize: 11 }}>爬虫副标题（不影响首页文案）</Typography.Text>
+          <Input
+            value={draft.seoHeroSubline}
+            maxLength={80}
+            placeholder="听同一首歌"
+            onChange={(e) => setDraft({ ...draft, seoHeroSubline: e.target.value })}
+          />
+        </Col>
+        <Col span={24}>
+          <Typography.Text type="secondary" style={{ fontSize: 11 }}>爬虫介绍标题</Typography.Text>
+          <Input
+            value={draft.seoAboutTitle}
+            maxLength={80}
+            placeholder="和喜欢的人听同一首歌，就用 OpenMusic"
+            onChange={(e) => setDraft({ ...draft, seoAboutTitle: e.target.value })}
+          />
+        </Col>
+        <Col span={24}>
+          <Typography.Text type="secondary" style={{ fontSize: 11 }}>爬虫介绍正文</Typography.Text>
+          <Input.TextArea
+            value={draft.seoAboutText}
+            maxLength={800}
+            rows={3}
+            showCount
+            placeholder="OpenMusic 是免费的一起听歌网站。网页建房，邀请好友进来……"
+            onChange={(e) => setDraft({ ...draft, seoAboutText: e.target.value })}
+          />
+        </Col>
+      </Row>
+    </SettingsSection>
+  );
+
   const tabItems = [
     ...(securityTab
       ? [{ key: 'security', label: '安全与账号', children: securityTab }]
       : []),
+    {
+      key: 'seo',
+      label: 'SEO 收录',
+      children: seoSection,
+    },
     {
       key: 'music',
       label: '音源接入',

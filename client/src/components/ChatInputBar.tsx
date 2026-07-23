@@ -52,21 +52,16 @@ import { uploadChatImage } from '../api/chatImage';
 import { ensureImageFile } from '../lib/imageMime';
 import { readClipboardImageFile } from '../lib/compressChatImage';
 import { getClientId } from '../lib/clientId';
-import { checkTextProfanity } from '../lib/textProfanity';
-import { requireSessionBootstrap } from '../lib/sessionBootstrap';
-
 type MentionOption =
   | { type: 'all' }
   | { type: 'user'; user: RoomUser };
 
-type SendProgress = 'idle' | 'uploading' | 'checking-text' | 'sending';
+type SendProgress = 'idle' | 'uploading' | 'sending';
 
 function sendProgressLabel(progress: SendProgress): string {
   switch (progress) {
     case 'uploading':
       return '正在压缩并上传…';
-    case 'checking-text':
-      return '违禁词检测中…';
     case 'sending':
       return '发送中…';
     default:
@@ -185,17 +180,12 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
     }
   }, []);
 
-  const beginSendProgress = useCallback((options: {
-    hasText?: boolean;
+  const beginSendProgress = useCallback((options?: {
     uploading?: boolean;
   }) => {
     clearSendProgressTimer();
-    if (options.uploading) {
+    if (options?.uploading) {
       setSendProgress('uploading');
-      return;
-    }
-    if (options.hasText) {
-      setSendProgress('checking-text');
       return;
     }
     setSendProgress('sending');
@@ -376,29 +366,7 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
     clearPendingImage({ revoke: false });
     setSending(true);
     setError('');
-    beginSendProgress({
-      hasText: Boolean(messageText),
-    });
-
-    if (messageText) {
-      try {
-        await requireSessionBootstrap(false);
-      } catch {
-        // bootstrap 失败时仍尝试发送，由服务端兜底检测
-      }
-      const gate = await checkTextProfanity(messageText, {
-        userId: mySocketId || getClientId(),
-      });
-      if (!gate.ok) {
-        insertPlainText(messageText);
-        onReplyChange(currentReplyTo);
-        if (currentImage) onPendingImageChange(currentImage);
-        setError(gate.error);
-        endSendProgress();
-        return;
-      }
-      beginSendProgress({});
-    }
+    beginSendProgress();
 
     const res = await sendChat(messageText, {
       mentions,

@@ -1,13 +1,131 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { fetchWithTimeout } from '../api/http';
 import { isPureModeDisguiseActive } from './roomPureMode';
 
 export const SITE_NAME = 'OpenMusic';
 
-export const DEFAULT_TITLE = '一起听歌 · 多人实时点歌 - OpenMusic';
+export const DEFAULT_TITLE = '一起听歌 - 和喜欢的人 听同一首歌 | OpenMusic';
 export const DEFAULT_DESCRIPTION =
-  'OpenMusic 一起听歌吧——免费的多人一起听歌平台。创建或加入在线点歌房间，和好友实时同步播放、共同点歌；支持多音源搜索，歌词同步滚动跟唱，房间内实时聊天。适合朋友聚会、远程陪伴或宿舍一起听歌。';
+  '想和朋友一起听歌？OpenMusic 免费在线一起听歌：创建房间就能和朋友、情侣同步听歌、共同点歌、边听边聊。异地远程、宿舍聚会也方便。';
 export const DEFAULT_KEYWORDS =
-  '一起听歌,一起听歌吧,多人听歌,一起听歌房间,多人一起听歌,同步听歌,好友一起听歌,在线一起听歌,多人点歌,在线点歌,点歌房,同步播放,歌词同步,OpenMusic';
+  '一起听歌,多人听歌,和朋友一起听歌,在线一起听歌,两个人一起听歌,情侣一起听歌,异地一起听歌,同步听歌,好友一起听歌,远程一起听歌,宿舍一起听歌,免费一起听歌,点歌房,在线点歌,OpenMusic,一起听歌吧';
+
+export const DEFAULT_HERO_HEADLINE = '和喜欢的人';
+export const DEFAULT_HERO_SUBLINE = '听同一首歌';
+export const DEFAULT_ABOUT_TITLE = '和喜欢的人听同一首歌，就用 OpenMusic';
+export const DEFAULT_ABOUT_TEXT =
+  'OpenMusic 是免费的一起听歌网站。网页建房，邀请好友进来，就能多人一起听歌、听同一首歌、一起点歌。适合情侣、室友、远方的朋友。';
+
+const FEATURE_LIST = [
+  '和朋友一起听歌，进度同步',
+  '两个人或多人都能点歌',
+  '异地远程也能听同一首歌',
+  '宿舍聚会、边听边聊都行',
+];
+
+export const SEO_FAQS: { q: string; a: string }[] = [
+  {
+    q: '怎么和朋友一起听歌？',
+    a: '打开 OpenMusic 创建房间，把房间号发给朋友。对方加入后就能一起听歌、同步播放、共同点歌。',
+  },
+  {
+    q: '异地怎么一起听歌？',
+    a: '双方进同一个在线听歌房间即可。歌曲进度同步，适合情侣、朋友远程陪伴。',
+  },
+  {
+    q: '两个人怎么听同一首歌？',
+    a: '创建房间后邀请对方加入。两个人一起听歌时进度一致，还能轮流点歌、边听边聊。',
+  },
+];
+
+export type SiteSeoConfig = {
+  siteName: string;
+  title: string;
+  description: string;
+  keywords: string;
+  canonicalUrl: string;
+  baiduVerification: string;
+  ogImage: string;
+  heroHeadline: string;
+  heroSubline: string;
+  aboutTitle: string;
+  aboutText: string;
+  featureList: string[];
+  faqs: { q: string; a: string }[];
+};
+
+let remoteSeo: SiteSeoConfig | null = null;
+let remoteSeoPromise: Promise<SiteSeoConfig | null> | null = null;
+
+function builtinSeo(): SiteSeoConfig {
+  return {
+    siteName: SITE_NAME,
+    title: DEFAULT_TITLE,
+    description: DEFAULT_DESCRIPTION,
+    keywords: DEFAULT_KEYWORDS,
+    canonicalUrl: '',
+    baiduVerification: '',
+    ogImage: '/og-cover.png',
+    heroHeadline: DEFAULT_HERO_HEADLINE,
+    heroSubline: DEFAULT_HERO_SUBLINE,
+    aboutTitle: DEFAULT_ABOUT_TITLE,
+    aboutText: DEFAULT_ABOUT_TEXT,
+    featureList: FEATURE_LIST,
+    faqs: SEO_FAQS,
+  };
+}
+
+export function getActiveSeo(): SiteSeoConfig {
+  return remoteSeo || builtinSeo();
+}
+
+export async function fetchSiteSeo(force = false): Promise<SiteSeoConfig> {
+  if (!force && remoteSeo) return remoteSeo;
+  if (!force && remoteSeoPromise) {
+    const cached = await remoteSeoPromise;
+    return cached || getActiveSeo();
+  }
+
+  remoteSeoPromise = (async () => {
+    try {
+      const res = await fetchWithTimeout('/api/site-seo', { method: 'GET' }, 5000);
+      if (!res.ok) return null;
+      const data = await res.json() as Partial<SiteSeoConfig>;
+      const next: SiteSeoConfig = {
+        ...builtinSeo(),
+        siteName: String(data.siteName || '').trim() || SITE_NAME,
+        title: String(data.title || '').trim() || DEFAULT_TITLE,
+        description: String(data.description || '').trim() || DEFAULT_DESCRIPTION,
+        keywords: String(data.keywords || '').trim() || DEFAULT_KEYWORDS,
+        canonicalUrl: String(data.canonicalUrl || '').trim().replace(/\/$/, ''),
+        baiduVerification: String(data.baiduVerification || '').trim(),
+        ogImage: String(data.ogImage || '').trim() || '/og-cover.png',
+        heroHeadline: String(data.heroHeadline || '').trim() || DEFAULT_HERO_HEADLINE,
+        heroSubline: String(data.heroSubline || '').trim() || DEFAULT_HERO_SUBLINE,
+        aboutTitle: String(data.aboutTitle || '').trim() || DEFAULT_ABOUT_TITLE,
+        aboutText: String(data.aboutText || '').trim() || DEFAULT_ABOUT_TEXT,
+        featureList: Array.isArray(data.featureList) && data.featureList.length
+          ? data.featureList.map(String)
+          : FEATURE_LIST,
+        faqs: Array.isArray(data.faqs) && data.faqs.length
+          ? data.faqs.map((item) => ({
+            q: String((item as { q?: string }).q || '').trim(),
+            a: String((item as { a?: string }).a || '').trim(),
+          })).filter((item) => item.q && item.a)
+          : SEO_FAQS,
+      };
+      remoteSeo = next;
+      return next;
+    } catch {
+      return null;
+    } finally {
+      remoteSeoPromise = null;
+    }
+  })();
+
+  const loaded = await remoteSeoPromise;
+  return loaded || getActiveSeo();
+}
 
 export interface PageSeoOptions {
   title?: string;
@@ -17,8 +135,10 @@ export interface PageSeoOptions {
   noindex?: boolean;
 }
 
-/** 使用浏览器当前访问域名（canonical、OG 等） */
+/** 优先后台规范域，否则当前访问域 */
 export function getSiteOrigin(): string {
+  const canonical = getActiveSeo().canonicalUrl;
+  if (canonical) return canonical;
   if (typeof window !== 'undefined' && window.location.origin) {
     return window.location.origin;
   }
@@ -26,6 +146,10 @@ export function getSiteOrigin(): string {
 }
 
 function upsertMeta(name: string, content: string, attribute: 'name' | 'property' = 'name') {
+  if (!content && name === 'baidu-site-verification') {
+    document.head.querySelector(`meta[${attribute}="${name}"]`)?.remove();
+    return;
+  }
   let el = document.head.querySelector(`meta[${attribute}="${name}"]`) as HTMLMetaElement | null;
   if (!el) {
     el = document.createElement('meta');
@@ -45,66 +169,107 @@ function upsertLink(rel: string, href: string) {
   el.href = href;
 }
 
-function upsertJsonLd(origin: string) {
-  const id = 'openmusic-json-ld';
-  let el = document.getElementById(id) as HTMLScriptElement | null;
-  const data = {
+function resolveOgImage(origin: string, ogImage: string) {
+  if (/^https?:\/\//i.test(ogImage)) return ogImage;
+  const path = ogImage.startsWith('/') ? ogImage : `/${ogImage}`;
+  return origin ? `${origin}${path}` : path;
+}
+
+function upsertJsonLd(origin: string, seo: SiteSeoConfig) {
+  const appId = 'openmusic-json-ld';
+  let appEl = document.getElementById(appId) as HTMLScriptElement | null;
+  const appData = {
     '@context': 'https://schema.org',
     '@type': 'WebApplication',
-    name: SITE_NAME,
-    alternateName: ['一起听歌', '一起听歌吧', '多人听歌', '在线点歌房'],
-    description: DEFAULT_DESCRIPTION,
+    name: seo.siteName,
+    alternateName: [
+      '一起听歌',
+      '多人听歌',
+      '和朋友一起听歌',
+      '点歌房',
+    ],
+    description: seo.description,
     ...(origin ? { url: `${origin}/` } : {}),
     applicationCategory: 'MusicApplication',
-    operatingSystem: 'Web',
+    operatingSystem: 'Web Browser',
     offers: { '@type': 'Offer', price: '0', priceCurrency: 'CNY' },
     inLanguage: 'zh-CN',
-    featureList: [
-      '和好友一起听歌，多人房间实时同步播放',
-      '多音源搜索共同点歌',
-      '歌词同步滚动跟唱，房间内实时聊天',
-      '创建或加入房间即可邀请小伙伴一起听歌',
-    ],
+    featureList: seo.featureList,
+    publisher: {
+      '@type': 'Organization',
+      name: seo.siteName,
+      ...(origin ? { url: `${origin}/` } : {}),
+    },
   };
 
-  if (!el) {
-    el = document.createElement('script');
-    el.id = id;
-    el.type = 'application/ld+json';
-    document.head.appendChild(el);
+  if (!appEl) {
+    appEl = document.createElement('script');
+    appEl.id = appId;
+    appEl.type = 'application/ld+json';
+    document.head.appendChild(appEl);
   }
-  el.textContent = JSON.stringify(data);
+  appEl.textContent = JSON.stringify(appData);
+
+  const faqId = 'openmusic-faq-json-ld';
+  let faqEl = document.getElementById(faqId) as HTMLScriptElement | null;
+  const faqs = seo.faqs?.length ? seo.faqs : SEO_FAQS;
+  const faqData = {
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: faqs.map((item) => ({
+      '@type': 'Question',
+      name: item.q,
+      acceptedAnswer: { '@type': 'Answer', text: item.a },
+    })),
+  };
+  if (!faqEl) {
+    faqEl = document.createElement('script');
+    faqEl.id = faqId;
+    faqEl.type = 'application/ld+json';
+    document.head.appendChild(faqEl);
+  }
+  faqEl.textContent = JSON.stringify(faqData);
 }
 
 export function buildPageTitle(pageTitle?: string) {
-  if (!pageTitle) return DEFAULT_TITLE;
-  if (pageTitle.includes(SITE_NAME)) return pageTitle;
-  return `${pageTitle} - ${SITE_NAME}`;
+  const seo = getActiveSeo();
+  if (!pageTitle) return seo.title;
+  if (pageTitle.includes(seo.siteName) || pageTitle.includes(SITE_NAME)) return pageTitle;
+  return `${pageTitle} - ${seo.siteName}`;
 }
 
 export function applyPageSeo(options: PageSeoOptions = {}) {
   if (typeof document === 'undefined') return;
 
+  const seo = getActiveSeo();
   const title = buildPageTitle(options.title);
-  const description = options.description || DEFAULT_DESCRIPTION;
+  const description = options.description || seo.description;
   const origin = getSiteOrigin();
-  const path = options.path ?? window.location.pathname;
+  const path = options.path ?? (typeof window !== 'undefined' ? window.location.pathname : '/');
   const url = origin ? `${origin}${path}` : path;
-  const image = options.image || (origin ? `${origin}/og-cover.png` : '/og-cover.png');
-  const robots = options.noindex ? 'noindex, nofollow' : 'index, follow';
+  const image = options.image || resolveOgImage(origin, seo.ogImage);
+  const robots = options.noindex ? 'noindex, nofollow' : 'index, follow, max-image-preview:large';
 
-  // 纯净模式伪装中：SEO 仍更新 meta，但不覆盖标签页标题
   if (!isPureModeDisguiseActive()) {
     document.title = title;
   }
   upsertMeta('description', description);
-  upsertMeta('keywords', DEFAULT_KEYWORDS);
+  upsertMeta('keywords', seo.keywords);
   upsertMeta('robots', robots);
+  upsertMeta('application-name', seo.siteName);
+  if (seo.baiduVerification) {
+    upsertMeta('baidu-site-verification', seo.baiduVerification);
+  } else {
+    upsertMeta('baidu-site-verification', '');
+  }
 
   if (origin) {
     upsertLink('canonical', url);
-    upsertJsonLd(origin);
+    upsertJsonLd(origin, seo);
   }
+
+  // 仅更新视觉隐藏的爬虫底座，不改首页可见 UI
+  syncSeoBootstrap(seo);
 
   upsertMeta('og:title', title, 'property');
   upsertMeta('og:description', description, 'property');
@@ -112,7 +277,7 @@ export function applyPageSeo(options: PageSeoOptions = {}) {
   upsertMeta('og:image', image, 'property');
   upsertMeta('og:type', 'website', 'property');
   upsertMeta('og:locale', 'zh_CN', 'property');
-  upsertMeta('og:site_name', SITE_NAME, 'property');
+  upsertMeta('og:site_name', seo.siteName, 'property');
 
   upsertMeta('twitter:card', 'summary_large_image');
   upsertMeta('twitter:title', title);
@@ -124,7 +289,71 @@ export function usePageSeo(options: PageSeoOptions) {
   const { title, description, path, image, noindex } = options;
 
   useEffect(() => {
+    let cancelled = false;
+    void fetchSiteSeo().then(() => {
+      if (!cancelled) applyPageSeo({ title, description, path, image, noindex });
+    });
     applyPageSeo({ title, description, path, image, noindex });
-    return () => applyPageSeo();
+    return () => {
+      cancelled = true;
+      applyPageSeo();
+    };
   }, [title, description, path, image, noindex]);
+}
+
+/** 首页等需要展示后台 SEO 文案的组件（当前首页不用，避免动可见区） */
+export function useSiteSeoConfig(): SiteSeoConfig {
+  const [seo, setSeo] = useState<SiteSeoConfig>(() => getActiveSeo());
+  useEffect(() => {
+    let cancelled = false;
+    void fetchSiteSeo().then((next) => {
+      if (!cancelled) setSeo(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return seo;
+}
+
+/**
+ * 同步视觉隐藏的 #seo-bootstrap（爬虫可读，用户看不见）。
+ * 不删除该节点，避免弱 JS 爬虫丢正文。
+ */
+export function syncSeoBootstrap(seo: SiteSeoConfig = getActiveSeo()) {
+  const el = document.getElementById('seo-bootstrap');
+  if (!el) return;
+
+  const faqs = seo.faqs?.length ? seo.faqs : SEO_FAQS;
+  const features = seo.featureList?.length ? seo.featureList : FEATURE_LIST;
+  const headline = `${seo.heroHeadline} - ${seo.heroSubline}`.replace(/\s*-\s*$/, '').trim()
+    || seo.title;
+
+  el.innerHTML = [
+    `<h1>${escapeHtml(headline)}</h1>`,
+    `<p>${escapeHtml(seo.description)}</p>`,
+    `<h2>${escapeHtml(seo.aboutTitle)}</h2>`,
+    `<p>${escapeHtml(seo.aboutText)}</p>`,
+    '<ul>',
+    ...features.map((item) => `<li>${escapeHtml(item)}</li>`),
+    '</ul>',
+    '<h2>一起听歌常见问题</h2>',
+    ...faqs.flatMap((item) => [
+      `<h3>${escapeHtml(item.q)}</h3>`,
+      `<p>${escapeHtml(item.a)}</p>`,
+    ]),
+  ].join('');
+}
+
+function escapeHtml(text: string) {
+  return String(text || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/** @deprecated 保留兼容；可见区策略下不再移除爬虫底座 */
+export function removeSeoBootstrap() {
+  // no-op：隐藏底座留给爬虫，不影响可见 UI
 }

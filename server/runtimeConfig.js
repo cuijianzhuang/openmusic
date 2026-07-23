@@ -4,6 +4,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypt
 import { fileURLToPath } from 'url';
 import { isBlockedMediaHostname } from './mediaProxy.js';
 import { normalizeMusicApis } from './customMusicApi.js';
+import { buildPublicSiteSeo } from './seoFiles.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = path.join(__dirname, 'runtimeConfig.json');
@@ -42,12 +43,12 @@ function envRoomEmptyTtlMs() {
   return Math.max(0, Math.min(Math.round(value), 24 * 60 * 60 * 1000));
 }
 
-// 服务重启后，恢复出的房间若仍有内容（队列 / 当前曲 / 历史 / 聊天 / 成员）会被保留，
-// 不因重启这一动作被解散。此宽限期 > 0 时，超期仍无人重连才清理；默认 24 小时；
-// 设为 0 表示不主动清理（一直保留，交由正常“无人离开”流程处理）。
+// 服务重启后，恢复出的「有内容」空房（队列/当前曲/点歌历史）会短暂无人。
+// 此项为重连宽限期（毫秒）：默认与空房 TTL 相同；设大一点可给用户更久重连时间。
+// 设为 0 时同样回退到 ROOM_EMPTY_TTL_MS，不会永久保留。
 function envRoomRestartGraceMs() {
   const value = Number(process.env.ROOM_RESTART_GRACE_MS);
-  if (!Number.isFinite(value)) return 24 * 60 * 60 * 1000;
+  if (!Number.isFinite(value)) return 0; // 0 = 使用 roomEmptyTtlMs
   return Math.max(0, Math.min(Math.round(value), 7 * 24 * 60 * 60 * 1000));
 }
 
@@ -90,6 +91,18 @@ function envDefaults() {
     apihzBaseUrl: envText('APIHZ_BASE_URL', 'https://cn.apihz.cn/api'),
     apihzId: envText('APIHZ_ID', envText('APIHZ_IMG_ID', envText('APIHZ_MGC_ID'))),
     apihzKey: envText('APIHZ_KEY', envText('APIHZ_IMG_KEY', envText('APIHZ_MGC_KEY'))),
+    // SEO：空字符串 = 使用内置默认文案；可在管理后台覆盖
+    seoTitle: '',
+    seoDescription: '',
+    seoKeywords: '',
+    seoSiteName: '',
+    seoCanonicalUrl: envText('SITE_CANONICAL_URL'),
+    seoBaiduVerification: '',
+    seoOgImage: '',
+    seoHeroHeadline: '',
+    seoHeroSubline: '',
+    seoAboutTitle: '',
+    seoAboutText: '',
   };
 }
 
@@ -229,7 +242,7 @@ function normalize(config) {
       : 10 * 60 * 1000,
     roomRestartGraceMs: Number.isFinite(roomRestartGraceMs)
       ? Math.max(0, Math.min(Math.round(roomRestartGraceMs), 7 * 24 * 60 * 60 * 1000))
-      : 24 * 60 * 60 * 1000,
+      : 0,
     linuxdoClientId: String(config.linuxdoClientId || '').trim(),
     linuxdoClientSecret: String(config.linuxdoClientSecret || '').trim(),
     linuxdoRedirectUri: String(config.linuxdoRedirectUri || '').trim(),
@@ -264,11 +277,27 @@ function normalize(config) {
     apihzBaseUrl: trimTrailingSlash(config.apihzBaseUrl) || 'https://cn.apihz.cn/api',
     apihzId: String(config.apihzId || '').trim(),
     apihzKey: String(config.apihzKey || '').trim(),
+    seoTitle: String(config.seoTitle || '').trim().slice(0, 120),
+    seoDescription: String(config.seoDescription || '').trim().slice(0, 300),
+    seoKeywords: String(config.seoKeywords || '').trim().slice(0, 400),
+    seoSiteName: String(config.seoSiteName || '').trim().slice(0, 80),
+    seoCanonicalUrl: trimTrailingSlash(config.seoCanonicalUrl).slice(0, 200),
+    seoBaiduVerification: String(config.seoBaiduVerification || '').trim().slice(0, 120),
+    seoOgImage: String(config.seoOgImage || '').trim().slice(0, 500),
+    seoHeroHeadline: String(config.seoHeroHeadline || '').trim().slice(0, 40),
+    seoHeroSubline: String(config.seoHeroSubline || '').trim().slice(0, 80),
+    seoAboutTitle: String(config.seoAboutTitle || '').trim().slice(0, 80),
+    seoAboutText: String(config.seoAboutText || '').trim().slice(0, 800),
   };
 }
 
 export function getRuntimeConfig() {
   return normalize({ ...envDefaults(), ...getPersisted() });
+}
+
+/** 公开 SEO 视图：后台留空字段回退内置默认文案 */
+export function getPublicSiteSeo() {
+  return buildPublicSiteSeo(getRuntimeConfig());
 }
 
 /** Linux.do OAuth 是否已具备可用配置（客户端凭据 + 三个接口地址均已填写） */
@@ -395,6 +424,7 @@ export function setRuntimeConfig(raw = {}) {
     validateHttpUrl(normalized.lrcapiUrl, 'LrcAPI 歌词地址', { allowEmpty: true, allowList: true }),
     validateHttpUrl(normalized.qiniuDomain, '七牛云域名', { allowEmpty: true }),
     validateHttpUrl(normalized.apihzBaseUrl, '接口盒子地址'),
+    validateHttpUrl(normalized.seoCanonicalUrl, 'SEO 规范域名', { allowEmpty: true }),
   ].filter(Boolean);
   if (urlChecks.length) return { success: false, error: urlChecks[0] };
 

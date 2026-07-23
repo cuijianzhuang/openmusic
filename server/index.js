@@ -73,6 +73,8 @@ import {
   setSongRequestEnabled,
   banRoomSong,
   unbanRoomSong,
+  addRoomForbiddenWord,
+  removeRoomForbiddenWord,
   setChatMute,
   addToQueue,
   removeFromQueue,
@@ -134,11 +136,10 @@ import {
   isApihzStickerConfigured,
   searchApihzStickers,
 } from './apihzSticker.js';
-import { checkApihzSensitiveWords } from './apihzSensitiveWord.js';
 import { getSiteAnnouncement, initSiteAnnouncement } from './siteAnnouncement.js';
 import { initSiteBans, isSiteBanned } from './siteBan.js';
 import { createErrorReport, listPendingSolutionsForUser, ackErrorReportSolution } from './errorReports.js';
-import { getRuntimeConfig } from './runtimeConfig.js';
+import { getRuntimeConfig, getPublicSiteSeo } from './runtimeConfig.js';
 import {
   isLinuxdoConfigured,
   signLinuxdoState,
@@ -178,6 +179,7 @@ const PORT = process.env.PORT || 4000;
 const DISCONNECT_GRACE_MS = 30_000;
 const AUTO_ADVANCE_INTERVAL_MS = 500;
 const CLIENT_URL = (process.env.CLIENT_URL || '').replace(/\/$/, '');
+const SITE_CANONICAL_URL = (process.env.SITE_CANONICAL_URL || '').trim().replace(/\/$/, '');
 const ALLOWED_ORIGINS = CLIENT_URL
   ? new Set(CLIENT_URL.split(',').map((origin) => origin.trim().replace(/\/$/, '')).filter(Boolean))
   : null;
@@ -716,6 +718,13 @@ app.get('/api/site-announcement', (_req, res) => {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
   res.set('Pragma', 'no-cache');
   res.json(getSiteAnnouncement());
+});
+
+/** 站点 SEO：管理后台可覆盖标题/描述等；空字段回退内置默认 */
+app.get('/api/site-seo', (_req, res) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+  res.set('Pragma', 'no-cache');
+  res.json(getPublicSiteSeo());
 });
 
 /** 前端更新检测：走 /api 绕过 EdgeOne 静态缓存；no-store 防中间层缓存 */
@@ -1705,13 +1714,19 @@ mountWechatFileHelperProxy(app, fetchWithTimeout, {
 });
 
 app.get('/robots.txt', (req, res) => {
-  const origin = resolveSiteOrigin(req, ALLOWED_ORIGINS);
-  res.type('text/plain').send(buildRobotsTxt(origin));
+  const runtime = getRuntimeConfig();
+  const origin = resolveSiteOrigin(req, ALLOWED_ORIGINS, {
+    canonicalEnv: runtime.seoCanonicalUrl || SITE_CANONICAL_URL,
+  });
+  res.type('text/plain; charset=utf-8').send(buildRobotsTxt(origin));
 });
 
 app.get('/sitemap.xml', (req, res) => {
-  const origin = resolveSiteOrigin(req, ALLOWED_ORIGINS);
-  res.type('application/xml').send(buildSitemapXml(origin));
+  const runtime = getRuntimeConfig();
+  const origin = resolveSiteOrigin(req, ALLOWED_ORIGINS, {
+    canonicalEnv: runtime.seoCanonicalUrl || SITE_CANONICAL_URL,
+  });
+  res.type('application/xml; charset=utf-8').send(buildSitemapXml(origin));
 });
 
 app.use(express.static(clientDist, {
@@ -1946,7 +1961,8 @@ function doBroadcastRoomUpdate(roomId, options = {}) {
     const needsPersonal = payload.chatMuted !== muteAll
       || payload.mutedUserIds != null
       || payload.userNicknames != null
-      || payload.bannedSongs != null;
+      || payload.bannedSongs != null
+      || payload.forbiddenWords != null;
 
     if (needsPersonal) {
       personalized.push({ sid, payload });
@@ -2551,6 +2567,46 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
+  socket.on('add_room_forbidden_word', ({ word }, callback) => {
+    if (rejectReadOnly(socket, callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, 'add_room_forbidden_word', callback)) return;
+
+    const roomId = socketToRoom.get(socket.id);
+    if (!roomId) {
+      callback?.({ success: false, error: '未加入房间' });
+      return;
+    }
+
+    const result = addRoomForbiddenWord(roomId, getSocketUserId(socket), word, socket.id);
+    if (result.error) {
+      callback?.({ success: false, error: result.error });
+      return;
+    }
+
+    broadcastRoomUpdate(roomId);
+    callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
+  });
+
+  socket.on('remove_room_forbidden_word', ({ word }, callback) => {
+    if (rejectReadOnly(socket, callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, 'remove_room_forbidden_word', callback)) return;
+
+    const roomId = socketToRoom.get(socket.id);
+    if (!roomId) {
+      callback?.({ success: false, error: '未加入房间' });
+      return;
+    }
+
+    const result = removeRoomForbiddenWord(roomId, getSocketUserId(socket), word, socket.id);
+    if (result.error) {
+      callback?.({ success: false, error: result.error });
+      return;
+    }
+
+    broadcastRoomUpdate(roomId);
+    callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
+  });
+
   socket.on('set_room_audio_quality', ({ netease, tencent }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
     if (rejectRateLimited(socket, limitSocketAction, 'set_room_audio_quality', callback)) return;
@@ -3076,16 +3132,6 @@ io.on('connection', (socket) => {
     if (!roomId) {
       callback?.({ success: false, error: '未加入房间' });
       return;
-    }
-
-    const textContent = String(text || '').trim();
-    if (textContent) {
-      // 客户端检测仅用于即时提示，服务端始终执行权威审核。
-      const sensitive = await checkApihzSensitiveWords(textContent);
-      if (!sensitive.ok) {
-        callback?.({ success: false, error: sensitive.error });
-        return;
-      }
     }
 
     const result = addChatMessage(roomId, getSocketUserId(socket), text, {

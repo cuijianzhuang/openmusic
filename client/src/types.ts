@@ -63,6 +63,13 @@ export interface BannedSong {
   bannedAt?: number;
 }
 
+export interface ForbiddenWord {
+  word: string;
+  /** 是否为房间默认词（排序靠后，可删除） */
+  isDefault?: boolean;
+  addedAt?: number;
+}
+
 export interface RoomUser {
   id: string;
   nickname: string;
@@ -224,6 +231,8 @@ export interface RoomState {
   queueMaxLength?: number;
   /** 禁播歌曲（仅房主/管理员可见） */
   bannedSongs?: BannedSong[];
+  /** 聊天违禁词（仅房主/管理员可见） */
+  forbiddenWords?: ForbiddenWord[];
   /** 房间贵宾角标（userId → 配置） */
   memberTiers?: Record<string, RoomMemberTier>;
   /** 贵宾欢迎语等房间级设置 */

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Crown, Minus, Plus, Sparkles, X } from 'lucide-react';
 import { NETEASE_FM_MODE_OPTIONS, getFmModeLabel, normalizeFmMode, FM_MODE_OFF, DEFAULT_FM_MODE } from '../api/music/fmMode';
-import type { BannedSong, RoomUser } from '../types';
+import type { BannedSong, ForbiddenWord, RoomUser } from '../types';
 import type { DislikeSkipMode } from '../lib/dislikeSkip';
 import SourceBadge from './SourceBadge';
 import ConfirmModal from './ConfirmModal';
@@ -27,6 +27,7 @@ const MAX_PER_USER_MAX = 50;
 const DISLIKE_SKIP_THRESHOLD_MAX = 50;
 const CLEAR_ON_LEAVE_DELAY_MINUTES_MAX = 24 * 60;
 const JOIN_NOTICE_COOLDOWN_MINUTES_MAX = 24 * 60;
+const FORBIDDEN_WORD_MAX_LEN = 20;
 const COOLDOWN_OPTIONS = [0, 10, 30, 60, 120] as const;
 const QUEUE_LIMIT_OPTIONS = [50, 100, 200] as const;
 
@@ -87,6 +88,10 @@ interface Props {
   songRequestSaving?: boolean;
   bannedSongs?: BannedSong[];
   onUnbanSong?: (name: string) => void | Promise<void>;
+  forbiddenWords?: ForbiddenWord[];
+  forbiddenWordSaving?: boolean;
+  onAddForbiddenWord?: (word: string) => boolean | Promise<boolean>;
+  onRemoveForbiddenWord?: (word: string) => void | Promise<void>;
   memberTierCount: number;
   users?: RoomUser[];
   myUserId?: string | null;
@@ -228,6 +233,10 @@ export default function RoomSettingsModal({
   songRequestSaving = false,
   bannedSongs = [],
   onUnbanSong,
+  forbiddenWords = [],
+  forbiddenWordSaving = false,
+  onAddForbiddenWord,
+  onRemoveForbiddenWord,
   memberTierCount,
   users = [],
   myUserId = null,
@@ -248,6 +257,8 @@ export default function RoomSettingsModal({
   const [draftJoinNoticeEnabled, setDraftJoinNoticeEnabled] = useState(joinNoticeEnabled);
   const [draftJoinNoticeCooldownMinutes, setDraftJoinNoticeCooldownMinutes] = useState(joinNoticeCooldownMinutes);
   const [draftSongRequest, setDraftSongRequest] = useState(songRequest);
+  const [draftForbiddenWord, setDraftForbiddenWord] = useState('');
+  const [showDefaultForbiddenWords, setShowDefaultForbiddenWords] = useState(false);
   const [transferTargetId, setTransferTargetId] = useState<string | null>(null);
   const [confirmTransfer, setConfirmTransfer] = useState(false);
   const [linuxdoEnabled, setLinuxdoEnabled] = useState(false);
@@ -268,6 +279,16 @@ export default function RoomSettingsModal({
   const selectedTransferUser = useMemo(
     () => transferCandidates.find((user) => user.id === transferTargetId) || null,
     [transferCandidates, transferTargetId],
+  );
+
+  const customForbiddenWords = useMemo(
+    () => forbiddenWords.filter((entry) => !entry.isDefault),
+    [forbiddenWords],
+  );
+
+  const defaultForbiddenWords = useMemo(
+    () => forbiddenWords.filter((entry) => entry.isDefault),
+    [forbiddenWords],
   );
 
   const tabs = useMemo(() => {
@@ -299,6 +320,8 @@ export default function RoomSettingsModal({
     setDraftJoinNoticeEnabled(joinNoticeEnabled);
     setDraftJoinNoticeCooldownMinutes(joinNoticeCooldownMinutes);
     setDraftSongRequest(songRequest);
+    setDraftForbiddenWord('');
+    setShowDefaultForbiddenWords(false);
     appliedAnnouncementRef.current = { enabled: announcementEnabled, text: announcementText };
     appliedSongRequestRef.current = songRequest;
     setTransferTargetId(null);
@@ -804,6 +827,107 @@ export default function RoomSettingsModal({
                     )}
                   </div>
                 )}
+
+                <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="text-sm font-medium text-white">违禁词</label>
+                    <span className="text-[11px] text-netease-muted">{forbiddenWords.length} 个</span>
+                  </div>
+                  <p className="mt-0.5 text-xs text-netease-muted">
+                    聊天消息命中任一词语将被拦截；自定义词排在前面，默认词可删除
+                  </p>
+                  <form
+                    className="mt-2 flex gap-2"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      const word = draftForbiddenWord.trim();
+                      if (!word || forbiddenWordSaving) return;
+                      void Promise.resolve(onAddForbiddenWord?.(word)).then((ok) => {
+                        if (ok) setDraftForbiddenWord('');
+                      });
+                    }}
+                  >
+                    <input
+                      type="text"
+                      value={draftForbiddenWord}
+                      maxLength={FORBIDDEN_WORD_MAX_LEN}
+                      disabled={forbiddenWordSaving}
+                      onChange={(e) => setDraftForbiddenWord(e.target.value.slice(0, FORBIDDEN_WORD_MAX_LEN))}
+                      placeholder="输入要拦截的词语"
+                      className="min-w-0 flex-1 rounded-lg border border-netease-border/60 bg-netease-dark px-2.5 py-1.5 text-xs text-white outline-none focus:border-netease-red/50 disabled:opacity-50"
+                    />
+                    <button
+                      type="submit"
+                      disabled={forbiddenWordSaving || !draftForbiddenWord.trim()}
+                      className="flex-shrink-0 rounded-lg bg-netease-red px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-netease-red/90 disabled:opacity-40"
+                    >
+                      添加
+                    </button>
+                  </form>
+
+                  {customForbiddenWords.length > 0 ? (
+                    <div className="mt-2 max-h-40 space-y-1 overflow-y-auto pr-0.5">
+                      {customForbiddenWords.map((entry) => (
+                        <div
+                          key={`${entry.word}:${entry.addedAt ?? ''}`}
+                          className="flex items-center gap-2 rounded-lg bg-black/20 px-2 py-1.5"
+                        >
+                          <p className="min-w-0 flex-1 truncate text-xs text-white/90">{entry.word}</p>
+                          <button
+                            type="button"
+                            disabled={forbiddenWordSaving}
+                            onClick={() => onRemoveForbiddenWord?.(entry.word)}
+                            className="flex-shrink-0 rounded-md px-2 py-1 text-[10px] text-netease-muted transition-colors hover:bg-white/10 hover:text-white disabled:opacity-40"
+                          >
+                            删除
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-xs text-netease-muted/80">暂无自定义违禁词</p>
+                  )}
+
+                  {defaultForbiddenWords.length > 0 && (
+                    <div className="mt-2 rounded-lg border border-white/5 bg-black/10 px-2.5 py-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-[11px] text-netease-muted">
+                          默认违禁词 {defaultForbiddenWords.length} 个（内容较脏，默认隐藏）
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setShowDefaultForbiddenWords((prev) => !prev)}
+                          className="flex-shrink-0 rounded-md px-2 py-1 text-[10px] text-netease-muted transition-colors hover:bg-white/10 hover:text-white"
+                        >
+                          {showDefaultForbiddenWords ? '收起' : '查看默认违禁词'}
+                        </button>
+                      </div>
+                      {showDefaultForbiddenWords && (
+                        <div className="mt-2 max-h-40 space-y-1 overflow-y-auto pr-0.5">
+                          {defaultForbiddenWords.map((entry) => (
+                            <div
+                              key={`${entry.word}:${entry.addedAt ?? ''}`}
+                              className="flex items-center gap-2 rounded-lg bg-black/20 px-2 py-1.5"
+                            >
+                              <p className="min-w-0 flex-1 truncate text-xs text-white/90">{entry.word}</p>
+                              <span className="flex-shrink-0 rounded px-1.5 py-0.5 text-[9px] text-netease-muted bg-white/5">
+                                默认
+                              </span>
+                              <button
+                                type="button"
+                                disabled={forbiddenWordSaving}
+                                onClick={() => onRemoveForbiddenWord?.(entry.word)}
+                                className="flex-shrink-0 rounded-md px-2 py-1 text-[10px] text-netease-muted transition-colors hover:bg-white/10 hover:text-white disabled:opacity-40"
+                              >
+                                删除
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             </section>
           )}

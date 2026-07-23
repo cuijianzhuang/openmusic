@@ -3,25 +3,32 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <meta name="description" content="OpenMusic 一起听歌吧——免费的多人一起听歌平台。创建或加入在线点歌房间，和好友实时同步播放、共同点歌；支持多音源搜索，歌词同步滚动跟唱，房间内实时聊天。适合朋友聚会、远程陪伴或宿舍一起听歌。" />
-    <meta name="keywords" content="一起听歌,一起听歌吧,多人听歌,一起听歌房间,多人一起听歌,同步听歌,好友一起听歌,在线一起听歌,多人点歌,在线点歌,点歌房,同步播放,歌词同步,OpenMusic" />
+    <meta name="description" content="想和朋友一起听歌？OpenMusic 免费在线一起听歌：创建房间就能和朋友、情侣同步听歌、共同点歌、边听边聊。异地远程、宿舍聚会也方便。" />
+    <meta name="keywords" content="一起听歌,多人听歌,和朋友一起听歌,在线一起听歌,两个人一起听歌,情侣一起听歌,异地一起听歌,同步听歌,好友一起听歌,远程一起听歌,宿舍一起听歌,免费一起听歌,点歌房,在线点歌,OpenMusic,一起听歌吧" />
     <meta name="author" content="OpenMusic" />
-    <meta name="robots" content="index, follow" />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
     <meta name="theme-color" content="#ec4141" />
     <meta name="application-name" content="OpenMusic" />
+    <meta name="apple-mobile-web-app-title" content="OpenMusic" />
     <meta name="format-detection" content="telephone=no" />
+    <meta name="renderer" content="webkit" />
+    <meta name="force-rendering" content="webkit" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+
+    <link rel="canonical" href="__SITE_ORIGIN__/" />
 
     <meta property="og:type" content="website" />
     <meta property="og:locale" content="zh_CN" />
     <meta property="og:site_name" content="OpenMusic" />
-    <meta property="og:title" content="一起听歌 · 多人实时点歌 - OpenMusic" />
-    <meta property="og:description" content="OpenMusic 一起听歌吧——免费的多人一起听歌平台。创建或加入在线点歌房间，和好友实时同步播放、共同点歌；支持多音源搜索，歌词同步滚动跟唱，房间内实时聊天。适合朋友聚会、远程陪伴或宿舍一起听歌。" />
-    <meta property="og:image" content="/og-cover.png" />
+    <meta property="og:title" content="一起听歌 - 和喜欢的人 听同一首歌 | OpenMusic" />
+    <meta property="og:description" content="想和朋友一起听歌？OpenMusic 免费在线一起听歌：创建房间就能和朋友、情侣同步听歌、共同点歌、边听边聊。异地远程、宿舍聚会也方便。" />
+    <meta property="og:url" content="__SITE_ORIGIN__/" />
+    <meta property="og:image" content="__SITE_ORIGIN__/og-cover.png" />
 
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="一起听歌 · 多人实时点歌 - OpenMusic" />
-    <meta name="twitter:description" content="OpenMusic 一起听歌吧——免费的多人一起听歌平台。创建或加入在线点歌房间，和好友实时同步播放、共同点歌；支持多音源搜索，歌词同步滚动跟唱，房间内实时聊天。适合朋友聚会、远程陪伴或宿舍一起听歌。" />
-    <meta name="twitter:image" content="/og-cover.png" />
+    <meta name="twitter:title" content="一起听歌 - 和喜欢的人 听同一首歌 | OpenMusic" />
+    <meta name="twitter:description" content="想和朋友一起听歌？OpenMusic 免费在线一起听歌：创建房间就能和朋友、情侣同步听歌、共同点歌、边听边聊。异地远程、宿舍聚会也方便。" />
+    <meta name="twitter:image" content="__SITE_ORIGIN__/og-cover.png" />
 
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
@@ -34,13 +41,81 @@
       href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700;900&family=Inter:wght@400;500;600;700;900&family=JetBrains+Mono:wght@400;500;600;700&family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=LXGW+WenKai&family=Noto+Sans+SC:wght@400;500;700;900&family=Noto+Serif+SC:wght@400;700;900&family=UnifrakturCook:wght@700&display=swap"
     />
 
-    <title>一起听歌 · 多人实时点歌 - OpenMusic</title>
+    <title>一起听歌 - 和喜欢的人 听同一首歌 | OpenMusic</title>
+    <script type="application/ld+json" id="openmusic-json-ld">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "OpenMusic",
+        "alternateName": ["一起听歌", "多人听歌", "和朋友一起听歌", "点歌房"],
+        "description": "想和朋友一起听歌？OpenMusic 免费在线一起听歌：创建房间就能和朋友、情侣同步听歌、共同点歌、边听边聊。异地远程、宿舍聚会也方便。",
+        "url": "__SITE_ORIGIN__/",
+        "applicationCategory": "MusicApplication",
+        "operatingSystem": "Web Browser",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "CNY" },
+        "inLanguage": "zh-CN",
+        "featureList": [
+          "和朋友一起听歌，进度同步",
+          "两个人或多人都能点歌",
+          "异地远程也能听同一首歌",
+          "宿舍聚会、边听边聊都行"
+        ],
+        "publisher": {
+          "@type": "Organization",
+          "name": "OpenMusic",
+          "url": "__SITE_ORIGIN__/"
+        }
+      }
+    </script>
+    <script type="application/ld+json" id="openmusic-faq-json-ld">
+      {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "怎么和朋友一起听歌？",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "打开 OpenMusic 创建房间，把房间号发给朋友。对方加入后就能一起听歌、同步播放、共同点歌。"
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "异地怎么一起听歌？",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "双方进同一个在线听歌房间即可。歌曲进度同步，适合情侣、朋友远程陪伴。"
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "两个人怎么听同一首歌？",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "创建房间后邀请对方加入。两个人一起听歌时进度一致，还能轮流点歌、边听边聊。"
+            }
+          }
+        ]
+      }
+    </script>
   </head>
   <body>
+    <div id="seo-bootstrap" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;">
+      <h1>一起听歌 - 和喜欢的人 听同一首歌</h1>
+      <p>想和朋友一起听歌？OpenMusic 免费在线一起听歌：创建房间就能和朋友、情侣同步听歌、共同点歌、边听边聊。</p>
+      <h2>一起听歌常见问题</h2>
+      <h3>怎么和朋友一起听歌？</h3>
+      <p>打开 OpenMusic 创建房间，把房间号发给朋友，加入后就能一起听歌。</p>
+      <h3>异地怎么一起听歌？</h3>
+      <p>双方进同一个在线听歌房间，歌曲进度同步。</p>
+      <h3>两个人怎么听同一首歌？</h3>
+      <p>创建房间邀请对方加入，进度一致，还能轮流点歌。</p>
+    </div>
     <noscript>
       <div style="max-width:720px;margin:2rem auto;padding:0 1rem;font-family:system-ui,sans-serif;line-height:1.6;">
-        <h1>OpenMusic · 一起听歌吧，多人实时在线点歌</h1>
-        <p>OpenMusic 一起听歌吧——免费的多人一起听歌平台。创建或加入在线点歌房间，和好友实时同步播放、共同点歌；支持多音源搜索，歌词同步滚动跟唱，房间内实时聊天。适合朋友聚会、远程陪伴或宿舍一起听歌。</p>
+        <h1>一起听歌 - 和喜欢的人 听同一首歌 | OpenMusic</h1>
+        <p>想和朋友一起听歌？OpenMusic 免费在线一起听歌，创建房间就能同步听、共同点歌。</p>
         <p>请启用 JavaScript 以使用完整功能。</p>
       </div>
     </noscript>
