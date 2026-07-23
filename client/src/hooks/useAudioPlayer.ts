@@ -473,10 +473,18 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     if (!options.bypassThrottle && now - lastSkipAt.current < 2000) return;
     lastSkipAt.current = now;
 
+    const sourceErrorSkip = options.reason === 'source_error';
+    const lockedQueueId = live?.current?.queueId || null;
+
     skippingRef.current = true;
     justSkippedRef.current = true;
     loadGeneration.current += 1;
-    loadLockRef.current = EMPTY_LOAD_LOCK;
+    // source_error：保持加载锁，避免跳过等待期间 effect 又去反复取链
+    if (sourceErrorSkip && lockedQueueId) {
+      loadLockRef.current = { queueId: lockedQueueId, gen: loadGeneration.current };
+    } else {
+      loadLockRef.current = EMPTY_LOAD_LOCK;
+    }
     useAudioStore.getState().setNeedsAudioUnlock(false);
     controller.clearQueue();
     controller.enqueue(() => {
@@ -487,14 +495,20 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     if (live) {
       useRoomStore.getState().setRoom({ ...live, currentTime: 0 });
     }
-    skipSong({ reason: options.reason || 'manual' }).then((res) => {
-      if (!res.success && options.reason === 'source_error' && res.error) {
-        notifyPlaybackToast(res.error, 'error');
-        const liveCurrent = useRoomStore.getState().room?.current;
-        if (liveCurrent) clearTrackSourceError(liveCurrent);
-        // 服务端判定音源正常：恢复加载锁，交给 watchdog / 下次 effect 本机重试
+    skipSong({ reason: options.reason || 'manual' }).then(async (res) => {
+      if (!res.success && sourceErrorSkip) {
+        // 服务端探测与本机预取不一致：以本机已确认无源为准，系统强制切歌
+        // （避免清标记后跨源换另一首歌「还能播」，并反复打失败的 type=url）
+        notifyPlaybackToast(res.error || '音源异常，正在跳过…', 'error');
+        try {
+          await skipSong({ reason: 'system' });
+        } finally {
+          loadLockRef.current = EMPTY_LOAD_LOCK;
+        }
+        return;
+      }
+      if (!res.success) {
         loadLockRef.current = EMPTY_LOAD_LOCK;
-        setLoadRetryNonce((n) => n + 1);
       }
     }).finally(() => {
       skippingRef.current = false;
@@ -865,15 +879,15 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     }
 
     if (isTrackSourceError(current)) {
-      // 预取已打上「歌曲源异常」：轮到播放时再完整取链一次（含跨源）
+      setTrackLoading(false);
       if (useRoomStore.getState().isPlaybackLeader) {
-        const prev = resolveFailCountRef.current;
-        const seeded = prev?.queueId === current.queueId ? prev.count : 0;
-        resolveFailCountRef.current = {
-          queueId: current.queueId,
-          count: Math.max(seeded, SOURCE_ERROR_SERVER_VERIFY_AFTER - 1),
-        };
+        // 预取已确认无源：直接核实切歌，不再本机重试取链
+        loadLockRef.current = { queueId: current.queueId, gen: loadGeneration.current };
+        notifyPlaybackToast('音源异常，正在跳过…', 'error');
+        requestSkip({ reason: 'source_error' });
+        return;
       }
+      // 成员：角标仅提示，仍尝试取链；房主切歌后会收到 room_update
       clearTrackSourceError(current);
     }
 

@@ -4,6 +4,7 @@ import { getActiveLyricPair } from '../../api/music';
 import { useSmoothPlaybackTime } from '../../hooks/useSmoothPlaybackTime';
 import { useTrackDuration, clampPlaybackTime } from '../../hooks/useTrackDuration';
 import { useTrackLyrics } from '../../hooks/useTrackLyrics';
+import TruncateTip from '../TruncateTip';
 
 interface Props {
   song: QueueItem;
@@ -25,19 +26,37 @@ function MiniPlayerLyricTicker({ song, onExpand }: Props) {
     >
       {currentLyric || nextLyric ? (
         <>
-          <p className="text-xs sm:text-sm font-medium truncate leading-tight">
-            {currentLyric || '\u00A0'}
-          </p>
-          <p className="text-[10px] sm:text-xs text-netease-muted truncate leading-tight mt-0.5">
-            {nextLyric || '\u00A0'}
-          </p>
+          {currentLyric ? (
+            <TruncateTip
+              text={currentLyric}
+              as="p"
+              className="min-w-0 text-xs sm:text-sm font-medium truncate leading-tight"
+            />
+          ) : (
+            <p className="text-xs sm:text-sm font-medium truncate leading-tight">{'\u00A0'}</p>
+          )}
+          {nextLyric ? (
+            <TruncateTip
+              text={nextLyric}
+              as="p"
+              className="min-w-0 text-[10px] sm:text-xs text-netease-muted truncate leading-tight mt-0.5"
+            />
+          ) : (
+            <p className="text-[10px] sm:text-xs text-netease-muted truncate leading-tight mt-0.5">{'\u00A0'}</p>
+          )}
         </>
       ) : (
         <>
-          <p className="text-xs sm:text-sm font-medium truncate leading-tight">{song.name}</p>
-          <p className="text-[10px] sm:text-xs text-netease-muted truncate leading-tight mt-0.5">
-            {song.artist}
-          </p>
+          <TruncateTip
+            text={song.name}
+            as="p"
+            className="min-w-0 text-xs sm:text-sm font-medium truncate leading-tight"
+          />
+          <TruncateTip
+            text={song.artist}
+            as="p"
+            className="min-w-0 text-[10px] sm:text-xs text-netease-muted truncate leading-tight mt-0.5"
+          />
         </>
       )}
     </button>

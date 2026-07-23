@@ -35,7 +35,11 @@ function SongRowBadgesContent({
           已播放
         </span>
       )}
-      <SourceBadge source={song.source} variant="muted" className="leading-none" />
+      <SourceBadge
+        source={song.source}
+        variant="muted"
+        className="hidden leading-none sm:inline-flex"
+      />
     </div>
   );
 }

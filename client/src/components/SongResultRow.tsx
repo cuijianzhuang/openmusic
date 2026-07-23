@@ -105,10 +105,11 @@ function SongResultRow({
         type="button"
         onClick={handleAdd}
         disabled={addingId === key}
-        className={`flex flex-shrink-0 items-center gap-1 rounded-full bg-netease-red/10 px-2.5 py-1 text-xs font-medium text-netease-red transition-all hover:bg-netease-red hover:text-white disabled:opacity-50 ${alwaysShowActions ? 'opacity-100' : 'opacity-100 sm:opacity-0 sm:group-hover:opacity-100'}`}
+        aria-label="点歌"
+        className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-netease-red/10 text-netease-red transition-all hover:bg-netease-red hover:text-white disabled:opacity-50 sm:h-auto sm:w-auto sm:gap-1 sm:px-2.5 sm:py-1 sm:text-xs sm:font-medium ${alwaysShowActions ? 'opacity-100' : 'opacity-100 sm:opacity-0 sm:group-hover:opacity-100'}`}
       >
         {addingId === key ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-        点歌
+        <span className="hidden sm:inline">点歌</span>
       </button>
     </div>
   );
