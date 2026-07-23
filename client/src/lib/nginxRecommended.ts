@@ -99,6 +99,23 @@ location = /sitemap.xml {
     proxy_set_header X-Forwarded-Proto $scheme;
 }
 
+# 首页 HTML 走 Node，保证百度验证 meta 出现在源码里（格式与平台一致）
+location = / {
+    proxy_pass http://127.0.0.1:4000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+location = /index.html {
+    proxy_pass http://127.0.0.1:4000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
 # 静态直出（assets 固定文件名，禁止长期缓存）
 location ^~ /assets/ {
     expires 1d;

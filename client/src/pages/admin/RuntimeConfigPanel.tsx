@@ -1079,7 +1079,7 @@ export default function RuntimeConfigPanel({
           <Input
             value={draft.seoBaiduVerification}
             maxLength={120}
-            placeholder="粘贴 baidu-site-verification 的 content"
+            placeholder="只填 content，如 codeva-xxxx（会写入 HTML 源码，格式与百度一致）"
             onChange={(e) => setDraft({ ...draft, seoBaiduVerification: e.target.value })}
           />
         </Col>

@@ -149,6 +149,27 @@ server {
         proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
     }
 
+    # 首页 HTML 走 Node，保证百度验证 meta 写入源码
+    location = / {
+        proxy_pass http://127.0.0.1:4000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header iqp $http_iqp;
+        proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
+    }
+
+    location = /index.html {
+        proxy_pass http://127.0.0.1:4000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header iqp $http_iqp;
+        proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
+    }
+
     # —— 静态直出（不要 proxy_pass）——
 
     location ^~ /assets/ {

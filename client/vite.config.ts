@@ -5,7 +5,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import {
-  applySiteOriginToHtml,
+  applySeoToHtml,
   buildRobotsTxt,
   buildSitemapXml,
   resolveDevSiteOrigin,
@@ -46,7 +46,10 @@ function seoDevMiddleware() {
       handler(html: string, ctx: { server?: unknown }) {
         // 仅开发服务器替换；生产构建交给 seoBuildPlugin，避免写成 localhost
         if (!ctx.server) return html;
-        return applySiteOriginToHtml(html, resolveDevSiteOrigin({ headers: { host: 'localhost:5173' } }));
+        return applySeoToHtml(html, {
+          siteOrigin: resolveDevSiteOrigin({ headers: { host: 'localhost:5173' } }),
+          baiduVerification: process.env.SITE_BAIDU_VERIFICATION || '',
+        });
       },
     },
   };
@@ -78,7 +81,11 @@ function seoBuildPlugin(): Plugin {
     apply: 'build',
     transformIndexHtml(html) {
       console.log(`[seo] site origin → ${BUILD_SITE_ORIGIN}`);
-      return applySiteOriginToHtml(html, BUILD_SITE_ORIGIN);
+      const withSeo = applySeoToHtml(html, {
+        siteOrigin: BUILD_SITE_ORIGIN,
+        baiduVerification: process.env.SITE_BAIDU_VERIFICATION || '',
+      });
+      return withSeo;
     },
     writeBundle(outputOptions) {
       const outDir = outputOptions.dir || path.join(__dirname, 'dist');
