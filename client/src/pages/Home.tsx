@@ -121,11 +121,9 @@ function lobbyCoverUrl(room: Pick<RoomSummary, 'customCoverUrl' | 'currentSong'>
 const RoomCard = memo(function RoomCard({
   room,
   onJoin,
-  isRecent,
 }: {
   room: RoomSummary;
   onJoin: (room: RoomSummary) => void;
-  isRecent?: boolean;
 }) {
   const isActive = room.isPlaying && room.currentSong;
   const hardLocked = isLobbyHardLocked(room);
@@ -241,22 +239,13 @@ const RoomCard = memo(function RoomCard({
 
           {/* 信息区块（倾斜时视差浮起） */}
           <div className="min-w-0 flex-1 flex flex-col h-full justify-center transition-transform duration-300 ease-out [transform:translateZ(0)] group-hover:[transform:translateZ(24px)]">
-            <div className="flex items-center gap-2.5 mb-1.5">
-              {isRecent && (
-                <span className="flex-shrink-0 flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-sky-200 bg-gradient-to-b from-sky-400/30 to-sky-600/15 ring-1 ring-sky-400/30 px-2 py-0.5 rounded-md font-bold shadow-[0_2px_5px_rgba(0,0,0,0.5),0_0_14px_rgba(56,189,248,0.3),inset_0_1px_0_rgba(255,255,255,0.25)]">
-                  <span className="relative flex h-1.5 w-1.5">
-                    <span className="absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75 animate-ping" />
-                    <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-sky-300" />
-                  </span>
-                  RECENT
-                </span>
-              )}
-              {/* 房间名 */}
-              <h3 className={`text-xl sm:text-[22px] font-black tracking-tight truncate ${hardLocked ? 'text-white/50' : 'text-emboss'}`}>
+            <div className="flex items-start gap-2.5 mb-1.5">
+              {/* 房间名：过长换行完整显示，不用省略号 */}
+              <h3 className={`min-w-0 flex-1 text-xl sm:text-[22px] font-black tracking-tight break-words whitespace-normal leading-snug ${hardLocked ? 'text-white/50' : 'text-emboss'}`}>
                 {room.name}
               </h3>
               {room.hasPassword && !hardLocked && (
-                <span className="flex-shrink-0 p-1 rounded-full bg-amber-400/10 text-amber-400 group-hover:bg-amber-400/20 transition-colors">
+                <span className="flex-shrink-0 mt-1 p-1 rounded-full bg-amber-400/10 text-amber-400 group-hover:bg-amber-400/20 transition-colors">
                   <Lock className="w-3.5 h-3.5" />
                 </span>
               )}
@@ -773,7 +762,7 @@ export default function Home() {
                   {/* 这里改成了更宽的网格，最大 3 列，从而让卡片变宽 */}
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 sm:gap-6">
                     {recentRooms.map((room) => (
-                      <RoomCard key={room.id} room={room} onJoin={handleRoomCardClick} isRecent />
+                      <RoomCard key={room.id} room={room} onJoin={handleRoomCardClick} />
                     ))}
                   </div>
                 </section>

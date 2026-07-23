@@ -201,36 +201,19 @@ body {
   opacity: 0.95;
 }
 
-/* 房间卡片标题：金属顶光渐变裁进文字 + 上白边/下黑边双向 bevel + 投影，浮雕立体感 */
+/* 房间卡片标题：纯色 + 上白边/下黑边双向 bevel + 投影 */
 .text-emboss {
-  background-image: linear-gradient(
-    180deg,
-    #ffffff 0%,
-    #f4f5f9 34%,
-    #c3c6d6 52%,
-    #82869c 74%,
-    #a9adc0 100%
-  );
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  color: #f0f1f5;
   filter:
     drop-shadow(0 -1px 0 rgba(255, 255, 255, 0.35))
     drop-shadow(0 2px 0 rgba(0, 0, 0, 0.95))
     drop-shadow(0 4px 3px rgba(0, 0, 0, 0.6))
     drop-shadow(0 10px 16px rgba(0, 0, 0, 0.55));
-  transition: filter 0.3s ease;
+  transition: filter 0.3s ease, color 0.3s ease;
 }
 
 .group:hover .text-emboss {
-  background-image: linear-gradient(
-    180deg,
-    #ffffff 0%,
-    #ffffff 38%,
-    #d6d9e6 54%,
-    #979cb4 74%,
-    #c0c4d6 100%
-  );
+  color: #ffffff;
   filter:
     drop-shadow(0 -1px 0 rgba(255, 255, 255, 0.3))
     drop-shadow(0 2px 1px rgba(0, 0, 0, 0.9))
