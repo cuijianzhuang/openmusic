@@ -269,3 +269,47 @@ export function applySiteOriginToHtml(html, siteOrigin) {
   if (!origin || !html) return html;
   return html.split('__SITE_ORIGIN__').join(origin);
 }
+
+/**
+ * 百度站长要求标签字面量与平台一致（含自闭合 `/`）。
+ * 只保留安全字符，避免写进 HTML 属性。
+ * @param {string} [code]
+ */
+export function sanitizeBaiduVerificationCode(code) {
+  const raw = String(code || '').trim();
+  if (!raw) return '';
+  const matched = raw.match(/content\s*=\s*["']([^"']+)["']/i);
+  const value = (matched?.[1] || raw).trim();
+  return /^[A-Za-z0-9_-]+$/.test(value) ? value : '';
+}
+
+/**
+ * 严格按搜索资源平台示例输出，勿改格式。
+ * @param {string} [code]
+ */
+export function buildBaiduVerificationMeta(code) {
+  const value = sanitizeBaiduVerificationCode(code);
+  if (!value) return '';
+  return `<meta name="baidu-site-verification" content="${value}" />`;
+}
+
+const BAIDU_META_RE = /<meta\s+name=["']baidu-site-verification["']\s+content=["'][^"']*["']\s*\/?\s*>/gi;
+const BAIDU_PLACEHOLDER = '<!-- __BAIDU_SITE_VERIFICATION__ -->';
+
+/**
+ * @param {string} html
+ * @param {{ siteOrigin?: string, baiduVerification?: string }} [opts]
+ */
+export function applySeoToHtml(html, opts = {}) {
+  if (!html) return html;
+  let out = applySiteOriginToHtml(html, opts.siteOrigin);
+  const meta = buildBaiduVerificationMeta(opts.baiduVerification);
+  // 先清掉旧标签，再写入占位符位置，保证源码里是百度要求的完整一行
+  out = out.replace(BAIDU_META_RE, '');
+  if (out.includes(BAIDU_PLACEHOLDER)) {
+    out = out.split(BAIDU_PLACEHOLDER).join(meta ? `${BAIDU_PLACEHOLDER}\n    ${meta}` : BAIDU_PLACEHOLDER);
+  } else if (meta) {
+    out = out.replace(/<head([^>]*)>/i, `<head$1>\n    ${meta}`);
+  }
+  return out;
+}

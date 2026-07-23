@@ -20,6 +20,7 @@ import { mountAdminApi } from './adminApi.js';
 import { initAdminCredentials } from './adminCredentials.js';
 import { isSetupRequired, mountSetupApi } from './setupApi.js';
 import { buildRobotsTxt, buildSitemapXml, resolveSiteOrigin } from './seoFiles.js';
+import { patchClientIndexHtml, readClientIndexHtml } from './seoIndexHtml.js';
 import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
@@ -1761,7 +1762,39 @@ app.get('/sitemap.xml', (req, res) => {
   res.type('application/xml; charset=utf-8').send(buildSitemapXml(origin));
 });
 
+function sendSpaIndexHtml(req, res, next) {
+  const runtime = getRuntimeConfig();
+  const origin = resolveSiteOrigin(req, ALLOWED_ORIGINS, {
+    canonicalEnv: runtime.seoCanonicalUrl || SITE_CANONICAL_URL,
+  });
+  const html = readClientIndexHtml(clientDist, {
+    baiduVerification: runtime.seoBaiduVerification,
+    siteOrigin: origin,
+  });
+  if (!html) return next();
+  res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+  res.type('html').send(html);
+}
+
+/** 启动时把后台已保存的百度验证码写进 dist，兼容 Nginx 静态直出 */
+try {
+  const bootRuntime = getRuntimeConfig();
+  const bootOrigin = bootRuntime.seoCanonicalUrl || SITE_CANONICAL_URL || '';
+  const patched = patchClientIndexHtml(clientDist, {
+    baiduVerification: bootRuntime.seoBaiduVerification,
+    siteOrigin: bootOrigin,
+  });
+  if (patched.ok && !patched.unchanged && bootRuntime.seoBaiduVerification) {
+    console.log('[seo] baidu-site-verification written into client/dist/index.html');
+  }
+} catch (err) {
+  console.warn('[seo] patch index.html skipped:', err?.message || err);
+}
+
+app.get(['/', '/index.html'], sendSpaIndexHtml);
+
 app.use(express.static(clientDist, {
+  index: false,
   setHeaders(res, filePath) {
     const rel = path.relative(clientDist, filePath).replace(/\\/g, '/');
     if (rel === 'index.html') {
@@ -1790,10 +1823,7 @@ app.get('*', (req, res, next) => {
   ) {
     return next();
   }
-  res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-  res.sendFile(path.join(clientDist, 'index.html'), (err) => {
-    if (err) next();
-  });
+  sendSpaIndexHtml(req, res, next);
 });
 
 const socketToRoom = new Map();

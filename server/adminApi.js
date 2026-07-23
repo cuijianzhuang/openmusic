@@ -39,7 +39,10 @@ import {
   toSolutionNotice,
 } from './errorReports.js';
 import { sanitizeDeviceId } from './deviceIdentity.js';
-import { getRuntimeConfigForAdmin, setRuntimeConfig } from './runtimeConfig.js';
+import { getRuntimeConfigForAdmin, setRuntimeConfig, getRuntimeConfig } from './runtimeConfig.js';
+import { patchClientIndexHtml } from './seoIndexHtml.js';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import {
   isAdminEnabled,
   verifyAdminCredentials,
@@ -66,6 +69,9 @@ import {
   signGithubState,
   buildGithubAuthorizeUrl,
 } from './githubAuth.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const CLIENT_DIST = path.join(__dirname, '../client/dist');
 
 export { isAdminEnabled };
 
@@ -779,6 +785,15 @@ export function mountAdminApi(app, { io, socketToRoom, socketToUserId, getClient
     const result = setRuntimeConfig(req.body || {});
     if (!result.success) {
       return res.status(400).json({ error: result.error });
+    }
+    try {
+      const cfg = getRuntimeConfig();
+      patchClientIndexHtml(CLIENT_DIST, {
+        baiduVerification: cfg.seoBaiduVerification,
+        siteOrigin: cfg.seoCanonicalUrl || '',
+      });
+    } catch (err) {
+      console.warn('[seo] patch index.html after runtime-config failed:', err?.message || err);
     }
     audit('set_runtime_config', {}, ip);
     res.json({ ok: true, config: result.config });
