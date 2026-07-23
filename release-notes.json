@@ -1,6 +1,8 @@
 {
   "notes": [
-    "修复已知问题"
+    "修复歌曲源异常时的无限重试",
+    "优化搜索算法 相关歌曲排序",
+    "优化其他已知问题"
   ],
-  "forcePrompt": false
+  "forcePrompt": true
 }

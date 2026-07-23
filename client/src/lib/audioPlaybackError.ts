@@ -33,9 +33,13 @@ export function isBlockedPlaybackUrl(url: string | undefined | null): boolean {
 /** Meting / 曲库上游明确表示无可用播放地址 */
 export function isSourceUnavailableMessage(message: string | undefined | null): boolean {
   const normalized = String(message || '').trim().toLowerCase();
+  if (!normalized) return false;
   return normalized === 'no url'
     || normalized === 'empty url'
-    || normalized === 'blocked playback url';
+    || normalized === 'blocked playback url'
+    || normalized.includes('no url')
+    || normalized.includes('音源异常')
+    || normalized.includes('音源不可用');
 }
 
 export class SourceUnavailableError extends Error {
@@ -105,6 +109,21 @@ export function classifySongUrlFetchError(error: unknown): PlaybackErrorClass {
   if (error instanceof DOMException) {
     if (error.name === 'AbortError' || error.name === 'TimeoutError') return 'temporary';
     if (error.name === 'NetworkError') return 'temporary';
+  }
+  if (error instanceof Error) {
+    const message = error.message.toLowerCase();
+    // 连通性 / 配置类：按临时故障本地重试，勿标成无源切歌
+    if (
+      message.includes('无法连接')
+      || message.includes('暂不可用')
+      || message.includes('未配置')
+      || message.includes('api 请求失败')
+      || message.includes('network')
+      || message.includes('timeout')
+      || message.includes('超时')
+    ) {
+      return 'temporary';
+    }
   }
   return 'service';
 }

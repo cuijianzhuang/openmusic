@@ -216,6 +216,25 @@ function markSuccess(upstream) {
   // 保留 lastError / recentErrors，方便后台查看历史失败
 }
 
+/** type=url：上游明确无播放链（VIP/版权/Cookie），属业务软失败，不应冷却上游 */
+function isNoUrlPayload(text) {
+  const normalized = String(text || '').trim().replace(/^['"]|['"]$/g, '').trim();
+  if (!normalized || normalized === 'null' || normalized === '[]' || normalized === '{}') {
+    return true;
+  }
+  if (!normalized.startsWith('{')) return false;
+  try {
+    const data = JSON.parse(normalized);
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
+    const err = typeof data.error === 'string' ? data.error.trim().toLowerCase() : '';
+    if (err === 'no url' || err === 'empty url') return true;
+    const url = typeof data.url === 'string' ? data.url.trim() : '';
+    return !url && (err.length > 0 || Object.prototype.hasOwnProperty.call(data, 'url'));
+  } catch {
+    return false;
+  }
+}
+
 /**
  * 按查询参数请求 Meting API，多上游间轮询负载均衡：
  * 网络错误或 5xx 时将该上游置入 60s 冷却并自动切换下一个。
@@ -253,6 +272,21 @@ export async function fetchMetingApi(query, options = {}, timeoutMs = 10000) {
         notFoundResponse = response;
         continue;
       }
+      // type=url 的 403 + {"error":"no url"} 是曲库业务失败，不是上游宕机
+      if (isUrl && response.status === 403) {
+        try {
+          const text = typeof response.clone === 'function'
+            ? await response.clone().text()
+            : await response.text();
+          if (isNoUrlPayload(text)) {
+            markSoftFailure(upstream, '返回无播放地址', query);
+            emptyUrlResponse = response;
+            continue;
+          }
+        } catch {
+          // 读正文失败时仍按硬失败处理
+        }
+      }
       if (response.status >= 400) {
         markFailure(upstream, `上游返回 ${response.status}`, query);
         lastError = new Error(`Meting 上游返回 ${response.status}（${upstream.base}）`);
@@ -265,7 +299,7 @@ export async function fetchMetingApi(query, options = {}, timeoutMs = 10000) {
         try {
           const text = typeof response.clone === 'function' ? await response.clone().text() : await response.text();
           const normalized = String(text || '').trim().replace(/^['"]|['"]$/g, '').trim();
-          if (!normalized || normalized === 'null' || normalized === '[]' || normalized === '{}') {
+          if (isNoUrlPayload(normalized)) {
             markSoftFailure(upstream, '返回空播放地址', query);
             emptyUrlResponse = response;
             continue;
