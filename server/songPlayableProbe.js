@@ -108,7 +108,12 @@ export async function isSongPlayableOnServer(song) {
     }
     return false;
   } catch (err) {
-    console.warn(`音源探测失败（${source}:${id}）：`, err?.message || err);
+    const message = String(err?.message || err);
+    console.warn(`音源探测失败（${source}:${id}）：`, message);
+    // 明确无链 / 上游业务 403：确认不可播，允许切歌
+    if (/no\s*url|空播放|上游返回 403|未返回有效媒体|不可播外链/i.test(message)) {
+      return false;
+    }
     // 探测本身失败（上游抖动）时不视为「确认无源」，避免误切
     return true;
   }

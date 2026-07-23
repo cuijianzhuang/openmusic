@@ -44,7 +44,10 @@ export async function searchAllSongs(
     if (!meta) return [];
     try {
       const songs = await searchSongs(filterMode, keyword);
-      return interleaveSearchResults({ [filterMode]: songs }, { sourceOnly: filterMode });
+      return interleaveSearchResults(
+        { [filterMode]: songs },
+        { sourceOnly: filterMode, keyword },
+      );
     } catch {
       return [];
     }
@@ -62,10 +65,18 @@ export async function searchAllSongs(
     }
   }
 
-  return interleaveSearchResults(groups, { dedupeCrossSource: true });
+  return interleaveSearchResults(groups, { dedupeCrossSource: true, keyword });
 }
 
-export { interleaveSearchResults, mergeSearchResults, songKey, artistGroupKey, trackTitleKey } from './merge';
+export {
+  interleaveSearchResults,
+  mergeSearchResults,
+  songKey,
+  artistGroupKey,
+  trackTitleKey,
+  rankSearchResultsByKeyword,
+  scoreTitleRelevance,
+} from './merge';
 export type { InterleaveOptions } from './merge';
 
 export async function getSongById(source: MusicSource, id: string): Promise<SearchResult | null> {

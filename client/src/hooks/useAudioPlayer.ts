@@ -50,7 +50,9 @@ import {
 } from '../lib/songPreloadCache';
 import {
   classifyMediaPlaybackError,
+  isSourceUnavailableMessage,
   MAX_TEMP_PLAYBACK_RETRIES,
+  SourceUnavailableError,
 } from '../lib/audioPlaybackError';
 import {
   recordSongPlaybackFailure,
@@ -81,9 +83,11 @@ import {
 
 /** 主控本机失败后的本地恢复间隔：不切歌，等网络恢复再重试 */
 const LOCAL_PLAYBACK_RECOVERY_MS = 8000;
+/** 明确无源时更快请求服务端核实，避免卡在「网络重试」循环 */
+const SOURCE_UNAVAILABLE_RECOVERY_MS = 2500;
 const LOCAL_RECOVERY_TOAST_COOLDOWN_MS = 20000;
 /** 同一曲本机取链连续失败多少次后，才请求服务端核实是否音源异常 */
-const SOURCE_ERROR_SERVER_VERIFY_AFTER = 3;
+const SOURCE_ERROR_SERVER_VERIFY_AFTER = 2;
 let localRecoveryTimer: number | null = null;
 let localRecoveryQueueId: string | null = null;
 let lastLocalRecoveryToastAt = 0;
@@ -92,6 +96,13 @@ function notifyPlaybackToast(message: string, type: 'success' | 'error' = 'error
   window.dispatchEvent(new CustomEvent('openmusic:visual-toast', {
     detail: { message, type },
   }));
+}
+
+function isSourceUnavailableReason(reason: string): boolean {
+  return reason === 'source_unavailable'
+    || reason === 'source_error_marked_local'
+    || reason === 'service_fallback_exhausted'
+    || reason === 'service_no_fallback';
 }
 
 /**
@@ -114,10 +125,18 @@ function ensureLowestQualityForLocalRecovery(song: QueueItem): boolean {
   return true;
 }
 
-function notifyLocalNetworkRecovery(song: QueueItem, options: { qualityDowngraded: boolean }) {
+function notifyLocalRecoveryToast(
+  song: QueueItem,
+  options: { qualityDowngraded: boolean; reason: string },
+) {
   const now = Date.now();
   if (now - lastLocalRecoveryToastAt < LOCAL_RECOVERY_TOAST_COOLDOWN_MS) return;
   lastLocalRecoveryToastAt = now;
+
+  if (isSourceUnavailableReason(options.reason)) {
+    notifyPlaybackToast('音源异常，正在确认…', 'error');
+    return;
+  }
 
   const source = song.source || 'netease';
   const lowestLabel = getQualityLabel(getLowestQuality(source) || undefined, source);
@@ -454,10 +473,18 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     if (!options.bypassThrottle && now - lastSkipAt.current < 2000) return;
     lastSkipAt.current = now;
 
+    const sourceErrorSkip = options.reason === 'source_error';
+    const lockedQueueId = live?.current?.queueId || null;
+
     skippingRef.current = true;
     justSkippedRef.current = true;
     loadGeneration.current += 1;
-    loadLockRef.current = EMPTY_LOAD_LOCK;
+    // source_error：保持加载锁，避免跳过等待期间 effect 又去反复取链
+    if (sourceErrorSkip && lockedQueueId) {
+      loadLockRef.current = { queueId: lockedQueueId, gen: loadGeneration.current };
+    } else {
+      loadLockRef.current = EMPTY_LOAD_LOCK;
+    }
     useAudioStore.getState().setNeedsAudioUnlock(false);
     controller.clearQueue();
     controller.enqueue(() => {
@@ -468,14 +495,20 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     if (live) {
       useRoomStore.getState().setRoom({ ...live, currentTime: 0 });
     }
-    skipSong({ reason: options.reason || 'manual' }).then((res) => {
-      if (!res.success && options.reason === 'source_error' && res.error) {
-        notifyPlaybackToast(res.error, 'error');
-        const liveCurrent = useRoomStore.getState().room?.current;
-        if (liveCurrent) clearTrackSourceError(liveCurrent);
-        // 服务端判定音源正常：恢复加载锁，交给 watchdog / 下次 effect 本机重试
+    skipSong({ reason: options.reason || 'manual' }).then(async (res) => {
+      if (!res.success && sourceErrorSkip) {
+        // 服务端探测与本机预取不一致：以本机已确认无源为准，系统强制切歌
+        // （避免清标记后跨源换另一首歌「还能播」，并反复打失败的 type=url）
+        notifyPlaybackToast(res.error || '音源异常，正在跳过…', 'error');
+        try {
+          await skipSong({ reason: 'system' });
+        } finally {
+          loadLockRef.current = EMPTY_LOAD_LOCK;
+        }
+        return;
+      }
+      if (!res.success) {
         loadLockRef.current = EMPTY_LOAD_LOCK;
-        setLoadRetryNonce((n) => n + 1);
       }
     }).finally(() => {
       skippingRef.current = false;
@@ -488,8 +521,9 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
    */
   const scheduleLocalRecovery = useCallback((song: QueueItem, reason: string) => {
     const queueId = song.queueId;
-    const qualityDowngraded = ensureLowestQualityForLocalRecovery(song);
-    notifyLocalNetworkRecovery(song, { qualityDowngraded });
+    const sourceIssue = isSourceUnavailableReason(reason);
+    const qualityDowngraded = sourceIssue ? false : ensureLowestQualityForLocalRecovery(song);
+    notifyLocalRecoveryToast(song, { qualityDowngraded, reason });
 
     if (localRecoveryTimer && localRecoveryQueueId === queueId) return;
 
@@ -498,10 +532,12 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
       localRecoveryTimer = null;
     }
 
+    const delayMs = sourceIssue ? SOURCE_UNAVAILABLE_RECOVERY_MS : LOCAL_PLAYBACK_RECOVERY_MS;
+
     debugLog('local_playback_recovery', debugLine({
       reason,
       queueId,
-      delayMs: LOCAL_PLAYBACK_RECOVERY_MS,
+      delayMs,
       qualityDowngraded,
       skipRoom: false,
     }));
@@ -520,7 +556,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
       lowestFallbackAttempted.current = false;
       loadLockRef.current = EMPTY_LOAD_LOCK;
       setLoadRetryNonce((n) => n + 1);
-    }, LOCAL_PLAYBACK_RECOVERY_MS);
+    }, delayMs);
   }, []);
 
   const initAudio = useCallback(() => {
@@ -636,7 +672,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
             if (fallbackUrl) {
               const qualityDowngraded = ensureLowestQualityForLocalRecovery(song)
                 || (!beforeLocked && isPlaybackQualityLockedToLowest());
-              notifyLocalNetworkRecovery(song, { qualityDowngraded });
+              notifyLocalRecoveryToast(song, { qualityDowngraded, reason: 'media_quality_fallback' });
               runtime.tempRetries.current = 0;
               const freshFallback = (await refreshSignedApiUrl(fallbackUrl)) || fallbackUrl;
               controller.enqueue(async () => {
@@ -844,13 +880,15 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
 
     if (isTrackSourceError(current)) {
       setTrackLoading(false);
-      // 本机标记的「源异常」不能直接全屋切歌：先清标记并本地重试。
-      // 真正无源须由服务端探测确认（见 skip_song source_error）。
-      clearTrackSourceError(current);
       if (useRoomStore.getState().isPlaybackLeader) {
-        scheduleLocalRecovery(current, 'source_error_marked_local');
+        // 预取已确认无源：直接核实切歌，不再本机重试取链
+        loadLockRef.current = { queueId: current.queueId, gen: loadGeneration.current };
+        notifyPlaybackToast('音源异常，正在跳过…', 'error');
+        requestSkip({ reason: 'source_error' });
+        return;
       }
-      return;
+      // 成员：角标仅提示，仍尝试取链；房主切歌后会收到 room_update
+      clearTrackSourceError(current);
     }
 
     const gen = ++loadGeneration.current;
@@ -888,16 +926,24 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
           clearAudioQueueBinding(controller.audio);
 
           const isLeader = useRoomStore.getState().isPlaybackLeader;
-          if (isLeader && isTrackSourceError(current)) {
+          const errMessage = err instanceof Error ? err.message : '';
+          const sourceUnavailable = err instanceof SourceUnavailableError
+            || isSourceUnavailableMessage(errMessage)
+            || isTrackSourceError(current);
+
+          if (isLeader && sourceUnavailable) {
             const prev = resolveFailCountRef.current;
             const count = prev?.queueId === queueId ? prev.count + 1 : 1;
             resolveFailCountRef.current = { queueId, count };
             if (count >= SOURCE_ERROR_SERVER_VERIFY_AFTER) {
               // 多次本机失败后请求服务端核实；服务端确认可播则拒绝切歌
               resolveFailCountRef.current = null;
+              notifyPlaybackToast('音源异常，正在跳过…', 'error');
               requestSkip({ reason: 'source_error' });
               return;
             }
+            scheduleLocalRecovery(current, 'source_unavailable');
+            return;
           }
           scheduleLocalRecovery(current, 'resolve_url_failed');
           return;

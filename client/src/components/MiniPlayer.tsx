@@ -18,6 +18,7 @@ import MiniPlayerLyricTicker from './playback/MiniPlayerLyricTicker';
 import VolumeControl from './VolumeControl';
 import FavoriteButton from './FavoriteButton';
 import Tooltip from './Tooltip';
+import TruncateTip from './TruncateTip';
 import ErrorReportModal from './ErrorReportModal';
 import PlayModeButton from './PlayModeButton';
 import { updateMediaSessionPlaybackState } from '../lib/mediaSession';
@@ -166,7 +167,11 @@ export default memo(function MiniPlayer({
           />
               <div className="control-meta">
                 <div className="control-title flex min-w-0 items-center gap-1.5 !overflow-visible">
-                  <span className="min-w-0 truncate">{current.name}</span>
+                  <TruncateTip
+                    text={current.name}
+                    as="span"
+                    className="min-w-0 truncate"
+                  />
                   <PlaybackQualityTag label={qualityLabel} source={current.source} />
                 </div>
                 <div className="control-artist truncate">
@@ -354,7 +359,11 @@ export default memo(function MiniPlayer({
           <div className="min-w-0 hidden sm:block">
 
             <div className="flex min-w-0 items-center gap-1.5">
-              <p className="min-w-0 truncate text-sm font-medium">{current.name}</p>
+              <TruncateTip
+                text={current.name}
+                as="p"
+                className="min-w-0 truncate text-sm font-medium"
+              />
               <PlaybackQualityTag label={qualityLabel} source={current.source} />
             </div>
 

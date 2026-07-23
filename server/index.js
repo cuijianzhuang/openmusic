@@ -642,23 +642,41 @@ async function resolveMediaProxyFetchUrl(fetchUrl, thumbPx = 0) {
 }
 
 async function finalizeMetingTextResponse(body, metingType) {
-  const payload = metingType === 'url' ? parseMetingUrlPayload(body) : null;
-  const normalized = payload?.url || normalizeMetingResolvedUrl(body);
-  if (metingType !== 'url' || !normalized.startsWith('http')) {
-    return { url: normalized, quality: payload?.quality || '' };
-  }
-  // outer/url 不可播：返回空，客户端按无音源处理并切歌
-  if (isNeteaseOuterMediaUrl(normalized)) return { url: '', quality: '' };
-  if (!isUnresolvedMetingMediaUrl(normalized)) {
-    return { url: normalized, quality: payload?.quality || '' };
+  if (metingType === 'url') {
+    const payload = parseMetingUrlPayload(body);
+    if (payload?.url) {
+      const normalized = payload.url;
+      if (isNeteaseOuterMediaUrl(normalized)) return { url: '', quality: '' };
+      if (!isUnresolvedMetingMediaUrl(normalized)) {
+        return { url: normalized, quality: payload.quality || '' };
+      }
+      const nested = parseMetingMediaQuery(normalized);
+      if (!nested || nested.type !== 'url') {
+        return { url: normalized, quality: payload.quality || '' };
+      }
+      const resolved = await resolveMetingMediaUrl(nested);
+      return { url: resolved, quality: payload.quality || '' };
+    }
+
+    // 纯文本 URL / @URL；JSON 无 url、{"error":"no url"} 等一律视为无链
+    const textUrl = normalizeMetingResolvedUrl(body);
+    if (textUrl.startsWith('http')) {
+      if (isNeteaseOuterMediaUrl(textUrl)) return { url: '', quality: '' };
+      if (!isUnresolvedMetingMediaUrl(textUrl)) {
+        return { url: textUrl, quality: '' };
+      }
+      const nested = parseMetingMediaQuery(textUrl);
+      if (nested?.type === 'url') {
+        const resolved = await resolveMetingMediaUrl(nested);
+        return { url: resolved, quality: '' };
+      }
+      return { url: textUrl, quality: '' };
+    }
+    return { url: '', quality: '' };
   }
 
-  const nested = parseMetingMediaQuery(normalized);
-  if (!nested || nested.type !== 'url') {
-    return { url: normalized, quality: payload?.quality || '' };
-  }
-  const resolved = await resolveMetingMediaUrl(nested);
-  return { url: resolved, quality: payload?.quality || '' };
+  const normalized = normalizeMetingResolvedUrl(body);
+  return { url: normalized, quality: '' };
 }
 
 async function proxyMetingResponse(metingQuery, res, thumbPx = 0, metingType = '') {
@@ -896,7 +914,21 @@ app.get('/api/meting', async (req, res) => {
       () => proxyMetingResponse(query, res, thumbPx, String(query.type || '')),
     );
   } catch (err) {
-    console.error('Meting proxy error:', formatMetingFetchError(err));
+    const message = formatMetingFetchError(err);
+    console.error('Meting proxy error:', message);
+    // 业务无链 / 上游 403 不应伪装成连通性故障，否则客户端会无限按「网络问题」重试
+    if (/no\s*url|空播放|未返回有效媒体|不可播外链/i.test(message)) {
+      return res.status(403).json({ error: 'no url' });
+    }
+    if (/上游返回 403/.test(message)) {
+      return res.status(403).json({ error: 'no url' });
+    }
+    if (/未配置 METING_API_URL/.test(message)) {
+      return res.status(502).json({ error: '未配置 METING_API_URL' });
+    }
+    if (/均已禁用|均不可用/.test(message)) {
+      return res.status(502).json({ error: '音源上游暂不可用，请稍后重试' });
+    }
     res.status(502).json({ error: '无法连接 Meting API，请检查 METING_API_URL 配置' });
   }
 });

@@ -9,6 +9,7 @@ import {
   classifySongUrlFetchError,
   classifySongUrlFetchFailure,
   isBlockedPlaybackUrl,
+  SourceUnavailableError,
   type PlaybackErrorClass,
 } from './audioPlaybackError';
 import {
@@ -389,6 +390,7 @@ async function fetchSongUrl(
   const quality = getEffectivePlaybackQuality(song);
   const lowest = getLowestQuality(source);
   const alreadyAtLowest = Boolean(lowest && quality === lowest);
+  const isCurrent = useRoomStore.getState().room?.current?.queueId === song.queueId;
 
   const first = await fetchSongUrlOnce(song, quality, options);
   if (first.ok) {
@@ -401,26 +403,27 @@ async function fetchSongUrl(
     return null;
   }
 
-  if (alreadyAtLowest) {
-    if (useRoomStore.getState().isPlaybackLeader) {
-      markTrackSourceError(song);
+  // 原平台无链：立刻标记，预取下一首时队列即可显示「歌曲源异常」
+  markTrackSourceError(song);
+
+  if (!alreadyAtLowest) {
+    const fallback = await tryLowestQualityFetch(song);
+    if (fallback.ok) {
+      clearTrackSourceError(song);
+      publishActualQuality(song, fallback.qualityLabel);
+      return { url: fallback.url, qualityLabel: fallback.qualityLabel };
     }
-    return null;
   }
 
-  const fallback = await tryLowestQualityFetch(song);
-  if (fallback.ok) {
-    clearTrackSourceError(song);
-    publishActualQuality(song, fallback.qualityLabel);
-    return { url: fallback.url, qualityLabel: fallback.qualityLabel };
+  // 非当前曲预取：不做跨源搜索，保留角标即可；轮到播放时再完整兜底
+  if (!isCurrent) {
+    return null;
   }
 
   const crossSource = await fetchCrossSourceFallback(song as QueueItem);
   if (crossSource) return { url: crossSource };
 
-  if (useRoomStore.getState().isPlaybackLeader) {
-    markTrackSourceError(song);
-  }
+  markTrackSourceError(song);
   return null;
 }
 
@@ -468,8 +471,12 @@ export async function resolveSongUrl(
   options: { refresh?: boolean } = {},
 ): Promise<{ url: string; qualityLabel?: string }> {
   const result = await fetchSongUrl(song, options);
-  if (!result?.url) throw new Error('empty url');
-  return result;
+  if (result?.url) return result;
+  // service 失败会 markTrackSourceError；temporary 不会
+  if (isTrackSourceError(song)) {
+    throw new SourceUnavailableError('no url');
+  }
+  throw new TypeError('取链失败，请稍后重试');
 }
 
 /** 加入房间后立即预取当前歌曲 URL，缩短刷新后的加载等待 */
@@ -515,15 +522,25 @@ export function prefetchQueueSongs(
     targets.push(options.nextRandom);
   }
 
-  if (targets.length === 0) return;
-
-  if (options.current) {
-    pruneSourceErrors([options.current, ...targets]);
-  } else {
-    pruneSourceErrors(targets);
+  if (targets.length === 0) {
+    // 无预取目标时仍按整队裁剪标记，避免旧标记残留
+    const retain: UrlPrefetchSong[] = [];
+    if (options.current) retain.push(options.current);
+    if (queue.length) retain.push(...queue);
+    if (options.nextRandom?.id) retain.push(options.nextRandom);
+    if (retain.length) pruneSourceErrors(retain);
+    return;
   }
 
+  // 保留整队 + 当前曲的源异常标记，避免只保留预取窗口导致角标被清掉
+  const retain: UrlPrefetchSong[] = [];
+  if (options.current) retain.push(options.current);
+  if (queue.length) retain.push(...queue);
+  else if (options.nextRandom?.id) retain.push(options.nextRandom);
+  pruneSourceErrors(retain);
+
   for (const song of targets) {
+    // 预取取链：失败时 markTrackSourceError，队列行立刻显示「歌曲源异常」
     void fetchSongUrl(song);
   }
 }
