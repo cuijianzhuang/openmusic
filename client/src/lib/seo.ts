@@ -5,9 +5,9 @@ export const SITE_NAME = 'OpenMusic';
 
 export const DEFAULT_TITLE = '一起听歌 · 多人实时点歌 - OpenMusic';
 export const DEFAULT_DESCRIPTION =
-  '和好友一起听歌、多人同步播放的在线点歌房间。支持多音源搜索点歌，歌词同步滚动、实时聊天；创建房间即可与小伙伴多人一起听歌。';
+  'OpenMusic 一起听歌吧——免费的多人一起听歌平台。创建或加入在线点歌房间，和好友实时同步播放、共同点歌；支持多音源搜索，歌词同步滚动跟唱，房间内实时聊天。适合朋友聚会、远程陪伴或宿舍一起听歌。';
 export const DEFAULT_KEYWORDS =
-  '一起听歌,多人听歌,一起听歌房间,多人一起听歌,同步听歌,好友一起听歌,在线一起听歌,多人点歌,在线点歌,点歌房,同步播放,歌词同步,OpenMusic';
+  '一起听歌,一起听歌吧,多人听歌,一起听歌房间,多人一起听歌,同步听歌,好友一起听歌,在线一起听歌,多人点歌,在线点歌,点歌房,同步播放,歌词同步,OpenMusic';
 
 export interface PageSeoOptions {
   title?: string;
@@ -52,7 +52,7 @@ function upsertJsonLd(origin: string) {
     '@context': 'https://schema.org',
     '@type': 'WebApplication',
     name: SITE_NAME,
-    alternateName: ['一起听歌', '多人听歌', '在线点歌房'],
+    alternateName: ['一起听歌', '一起听歌吧', '多人听歌', '在线点歌房'],
     description: DEFAULT_DESCRIPTION,
     ...(origin ? { url: `${origin}/` } : {}),
     applicationCategory: 'MusicApplication',
@@ -61,9 +61,9 @@ function upsertJsonLd(origin: string) {
     inLanguage: 'zh-CN',
     featureList: [
       '和好友一起听歌，多人房间实时同步播放',
-      '多音源搜索点歌',
-      '歌词同步滚动，边听边聊',
-      '创建房间即可邀请小伙伴多人一起听歌',
+      '多音源搜索共同点歌',
+      '歌词同步滚动跟唱，房间内实时聊天',
+      '创建或加入房间即可邀请小伙伴一起听歌',
     ],
   };
 

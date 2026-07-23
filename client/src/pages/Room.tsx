@@ -408,6 +408,19 @@ export default function Room() {
 
   const closeToast = useCallback(() => setToast(null), []);
 
+  const handleClearQueue = useCallback(async () => {
+    if (clearingQueue) return;
+    setClearingQueue(true);
+    const res = await clearQueue();
+    setClearingQueue(false);
+    if (res.success) {
+      setClearQueueConfirmOpen(false);
+      showToast('已清空待播列表', 'success');
+    } else {
+      showToast(res.error || '清空失败', 'error');
+    }
+  }, [clearQueue, clearingQueue, showToast]);
+
   useEffect(() => {
     const result = consumeLinuxdoReturnParam() || consumeGithubReturnParam();
     if (result) showToast(result.message, result.type);
@@ -1859,21 +1872,6 @@ export default function Room() {
     );
 
   }
-
-
-
-  const handleClearQueue = useCallback(async () => {
-    if (clearingQueue) return;
-    setClearingQueue(true);
-    const res = await clearQueue();
-    setClearingQueue(false);
-    if (res.success) {
-      setClearQueueConfirmOpen(false);
-      showToast('已清空待播列表', 'success');
-    } else {
-      showToast(res.error || '清空失败', 'error');
-    }
-  }, [clearQueue, clearingQueue, showToast]);
 
   if (!room) {
 
