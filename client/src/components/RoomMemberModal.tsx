@@ -7,9 +7,11 @@ import {
   DEFAULT_MEMBER_SETTINGS,
   DEFAULT_MEMBER_TIER,
   MEMBER_BORDER_STYLE_ID,
+  WELCOME_COOLDOWN_MINUTE_OPTIONS,
   WELCOME_TEMPLATE_PRESETS,
   getSelectableBadgeColorPresets,
   normalizeBadgeColor,
+  normalizeWelcomeCooldownSec,
   normalizeWelcomeTemplateId,
   buildWelcomeText,
 } from '../lib/memberTierPresets';
@@ -64,11 +66,16 @@ export default function RoomMemberModal({
   const [settingsDraft, setSettingsDraft] = useState<RoomMemberSettings>({
     ...DEFAULT_MEMBER_SETTINGS,
     ...memberSettings,
+    welcomeCooldownSec: normalizeWelcomeCooldownSec(memberSettings?.welcomeCooldownSec),
   });
 
   useEffect(() => {
     if (!open) return;
-    setSettingsDraft({ ...DEFAULT_MEMBER_SETTINGS, ...memberSettings });
+    setSettingsDraft({
+      ...DEFAULT_MEMBER_SETTINGS,
+      ...memberSettings,
+      welcomeCooldownSec: normalizeWelcomeCooldownSec(memberSettings?.welcomeCooldownSec),
+    });
   }, [open, memberSettings]);
 
   const assignableUsers = useMemo(() => {
@@ -325,6 +332,36 @@ export default function RoomMemberModal({
                   />
                 </button>
               </div>
+              <div className={`space-y-2 ${settingsDraft.welcomeEnabled ? '' : 'opacity-50'}`}>
+                <div>
+                  <p className="text-sm font-medium text-white">重复欢迎间隔</p>
+                  <p className="mt-0.5 text-xs text-netease-muted">
+                    同一贵宾在此时间内再次进房不重复欢迎与礼花；0 表示每次都欢迎
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {WELCOME_COOLDOWN_MINUTE_OPTIONS.map((minutes) => {
+                    const sec = minutes * 60;
+                    const current = normalizeWelcomeCooldownSec(settingsDraft.welcomeCooldownSec);
+                    const active = current === sec;
+                    return (
+                      <button
+                        key={minutes}
+                        type="button"
+                        disabled={saving || !settingsDraft.welcomeEnabled}
+                        onClick={() => setSettingsDraft((prev) => ({ ...prev, welcomeCooldownSec: sec }))}
+                        className={`rounded-lg border px-3 py-1.5 text-xs transition-colors disabled:opacity-50 ${
+                          active
+                            ? 'border-amber-400/50 bg-amber-400/15 text-amber-100'
+                            : 'border-netease-border bg-netease-card text-netease-muted hover:bg-netease-hover hover:text-white'
+                        }`}
+                      >
+                        {minutes === 0 ? '每次' : `${minutes} 分钟`}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 {WELCOME_TEMPLATE_PRESETS.map((preset) => (
                   <button
@@ -362,6 +399,7 @@ export default function RoomMemberModal({
                   welcomeEnabled: settingsDraft.welcomeEnabled,
                   welcomeTemplateId: normalizeWelcomeTemplateId(settingsDraft.welcomeTemplateId),
                   welcomeCustomText: settingsDraft.welcomeCustomText?.trim() || '',
+                  welcomeCooldownSec: normalizeWelcomeCooldownSec(settingsDraft.welcomeCooldownSec),
                 })}
                 className="rounded-xl border border-netease-border px-4 py-2 text-sm text-white hover:bg-netease-hover disabled:opacity-50"
               >

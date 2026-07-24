@@ -130,7 +130,23 @@ export const DEFAULT_MEMBER_SETTINGS = {
   welcomeEnabled: true,
   welcomeTemplateId: 'royal',
   welcomeCustomText: '',
+  /** 同一贵宾重复迎宾间隔（秒），0 = 每次进房都欢迎；默认 5 分钟 */
+  welcomeCooldownSec: 5 * 60,
 };
+
+/** 房主可选的迎宾冷却（分钟） */
+export const WELCOME_COOLDOWN_MINUTE_OPTIONS = [0, 1, 5, 15, 30, 60] as const;
+
+const MAX_WELCOME_COOLDOWN_SEC = 24 * 60 * 60;
+
+export function normalizeWelcomeCooldownSec(value: number | undefined | null): number {
+  if (value === undefined || value === null || Number.isNaN(Number(value))) {
+    return DEFAULT_MEMBER_SETTINGS.welcomeCooldownSec;
+  }
+  const sec = Math.floor(Number(value));
+  if (!Number.isFinite(sec) || sec < 0) return DEFAULT_MEMBER_SETTINGS.welcomeCooldownSec;
+  return Math.min(sec, MAX_WELCOME_COOLDOWN_SEC);
+}
 
 export const DEFAULT_MEMBER_TIER = {
   badgeLabel: '贵宾',

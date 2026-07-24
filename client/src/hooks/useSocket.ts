@@ -1371,6 +1371,7 @@ export function useSocket() {
     welcomeEnabled: boolean;
     welcomeTemplateId: string;
     welcomeCustomText?: string;
+    welcomeCooldownSec?: number;
   }): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
     return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
       'set_room_member_settings',

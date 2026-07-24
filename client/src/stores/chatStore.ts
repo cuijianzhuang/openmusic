@@ -1,14 +1,27 @@
 import { create } from 'zustand';
 import type { ChatMessage } from '../types';
+import { useRoomStore } from './roomStore';
+import {
+  DEFAULT_MEMBER_SETTINGS,
+  normalizeWelcomeCooldownSec,
+} from '../lib/memberTierPresets';
 
-const WELCOME_MESSAGE_COOLDOWN_MS = 5 * 60 * 1000;
+function getWelcomeCooldownMs(): number {
+  const sec = normalizeWelcomeCooldownSec(
+    useRoomStore.getState().room?.memberSettings?.welcomeCooldownSec
+      ?? DEFAULT_MEMBER_SETTINGS.welcomeCooldownSec,
+  );
+  return sec * 1000;
+}
 
 function hasRecentWelcomeForUser(messages: ChatMessage[], targetUserId: string) {
+  const cooldownMs = getWelcomeCooldownMs();
+  if (!(cooldownMs > 0)) return false;
   const now = Date.now();
   return messages.some(
     (message) => message.kind === 'welcome'
       && message.targetUserId === targetUserId
-      && now - message.timestamp < WELCOME_MESSAGE_COOLDOWN_MS,
+      && now - message.timestamp < cooldownMs,
   );
 }
 

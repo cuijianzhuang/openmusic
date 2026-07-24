@@ -20,6 +20,11 @@ import {
   hasMentionInText,
 } from '../lib/chatPanelUtils';
 import { getClientId } from '../lib/clientId';
+import { useRoomStore } from '../stores/roomStore';
+import {
+  DEFAULT_MEMBER_SETTINGS,
+  normalizeWelcomeCooldownSec,
+} from '../lib/memberTierPresets';
 import { VariableSizeList, type ListChildComponentProps, type ListOnScrollProps } from 'react-window';
 
 const VIRTUAL_LIST_THRESHOLD = 24;
@@ -30,6 +35,8 @@ const VIRTUAL_LIST_THRESHOLD = 24;
 const VIRTUAL_LIST_ENABLED = false;
 const ROW_GAP_PX = 8;
 const ESTIMATED_ROW_HEIGHT = 72;
+/** 仅对「刚发生」的迎宾放礼花，避免翻历史重放；覆盖进房 ACK 延迟 */
+const WELCOME_CONFETTI_MAX_AGE_MS = 30 * 1000;
 
 interface Props {
   roomMeta: ChatRoomMeta;
@@ -186,7 +193,6 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
   const notifiedMessageIdsRef = useRef<Set<string>>(new Set());
   const welcomeConfettiIdsRef = useRef(new Set<string>());
   const welcomeConfettiCooldownRef = useRef(new Map<string, number>());
-  const welcomeConfettiSessionStartRef = useRef(Date.now());
   const pendingWelcomeConfettiRef = useRef(false);
   const chatConfettiRootRef = useRef<HTMLDivElement | null>(null);
   const listContainerRef = useRef<HTMLDivElement | null>(null);
@@ -198,8 +204,6 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
   const initialScrollDoneRef = useRef(false);
   const allowLoadOlderRef = useRef(false);
   const [showLoadOlderHint, setShowLoadOlderHint] = useState(false);
-  const WELCOME_CONFETTI_COOLDOWN_MS = 5 * 60 * 1000;
-  const WELCOME_CONFETTI_LIVE_GRACE_MS = 2500;
 
   const useVirtualList = VIRTUAL_LIST_ENABLED && messages.length >= VIRTUAL_LIST_THRESHOLD;
 
@@ -241,9 +245,8 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
     if (!initialScrollDoneRef.current || pinningToBottomRef.current) return;
 
     pendingWelcomeConfettiRef.current = false;
-    const container = chatConfettiRootRef.current;
-    if (!container) return;
-    fireWelcomeConfetti(container);
+    // 聊天区未展开时回退全屏，保证房内其他人也能看到
+    fireWelcomeConfetti(chatConfettiRootRef.current);
   }, [pureMode]);
 
   const scheduleWelcomeConfetti = useCallback(() => {
@@ -378,7 +381,6 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
     notifiedMessageIdsRef.current.clear();
     welcomeConfettiIdsRef.current.clear();
     welcomeConfettiCooldownRef.current.clear();
-    welcomeConfettiSessionStartRef.current = Date.now();
     pendingWelcomeConfettiRef.current = false;
     setRevealedPureImages(new Set());
     rowHeightsRef.current.clear();
@@ -402,22 +404,36 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
   useEffect(() => {
     if (pureMode) return;
 
+    const cooldownMs = normalizeWelcomeCooldownSec(
+      useRoomStore.getState().room?.memberSettings?.welcomeCooldownSec
+        ?? DEFAULT_MEMBER_SETTINGS.welcomeCooldownSec,
+    ) * 1000;
+
+    const now = Date.now();
     for (const msg of messages) {
-      if (msg.kind !== 'welcome' || welcomeConfettiIdsRef.current.has(msg.id)) continue;
-      welcomeConfettiIdsRef.current.add(msg.id);
-      // 仅本人迎宾触发特效，避免人多时全员 canvas 礼花卡顿
-      if (msg.targetUserId && myUserId && msg.targetUserId !== myUserId) continue;
-      if (msg.timestamp < welcomeConfettiSessionStartRef.current - WELCOME_CONFETTI_LIVE_GRACE_MS) continue;
+      if (msg.kind !== 'welcome') continue;
+      if (welcomeConfettiIdsRef.current.has(msg.id)) continue;
+      // 过旧迎宾不放礼花（翻历史），也不占冷却
+      if (now - msg.timestamp > WELCOME_CONFETTI_MAX_AGE_MS) {
+        welcomeConfettiIdsRef.current.add(msg.id);
+        continue;
+      }
 
       const targetId = msg.targetUserId || msg.id;
-      const lastAt = welcomeConfettiCooldownRef.current.get(targetId) || 0;
-      const now = Date.now();
-      if (now - lastAt < WELCOME_CONFETTI_COOLDOWN_MS) continue;
+      if (cooldownMs > 0) {
+        const lastAt = welcomeConfettiCooldownRef.current.get(targetId) || 0;
+        if (now - lastAt < cooldownMs) {
+          welcomeConfettiIdsRef.current.add(msg.id);
+          continue;
+        }
+      }
 
+      welcomeConfettiIdsRef.current.add(msg.id);
       welcomeConfettiCooldownRef.current.set(targetId, now);
+      // 房内全员可见（含贵宾本人与其他成员）
       scheduleWelcomeConfetti();
     }
-  }, [messages, pureMode, scheduleWelcomeConfetti, myUserId]);
+  }, [messages, pureMode, scheduleWelcomeConfetti]);
 
   useLayoutEffect(() => {
     if (reactionPickerOpenRef.current) return;

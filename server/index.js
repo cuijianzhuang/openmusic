@@ -2376,7 +2376,8 @@ io.on('connection', (socket) => {
         socket.to(id).emit('user_location', { userId, location });
       }
       if (welcomeMessage) {
-        socket.to(id).emit('chat_message', welcomeMessage);
+        // 含进房者本人：全员都能收到迎宾，前端再放礼花
+        io.to(id).emit('chat_message', welcomeMessage);
       }
       if (joinNoticeMessage) {
         socket.to(id).emit('chat_message', joinNoticeMessage);

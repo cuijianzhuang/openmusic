@@ -34,7 +34,11 @@ export const DEFAULT_MEMBER_SETTINGS = {
   welcomeEnabled: true,
   welcomeTemplateId: 'royal',
   welcomeCustomText: '',
+  /** 同一贵宾重复迎宾间隔（秒），0 = 每次进房都欢迎；默认 5 分钟 */
+  welcomeCooldownSec: 5 * 60,
 };
+
+const MAX_WELCOME_COOLDOWN_SEC = 24 * 60 * 60;
 
 export function createDefaultMemberTier() {
   return {
@@ -61,11 +65,21 @@ function normalizeWelcomeTemplateId(templateId) {
   return MEMBER_WELCOME_TEMPLATE_IDS.has(raw) ? raw : 'royal';
 }
 
+export function normalizeWelcomeCooldownSec(value) {
+  if (value === undefined || value === null || value === '') {
+    return DEFAULT_MEMBER_SETTINGS.welcomeCooldownSec;
+  }
+  const sec = Math.floor(Number(value));
+  if (!Number.isFinite(sec) || sec < 0) return DEFAULT_MEMBER_SETTINGS.welcomeCooldownSec;
+  return Math.min(sec, MAX_WELCOME_COOLDOWN_SEC);
+}
+
 export function normalizeMemberSettings(input) {
   return {
     welcomeEnabled: input?.welcomeEnabled !== false,
     welcomeTemplateId: normalizeWelcomeTemplateId(input?.welcomeTemplateId),
     welcomeCustomText: String(input?.welcomeCustomText || '').slice(0, 200),
+    welcomeCooldownSec: normalizeWelcomeCooldownSec(input?.welcomeCooldownSec),
   };
 }
 

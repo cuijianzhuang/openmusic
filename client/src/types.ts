@@ -18,6 +18,8 @@ export interface RoomMemberSettings {
   welcomeEnabled: boolean;
   welcomeTemplateId: string;
   welcomeCustomText?: string;
+  /** 同一贵宾重复迎宾冷却（秒），0 = 每次进房都欢迎 */
+  welcomeCooldownSec?: number;
 }
 
 export interface Song {

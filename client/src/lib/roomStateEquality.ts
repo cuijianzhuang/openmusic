@@ -157,7 +157,8 @@ function memberSettingsEqual(a: RoomState['memberSettings'], b: RoomState['membe
   if (!a || !b) return !a && !b;
   return a.welcomeEnabled === b.welcomeEnabled
     && a.welcomeTemplateId === b.welcomeTemplateId
-    && a.welcomeCustomText === b.welcomeCustomText;
+    && a.welcomeCustomText === b.welcomeCustomText
+    && (a.welcomeCooldownSec ?? 300) === (b.welcomeCooldownSec ?? 300);
 }
 
 /** 忽略 currentTime 漂移，判断房间快照是否等价 */

@@ -2384,13 +2384,14 @@ export function postJoinNoticeMessage(roomId, userId) {
 
 const MEMBER_WELCOME_COOLDOWN_MS = 5 * 60 * 1000;
 
-function hasRecentMemberWelcome(room, userId) {
+function hasRecentMemberWelcome(room, userId, cooldownMs = MEMBER_WELCOME_COOLDOWN_MS) {
   if (!room?.messages?.length || !userId) return false;
+  if (!(cooldownMs > 0)) return false;
   const now = Date.now();
   for (let i = room.messages.length - 1; i >= 0; i -= 1) {
     const message = room.messages[i];
     if (message.kind !== "welcome" || message.targetUserId !== userId) continue;
-    return now - message.timestamp < MEMBER_WELCOME_COOLDOWN_MS;
+    return now - message.timestamp < cooldownMs;
   }
   return false;
 }
@@ -2405,7 +2406,8 @@ export function postMemberWelcomeMessage(roomId, userId) {
   const settings = normalizeMemberSettings(room.memberSettings);
   if (!settings.welcomeEnabled) return null;
 
-  if (hasRecentMemberWelcome(room, userId)) return null;
+  const cooldownMs = Math.max(0, Number(settings.welcomeCooldownSec) || 0) * 1000;
+  if (hasRecentMemberWelcome(room, userId, cooldownMs)) return null;
 
   const user = room.users.get(userId);
   const nickname = user?.nickname || room.userNicknames?.get(userId) || "贵宾";
