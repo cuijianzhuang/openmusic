@@ -1,12 +1,12 @@
-/** 生成分页页码序列，多页时形如 1 2 3 4 5 … 20 21 22 */
+/** 生成分页页码序列，紧凑模式：1 … 5 6 7 8 9 … 25 */
 export function buildPageNumbers(current: number, total: number): (number | 'ellipsis')[] {
   if (total <= 1) return total === 1 ? [1] : [];
   if (total <= 9) {
     return Array.from({ length: total }, (_, i) => i + 1);
   }
 
-  const pages = new Set<number>([1, 2, 3, 4, 5, total - 2, total - 1, total]);
-  for (let i = current - 1; i <= current + 1; i++) {
+  const pages = new Set<number>([1, total]);
+  for (let i = current - 2; i <= current + 2; i++) {
     if (i >= 1 && i <= total) pages.add(i);
   }
 
