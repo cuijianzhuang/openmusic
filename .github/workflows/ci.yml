@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+jobs:
+  client:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: client
+
+      - name: Typecheck + antd import boundary + build
+        run: npm run build:check
+        working-directory: client
+
+  server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: server
+
+      - name: Syntax check all server files
+        run: |
+          for f in $(find . -name '*.js' -not -path './node_modules/*'); do
+            node --check "$f" || exit 1
+          done
+        working-directory: server
+
+      - name: Run tests
+        run: npm test
+        working-directory: server
