@@ -71,6 +71,7 @@ import {
   setRoomAnnouncement,
   setRoomCustomCover,
   setChatHistoryVisibleOnJoin,
+  setChatShowAvatars,
   setSongRequestEnabled,
   banRoomSong,
   unbanRoomSong,
@@ -2662,6 +2663,31 @@ io.on('connection', (socket) => {
     }
 
     const result = setChatHistoryVisibleOnJoin(
+      roomId,
+      getSocketUserId(socket),
+      enabled,
+      socket.id,
+    );
+    if (result.error) {
+      callback?.({ success: false, error: result.error });
+      return;
+    }
+
+    broadcastRoomUpdate(roomId);
+    callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
+  });
+
+  socket.on('set_room_chat_avatars', ({ enabled } = {}, callback) => {
+    if (rejectReadOnly(socket, callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, 'set_room_chat_avatars', callback)) return;
+
+    const roomId = socketToRoom.get(socket.id);
+    if (!roomId) {
+      callback?.({ success: false, error: '未加入房间' });
+      return;
+    }
+
+    const result = setChatShowAvatars(
       roomId,
       getSocketUserId(socket),
       enabled,

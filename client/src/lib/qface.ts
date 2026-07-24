@@ -1,6 +1,7 @@
 import {
   configureQFaceImageLoader,
   getQFaceObjectUrl,
+  hydrateQFaceImagesFromCache,
   isQFaceImageDecoded,
   QFaceLoadPriority,
   requestQFaceImage,
@@ -126,10 +127,11 @@ function notifyFaceSubscribers(): void {
 }
 
 function warmupManifestFaces(): void {
-  requestQFaceImages(
-    [...new Set([...POPULAR_FACE_IDS, ...PINNED_REACTION_FACE_IDS])],
-    QFaceLoadPriority.MANIFEST,
-  );
+  const ids = [...new Set([...POPULAR_FACE_IDS, ...PINNED_REACTION_FACE_IDS])];
+  // 先从持久化缓存灌入 blob URL（刷新后无网络），再按需解码
+  void hydrateQFaceImagesFromCache(ids).then(() => {
+    requestQFaceImages(ids, QFaceLoadPriority.MANIFEST);
+  });
 }
 
 async function fetchLocalManifest(): Promise<QFaceItem[]> {
@@ -163,6 +165,7 @@ export {
   acquireQFaceDisplayImage,
   getQFaceImageState,
   getQFaceObjectUrl,
+  hydrateQFaceImagesFromCache,
   isQFaceImageDecoded,
   markQFaceImageRendered,
   releaseQFaceDisplayImage,

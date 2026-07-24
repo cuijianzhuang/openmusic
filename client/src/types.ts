@@ -12,12 +12,22 @@ export interface RoomMemberTier {
   borderStyleId: string;
   borderColor: string;
   assignedAt?: number;
+  /** 该贵宾是否进房欢迎（缺省跟随房间默认） */
+  welcomeEnabled?: boolean;
+  welcomeTemplateId?: string;
+  welcomeCustomText?: string;
+  /** 该贵宾进房是否放礼花（与欢迎语独立） */
+  confettiEnabled?: boolean;
+  /** 该贵宾重复迎宾冷却（秒）；缺省跟随房间默认 */
+  welcomeCooldownSec?: number;
 }
 
 export interface RoomMemberSettings {
   welcomeEnabled: boolean;
   welcomeTemplateId: string;
   welcomeCustomText?: string;
+  /** 进房是否放礼花（与欢迎语独立；房间默认） */
+  confettiEnabled?: boolean;
   /** 同一贵宾重复迎宾冷却（秒），0 = 每次进房都欢迎 */
   welcomeCooldownSec?: number;
 }
@@ -131,6 +141,8 @@ export interface ChatMessage {
   memberTier?: Pick<RoomMemberTier, 'badgeLabel' | 'badgeColor' | 'borderStyleId' | 'borderColor'>;
   targetUserId?: string;
   targetNickname?: string;
+  /** 本条迎宾是否触发礼花（与欢迎语文案独立） */
+  confettiEnabled?: boolean;
 }
 
 export interface SkipRequest {
@@ -206,6 +218,8 @@ export interface RoomState {
   } | null;
   /** 进房是否可查看聊天历史（关闭时仅见进房后的消息） */
   chatHistoryVisibleOnJoin?: boolean;
+  /** 聊天室是否在昵称左侧显示头像（仅房主可设） */
+  chatShowAvatars?: boolean;
   /** 是否在聊天室提示“昵称进入房间” */
   joinNoticeEnabled?: boolean;
   /** 同一用户进房提醒的防重复间隔（秒），默认 180 */

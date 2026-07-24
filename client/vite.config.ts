@@ -96,6 +96,22 @@ function seoBuildPlugin(): Plugin {
   };
 }
 
+function qfaceDevCachePlugin(): Plugin {
+  return {
+    name: 'openmusic-qface-dev-cache',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const pathname = req.url?.split('?')[0] || '';
+        if (pathname.startsWith('/qface/')) {
+          // 开发态也给长缓存，避免刷新表情弹框反复拉 APNG
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        }
+        next();
+      });
+    },
+  };
+}
+
 export default defineConfig({
   define: {
     __APP_BUILD_ID__: JSON.stringify(appVersionMeta.buildId),
@@ -104,6 +120,7 @@ export default defineConfig({
   plugins: [
     react(),
     seoDevMiddleware(),
+    qfaceDevCachePlugin(),
     seoBuildPlugin(),
     appVersionPlugin(),
     ...(shouldPrecompress

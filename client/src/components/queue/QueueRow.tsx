@@ -147,8 +147,8 @@ function QueueRow({
               </span>
             </Tooltip>
           )}
-          {isOwnerPriority && <RoleBadge role="owner" />}
-          {isAdminPriority && (
+          {isOwnerPriority && !memberTier && <RoleBadge role="owner" />}
+          {isAdminPriority && !memberTier && (
             <TruncateTip
               text={song.priorityBy!}
               as="span"
@@ -156,6 +156,14 @@ function QueueRow({
             />
           )}
           {memberTier && <MemberTierBadge tier={memberTier} />}
+          {memberTier && isOwnerPriority && <RoleBadge role="owner" variant="icon" />}
+          {memberTier && isAdminPriority && (
+            <TruncateTip
+              text={song.priorityBy!}
+              as="span"
+              className="flex-shrink-0 max-w-[4.5rem] rounded-full bg-sky-400/15 px-1.5 py-0 text-[9px] leading-4 text-sky-300 truncate"
+            />
+          )}
           <FavoriteButton
             song={song}
             className="w-7 h-7 text-netease-muted hover:text-rose-300"

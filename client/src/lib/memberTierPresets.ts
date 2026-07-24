@@ -1,4 +1,5 @@
 import type { CSSProperties } from 'react';
+import type { RoomMemberTier } from '../types';
 
 export interface BadgeColorPreset {
   id: string;
@@ -69,12 +70,26 @@ export const BADGE_LABEL_PRESETS = [
 
 export const BADGE_COLOR_PRESETS: BadgeColorPreset[] = [
   { id: 'gold', name: '鎏金', color: '#f6d365', glow: 'rgba(246, 211, 101, 0.55)' },
-  { id: 'rose', name: '玫瑰金', color: '#f4a5c0', glow: 'rgba(244, 165, 192, 0.5)' },
-  { id: 'cyan', name: '极光', color: '#67e8f9', glow: 'rgba(103, 232, 249, 0.45)' },
-  { id: 'purple', name: '御紫', color: '#c4b5fd', glow: 'rgba(196, 181, 253, 0.5)' },
-  { id: 'emerald', name: '翡翠', color: '#6ee7b7', glow: 'rgba(110, 231, 183, 0.45)' },
+  { id: 'champagne', name: '香槟', color: '#fde68a', glow: 'rgba(253, 230, 138, 0.5)' },
+  { id: 'sand', name: '流沙', color: '#d4a574', glow: 'rgba(212, 165, 116, 0.5)' },
+  { id: 'caramel', name: '焦糖', color: '#b45309', glow: 'rgba(180, 83, 9, 0.45)' },
+  { id: 'orange', name: '琥珀', color: '#ff8a4c', glow: 'rgba(255, 138, 76, 0.5)' },
+  { id: 'sunset', name: '晚霞', color: '#ff7a59', glow: 'rgba(255, 122, 89, 0.5)' },
   { id: 'crimson', name: '赤焰', color: '#fb7185', glow: 'rgba(251, 113, 133, 0.45)' },
+  { id: 'wine', name: '酒红', color: '#e11d48', glow: 'rgba(225, 29, 72, 0.45)' },
+  { id: 'rose', name: '玫瑰金', color: '#f4a5c0', glow: 'rgba(244, 165, 192, 0.5)' },
+  { id: 'fuchsia', name: '桃紫', color: '#e879f9', glow: 'rgba(232, 121, 249, 0.5)' },
+  { id: 'grape', name: '葡萄', color: '#c084fc', glow: 'rgba(192, 132, 252, 0.5)' },
+  { id: 'purple', name: '御紫', color: '#c4b5fd', glow: 'rgba(196, 181, 253, 0.5)' },
+  { id: 'indigo', name: '靛蓝', color: '#818cf8', glow: 'rgba(129, 140, 248, 0.5)' },
+  { id: 'cyan', name: '极光', color: '#67e8f9', glow: 'rgba(103, 232, 249, 0.45)' },
+  { id: 'teal', name: '碧青', color: '#2dd4bf', glow: 'rgba(45, 212, 191, 0.45)' },
+  { id: 'mint', name: '薄荷', color: '#99f6e4', glow: 'rgba(153, 246, 228, 0.45)' },
+  { id: 'emerald', name: '翡翠', color: '#6ee7b7', glow: 'rgba(110, 231, 183, 0.45)' },
+  { id: 'matcha', name: '抹茶', color: '#86efac', glow: 'rgba(134, 239, 172, 0.45)' },
+  { id: 'lime', name: '青柠', color: '#a3e635', glow: 'rgba(163, 230, 53, 0.45)' },
   { id: 'silver', name: '铂金', color: '#e2e8f0', glow: 'rgba(226, 232, 240, 0.4)' },
+  { id: 'slate', name: '玄银', color: '#94a3b8', glow: 'rgba(148, 163, 184, 0.4)' },
 ];
 
 /** 房主/管理员专用色，贵宾角标与边框不可选 */
@@ -88,6 +103,12 @@ export function getSelectableBadgeColorPresets(): BadgeColorPreset[] {
 }
 
 export const WELCOME_TEMPLATE_PRESETS: WelcomeTemplatePreset[] = [
+  {
+    id: 'none',
+    name: '无',
+    preview: '不发送欢迎语',
+    template: '',
+  },
   {
     id: 'royal',
     name: '皇家驾临',
@@ -130,6 +151,7 @@ export const DEFAULT_MEMBER_SETTINGS = {
   welcomeEnabled: true,
   welcomeTemplateId: 'royal',
   welcomeCustomText: '',
+  confettiEnabled: true,
   /** 同一贵宾重复迎宾间隔（秒），0 = 每次进房都欢迎；默认 5 分钟 */
   welcomeCooldownSec: 5 * 60,
 };
@@ -153,7 +175,51 @@ export const DEFAULT_MEMBER_TIER = {
   badgeColor: BADGE_COLOR_PRESETS[0].color,
   borderStyleId: MEMBER_BORDER_STYLE_ID,
   borderColor: BADGE_COLOR_PRESETS[0].color,
+  welcomeEnabled: false,
+  welcomeTemplateId: 'none',
+  welcomeCustomText: '',
+  confettiEnabled: false,
+  welcomeCooldownSec: DEFAULT_MEMBER_SETTINGS.welcomeCooldownSec,
 };
+
+/** 合并房间默认与用户贵宾上的迎宾字段 */
+export function resolveMemberWelcomeSettings(
+  tier: Partial<RoomMemberTier> | null | undefined,
+  roomSettings?: Partial<typeof DEFAULT_MEMBER_SETTINGS> | null,
+) {
+  const room = {
+    ...DEFAULT_MEMBER_SETTINGS,
+    ...roomSettings,
+    welcomeCooldownSec: normalizeWelcomeCooldownSec(roomSettings?.welcomeCooldownSec),
+    confettiEnabled: roomSettings?.confettiEnabled !== false,
+  };
+  const hasTierWelcome = Boolean(
+    tier && (
+      tier.welcomeTemplateId != null
+      || tier.welcomeCustomText != null
+      || tier.welcomeEnabled != null
+      || tier.confettiEnabled != null
+      || tier.welcomeCooldownSec != null
+    ),
+  );
+  if (!hasTierWelcome) return room;
+  const welcomeTemplateId = normalizeWelcomeTemplateId(tier!.welcomeTemplateId || room.welcomeTemplateId);
+  const welcomeEnabled = welcomeTemplateId !== 'none' && tier!.welcomeEnabled !== false;
+  return {
+    welcomeEnabled,
+    welcomeTemplateId,
+    welcomeCustomText: String(
+      tier!.welcomeCustomText != null ? tier!.welcomeCustomText : room.welcomeCustomText || '',
+    ).slice(0, 200),
+    // 旧数据无 confetti 字段时：有欢迎语则默认放礼花
+    confettiEnabled: tier!.confettiEnabled != null
+      ? Boolean(tier!.confettiEnabled)
+      : welcomeEnabled,
+    welcomeCooldownSec: normalizeWelcomeCooldownSec(
+      tier!.welcomeCooldownSec != null ? tier!.welcomeCooldownSec : room.welcomeCooldownSec,
+    ),
+  };
+}
 
 const WELCOME_TEMPLATE_IDS = new Set(WELCOME_TEMPLATE_PRESETS.map((item) => item.id));
 
@@ -187,10 +253,12 @@ export function buildWelcomeText(
   badgeLabel: string,
   nickname: string,
 ): string {
-  const template = templateId === 'custom'
+  const id = normalizeWelcomeTemplateId(templateId);
+  if (id === 'none') return '不发送欢迎语';
+  const template = id === 'custom'
     ? (customText.trim() || WELCOME_TEMPLATE_PRESETS.find((item) => item.id === 'custom')!.template)
-    : (WELCOME_TEMPLATE_PRESETS.find((item) => item.id === templateId)?.template
-      || WELCOME_TEMPLATE_PRESETS[0].template);
+    : (WELCOME_TEMPLATE_PRESETS.find((item) => item.id === id)?.template
+      || WELCOME_TEMPLATE_PRESETS.find((item) => item.id === 'royal')!.template);
   const badge = badgeLabel.trim() || '贵宾';
   return template
     .replace(/\{badge\}/g, `「${badge}」`)

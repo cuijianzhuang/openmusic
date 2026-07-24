@@ -73,7 +73,7 @@ import Toast from '../components/Toast';
 import QueueSystemToast from '../components/QueueSystemToast';
 import Tooltip from '../components/Tooltip';
 import RoomThemeColorPicker from '../components/RoomThemeColorPicker';
-import RoleBadge from '../components/RoleBadge';
+import UserRoleMarks from '../components/UserRoleMarks';
 import { copyToClipboard } from '../lib/copyToClipboard';
 import { rememberRoomVisit } from '../lib/recentRooms';
 import { ensureRoomChromeInit } from '../lib/roomChromeInit';
@@ -286,7 +286,7 @@ export default function Room() {
     noindex: true,
   });
 
-  const { joinRoom, addSong, leaveRoom, listFavorites, setFavorite, importFavorites, renameRoomName, setRoomLock, setRoomFmMode, setRoomAnnouncement, setRoomCustomCover, setChatHistoryVisibleOnJoin, setRoomJoinNotice, setSongRequestEnabled, unbanRoomSong, addRoomForbiddenWord, removeRoomForbiddenWord, setRoomMemberTier, removeRoomMemberTier, setRoomMemberSettings, loadSongHistory, transferOwner, applyRoomPermanent, cancelRoomPermanent, clearQueue } = useSocket();
+  const { joinRoom, addSong, leaveRoom, listFavorites, setFavorite, importFavorites, renameRoomName, setRoomLock, setRoomFmMode, setRoomAnnouncement, setRoomCustomCover, setChatHistoryVisibleOnJoin, setChatShowAvatars, setRoomJoinNotice, setSongRequestEnabled, unbanRoomSong, addRoomForbiddenWord, removeRoomForbiddenWord, setRoomMemberTier, removeRoomMemberTier, setRoomMemberSettings, loadSongHistory, transferOwner, applyRoomPermanent, cancelRoomPermanent, clearQueue } = useSocket();
   const { applyFavorites } = useFavorites();
   const { queueKeys, playedKeys } = useRoomSongKeySets();
 
@@ -380,6 +380,7 @@ export default function Room() {
   const [memberSaving, setMemberSaving] = useState(false);
   const [songRequestSaving, setSongRequestSaving] = useState(false);
   const [chatHistorySaving, setChatHistorySaving] = useState(false);
+  const [chatAvatarsSaving, setChatAvatarsSaving] = useState(false);
   const [joinNoticeSaving, setJoinNoticeSaving] = useState(false);
   const [forbiddenWordSaving, setForbiddenWordSaving] = useState(false);
   const lastSongRequestAtRef = useRef(0);
@@ -1413,6 +1414,18 @@ export default function Room() {
       showToast(res.error || '聊天设置失败', 'error');
     }
   }, [chatHistorySaving, setChatHistoryVisibleOnJoin, showToast]);
+
+  const handleSaveChatShowAvatars = useCallback(async (enabled: boolean) => {
+    if (chatAvatarsSaving) return;
+    setChatAvatarsSaving(true);
+    const res = await setChatShowAvatars(enabled);
+    setChatAvatarsSaving(false);
+    if (res.success) {
+      showToast(enabled ? '已开启聊天室头像' : '已关闭聊天室头像', 'success');
+    } else {
+      showToast(res.error || '聊天头像设置失败', 'error');
+    }
+  }, [chatAvatarsSaving, setChatShowAvatars, showToast]);
 
   const handleSaveJoinNotice = useCallback(async (settings: {
     enabled: boolean;
@@ -2519,6 +2532,8 @@ export default function Room() {
         announcementSaving={announcementSaving}
         chatHistoryVisibleOnJoin={Boolean(room?.chatHistoryVisibleOnJoin)}
         chatHistorySaving={chatHistorySaving}
+        chatShowAvatars={Boolean(room?.chatShowAvatars)}
+        chatAvatarsSaving={chatAvatarsSaving}
         joinNoticeEnabled={room?.joinNoticeEnabled !== false}
         joinNoticeCooldownMinutes={Math.floor((room?.joinNoticeCooldownSec ?? 180) / 60)}
         joinNoticeSaving={joinNoticeSaving}
@@ -2547,6 +2562,7 @@ export default function Room() {
         onOpenMemberModal={handleOpenMemberModalFromSettings}
         onSaveAnnouncement={handleSaveAnnouncement}
         onSaveChatHistory={handleSaveChatHistory}
+        onSaveChatShowAvatars={handleSaveChatShowAvatars}
         onSaveJoinNotice={handleSaveJoinNotice}
         onSaveSongRequest={handleSaveSongRequestSettings}
         onTransferOwner={handleTransferOwner}
@@ -2691,9 +2707,11 @@ export default function Room() {
                   </Tooltip>
                 )}
 
-                {isOwner && <RoleBadge role="owner" />}
-
-                {(isAdmin || canControlPlayback) && !isOwner && <RoleBadge role="admin" />}
+                <UserRoleMarks
+                  isOwner={isOwner}
+                  isAdmin={(isAdmin || canControlPlayback) && !isOwner}
+                  memberTier={mySocketId ? room?.memberTiers?.[mySocketId] : undefined}
+                />
 
                 {canOpenRoomSettings && (
                   <Tooltip side="bottom" content="房间设置">

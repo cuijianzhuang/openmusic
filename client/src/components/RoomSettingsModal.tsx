@@ -81,6 +81,8 @@ interface Props {
   announcementSaving?: boolean;
   chatHistoryVisibleOnJoin: boolean;
   chatHistorySaving?: boolean;
+  chatShowAvatars: boolean;
+  chatAvatarsSaving?: boolean;
   joinNoticeEnabled: boolean;
   joinNoticeCooldownMinutes: number;
   joinNoticeSaving?: boolean;
@@ -114,6 +116,7 @@ interface Props {
   onOpenMemberModal: () => void;
   onSaveAnnouncement: (options: { enabled: boolean; text: string }) => void;
   onSaveChatHistory: (enabled: boolean) => void;
+  onSaveChatShowAvatars: (enabled: boolean) => void;
   onSaveJoinNotice: (settings: { enabled: boolean; cooldownMinutes: number }) => void;
   onSaveSongRequest: (settings: SongRequestSettings) => void;
   onTransferOwner?: (userId: string) => void | Promise<void>;
@@ -240,6 +243,8 @@ export default function RoomSettingsModal({
   announcementSaving = false,
   chatHistoryVisibleOnJoin,
   chatHistorySaving = false,
+  chatShowAvatars,
+  chatAvatarsSaving = false,
   joinNoticeEnabled,
   joinNoticeCooldownMinutes,
   joinNoticeSaving = false,
@@ -268,6 +273,7 @@ export default function RoomSettingsModal({
   onOpenMemberModal,
   onSaveAnnouncement,
   onSaveChatHistory,
+  onSaveChatShowAvatars,
   onSaveJoinNotice,
   onSaveSongRequest,
   onTransferOwner,
@@ -319,11 +325,11 @@ export default function RoomSettingsModal({
     const items: { id: SettingsTab; label: string }[] = [];
     if (isOwner) {
       items.push({ id: 'fm', label: '漫游' });
-      items.push({ id: 'member', label: '贵宾' });
       items.push({ id: 'permanent', label: '常驻' });
       items.push({ id: 'transfer', label: '转让' });
     }
     if (canModerate) {
+      items.push({ id: 'member', label: '贵宾' });
       items.push({ id: 'announcement', label: '公告' });
       items.push({ id: 'chat', label: '聊天' });
       items.push({ id: 'songRequest', label: '点歌' });
@@ -354,10 +360,10 @@ export default function RoomSettingsModal({
     setPermanentNote('');
     const initialTabs: SettingsTab[] = [];
     if (isOwner) {
-      initialTabs.push('fm', 'member', 'permanent', 'transfer');
+      initialTabs.push('fm', 'permanent', 'transfer');
     }
     if (canModerate) {
-      initialTabs.push('announcement', 'chat', 'songRequest');
+      initialTabs.push('member', 'announcement', 'chat', 'songRequest');
     }
     if (identityLinuxdoEnabled || identityGithubEnabled) {
       initialTabs.push('identity');
@@ -497,7 +503,7 @@ export default function RoomSettingsModal({
         aria-label="关闭"
       />
       <div
-        className="relative flex max-h-[min(88vh,640px)] w-full max-w-lg animate-fade-in flex-col rounded-2xl border border-white/10 bg-netease-dark shadow-2xl backdrop-blur-xl"
+        className="relative flex h-[min(88vh,640px)] w-full max-w-lg animate-fade-in flex-col rounded-2xl border border-white/10 bg-netease-dark shadow-2xl backdrop-blur-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex flex-shrink-0 items-center justify-between border-b border-white/10 px-5 py-4">
@@ -637,14 +643,14 @@ export default function RoomSettingsModal({
             </section>
           )}
 
-          {activeTab === 'member' && isOwner && (
+          {activeTab === 'member' && canModerate && (
             <section>
               <div className="mb-2 flex items-center gap-2">
                 <Sparkles className="h-4 w-4 text-amber-400" />
                 <h3 className="text-sm font-medium text-white">贵宾角标</h3>
               </div>
               <p className="mb-3 text-xs text-netease-muted">
-                为在线用户赋予角标，进房欢迎与点歌边框自动生效
+                房主与管理员可为在线用户赋予角标；进房欢迎与点歌边框自动生效
               </p>
               <button
                 type="button"
@@ -879,6 +885,15 @@ export default function RoomSettingsModal({
                   description="开启后，成员进入房间可浏览此前聊天记录；关闭则仅能看到进房之后的消息"
                 />
                 {isOwner && (
+                  <Toggle
+                    checked={chatShowAvatars}
+                    disabled={chatAvatarsSaving}
+                    onChange={onSaveChatShowAvatars}
+                    label="聊天室显示头像"
+                    description="开启后，消息昵称左侧显示用户头像；未设置头像则显示昵称首字"
+                  />
+                )}
+                {isOwner && (
                   <div className="space-y-3 rounded-xl border border-white/10 bg-white/[0.02] p-3">
                     <Toggle
                       checked={draftJoinNoticeEnabled}
@@ -959,7 +974,22 @@ export default function RoomSettingsModal({
                     </button>
                   </form>
 
-                  {customForbiddenWords.length > 0 ? (
+                  {defaultForbiddenWords.length > 0 && (
+                    <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border border-white/5 bg-black/10 px-2.5 py-2">
+                      <p className="text-[11px] text-netease-muted">
+                        默认违禁词 {defaultForbiddenWords.length} 个（内容较脏，默认隐藏）
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setShowDefaultForbiddenWords((prev) => !prev)}
+                        className="flex-shrink-0 rounded-md px-2 py-1 text-[10px] text-netease-muted transition-colors hover:bg-white/10 hover:text-white"
+                      >
+                        {showDefaultForbiddenWords ? '收起' : '查看默认违禁词'}
+                      </button>
+                    </div>
+                  )}
+
+                  {customForbiddenWords.length > 0 || (showDefaultForbiddenWords && defaultForbiddenWords.length > 0) ? (
                     <div className="mt-2 max-h-40 space-y-1 overflow-y-auto pr-0.5">
                       {customForbiddenWords.map((entry) => (
                         <div
@@ -977,49 +1007,28 @@ export default function RoomSettingsModal({
                           </button>
                         </div>
                       ))}
+                      {showDefaultForbiddenWords && defaultForbiddenWords.map((entry) => (
+                        <div
+                          key={`${entry.word}:${entry.addedAt ?? ''}`}
+                          className="flex items-center gap-2 rounded-lg bg-black/20 px-2 py-1.5"
+                        >
+                          <p className="min-w-0 flex-1 truncate text-xs text-white/90">{entry.word}</p>
+                          <span className="flex-shrink-0 rounded px-1.5 py-0.5 text-[9px] text-netease-muted bg-white/5">
+                            默认
+                          </span>
+                          <button
+                            type="button"
+                            disabled={forbiddenWordSaving}
+                            onClick={() => onRemoveForbiddenWord?.(entry.word)}
+                            className="flex-shrink-0 rounded-md px-2 py-1 text-[10px] text-netease-muted transition-colors hover:bg-white/10 hover:text-white disabled:opacity-40"
+                          >
+                            删除
+                          </button>
+                        </div>
+                      ))}
                     </div>
                   ) : (
                     <p className="mt-2 text-xs text-netease-muted/80">暂无自定义违禁词</p>
-                  )}
-
-                  {defaultForbiddenWords.length > 0 && (
-                    <div className="mt-2 rounded-lg border border-white/5 bg-black/10 px-2.5 py-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-[11px] text-netease-muted">
-                          默认违禁词 {defaultForbiddenWords.length} 个（内容较脏，默认隐藏）
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() => setShowDefaultForbiddenWords((prev) => !prev)}
-                          className="flex-shrink-0 rounded-md px-2 py-1 text-[10px] text-netease-muted transition-colors hover:bg-white/10 hover:text-white"
-                        >
-                          {showDefaultForbiddenWords ? '收起' : '查看默认违禁词'}
-                        </button>
-                      </div>
-                      {showDefaultForbiddenWords && (
-                        <div className="mt-2 max-h-40 space-y-1 overflow-y-auto pr-0.5">
-                          {defaultForbiddenWords.map((entry) => (
-                            <div
-                              key={`${entry.word}:${entry.addedAt ?? ''}`}
-                              className="flex items-center gap-2 rounded-lg bg-black/20 px-2 py-1.5"
-                            >
-                              <p className="min-w-0 flex-1 truncate text-xs text-white/90">{entry.word}</p>
-                              <span className="flex-shrink-0 rounded px-1.5 py-0.5 text-[9px] text-netease-muted bg-white/5">
-                                默认
-                              </span>
-                              <button
-                                type="button"
-                                disabled={forbiddenWordSaving}
-                                onClick={() => onRemoveForbiddenWord?.(entry.word)}
-                                className="flex-shrink-0 rounded-md px-2 py-1 text-[10px] text-netease-muted transition-colors hover:bg-white/10 hover:text-white disabled:opacity-40"
-                              >
-                                删除
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
                   )}
                 </div>
               </div>

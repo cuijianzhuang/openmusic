@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   acquireQFaceDisplayImage,
   getQQFaceItem,
+  getQFaceObjectUrl,
   isQFaceImageDecoded,
   markQFaceImageRendered,
   QFaceLoadPriority,
@@ -28,6 +29,10 @@ interface Props {
 
 const NEAR_ROOT_MARGIN = '96px';
 
+function isPaintReady(state: string): boolean {
+  return state === 'loaded' || state === 'decoded' || state === 'rendered';
+}
+
 export default function QFaceImage({
   id,
   className,
@@ -38,24 +43,31 @@ export default function QFaceImage({
   placeholderClassName,
 }: Props) {
   const face = getQQFaceItem(id);
+  const rootRef = useRef<HTMLSpanElement>(null);
   const hostRef = useRef<HTMLSpanElement>(null);
-  const [decoded, setDecoded] = useState(() => isQFaceImageDecoded(id));
+  const [ready, setReady] = useState(() => (
+    isQFaceImageDecoded(id) || Boolean(getQFaceObjectUrl(id))
+  ));
 
   useEffect(() => {
     return subscribeQFaceImageState(id, (state) => {
-      setDecoded(state === 'decoded' || state === 'rendered');
+      if (isPaintReady(state)) setReady(true);
     });
   }, [id]);
 
   useEffect(() => {
     if (isQFaceImageDecoded(id)) return;
 
-    const anchor = hostRef.current;
+    const anchor = rootRef.current;
     if (!anchor) return;
 
     const schedule = (loadPriority: QFacePriority) => {
       void requestQFaceImage(id, loadPriority);
     };
+
+    if (getQFaceObjectUrl(id)) {
+      schedule(priority);
+    }
 
     const visibleObserver = new IntersectionObserver(
       (entries) => {
@@ -81,7 +93,7 @@ export default function QFaceImage({
 
   useLayoutEffect(() => {
     const host = hostRef.current;
-    if (!host || !decoded) return;
+    if (!host || !ready) return;
 
     const img = acquireQFaceDisplayImage(id, {
       className,
@@ -89,23 +101,48 @@ export default function QFaceImage({
     });
     if (!img) return;
 
+    let cancelled = false;
+    const reveal = () => {
+      if (cancelled) return;
+      img.style.opacity = '1';
+      markQFaceImageRendered(id);
+    };
+
+    img.style.opacity = '0';
+    img.style.transition = 'opacity 120ms ease-out';
     host.replaceChildren(img);
-    markQFaceImageRendered(id);
+
+    if (img.complete && img.naturalWidth > 0) {
+      requestAnimationFrame(reveal);
+    } else {
+      const onLoad = () => {
+        if (img.decode) {
+          void img.decode().then(reveal, reveal);
+        } else {
+          reveal();
+        }
+      };
+      img.addEventListener('load', onLoad, { once: true });
+      img.addEventListener('error', reveal, { once: true });
+    }
 
     return () => {
+      cancelled = true;
       releaseQFaceDisplayImage(id, img);
       host.replaceChildren();
     };
-  }, [className, decoded, face.text, id]);
+  }, [className, face.text, id, ready]);
 
+  const sizeClass = placeholderClassName || className || '';
   const faceContent = (
-    <span ref={hostRef} className="inline-flex align-middle">
-      {!decoded && (
-        <span
-          className={placeholderClassName || className}
-          aria-hidden="true"
-        />
-      )}
+    <span
+      ref={rootRef}
+      className={`inline-flex items-center justify-center align-middle ${sizeClass}`.trim()}
+    >
+      <span
+        ref={hostRef}
+        className="inline-flex max-h-full max-w-full items-center justify-center [&_img]:max-h-full [&_img]:max-w-full"
+      />
     </span>
   );
 

@@ -27,6 +27,7 @@ import {
   Layout,
   Menu,
   Modal,
+  Popconfirm,
   Row,
   Select,
   Space,
@@ -34,7 +35,6 @@ import {
   Table,
   Tabs,
   Tag,
-  Tooltip,
   Typography,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
@@ -138,7 +138,6 @@ function AdminPage() {
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [rooms, setRooms] = useState<AdminRoom[]>([]);
   const [error, setError] = useState('');
-  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [protectingId, setProtectingId] = useState<string | null>(null);
   const [permanentReviewingId, setPermanentReviewingId] = useState<string | null>(null);
@@ -176,7 +175,7 @@ function AdminPage() {
   const [auditLoading, setAuditLoading] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [roomsPage, setRoomsPage] = useState(1);
-  const [roomsPageSize, setRoomsPageSize] = useState(LIST_PAGE_SIZE);
+  const [roomsPageSize, setRoomsPageSize] = useState(10);
   const [roomsKeyword, setRoomsKeyword] = useState('');
   const [roomsStatusFilter, setRoomsStatusFilter] = useState<AdminRoomStatusFilter[]>([]);
   const [bansPage, setBansPage] = useState(1);
@@ -184,6 +183,8 @@ function AdminPage() {
   const [refreshing, setRefreshing] = useState(false);
   const annLoadedRef = useRef(false);
   const loadingRef = useRef(false);
+  const pendingForceRefreshRef = useRef(false);
+  const refreshGenRef = useRef(0);
   const savedEntryPathRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -218,43 +219,53 @@ function AdminPage() {
     setAuditPage(1);
   }, []);
 
-  const refresh = useCallback(async () => {
-    if (loadingRef.current) return;
-    loadingRef.current = true;
-    setRefreshing(true);
-    try {
-      const [ov, rm, banRes, reportRes] = await Promise.all([
-        adminFetch<AdminOverview>('/api/admin/overview'),
-        adminFetch<{ rooms: AdminRoom[] }>('/api/admin/rooms'),
-        adminFetch<{ bans: SiteBanEntry[] }>('/api/admin/bans'),
-        adminFetch<{ reports: ErrorReportSummary[] }>('/api/admin/error-reports'),
-      ]);
-      setOverview(ov);
-      setRooms(rm.rooms);
-      setBans(banRes.bans);
-      setErrorReports(reportRes.reports);
-      if (ov.entryPath) {
-        setEntryPathDraft((draft) => {
-          if (savedEntryPathRef.current === null || draft === savedEntryPathRef.current) {
-            savedEntryPathRef.current = ov.entryPath!;
-            return ov.entryPath!;
-          }
-          return draft;
-        });
-        if (savedEntryPathRef.current === null) savedEntryPathRef.current = ov.entryPath;
-      }
-      setError('');
-    } catch (err) {
-      const errMessage = err instanceof Error ? err.message : '加载失败';
-      setError(errMessage);
-      const status = err && typeof err === 'object' && 'status' in err
-        ? Number((err as { status?: number }).status)
-        : 0;
-      if (status === 401 || status === 503) setLoggedIn(false);
-    } finally {
-      loadingRef.current = false;
-      setRefreshing(false);
+  const refresh = useCallback(async (opts?: { force?: boolean }) => {
+    if (loadingRef.current) {
+      if (opts?.force) pendingForceRefreshRef.current = true;
+      return;
     }
+
+    do {
+      pendingForceRefreshRef.current = false;
+      loadingRef.current = true;
+      setRefreshing(true);
+      const gen = ++refreshGenRef.current;
+      try {
+        const [ov, rm, banRes, reportRes] = await Promise.all([
+          adminFetch<AdminOverview>('/api/admin/overview'),
+          adminFetch<{ rooms: AdminRoom[] }>('/api/admin/rooms'),
+          adminFetch<{ bans: SiteBanEntry[] }>('/api/admin/bans'),
+          adminFetch<{ reports: ErrorReportSummary[] }>('/api/admin/error-reports'),
+        ]);
+        if (gen !== refreshGenRef.current) continue;
+        setOverview(ov);
+        setRooms(rm.rooms);
+        setBans(banRes.bans);
+        setErrorReports(reportRes.reports);
+        if (ov.entryPath) {
+          setEntryPathDraft((draft) => {
+            if (savedEntryPathRef.current === null || draft === savedEntryPathRef.current) {
+              savedEntryPathRef.current = ov.entryPath!;
+              return ov.entryPath!;
+            }
+            return draft;
+          });
+          if (savedEntryPathRef.current === null) savedEntryPathRef.current = ov.entryPath;
+        }
+        setError('');
+      } catch (err) {
+        if (gen !== refreshGenRef.current) continue;
+        const errMessage = err instanceof Error ? err.message : '加载失败';
+        setError(errMessage);
+        const status = err && typeof err === 'object' && 'status' in err
+          ? Number((err as { status?: number }).status)
+          : 0;
+        if (status === 401 || status === 503) setLoggedIn(false);
+      } finally {
+        loadingRef.current = false;
+        setRefreshing(false);
+      }
+    } while (pendingForceRefreshRef.current);
   }, []);
 
   useEffect(() => {
@@ -344,9 +355,9 @@ function AdminPage() {
     setDeletingId(room.id);
     try {
       await adminFetch(`/api/admin/rooms/${room.id}`, { method: 'DELETE' });
-      setPendingDeleteId(null);
+      setRooms((prev) => prev.filter((r) => r.id !== room.id));
       message.success(`已解散房间 ${room.name}`);
-      await refresh();
+      await refresh({ force: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : '解散失败');
     } finally {
@@ -356,13 +367,17 @@ function AdminPage() {
 
   const toggleRoomProtection = useCallback(async (room: AdminRoom) => {
     setProtectingId(room.id);
+    const nextProtected = !room.protectedFromDestroy;
     try {
       await adminFetch(`/api/admin/rooms/${room.id}/protection`, {
         method: 'PUT',
-        body: JSON.stringify({ enabled: !room.protectedFromDestroy }),
+        body: JSON.stringify({ enabled: nextProtected }),
       });
+      setRooms((prev) => prev.map((r) => (
+        r.id === room.id ? { ...r, protectedFromDestroy: nextProtected } : r
+      )));
       message.success(room.protectedFromDestroy ? '已取消房间常驻' : '已设为常驻');
-      await refresh();
+      await refresh({ force: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : '更新房间常驻状态失败');
     } finally {
@@ -381,10 +396,18 @@ function AdminPage() {
         method: 'POST',
         body: JSON.stringify({ approved, reason }),
       });
+      setRooms((prev) => prev.map((r) => {
+        if (r.id !== room.id) return r;
+        return {
+          ...r,
+          permanentApplication: null,
+          protectedFromDestroy: approved ? true : r.protectedFromDestroy,
+        };
+      }));
       message.success(approved ? `已通过「${room.name}」的常驻申请` : `已拒绝「${room.name}」的常驻申请`);
       setRejectPermanentRoom(null);
       setRejectPermanentReason('');
-      await refresh();
+      await refresh({ force: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : '审核常驻申请失败');
     } finally {
@@ -410,7 +433,7 @@ function AdminPage() {
         body: JSON.stringify({ url }),
       });
       message.success('已重置上游冷却');
-      await refresh();
+      await refresh({ force: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : '重置冷却失败');
     } finally {
@@ -426,7 +449,7 @@ function AdminPage() {
         body: JSON.stringify({ url: up.url, disabled: !up.disabled }),
       });
       message.success(up.disabled ? '已启用上游' : '已临时禁用上游');
-      await refresh();
+      await refresh({ force: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : '更新上游状态失败');
     } finally {
@@ -447,7 +470,7 @@ function AdminPage() {
       const hint = `已发送到 ${res.roomCount} 个房间`;
       setBroadcastHint(hint);
       message.success(hint);
-      await refresh();
+      await refresh({ force: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : '广播失败');
     } finally {
@@ -473,7 +496,7 @@ function AdminPage() {
       const hint = `已封禁${typeof res.kicked === 'number' && res.kicked > 0 ? `，踢出 ${res.kicked} 个在线连接` : ''}`;
       setBanHint(hint);
       message.success(hint);
-      await refresh();
+      await refresh({ force: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : '封禁失败');
     } finally {
@@ -485,7 +508,7 @@ function AdminPage() {
     try {
       await adminFetch(`/api/admin/bans/${banId}`, { method: 'DELETE' });
       message.success('已解封');
-      await refresh();
+      await refresh({ force: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : '解封失败');
     }
@@ -532,7 +555,7 @@ function AdminPage() {
       } else {
         message.success('已重开');
       }
-      await refresh();
+      await refresh({ force: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : '更新上报失败');
     } finally {
@@ -552,7 +575,7 @@ function AdminPage() {
           await adminFetch(`/api/admin/error-reports/${id}`, { method: 'DELETE' });
           if (reportDetail?.id === id) setReportDetail(null);
           message.success('已删除');
-          await refresh();
+          await refresh({ force: true });
         } catch (err) {
           setError(err instanceof Error ? err.message : '删除上报失败');
         } finally {
@@ -593,7 +616,7 @@ function AdminPage() {
       if (window.location.pathname !== res.entryPath) {
         navigate(res.entryPath, { replace: true });
       }
-      await refresh();
+      await refresh({ force: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : '保存登录地址失败');
     } finally {
@@ -651,151 +674,170 @@ function AdminPage() {
   const roomColumns: ColumnsType<AdminRoom> = [
     {
       title: '房间',
-      width: 156,
+      width: 210,
       ellipsis: true,
       render: (_, room) => (
-        <div style={{ minWidth: 0 }}>
-          <Typography.Text strong ellipsis style={{ display: 'block', maxWidth: 144 }}>
+        <div style={{ minWidth: 0, lineHeight: 1.35 }}>
+          <Typography.Text strong ellipsis style={{ display: 'block', maxWidth: 190 }}>
             {room.name}
           </Typography.Text>
-          <Typography.Text type="secondary" code style={{ fontSize: 11 }}>
-            {room.id}
-          </Typography.Text>
+          <Space size={6} wrap style={{ marginTop: 2 }}>
+            <Typography.Text type="secondary" code style={{ fontSize: 11 }}>
+              {room.id}
+            </Typography.Text>
+            {room.ownerNickname ? (
+              <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                {room.ownerNickname}
+              </Typography.Text>
+            ) : null}
+          </Space>
         </div>
       ),
     },
     {
       title: '状态',
-      width: 132,
+      width: 128,
       render: (_, room) => {
         const pending = room.permanentApplication?.status === 'pending';
-        const tags = [
-          pending ? <Tag key="pending" color="orange">待审</Tag> : null,
-          room.protectedFromDestroy ? <Tag key="protected" color="green">常驻</Tag> : null,
-          room.hasPassword ? <Tag key="password" color="gold">密码</Tag> : null,
-          room.isLocked ? <Tag key="locked" color="red">上锁</Tag> : null,
-        ].filter(Boolean);
-        return tags.length > 0
-          ? <Space size={[4, 4]} wrap>{tags}</Space>
-          : <Typography.Text type="secondary">—</Typography.Text>;
+        const badgeStatus = pending
+          ? 'warning'
+          : room.protectedFromDestroy
+            ? 'success'
+            : 'default';
+        const badgeText = pending
+          ? '待审'
+          : room.protectedFromDestroy
+            ? '常驻'
+            : '普通';
+        const attrs: string[] = [];
+        if (room.hasPassword) attrs.push('密码');
+        if (room.isLocked) attrs.push('上锁');
+        return (
+          <div className="admin-room-status" style={{ lineHeight: 1.35 }}>
+            <Badge status={badgeStatus} text={badgeText} />
+            {attrs.length > 0 ? (
+              <div className="admin-room-status__attrs">
+                {attrs.join(' · ')}
+              </div>
+            ) : null}
+          </div>
+        );
       },
     },
     {
       title: '在线',
-      width: 56,
+      width: 64,
       align: 'center',
       dataIndex: 'userCount',
+      render: (count: number) => (
+        <Typography.Text type={count > 0 ? undefined : 'secondary'}>{count}</Typography.Text>
+      ),
     },
     {
       title: '播放',
       ellipsis: true,
       render: (_, room) => (
         room.currentSong ? (
-          <Typography.Text ellipsis style={{ maxWidth: 240 }}>
-            {room.isPlaying ? '▶ ' : '⏸ '}
-            {room.currentSong.name}
-            <Typography.Text type="secondary"> · {room.currentSong.artist}</Typography.Text>
-          </Typography.Text>
+          <div style={{ minWidth: 0, lineHeight: 1.35 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+              <Badge status={room.isPlaying ? 'processing' : 'default'} />
+              <Typography.Text ellipsis style={{ flex: 1, minWidth: 0, maxWidth: 240 }}>
+                {room.currentSong.name}
+              </Typography.Text>
+            </div>
+            <Typography.Text
+              type="secondary"
+              ellipsis
+              style={{ display: 'block', fontSize: 12, maxWidth: 260, paddingLeft: 14 }}
+            >
+              {room.isPlaying ? '播放中' : '已暂停'}
+              {' · '}
+              {room.currentSong.artist}
+            </Typography.Text>
+          </div>
         ) : (
-          <Typography.Text type="secondary">—</Typography.Text>
+          <Typography.Text type="secondary">
+            <Badge status="default" text="未播放" />
+          </Typography.Text>
         )
       ),
     },
     {
       title: '队列',
-      width: 52,
+      width: 56,
       align: 'center',
       dataIndex: 'queueLength',
+      render: (n: number) => (
+        <Typography.Text type={n > 0 ? undefined : 'secondary'}>{n}</Typography.Text>
+      ),
     },
     {
       title: '操作',
-      width: 148,
+      width: 200,
       fixed: 'right',
       render: (_, room) => {
         const pending = room.permanentApplication?.status === 'pending';
         const busy = protectingId === room.id || permanentReviewingId === room.id;
         return (
-          <Space size={4} onClick={(e) => e.stopPropagation()}>
+          <Space size={6} wrap onClick={(e) => e.stopPropagation()}>
             {pending ? (
               <>
-                <Tooltip title="通过常驻申请">
-                  <Button
-                    size="small"
-                    type="primary"
-                    icon={<CheckOutlined />}
-                    loading={busy}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void reviewPermanentApplication(room, true);
-                    }}
-                  />
-                </Tooltip>
-                <Tooltip title="拒绝申请">
-                  <Button
-                    size="small"
-                    danger
-                    icon={<CloseOutlined />}
-                    loading={busy}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setRejectPermanentRoom(room);
-                      setRejectPermanentReason('');
-                    }}
-                  />
-                </Tooltip>
-              </>
-            ) : (
-              <Tooltip title={room.protectedFromDestroy ? '取消常驻' : '设为常驻'}>
                 <Button
                   size="small"
-                  type={room.protectedFromDestroy ? 'primary' : 'default'}
-                  ghost={room.protectedFromDestroy}
-                  icon={<SafetyCertificateOutlined />}
+                  type="primary"
+                  icon={<CheckOutlined />}
                   loading={busy}
                   onClick={(e) => {
                     e.stopPropagation();
-                    void toggleRoomProtection(room);
-                  }}
-                />
-              </Tooltip>
-            )}
-            {pendingDeleteId === room.id ? (
-              <>
-                <Button
-                  size="small"
-                  danger
-                  type="primary"
-                  loading={deletingId === room.id}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void dissolveRoom(room);
+                    void reviewPermanentApplication(room, true);
                   }}
                 >
-                  确认
+                  通过
                 </Button>
                 <Button
                   size="small"
+                  danger
+                  icon={<CloseOutlined />}
+                  loading={busy}
                   onClick={(e) => {
                     e.stopPropagation();
-                    setPendingDeleteId(null);
+                    setRejectPermanentRoom(room);
+                    setRejectPermanentReason('');
                   }}
                 >
-                  取消
+                  拒绝
                 </Button>
               </>
             ) : (
-              <Tooltip title="解散房间">
-                <Button
-                  size="small"
-                  danger
-                  icon={<DeleteOutlined />}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setPendingDeleteId(room.id);
-                  }}
-                />
-              </Tooltip>
+              <Button
+                size="small"
+                type={room.protectedFromDestroy ? 'primary' : 'default'}
+                ghost={room.protectedFromDestroy}
+                icon={<SafetyCertificateOutlined />}
+                loading={busy}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void toggleRoomProtection(room);
+                }}
+              >
+                {room.protectedFromDestroy ? '常驻' : '设常驻'}
+              </Button>
             )}
+            <Popconfirm
+              title="解散此房间？"
+              description="在线成员会被踢出，操作不可撤销。"
+              okText="解散"
+              cancelText="取消"
+              okButtonProps={{ danger: true, loading: deletingId === room.id }}
+              onConfirm={() => dissolveRoom(room)}
+            >
+              <Button
+                size="small"
+                danger
+                icon={<DeleteOutlined />}
+                onClick={(e) => e.stopPropagation()}
+              />
+            </Popconfirm>
           </Space>
         );
       },
@@ -952,60 +994,56 @@ function AdminPage() {
             title="房间列表"
             size="small"
             extra={(
-              <Space size={12} wrap>
+              <Space size={8} wrap>
                 {pendingPermanentCount > 0 && (
-                  <Tag color="orange">{pendingPermanentCount} 个待审常驻</Tag>
+                  <Badge
+                    status="warning"
+                    text={`${pendingPermanentCount} 个待审常驻`}
+                  />
                 )}
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                   {roomsKeyword || roomsStatusFilter.length > 0
-                    ? `${filteredRooms.length} / ${rooms.length} 个房间`
-                    : `${rooms.length} 个活跃房间`}
+                    ? `${filteredRooms.length} / ${rooms.length}`
+                    : `${rooms.length} 个房间`}
                 </Typography.Text>
               </Space>
             )}
           >
-            <Space direction="vertical" size="small" style={{ width: '100%' }}>
-              <Row gutter={[8, 8]} align="middle">
-                <Col xs={24} md={11}>
-                  <Input.Search
-                    placeholder="搜索房间、成员、IP、歌曲"
-                    allowClear
-                    size="middle"
-                    value={roomsKeyword}
-                    onChange={(e) => setRoomsKeyword(e.target.value)}
-                  />
-                </Col>
-                <Col xs={20} md={10}>
-                  <Select
-                    mode="multiple"
-                    allowClear
-                    placeholder="状态筛选"
-                    style={{ width: '100%' }}
-                    value={roomsStatusFilter}
-                    options={ADMIN_ROOM_STATUS_FILTERS}
-                    onChange={setRoomsStatusFilter}
-                    maxTagCount="responsive"
-                  />
-                </Col>
-                <Col xs={4} md={3}>
-                  <Button
-                    block
-                    disabled={!roomsKeyword && roomsStatusFilter.length === 0}
-                    onClick={() => {
-                      setRoomsKeyword('');
-                      setRoomsStatusFilter([]);
-                    }}
-                  >
-                    重置
-                  </Button>
-                </Col>
-              </Row>
+            <Space direction="vertical" size={12} style={{ width: '100%' }}>
+              <Space wrap size={8} style={{ width: '100%' }}>
+                <Input.Search
+                  placeholder="搜索房间、成员、IP、歌曲"
+                  allowClear
+                  value={roomsKeyword}
+                  onChange={(e) => setRoomsKeyword(e.target.value)}
+                  style={{ width: 260, maxWidth: '100%' }}
+                />
+                <Select
+                  mode="multiple"
+                  allowClear
+                  placeholder="状态筛选"
+                  value={roomsStatusFilter}
+                  options={ADMIN_ROOM_STATUS_FILTERS}
+                  onChange={setRoomsStatusFilter}
+                  maxTagCount="responsive"
+                  style={{ minWidth: 200, flex: 1, maxWidth: 420 }}
+                />
+                <Button
+                  disabled={!roomsKeyword && roomsStatusFilter.length === 0}
+                  onClick={() => {
+                    setRoomsKeyword('');
+                    setRoomsStatusFilter([]);
+                  }}
+                >
+                  重置
+                </Button>
+              </Space>
               <Table
                 rowKey="id"
-                size="small"
+                size="middle"
                 columns={roomColumns}
                 dataSource={filteredRooms}
-                scroll={{ x: 820 }}
+                scroll={{ x: 900 }}
                 rowClassName={(room) => (
                   room.permanentApplication?.status === 'pending' ? 'admin-room-row-pending' : ''
                 )}
@@ -1050,27 +1088,49 @@ function AdminPage() {
                   ),
                   expandedRowRender: (room) => {
                     const app = room.permanentApplication;
+                    const busy = permanentReviewingId === room.id;
                     return (
-                      <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                      <div className="admin-room-expand">
                         {app?.status === 'pending' && (
-                          <Alert
-                            type="warning"
-                            showIcon
-                            message="常驻申请待审核"
-                            description={(
-                              <Space direction="vertical" size={4}>
-                                <Typography.Text style={{ fontSize: 12 }}>
-                                  申请人：{app.applicantNickname || room.ownerNickname || '房主'}
-                                  {app.appliedAt ? ` · ${formatAuditTime(app.appliedAt)}` : ''}
+                          <div
+                            className="admin-room-review"
+                            style={{ marginBottom: room.users.length > 0 ? 12 : 0 }}
+                          >
+                            <div className="admin-room-review__main">
+                              <div className="admin-room-review__title">
+                                <Badge status="warning" text="常驻申请待审核" />
+                              </div>
+                              <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
+                                申请人 {app.applicantNickname || room.ownerNickname || '房主'}
+                                {app.appliedAt ? ` · ${formatAuditTime(app.appliedAt)}` : ''}
+                              </Typography.Text>
+                              {app.note ? (
+                                <Typography.Text style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
+                                  {app.note}
                                 </Typography.Text>
-                                {app.note ? (
-                                  <Typography.Text style={{ fontSize: 12 }}>
-                                    说明：{app.note}
-                                  </Typography.Text>
-                                ) : null}
-                              </Space>
-                            )}
-                          />
+                              ) : null}
+                            </div>
+                            <Space size={8}>
+                              <Button
+                                size="small"
+                                type="primary"
+                                loading={busy}
+                                onClick={() => void reviewPermanentApplication(room, true)}
+                              >
+                                通过
+                              </Button>
+                              <Button
+                                size="small"
+                                loading={busy}
+                                onClick={() => {
+                                  setRejectPermanentRoom(room);
+                                  setRejectPermanentReason('');
+                                }}
+                              >
+                                拒绝
+                              </Button>
+                            </Space>
+                          </div>
                         )}
                         {room.users.length > 0 ? (
                           <Table
@@ -1083,12 +1143,14 @@ function AdminPage() {
                                 title: '昵称',
                                 dataIndex: 'nickname',
                                 width: 120,
+                                ellipsis: true,
                               },
                               {
                                 title: 'IP',
+                                width: 200,
                                 render: (_, u) => (
                                   u.clientIp ? (
-                                    <Space size={8}>
+                                    <Space size={6} wrap>
                                       <Typography.Text code copyable={{ text: u.clientIp }}>
                                         {u.clientIp}
                                       </Typography.Text>
@@ -1105,12 +1167,12 @@ function AdminPage() {
                                 title: '设备 ID',
                                 render: (_, u) => (
                                   u.deviceId ? (
-                                    <Space size={8}>
+                                    <Space size={6} wrap>
                                       <Typography.Text
                                         code
                                         copyable={{ text: u.deviceId }}
                                         ellipsis
-                                        style={{ maxWidth: 200 }}
+                                        style={{ maxWidth: 220 }}
                                       >
                                         {u.deviceId}
                                       </Typography.Text>
@@ -1130,7 +1192,7 @@ function AdminPage() {
                             当前无在线成员
                           </Typography.Text>
                         )}
-                      </Space>
+                      </div>
                     );
                   },
                 }}
@@ -1541,7 +1603,7 @@ function AdminPage() {
           </Space>
           <Button
             icon={<SyncOutlined spin={refreshing} />}
-            onClick={() => void refresh()}
+            onClick={() => void refresh({ force: true })}
             loading={refreshing}
             style={{ flexShrink: 0 }}
           >
@@ -1726,10 +1788,54 @@ function AdminPage() {
 
       <style>{`
         .admin-room-row-pending > td {
-          background: #fffbe6 !important;
+          background: #fff !important;
+        }
+        .admin-room-row-pending > td:first-child {
+          box-shadow: inset 3px 0 0 #faad14;
         }
         .admin-room-row-pending:hover > td {
-          background: #fff7cc !important;
+          background: #fafafa !important;
+        }
+        .admin-room-status .ant-badge-status-text {
+          font-size: 13px;
+          color: rgba(0, 0, 0, 0.88);
+        }
+        .admin-room-status__attrs {
+          margin-top: 2px;
+          padding-left: 14px;
+          font-size: 12px;
+          color: rgba(0, 0, 0, 0.45);
+          letter-spacing: 0.01em;
+        }
+        .admin-room-review {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 16px;
+          padding: 12px 14px;
+          border: 1px solid #f0f0f0;
+          border-left: 3px solid #faad14;
+          border-radius: 6px;
+          background: #fafafa;
+        }
+        .admin-room-review__main {
+          min-width: 0;
+          flex: 1;
+        }
+        .admin-room-review__title .ant-badge-status-text {
+          font-size: 13px;
+          font-weight: 500;
+          color: rgba(0, 0, 0, 0.88);
+        }
+        .admin-room-expand {
+          padding: 4px 8px 8px 28px;
+        }
+        .admin-room-expand .ant-table {
+          background: transparent;
+        }
+        .admin-room-expand .ant-table-thead > tr > th {
+          background: rgba(0, 0, 0, 0.02);
+          font-size: 12px;
         }
         .admin-page-header.ant-layout-header {
           height: 56px !important;

@@ -12,6 +12,8 @@ export type ChatRoomSlice = {
   autoPromotedAdminIds?: string[];
   users: RoomUser[];
   memberTiers?: RoomState['memberTiers'];
+  userAvatarUrls?: RoomState['userAvatarUrls'];
+  chatShowAvatars?: boolean;
   muteAll?: boolean;
   mutedUserIds?: string[];
 };
@@ -20,6 +22,21 @@ function stringArraysEqual(a: string[], b: string[]): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i += 1) {
     if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+function avatarUrlsEqual(
+  a: Record<string, string> | undefined,
+  b: Record<string, string> | undefined,
+): boolean {
+  if (a === b) return true;
+  const left = a || {};
+  const right = b || {};
+  const keys = Object.keys(left);
+  if (keys.length !== Object.keys(right).length) return false;
+  for (const key of keys) {
+    if (left[key] !== right[key]) return false;
   }
   return true;
 }
@@ -33,6 +50,8 @@ export function roomToChatSlice(room: RoomState): ChatRoomSlice {
     autoPromotedAdminIds: room.autoPromotedAdminIds || [],
     users: room.users,
     memberTiers: room.memberTiers,
+    userAvatarUrls: room.userAvatarUrls,
+    chatShowAvatars: Boolean(room.chatShowAvatars),
     muteAll: room.muteAll,
     mutedUserIds: room.mutedUserIds || [],
   };
@@ -45,11 +64,13 @@ export function chatRoomSlicesEqual(a: ChatRoomSlice | null, b: ChatRoomSlice | 
     && a.creatorId === b.creatorId
     && a.ownerId === b.ownerId
     && a.muteAll === b.muteAll
+    && a.chatShowAvatars === b.chatShowAvatars
     && stringArraysEqual(a.adminIds, b.adminIds)
     && stringArraysEqual(a.autoPromotedAdminIds || [], b.autoPromotedAdminIds || [])
     && stringArraysEqual(a.mutedUserIds || [], b.mutedUserIds || [])
     && roomUsersEqual(a.users, b.users)
-    && memberTiersEqual(a.memberTiers, b.memberTiers);
+    && memberTiersEqual(a.memberTiers, b.memberTiers)
+    && avatarUrlsEqual(a.userAvatarUrls, b.userAvatarUrls);
 }
 
 export function chatSliceToRoomMeta(slice: ChatRoomSlice): ChatRoomMeta {
@@ -61,6 +82,8 @@ export function chatSliceToRoomMeta(slice: ChatRoomSlice): ChatRoomMeta {
     autoPromotedAdminIds: slice.autoPromotedAdminIds,
     users: slice.users,
     memberTiers: slice.memberTiers,
+    userAvatarUrls: slice.userAvatarUrls,
+    chatShowAvatars: slice.chatShowAvatars,
     muteAll: slice.muteAll,
   };
 }

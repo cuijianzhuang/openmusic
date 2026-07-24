@@ -1222,6 +1222,19 @@ export function useSocket() {
     });
   }, []);
 
+  const setChatShowAvatars = useCallback((enabled: boolean): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
+    return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
+      'set_room_chat_avatars',
+      { enabled },
+      { success: false, error: '连接超时，请重试' },
+    ).then((res) => {
+      if (res.success && res.room) {
+        applyRoomSnapshot(res.room);
+      }
+      return res;
+    });
+  }, []);
+
   const setRoomJoinNotice = useCallback((options: {
     enabled: boolean;
     cooldownSec: number;
@@ -1340,7 +1353,17 @@ export function useSocket() {
 
   const setRoomMemberTier = useCallback((
     userId: string,
-    tier: { badgeLabel: string; badgeColor: string; borderStyleId: string; borderColor: string },
+    tier: {
+      badgeLabel: string;
+      badgeColor: string;
+      borderStyleId: string;
+      borderColor: string;
+      welcomeEnabled?: boolean;
+      welcomeTemplateId?: string;
+      welcomeCustomText?: string;
+      confettiEnabled?: boolean;
+      welcomeCooldownSec?: number;
+    },
   ): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
     return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
       'set_room_member_tier',
@@ -1371,6 +1394,7 @@ export function useSocket() {
     welcomeEnabled: boolean;
     welcomeTemplateId: string;
     welcomeCustomText?: string;
+    confettiEnabled?: boolean;
     welcomeCooldownSec?: number;
   }): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
     return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
@@ -1512,6 +1536,8 @@ export function useSocket() {
     setRoomCustomCover,
 
     setChatHistoryVisibleOnJoin,
+
+    setChatShowAvatars,
 
     setRoomJoinNotice,
 

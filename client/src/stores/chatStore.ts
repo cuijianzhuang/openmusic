@@ -4,18 +4,21 @@ import { useRoomStore } from './roomStore';
 import {
   DEFAULT_MEMBER_SETTINGS,
   normalizeWelcomeCooldownSec,
+  resolveMemberWelcomeSettings,
 } from '../lib/memberTierPresets';
 
-function getWelcomeCooldownMs(): number {
+function getWelcomeCooldownMs(targetUserId: string): number {
+  const room = useRoomStore.getState().room;
+  const tier = room?.memberTiers?.[targetUserId];
   const sec = normalizeWelcomeCooldownSec(
-    useRoomStore.getState().room?.memberSettings?.welcomeCooldownSec
+    resolveMemberWelcomeSettings(tier, room?.memberSettings).welcomeCooldownSec
       ?? DEFAULT_MEMBER_SETTINGS.welcomeCooldownSec,
   );
   return sec * 1000;
 }
 
 function hasRecentWelcomeForUser(messages: ChatMessage[], targetUserId: string) {
-  const cooldownMs = getWelcomeCooldownMs();
+  const cooldownMs = getWelcomeCooldownMs(targetUserId);
   if (!(cooldownMs > 0)) return false;
   const now = Date.now();
   return messages.some(

@@ -11,8 +11,7 @@ import { formatDisplayLocation } from "../lib/clientNetworkInfo";
 import ConfirmModal from "./ConfirmModal";
 import Tooltip from "./Tooltip";
 import TruncateTip from "./TruncateTip";
-import MemberTierBadge from "./MemberTierBadge";
-import RoleBadge from "./RoleBadge";
+import UserRoleMarks from "./UserRoleMarks";
 import type { RoomUser } from "../types";
 
 interface Props {
@@ -346,9 +345,11 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
                             我
                           </span>
                         )}
-                        {isRoomCreator && <RoleBadge role="owner" />}
-                        {showAdminBadge && <RoleBadge role="admin" />}
-                        {memberTiers[user.id] && <MemberTierBadge tier={memberTiers[user.id]} />}
+                        <UserRoleMarks
+                          isOwner={isRoomCreator}
+                          isAdmin={showAdminBadge}
+                          memberTier={memberTiers[user.id]}
+                        />
                         {user.offline && (
                           <span className="flex-shrink-0 whitespace-nowrap rounded-full bg-white/8 px-1.5 py-0 text-[9px] leading-4 text-netease-muted">
                             离线

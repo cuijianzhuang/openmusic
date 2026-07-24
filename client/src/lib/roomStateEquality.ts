@@ -113,7 +113,12 @@ function memberTierEqual(a: RoomMemberTier, b: RoomMemberTier): boolean {
     && a.badgeLabel === b.badgeLabel
     && a.badgeColor === b.badgeColor
     && a.borderStyleId === b.borderStyleId
-    && a.borderColor === b.borderColor;
+    && a.borderColor === b.borderColor
+    && (a.welcomeEnabled !== false) === (b.welcomeEnabled !== false)
+    && (a.welcomeTemplateId || 'royal') === (b.welcomeTemplateId || 'royal')
+    && (a.welcomeCustomText || '') === (b.welcomeCustomText || '')
+    && Boolean(a.confettiEnabled) === Boolean(b.confettiEnabled)
+    && (a.welcomeCooldownSec ?? 300) === (b.welcomeCooldownSec ?? 300);
 }
 
 export function memberTiersEqual(
@@ -158,6 +163,7 @@ function memberSettingsEqual(a: RoomState['memberSettings'], b: RoomState['membe
   return a.welcomeEnabled === b.welcomeEnabled
     && a.welcomeTemplateId === b.welcomeTemplateId
     && a.welcomeCustomText === b.welcomeCustomText
+    && Boolean(a.confettiEnabled) === Boolean(b.confettiEnabled)
     && (a.welcomeCooldownSec ?? 300) === (b.welcomeCooldownSec ?? 300);
 }
 
@@ -192,6 +198,7 @@ export function isRoomStateEquivalent(a: RoomState, b: RoomState): boolean {
     && a.announcementEnabled === b.announcementEnabled
     && a.announcementText === b.announcementText
     && a.chatHistoryVisibleOnJoin === b.chatHistoryVisibleOnJoin
+    && a.chatShowAvatars === b.chatShowAvatars
     && a.joinNoticeEnabled === b.joinNoticeEnabled
     && a.joinNoticeCooldownSec === b.joinNoticeCooldownSec
     && a.songRequestEnabled === b.songRequestEnabled

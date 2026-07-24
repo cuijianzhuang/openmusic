@@ -12,7 +12,7 @@ import { createPortal } from 'react-dom';
 import { ImagePlus, Loader2, Search, Send, Smile, X } from 'lucide-react';
 import type { ChatMention, ChatReplyRef, RoomUser } from '../types';
 import Tooltip from './Tooltip';
-import RoleBadge from './RoleBadge';
+import UserRoleMarks from './UserRoleMarks';
 import QFaceImage from './QFaceImage';
 import StickerSearchPanel, { STICKER_SEARCH_PICKER_HEIGHT } from './StickerSearchPanel';
 import { isInsideModalRoot } from './Modal';
@@ -42,8 +42,10 @@ import {
   ensureQQFacesLoaded,
   getInitialQQFaces,
   hasFullQQFaces,
+  hydrateQFaceImagesFromCache,
   qqFaceToken,
   requestQFaceImage,
+  requestQFaceImages,
   subscribeQQFaces,
   QFaceLoadPriority,
   type QFaceItem,
@@ -230,7 +232,12 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
   useEffect(() => {
     if (!showEmoji) return;
     ensureQQFacesLoaded();
-  }, [showEmoji]);
+    // 打开面板：先从 Cache Storage 灌入已看过的表情，减少黑块等待
+    const ids = qqFaces.map((face) => face.id);
+    void hydrateQFaceImagesFromCache(ids).then(() => {
+      requestQFaceImages(ids.slice(0, 48), QFaceLoadPriority.PANEL);
+    });
+  }, [qqFaces, showEmoji]);
 
   const syncEditorState = useCallback(() => {
     const editor = inputRef.current;
@@ -787,14 +794,18 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
                       className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm transition-colors ${index === mentionIndex ? 'bg-white/10 text-white' : 'text-white/85 hover:bg-white/10'}`}
                     >
                       <span className="min-w-0 truncate">{option.user.nickname}</span>
-                      {option.user.id === roomMeta.creatorId && <RoleBadge role="owner" className="ml-2" />}
-                      {option.user.id !== roomMeta.creatorId && (
-                        roomMeta.adminIds.includes(option.user.id)
-                        || (roomMeta.autoPromotedAdminIds || []).includes(option.user.id)
-                        || roomMeta.ownerId === option.user.id
-                      ) && (
-                        <RoleBadge role="admin" className="ml-2" />
-                      )}
+                      <UserRoleMarks
+                        className="ml-2"
+                        isOwner={option.user.id === roomMeta.creatorId}
+                        isAdmin={
+                          option.user.id !== roomMeta.creatorId && (
+                            roomMeta.adminIds.includes(option.user.id)
+                            || (roomMeta.autoPromotedAdminIds || []).includes(option.user.id)
+                            || roomMeta.ownerId === option.user.id
+                          )
+                        }
+                        memberTier={roomMeta.memberTiers?.[option.user.id]}
+                      />
                     </button>
                   )
                 ))}

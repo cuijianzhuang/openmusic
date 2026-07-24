@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Crown, Search, Sparkles, Trash2, UserPlus, X } from 'lucide-react';
+import { Search, Sparkles, Trash2, UserPlus, X } from 'lucide-react';
 import type { RoomMemberSettings, RoomMemberTier, RoomUser } from '../types';
 import {
   BADGE_LABEL_PRESETS,
-  DEFAULT_MEMBER_SETTINGS,
   DEFAULT_MEMBER_TIER,
   MEMBER_BORDER_STYLE_ID,
   WELCOME_COOLDOWN_MINUTE_OPTIONS,
@@ -14,9 +13,12 @@ import {
   normalizeWelcomeCooldownSec,
   normalizeWelcomeTemplateId,
   buildWelcomeText,
+  resolveMemberWelcomeSettings,
 } from '../lib/memberTierPresets';
 import MemberTierBadge from './MemberTierBadge';
 import MemberQueueFrame from './MemberQueueFrame';
+import RoleBadge from './RoleBadge';
+import UserRoleMarks from './UserRoleMarks';
 import { getDisplayInitial } from '../lib/displayInitial';
 
 interface Props {
@@ -28,23 +30,72 @@ interface Props {
   memberSettings: RoomMemberSettings;
   saving?: boolean;
   onClose: () => void;
-  onSaveSettings: (settings: RoomMemberSettings) => void;
+  onSaveSettings?: (settings: RoomMemberSettings) => void;
   onSaveTier: (userId: string, tier: Omit<RoomMemberTier, 'userId' | 'assignedAt'>) => void;
   onRemoveTier: (userId: string) => void;
 }
 
 type DraftTier = Omit<RoomMemberTier, 'userId' | 'assignedAt'>;
+type UserFilter = 'all' | 'vip';
 
-function buildDraftFromTier(tier?: RoomMemberTier): DraftTier {
-  if (!tier) {
-    return { ...DEFAULT_MEMBER_TIER };
-  }
+function buildDraftFromTier(
+  tier: RoomMemberTier | undefined,
+  roomSettings: RoomMemberSettings,
+): DraftTier {
+  const welcome = resolveMemberWelcomeSettings(tier, roomSettings);
+  const base = tier
+    ? {
+        badgeLabel: tier.badgeLabel,
+        badgeColor: tier.badgeColor,
+        borderStyleId: MEMBER_BORDER_STYLE_ID,
+        borderColor: tier.borderColor,
+      }
+    : { ...DEFAULT_MEMBER_TIER };
+
+  const welcomeTemplateId = welcome.welcomeEnabled === false
+    ? 'none'
+    : normalizeWelcomeTemplateId(welcome.welcomeTemplateId);
+
   return {
-    badgeLabel: tier.badgeLabel,
-    badgeColor: tier.badgeColor,
-    borderStyleId: MEMBER_BORDER_STYLE_ID,
-    borderColor: tier.borderColor,
+    ...base,
+    welcomeEnabled: welcomeTemplateId !== 'none',
+    welcomeTemplateId,
+    welcomeCustomText: welcome.welcomeCustomText,
+    confettiEnabled: Boolean(welcome.confettiEnabled),
+    welcomeCooldownSec: welcome.welcomeCooldownSec,
   };
+}
+
+function ColorSwatches({
+  value,
+  onChange,
+  ariaPrefix,
+}: {
+  value: string;
+  onChange: (color: string) => void;
+  ariaPrefix: string;
+}) {
+  const colors = getSelectableBadgeColorPresets();
+  return (
+    <div className="flex flex-wrap gap-2">
+      {colors.map((preset) => {
+        const active = normalizeBadgeColor(value) === preset.color;
+        return (
+          <button
+            key={preset.id}
+            type="button"
+            title={preset.name}
+            aria-label={`${ariaPrefix}${preset.name}`}
+            onClick={() => onChange(preset.color)}
+            className={`h-7 w-7 rounded-full transition-transform ${
+              active ? 'scale-110 ring-2 ring-amber-300/70 ring-offset-1 ring-offset-netease-dark' : 'hover:scale-105'
+            }`}
+            style={{ backgroundColor: preset.color }}
+          />
+        );
+      })}
+    </div>
+  );
 }
 
 export default function RoomMemberModal({
@@ -56,32 +107,30 @@ export default function RoomMemberModal({
   memberSettings,
   saving = false,
   onClose,
-  onSaveSettings,
   onSaveTier,
   onRemoveTier,
 }: Props) {
+  const [userFilter, setUserFilter] = useState<UserFilter>('all');
   const [query, setQuery] = useState('');
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
-  const [draft, setDraft] = useState<DraftTier>(buildDraftFromTier());
-  const [settingsDraft, setSettingsDraft] = useState<RoomMemberSettings>({
-    ...DEFAULT_MEMBER_SETTINGS,
-    ...memberSettings,
-    welcomeCooldownSec: normalizeWelcomeCooldownSec(memberSettings?.welcomeCooldownSec),
-  });
+  const [draft, setDraft] = useState<DraftTier>(buildDraftFromTier(undefined, memberSettings));
 
   useEffect(() => {
     if (!open) return;
-    setSettingsDraft({
-      ...DEFAULT_MEMBER_SETTINGS,
-      ...memberSettings,
-      welcomeCooldownSec: normalizeWelcomeCooldownSec(memberSettings?.welcomeCooldownSec),
-    });
+    setUserFilter('all');
+    setQuery('');
+    setSelectedUserId(null);
+    setDraft(buildDraftFromTier(undefined, memberSettings));
   }, [open, memberSettings]);
 
   const assignableUsers = useMemo(() => {
-    const adminSet = new Set(adminIds);
-    return users.filter((user) => user.id !== creatorId && !adminSet.has(user.id));
-  }, [users, creatorId, adminIds]);
+    return users.filter((user) => !user.readOnly);
+  }, [users]);
+
+  const vipCount = useMemo(
+    () => assignableUsers.filter((user) => Boolean(memberTiers[user.id])).length,
+    [assignableUsers, memberTiers],
+  );
 
   useEffect(() => {
     if (selectedUserId && !assignableUsers.some((user) => user.id === selectedUserId)) {
@@ -92,39 +141,69 @@ export default function RoomMemberModal({
   const onlineUsers = useMemo(() => {
     const keyword = query.trim().toLowerCase();
     return assignableUsers
-      .filter((user) => !keyword || user.nickname.toLowerCase().includes(keyword))
+      .filter((user) => {
+        if (userFilter === 'vip' && !memberTiers[user.id]) return false;
+        if (keyword && !user.nickname.toLowerCase().includes(keyword)) return false;
+        return true;
+      })
       .sort((a, b) => {
         const aTier = memberTiers[a.id] ? 1 : 0;
         const bTier = memberTiers[b.id] ? 1 : 0;
         if (aTier !== bTier) return bTier - aTier;
         return a.nickname.localeCompare(b.nickname, 'zh-CN');
       });
-  }, [assignableUsers, memberTiers, query]);
+  }, [assignableUsers, memberTiers, query, userFilter]);
 
-  const selectedUser = onlineUsers.find((user) => user.id === selectedUserId) || null;
+  const selectedUser = onlineUsers.find((user) => user.id === selectedUserId)
+    || assignableUsers.find((user) => user.id === selectedUserId)
+    || null;
+  const selectedIsVip = Boolean(selectedUser && memberTiers[selectedUser.id]);
+  const selectedIsOwner = Boolean(selectedUser && creatorId && selectedUser.id === creatorId);
+  const selectedIsAdmin = Boolean(selectedUser && adminIds.includes(selectedUser.id) && !selectedIsOwner);
+  const cooldownMinutes = Math.floor(normalizeWelcomeCooldownSec(draft.welcomeCooldownSec) / 60);
+  const cooldownIsPreset = (WELCOME_COOLDOWN_MINUTE_OPTIONS as readonly number[]).includes(cooldownMinutes);
   const previewNickname = selectedUser?.nickname || '贵宾昵称';
   const previewWelcome = buildWelcomeText(
-    normalizeWelcomeTemplateId(settingsDraft.welcomeTemplateId),
-    settingsDraft.welcomeCustomText || '',
-    draft.badgeLabel,
+    normalizeWelcomeTemplateId(draft.welcomeTemplateId),
+    draft.welcomeCustomText || '',
+    draft.badgeLabel || '贵宾',
     previewNickname,
   );
-  const selectableColors = getSelectableBadgeColorPresets();
 
   if (!open) return null;
 
   const selectUser = (userId: string) => {
+    const tier = memberTiers[userId];
     setSelectedUserId(userId);
-    setDraft(buildDraftFromTier(memberTiers[userId]));
+    setDraft(buildDraftFromTier(tier, memberSettings));
   };
+
+  const updateAccentColor = (color: string) => {
+    setDraft((prev) => ({
+      ...prev,
+      badgeColor: color,
+      borderColor: color,
+    }));
+  };
+
+  const welcomeTemplateId = normalizeWelcomeTemplateId(draft.welcomeTemplateId);
+  const welcomeOn = welcomeTemplateId !== 'none';
+  const confettiOn = Boolean(draft.confettiEnabled);
+  const entryFxOn = welcomeOn || confettiOn;
 
   const handleSaveTier = () => {
     if (!selectedUserId) return;
+    const templateId = normalizeWelcomeTemplateId(draft.welcomeTemplateId);
     onSaveTier(selectedUserId, {
       badgeLabel: draft.badgeLabel.trim().slice(0, 8) || '贵宾',
       badgeColor: normalizeBadgeColor(draft.badgeColor),
       borderStyleId: MEMBER_BORDER_STYLE_ID,
       borderColor: normalizeBadgeColor(draft.borderColor),
+      welcomeEnabled: templateId !== 'none',
+      welcomeTemplateId: templateId,
+      welcomeCustomText: (draft.welcomeCustomText || '').trim().slice(0, 200),
+      confettiEnabled: Boolean(draft.confettiEnabled),
+      welcomeCooldownSec: normalizeWelcomeCooldownSec(draft.welcomeCooldownSec),
     });
   };
 
@@ -137,275 +216,348 @@ export default function RoomMemberModal({
         aria-label="关闭"
       />
       <div
-        className="relative flex max-h-[min(78vh,620px)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-netease-dark shadow-2xl"
+        className="relative flex h-[min(86vh,680px)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-netease-border/60 bg-netease-dark shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-netease-border/50 px-4 py-3">
-          <div>
+        <header className="flex flex-shrink-0 items-start justify-between gap-3 px-4 pt-3.5 pb-3 sm:px-5">
+          <div className="min-w-0">
             <h2 className="flex items-center gap-2 text-base font-semibold text-white">
-              <Sparkles className="h-4 w-4 text-amber-300" />
-              贵宾角标管理
+              <Sparkles className="h-4 w-4 flex-shrink-0 text-amber-300" />
+              贵宾管理
             </h2>
-            <p className="mt-0.5 text-xs text-netease-muted">为在线用户赋予角标，进房欢迎与点歌边框自动生效</p>
+            <p className="mt-0.5 text-xs text-netease-muted">
+              {vipCount > 0 ? `已设置 ${vipCount} 人 · 角标与欢迎按人配置` : '选择成员，配置专属角标与进房欢迎'}
+            </p>
           </div>
-          <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-netease-muted hover:bg-white/10 hover:text-white">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-netease-muted hover:bg-netease-hover hover:text-white"
+            aria-label="关闭"
+          >
             <X className="h-4 w-4" />
           </button>
-        </div>
+        </header>
 
-        <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 overflow-hidden lg:grid-cols-[260px_minmax(0,1fr)]">
-          <div className="flex min-h-0 flex-col border-b border-netease-border/60 p-3 lg:border-b-0 lg:border-r">
-            <div className="relative mb-2.5">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-netease-muted" />
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="搜索在线用户昵称"
-                className="w-full rounded-xl border border-netease-border bg-netease-card py-2 pl-9 pr-3 text-sm text-white outline-none focus:border-amber-400/50"
-              />
-            </div>
-            <div className="min-h-0 max-h-[180px] flex-1 space-y-1 overflow-y-auto pr-0.5 lg:max-h-none">
-              {assignableUsers.length === 0 ? (
-                <p className="py-6 text-center text-xs text-netease-muted">暂无可赋予贵宾身份的在线用户</p>
-              ) : onlineUsers.length === 0 ? (
-                <p className="py-6 text-center text-xs text-netease-muted">没有匹配的在线用户</p>
-              ) : onlineUsers.map((user) => {
-                const tier = memberTiers[user.id];
-                const active = selectedUserId === user.id;
-                return (
+        <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[210px_minmax(0,1fr)]">
+          <aside className="flex min-h-0 flex-col border-b border-netease-border/40 lg:border-b-0 lg:border-r lg:border-netease-border/40">
+            <div className="flex-shrink-0 space-y-2 px-3 pb-2">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-netease-muted" />
+                <input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="搜索昵称"
+                  className="w-full rounded-lg border border-netease-border/50 bg-netease-card py-1.5 pl-8 pr-2.5 text-sm text-white outline-none placeholder:text-netease-muted/50 focus:border-amber-400/35"
+                />
+              </div>
+              <div className="flex gap-1">
+                {([
+                  { id: 'all' as const, label: '全部' },
+                  { id: 'vip' as const, label: `贵宾${vipCount ? ` ${vipCount}` : ''}` },
+                ]).map((item) => (
                   <button
-                    key={user.id}
+                    key={item.id}
                     type="button"
-                    onClick={() => selectUser(user.id)}
-                    className={`flex w-full items-center gap-2 rounded-xl border px-2.5 py-2 text-left transition-colors ${
-                      active ? 'border-amber-400/50 bg-amber-400/15' : 'border-netease-border bg-netease-card hover:bg-netease-hover'
+                    onClick={() => setUserFilter(item.id)}
+                    className={`rounded-md px-2.5 py-1 text-[11px] transition-colors ${
+                      userFilter === item.id
+                        ? 'bg-amber-500/15 text-amber-100'
+                        : 'text-netease-muted hover:bg-netease-hover hover:text-white'
                     }`}
                   >
-                    <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-zinc-500 to-zinc-700 text-xs font-bold text-white">
-                      {getDisplayInitial(user.nickname)}
-                    </div>
-                    <p className="min-w-0 flex-1 truncate text-sm text-white">{user.nickname}</p>
-                    {tier ? <MemberTierBadge tier={tier} /> : (
-                      <span className="rounded-full bg-netease-hover px-2 py-0.5 text-[10px] text-netease-muted">普通</span>
-                    )}
+                    {item.label}
                   </button>
-                );
-              })}
+                ))}
+              </div>
             </div>
-          </div>
 
-          <div className="min-h-0 overflow-y-auto p-3 sm:p-4">
+            <div className="min-h-0 max-h-[150px] flex-1 overflow-y-auto px-2 pb-2 lg:max-h-none">
+              {assignableUsers.length === 0 ? (
+                <p className="px-2 py-8 text-center text-xs text-netease-muted">暂无可设置的在线用户</p>
+              ) : onlineUsers.length === 0 ? (
+                <p className="px-2 py-8 text-center text-xs text-netease-muted">没有匹配用户</p>
+              ) : (
+                <div className="space-y-0.5">
+                  {onlineUsers.map((user) => {
+                    const tier = memberTiers[user.id];
+                    const active = selectedUserId === user.id;
+                    const isAdminUser = adminIds.includes(user.id);
+                    const isOwnerUser = Boolean(creatorId && user.id === creatorId);
+                    return (
+                      <button
+                        key={user.id}
+                        type="button"
+                        onClick={() => selectUser(user.id)}
+                        className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors ${
+                          active
+                            ? 'bg-amber-400/12 text-white'
+                            : 'text-white/90 hover:bg-netease-hover'
+                        }`}
+                      >
+                        <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-zinc-500 to-zinc-700 text-[10px] font-bold text-white">
+                          {getDisplayInitial(user.nickname)}
+                        </div>
+                        <p className="min-w-0 flex-1 truncate text-sm">{user.nickname}</p>
+                        {(tier || isAdminUser || isOwnerUser) && (
+                          <UserRoleMarks
+                            isOwner={isOwnerUser}
+                            isAdmin={isAdminUser && !isOwnerUser}
+                            memberTier={tier}
+                          />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </aside>
+
+          <div className="flex min-h-0 flex-col">
             {!selectedUser ? (
-              <div className="flex min-h-[120px] flex-col items-center justify-center py-6 text-center text-netease-muted">
-                <UserPlus className="mb-3 h-8 w-8 opacity-50" />
-                <p className="text-sm">从左侧选择在线用户</p>
-                <p className="mt-1 text-xs">赋予角标后，Ta 进房将收到欢迎消息，点歌将带专属边框</p>
+              <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-12 text-center text-netease-muted">
+                <UserPlus className="h-8 w-8 opacity-40" />
+                <p className="text-sm text-white/80">选择一位成员开始设置</p>
+                <p className="max-w-xs text-xs">角标、欢迎语与冷却均按该用户保存</p>
               </div>
             ) : (
-              <div className="space-y-4">
-                <div className="rounded-xl border border-netease-border bg-netease-card p-3">
-                  <p className="mb-2 text-xs text-netease-muted">预览 · {selectedUser.nickname}</p>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <MemberTierBadge tier={draft} />
-                    <span className="text-sm text-white">{selectedUser.nickname}</span>
-                  </div>
-                  <div className="mt-3">
+              <>
+                <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-3 py-3 sm:px-4">
+                  <div className="space-y-2.5">
+                    <div className="flex items-center gap-2">
+                      <MemberTierBadge tier={draft} />
+                      {selectedIsOwner && <RoleBadge role="owner" variant="icon" />}
+                      {selectedIsAdmin && <RoleBadge role="admin" variant="icon" />}
+                      <span className="truncate text-sm font-medium text-white">{selectedUser.nickname}</span>
+                      <span className="ml-auto flex-shrink-0 text-[10px] text-netease-muted">
+                        {selectedIsVip ? '已是贵宾' : '未设置'}
+                      </span>
+                    </div>
                     <MemberQueueFrame tier={draft} variant="preview" innerClassName="bg-netease-card px-3 py-2">
-                      <p className="text-sm font-medium text-white">示例歌曲 · 点歌边框预览</p>
-                      <p className="text-xs text-netease-muted">Ta 点的歌会在队列中展示此边框</p>
+                      <p className="text-sm font-medium text-white">点歌边框预览</p>
+                      <p className="text-[11px] text-netease-muted">队列中将显示此边框效果</p>
                     </MemberQueueFrame>
                   </div>
+
+                  <section className="space-y-3">
+                    <p className="text-[11px] font-medium tracking-wide text-netease-muted">角标</p>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <label className="text-xs text-netease-muted">名称</label>
+                        <span className="text-[10px] tabular-nums text-netease-muted/70">
+                          {draft.badgeLabel.length}/8
+                        </span>
+                      </div>
+                      <input
+                        value={draft.badgeLabel}
+                        onChange={(event) => setDraft((prev) => ({ ...prev, badgeLabel: event.target.value.slice(0, 8) }))}
+                        maxLength={8}
+                        placeholder="如：赞助、VIP、老铁"
+                        className="w-full rounded-xl border border-netease-border/50 bg-netease-card px-3 py-2 text-sm text-white outline-none placeholder:text-netease-muted/50 focus:border-amber-400/35"
+                      />
+                      <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5 [scrollbar-width:thin]">
+                        {BADGE_LABEL_PRESETS.map((label) => (
+                          <button
+                            key={label}
+                            type="button"
+                            onClick={() => setDraft((prev) => ({ ...prev, badgeLabel: label }))}
+                            className={`flex-shrink-0 rounded-full px-2.5 py-1 text-[11px] transition-colors ${
+                              draft.badgeLabel === label
+                                ? 'bg-amber-500/18 text-amber-100'
+                                : 'bg-netease-card text-netease-muted hover:text-white'
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-xs text-netease-muted">角标色 / 边框色</label>
+                      <ColorSwatches
+                        ariaPrefix="角标色与边框色"
+                        value={draft.badgeColor}
+                        onChange={updateAccentColor}
+                      />
+                    </div>
+                  </section>
+
+                  <section className="space-y-3 border-t border-netease-border/35 pt-4">
+                    <div className="min-w-0">
+                      <p className="text-[11px] font-medium tracking-wide text-netease-muted">进房效果 · 仅此用户</p>
+                      <p className="mt-0.5 text-[11px] text-netease-muted/70">欢迎语与礼花可分开开关</p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-xs text-white/90">礼花</p>
+                          <p className="text-[11px] text-netease-muted/70">进房时全员可见礼花动画</p>
+                        </div>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={confettiOn}
+                          disabled={saving}
+                          onClick={() => setDraft((prev) => ({
+                            ...prev,
+                            confettiEnabled: !prev.confettiEnabled,
+                          }))}
+                          className={`relative h-6 w-11 flex-shrink-0 rounded-full transition-colors disabled:opacity-50 ${
+                            confettiOn ? 'bg-amber-500' : 'bg-netease-card'
+                          }`}
+                        >
+                          <span
+                            className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
+                              confettiOn ? 'translate-x-5' : 'translate-x-0'
+                            }`}
+                          />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <p className="text-xs text-netease-muted">欢迎语</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {WELCOME_TEMPLATE_PRESETS.map((preset) => {
+                          const active = welcomeTemplateId === preset.id;
+                          return (
+                            <button
+                              key={preset.id}
+                              type="button"
+                              onClick={() => setDraft((prev) => ({
+                                ...prev,
+                                welcomeTemplateId: preset.id,
+                                welcomeEnabled: preset.id !== 'none',
+                              }))}
+                              className={`rounded-lg px-2.5 py-1.5 text-xs transition-colors ${
+                                active
+                                  ? 'bg-amber-500/18 text-amber-100'
+                                  : 'bg-netease-card text-netease-muted hover:text-white'
+                              }`}
+                            >
+                              {preset.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {welcomeTemplateId === 'custom' && (
+                        <div className="space-y-1.5">
+                          <textarea
+                            value={draft.welcomeCustomText || ''}
+                            onChange={(event) => setDraft((prev) => ({
+                              ...prev,
+                              welcomeCustomText: event.target.value.slice(0, 200),
+                            }))}
+                            rows={3}
+                            placeholder="自定义欢迎语，例如：欢迎 {badge} {nickname} 回家"
+                            className="w-full resize-none rounded-xl border border-netease-border/50 bg-netease-card px-3 py-2 text-sm text-white outline-none placeholder:text-netease-muted/50 focus:border-amber-400/35"
+                          />
+                          <p className="text-[11px] text-netease-muted/75">
+                            可用参数：
+                            <code className="mx-1 rounded bg-netease-card px-1.5 py-0.5 text-amber-200/90">{'{badge}'}</code>
+                            角标名、
+                            <code className="mx-1 rounded bg-netease-card px-1.5 py-0.5 text-amber-200/90">{'{nickname}'}</code>
+                            昵称
+                          </p>
+                        </div>
+                      )}
+
+                      {welcomeOn && (
+                        <div className="rounded-xl bg-netease-card/80 px-3 py-2.5">
+                          <p className="mb-1 text-[10px] text-netease-muted">预览</p>
+                          <p className="text-sm leading-6 text-white/90">{previewWelcome}</p>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className={`space-y-2 ${entryFxOn ? '' : 'pointer-events-none opacity-40'}`}>
+                      <p className="text-xs text-netease-muted">重复触发间隔</p>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {WELCOME_COOLDOWN_MINUTE_OPTIONS.map((minutes) => {
+                          const sec = minutes * 60;
+                          const active = normalizeWelcomeCooldownSec(draft.welcomeCooldownSec) === sec;
+                          return (
+                            <button
+                              key={minutes}
+                              type="button"
+                              disabled={saving || !entryFxOn}
+                              onClick={() => setDraft((prev) => ({ ...prev, welcomeCooldownSec: sec }))}
+                              className={`rounded-lg px-2.5 py-1.5 text-xs transition-colors disabled:opacity-50 ${
+                                active
+                                  ? 'bg-amber-500/18 text-amber-100'
+                                  : 'bg-netease-card text-netease-muted hover:text-white'
+                              }`}
+                            >
+                              {minutes === 0 ? '每次' : `${minutes} 分`}
+                            </button>
+                          );
+                        })}
+                        <label
+                          className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs ${
+                            entryFxOn && !cooldownIsPreset
+                              ? 'bg-amber-500/18 text-amber-100'
+                              : 'bg-netease-card text-netease-muted'
+                          }`}
+                        >
+                          <input
+                            type="number"
+                            min={0}
+                            max={24 * 60}
+                            step={1}
+                            disabled={saving || !entryFxOn}
+                            value={cooldownMinutes}
+                            onChange={(event) => {
+                              const raw = event.target.value;
+                              if (raw === '') {
+                                setDraft((prev) => ({ ...prev, welcomeCooldownSec: 0 }));
+                                return;
+                              }
+                              const minutes = Math.min(
+                                24 * 60,
+                                Math.max(0, Math.floor(Number(raw) || 0)),
+                              );
+                              setDraft((prev) => ({ ...prev, welcomeCooldownSec: minutes * 60 }));
+                            }}
+                            className="w-14 rounded-md border border-netease-border/50 bg-netease-dark px-1.5 py-0.5 text-center text-xs text-white outline-none focus:border-amber-400/35 disabled:opacity-50"
+                            aria-label="自定义迎宾间隔分钟"
+                          />
+                          <span>分</span>
+                        </label>
+                      </div>
+                      <p className="text-[11px] text-netease-muted/70">
+                        欢迎语或礼花任一开启时生效（0 = 每次进房都触发，最长 24 小时）
+                      </p>
+                    </div>
+                  </section>
                 </div>
 
-                <section className="space-y-2">
-                  <label className="text-xs font-medium text-netease-muted">角标名称</label>
-                  <input
-                    value={draft.badgeLabel}
-                    onChange={(event) => setDraft((prev) => ({ ...prev, badgeLabel: event.target.value.slice(0, 8) }))}
-                    maxLength={8}
-                    placeholder="如：赞助、老铁、VIP"
-                    className="w-full rounded-xl border border-netease-border bg-netease-card px-3 py-2 text-sm text-white outline-none focus:border-amber-400/50"
-                  />
-                  <div className="flex flex-wrap gap-1.5">
-                    {BADGE_LABEL_PRESETS.map((label) => (
-                      <button
-                        key={label}
-                        type="button"
-                        onClick={() => setDraft((prev) => ({ ...prev, badgeLabel: label }))}
-                        className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
-                          draft.badgeLabel === label
-                            ? 'border-amber-400/60 bg-amber-500/15 text-amber-200'
-                            : 'border-netease-border bg-netease-card text-netease-muted hover:border-white/20 hover:text-white'
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </section>
-
-                <section className="space-y-2">
-                  <label className="text-xs font-medium text-netease-muted">角标颜色</label>
-                  <div className="flex flex-wrap gap-2">
-                    {selectableColors.map((preset) => (
-                      <button
-                        key={preset.id}
-                        type="button"
-                        onClick={() => setDraft((prev) => ({ ...prev, badgeColor: preset.color }))}
-                        className={`rounded-full px-3 py-1.5 text-xs font-medium transition-transform ${
-                          normalizeBadgeColor(draft.badgeColor) === preset.color ? 'ring-2 ring-white/70 scale-105' : ''
-                        }`}
-                        style={{ backgroundColor: preset.color, color: '#111' }}
-                      >
-                        {preset.name}
-                      </button>
-                    ))}
-                  </div>
-                </section>
-
-                <section className="space-y-2">
-                  <label className="text-xs font-medium text-netease-muted">边框颜色</label>
-                  <div className="flex flex-wrap gap-2">
-                    {selectableColors.map((preset) => (
-                      <button
-                        key={`border-${preset.id}`}
-                        type="button"
-                        onClick={() => setDraft((prev) => ({ ...prev, borderColor: preset.color }))}
-                        className={`h-8 w-8 rounded-full border-2 transition-transform ${
-                          normalizeBadgeColor(draft.borderColor) === preset.color ? 'border-white scale-110' : 'border-transparent'
-                        }`}
-                        style={{ backgroundColor: preset.color }}
-                        aria-label={preset.name}
-                      />
-                    ))}
-                  </div>
-                </section>
-
-                <div className="flex flex-wrap gap-2">
+                <footer className="flex flex-shrink-0 items-center gap-2 border-t border-netease-border/35 px-3 py-3 sm:px-4">
                   <button
                     type="button"
                     disabled={saving}
                     onClick={handleSaveTier}
                     className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-medium text-black hover:bg-amber-400 disabled:opacity-50"
                   >
-                    保存角标
+                    {selectedIsVip ? '保存此用户设置' : '设为贵宾并保存'}
                   </button>
-                  {memberTiers[selectedUser.id] && (
+                  {selectedIsVip && (
                     <button
                       type="button"
                       disabled={saving}
                       onClick={() => onRemoveTier(selectedUser.id)}
-                      className="inline-flex items-center gap-1 rounded-xl border border-red-500/30 px-4 py-2 text-sm text-red-300 hover:bg-red-500/10 disabled:opacity-50"
+                      className="inline-flex items-center gap-1 rounded-xl px-3 py-2 text-sm text-red-300/90 hover:bg-red-500/10 disabled:opacity-50"
                     >
-                      <Trash2 className="h-4 w-4" />
+                      <Trash2 className="h-3.5 w-3.5" />
                       移除贵宾
                     </button>
                   )}
-                </div>
-              </div>
+                </footer>
+              </>
             )}
-
-            <section className="mt-4 space-y-2.5 border-t border-netease-border/60 pt-4">
-              <div className="flex items-center gap-2">
-                <Crown className="h-4 w-4 text-amber-300" />
-                <h3 className="text-sm font-medium text-white">进房欢迎语（聊天室展示）</h3>
-              </div>
-              <div className="flex items-center justify-between gap-3 rounded-xl border border-netease-border bg-netease-card px-3 py-2.5">
-                <div>
-                  <p className="text-sm font-medium text-white">进房欢迎消息</p>
-                  <p className="mt-0.5 text-xs text-netease-muted">贵宾进房时在聊天室发送欢迎消息</p>
-                </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={settingsDraft.welcomeEnabled}
-                  disabled={saving}
-                  onClick={() => setSettingsDraft((prev) => ({ ...prev, welcomeEnabled: !prev.welcomeEnabled }))}
-                  className={`relative h-6 w-11 flex-shrink-0 rounded-full transition-colors disabled:opacity-50 ${
-                    settingsDraft.welcomeEnabled ? 'bg-amber-500' : 'bg-white/20'
-                  }`}
-                >
-                  <span
-                    className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
-                      settingsDraft.welcomeEnabled ? 'translate-x-5' : 'translate-x-0'
-                    }`}
-                  />
-                </button>
-              </div>
-              <div className={`space-y-2 ${settingsDraft.welcomeEnabled ? '' : 'opacity-50'}`}>
-                <div>
-                  <p className="text-sm font-medium text-white">重复欢迎间隔</p>
-                  <p className="mt-0.5 text-xs text-netease-muted">
-                    同一贵宾在此时间内再次进房不重复欢迎与礼花；0 表示每次都欢迎
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {WELCOME_COOLDOWN_MINUTE_OPTIONS.map((minutes) => {
-                    const sec = minutes * 60;
-                    const current = normalizeWelcomeCooldownSec(settingsDraft.welcomeCooldownSec);
-                    const active = current === sec;
-                    return (
-                      <button
-                        key={minutes}
-                        type="button"
-                        disabled={saving || !settingsDraft.welcomeEnabled}
-                        onClick={() => setSettingsDraft((prev) => ({ ...prev, welcomeCooldownSec: sec }))}
-                        className={`rounded-lg border px-3 py-1.5 text-xs transition-colors disabled:opacity-50 ${
-                          active
-                            ? 'border-amber-400/50 bg-amber-400/15 text-amber-100'
-                            : 'border-netease-border bg-netease-card text-netease-muted hover:bg-netease-hover hover:text-white'
-                        }`}
-                      >
-                        {minutes === 0 ? '每次' : `${minutes} 分钟`}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {WELCOME_TEMPLATE_PRESETS.map((preset) => (
-                  <button
-                    key={preset.id}
-                    type="button"
-                    onClick={() => setSettingsDraft((prev) => ({ ...prev, welcomeTemplateId: preset.id }))}
-                    className={`rounded-xl border px-3 py-2 text-left ${
-                      settingsDraft.welcomeTemplateId === preset.id
-                        ? 'border-amber-400/50 bg-amber-400/15'
-                        : 'border-netease-border bg-netease-card hover:bg-netease-hover'
-                    }`}
-                  >
-                    <p className="text-sm font-medium text-white">{preset.name}</p>
-                    <p className="text-[11px] text-netease-muted">{preset.preview}</p>
-                  </button>
-                ))}
-              </div>
-              {settingsDraft.welcomeTemplateId === 'custom' && (
-                <textarea
-                  value={settingsDraft.welcomeCustomText || ''}
-                  onChange={(event) => setSettingsDraft((prev) => ({ ...prev, welcomeCustomText: event.target.value.slice(0, 200) }))}
-                  rows={2}
-                  placeholder="支持 {badge} 与 {nickname} 占位符"
-                  className="w-full rounded-xl border border-netease-border bg-netease-card px-3 py-2 text-sm text-white outline-none focus:border-amber-400/50"
-                />
-              )}
-              <div className="rounded-xl border border-netease-border bg-netease-card px-4 py-3">
-                <p className="mb-1 text-[10px] uppercase tracking-wider text-amber-300/80">欢迎预览</p>
-                <p className="text-sm leading-6 text-white/95">{previewWelcome}</p>
-              </div>
-              <button
-                type="button"
-                disabled={saving}
-                onClick={() => onSaveSettings({
-                  welcomeEnabled: settingsDraft.welcomeEnabled,
-                  welcomeTemplateId: normalizeWelcomeTemplateId(settingsDraft.welcomeTemplateId),
-                  welcomeCustomText: settingsDraft.welcomeCustomText?.trim() || '',
-                  welcomeCooldownSec: normalizeWelcomeCooldownSec(settingsDraft.welcomeCooldownSec),
-                })}
-                className="rounded-xl border border-netease-border px-4 py-2 text-sm text-white hover:bg-netease-hover disabled:opacity-50"
-              >
-                保存欢迎设置
-              </button>
-            </section>
           </div>
         </div>
       </div>

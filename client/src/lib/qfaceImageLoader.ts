@@ -1,6 +1,7 @@
 /**
- * QQ 表情统一图片调度器：网络拉取 + 解码并发控制 + LRU + 显示节点池
+ * QQ 表情统一图片调度器：持久化资源缓存 + 解码并发控制 + LRU + 显示节点池
  *
+ * 资源层走 Cache Storage（刷新后仍命中），避免反复下载大体积 APNG。
  * 进房重挂载时优先复用已解码的 <img> DOM 节点，避免 APNG 反复解码。
  *
  * 优先级（数值越小越高）：
@@ -9,6 +10,11 @@
  * P2 PANEL    — 表情面板可见区域
  * P3 MANIFEST — manifest 预热（常用表情）
  */
+
+import {
+  resolveQFaceAssetBlobUrl,
+  tryHydrateQFaceAssetBlobUrl,
+} from './qfaceAssetCache';
 
 export const QFaceLoadPriority = {
   MESSAGE: 0,
@@ -21,7 +27,7 @@ export type QFaceLoadPriority = typeof QFaceLoadPriority[keyof typeof QFaceLoadP
 
 export type QFaceImageState = 'idle' | 'loading' | 'loaded' | 'decoded' | 'rendered';
 
-const MAX_CONCURRENT_DECODE = 4;
+const MAX_CONCURRENT_DECODE = 8;
 /** 全套约 214 个，会话内尽量常驻，避免进房反复解码 */
 const LRU_MAX_DECODED = 256;
 const MAX_POOLED_DISPLAY_PER_ID = 8;
@@ -254,14 +260,26 @@ class QFaceImageLoader {
     const cached = this.objectUrls.get(id);
     if (cached) return cached;
 
-    const res = await fetch(url, { cache: 'force-cache' });
-    if (!res.ok) {
+    try {
+      const objectUrl = await resolveQFaceAssetBlobUrl(url);
+      this.objectUrls.set(id, objectUrl);
+      return objectUrl;
+    } catch {
       throw new Error(`QQ 表情加载失败: ${id}`);
     }
-    const blob = await res.blob();
-    const objectUrl = URL.createObjectURL(blob);
-    this.objectUrls.set(id, objectUrl);
-    return objectUrl;
+  }
+
+  /**
+   * 从 Cache Storage 静默灌入会话级 blob URL（不联网）。
+   * 刷新后常用表情可立刻有源，打开面板时少转圈。
+   */
+  async hydrateFromPersistentCache(ids: string[]): Promise<void> {
+    const unique = [...new Set(ids.filter(Boolean))];
+    await Promise.all(unique.map(async (id) => {
+      if (this.objectUrls.has(id)) return;
+      const objectUrl = await tryHydrateQFaceAssetBlobUrl(this.urlForId(id));
+      if (objectUrl) this.objectUrls.set(id, objectUrl);
+    }));
   }
 
   private async fetchAndDecode(id: string, url: string): Promise<HTMLImageElement> {
@@ -374,4 +392,9 @@ export function acquireQFaceDisplayImage(
 
 export function releaseQFaceDisplayImage(id: string, img: HTMLImageElement): void {
   loader.releaseDisplayImage(id, img);
+}
+
+/** 从 Cache Storage 预热会话 blob URL（刷新后零网络） */
+export function hydrateQFaceImagesFromCache(ids: string[]): Promise<void> {
+  return loader.hydrateFromPersistentCache(ids);
 }

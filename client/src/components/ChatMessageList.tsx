@@ -22,8 +22,8 @@ import {
 import { getClientId } from '../lib/clientId';
 import { useRoomStore } from '../stores/roomStore';
 import {
-  DEFAULT_MEMBER_SETTINGS,
   normalizeWelcomeCooldownSec,
+  resolveMemberWelcomeSettings,
 } from '../lib/memberTierPresets';
 import { VariableSizeList, type ListChildComponentProps, type ListOnScrollProps } from 'react-window';
 
@@ -90,7 +90,9 @@ type VirtualRowData = {
 };
 
 function estimateMessageHeight(msg: ChatMessage): number {
-  if (msg.kind === 'welcome') return 120;
+  if (msg.kind === 'welcome') {
+    return msg.text?.trim() ? 120 : 0;
+  }
   if (msg.kind === 'recall' || msg.kind === 'notice') return 36;
   // 头像行 + 昵称行余量（宁可偏高出现空隙，也不要偏低导致重叠）
   let height = 56;
@@ -404,11 +406,7 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
   useEffect(() => {
     if (pureMode) return;
 
-    const cooldownMs = normalizeWelcomeCooldownSec(
-      useRoomStore.getState().room?.memberSettings?.welcomeCooldownSec
-        ?? DEFAULT_MEMBER_SETTINGS.welcomeCooldownSec,
-    ) * 1000;
-
+    const room = useRoomStore.getState().room;
     const now = Date.now();
     for (const msg of messages) {
       if (msg.kind !== 'welcome') continue;
@@ -418,8 +416,17 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
         welcomeConfettiIdsRef.current.add(msg.id);
         continue;
       }
+      // 本条未开启礼花（仅欢迎语）则跳过
+      if (msg.confettiEnabled === false) {
+        welcomeConfettiIdsRef.current.add(msg.id);
+        continue;
+      }
 
       const targetId = msg.targetUserId || msg.id;
+      const tier = msg.targetUserId ? room?.memberTiers?.[msg.targetUserId] : undefined;
+      const cooldownMs = normalizeWelcomeCooldownSec(
+        resolveMemberWelcomeSettings(tier, room?.memberSettings).welcomeCooldownSec,
+      ) * 1000;
       if (cooldownMs > 0) {
         const lastAt = welcomeConfettiCooldownRef.current.get(targetId) || 0;
         if (now - lastAt < cooldownMs) {

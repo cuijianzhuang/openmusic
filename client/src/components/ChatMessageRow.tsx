@@ -4,7 +4,7 @@ import type { ChatMessage, ChatReplyRef, RoomMemberTier, RoomUser } from '../typ
 import QFaceImage from './QFaceImage';
 import Tooltip from './Tooltip';
 import MemberTierBadge from './MemberTierBadge';
-import RoleBadge from './RoleBadge';
+import UserRoleMarks from './UserRoleMarks';
 import { ChatMessageReactions } from './ChatMessageReactions';
 import ChatMessageContextMenu, { type ChatMessageMenuPos } from './ChatMessageContextMenu';
 import {
@@ -17,6 +17,8 @@ import {
 } from '../lib/chatPanelUtils';
 import { parseQQFaceTokens, QFaceLoadPriority } from '../lib/qface';
 import { importUserStickerFromChatImage } from '../lib/userStickerStore';
+import { getDisplayInitial } from '../lib/displayInitial';
+import { useRoomStore } from '../stores/roomStore';
 
 type StickerSaveState = 'idle' | 'saving' | 'done' | 'exists' | 'error';
 
@@ -78,6 +80,8 @@ export type ChatRoomMeta = {
   autoPromotedAdminIds?: string[];
   users: RoomUser[];
   memberTiers?: Record<string, RoomMemberTier>;
+  userAvatarUrls?: Record<string, string>;
+  chatShowAvatars?: boolean;
   muteAll?: boolean;
 };
 
@@ -187,6 +191,7 @@ function ChatMessageRow({
   onContentResize,
 }: ChatMessageRowProps) {
   const [menuPos, setMenuPos] = useState<ChatMessageMenuPos | null>(null);
+  const myAvatarUrl = useRoomStore((s) => s.avatar_url);
   const userMap = useMemo(
     () => new Map(room.users.map((user) => [user.id, user])),
     [room.users],
@@ -231,13 +236,17 @@ function ChatMessageRow({
     || (Boolean(room.ownerId) && room.ownerId === msg.userId && !isRoomCreator);
   const userMemberTier = room.memberTiers?.[msg.userId];
   const user = userMap.get(msg.userId);
+  const showAvatars = Boolean(room.chatShowAvatars);
+  const avatarUrl = isMe
+    ? (myAvatarUrl || room.userAvatarUrls?.[msg.userId] || '')
+    : (room.userAvatarUrls?.[msg.userId] || '');
   const isStickerImage = isChatStickerMessage(msg.imageUrl, msg.imageKey, msg.asSticker);
   const isPureStickerHidden = pureMode && isStickerImage && !pureImageRevealed;
   const isPhotoOnly = Boolean(
     msg.imageUrl && !msg.text && !isStickerImage && (!pureMode || pureImageRevealed),
   );
-  const bubbleClass = `min-w-0 max-w-full rounded-2xl text-sm leading-7 break-words [overflow-wrap:anywhere] ${isPhotoOnly ? 'p-1' : 'px-3 py-1.5'} ${isMe ? 'rounded-br-md bg-netease-red/20 text-white' : 'rounded-bl-md bg-netease-dark/80 text-white/90'}`;
-  const replyBubbleClass = `min-w-0 max-w-full rounded-2xl px-3 py-1.5 text-sm ${isMe ? 'rounded-br-md bg-netease-red/20 text-white' : 'rounded-bl-md bg-netease-dark/80 text-white/90'}`;
+  const bubbleClass = `min-w-0 max-w-full rounded-2xl text-sm leading-7 break-words [overflow-wrap:anywhere] ${isPhotoOnly ? 'p-1' : 'px-3 py-1.5'} ${isMe ? 'rounded-tr-none bg-netease-red/20 text-white' : 'rounded-tl-none bg-netease-dark/80 text-white/90'}`;
+  const replyBubbleClass = `min-w-0 max-w-full rounded-2xl px-3 py-1.5 text-sm ${isMe ? 'rounded-tr-none bg-netease-red/20 text-white' : 'rounded-tl-none bg-netease-dark/80 text-white/90'}`;
 
   const renderReplyPreview = () => {
     if (!msg.replyTo) return null;
@@ -327,93 +336,121 @@ function ChatMessageRow({
     );
   };
 
+  const avatarNode = showAvatars ? (
+    <button
+      type="button"
+      onClick={() => user && onMentionUser(user)}
+      className={`mt-0.5 inline-flex h-8 w-8 flex-shrink-0 items-center justify-center overflow-hidden rounded-full text-[11px] font-bold text-white ${
+        avatarUrl
+          ? ''
+          : isRoomCreator
+            ? 'bg-gradient-to-br from-amber-500 to-orange-600'
+            : isMe
+              ? 'bg-gradient-to-br from-netease-red to-pink-500'
+              : 'bg-gradient-to-br from-zinc-500 to-zinc-700'
+      }`}
+      aria-label={msg.nickname}
+    >
+      {avatarUrl ? (
+        <img src={avatarUrl} alt="" className="h-full w-full object-cover" />
+      ) : (
+        getDisplayInitial(msg.nickname)
+      )}
+    </button>
+  ) : null;
+
   return (
-    <div className={`group flex w-full min-w-0 max-w-full flex-col ${isMe ? 'items-end' : 'items-start'}`}>
-      <div className={`mb-0.5 flex max-w-full min-w-0 items-center gap-1.5 ${isMe ? 'flex-row-reverse' : ''}`}>
-        <button
-          type="button"
-          onClick={() => user && onMentionUser(user)}
-          className={`max-w-full truncate text-[10px] ${isMe ? 'text-netease-red/80' : 'text-netease-muted'} hover:text-sky-300`}
-        >
-          {msg.nickname}
-        </button>
-        {isRoomCreator && <RoleBadge role="owner" />}
-        {isRoomAdmin && !isRoomCreator && <RoleBadge role="admin" />}
-        {userMemberTier && <MemberTierBadge tier={userMemberTier} />}
-        {msg.timestamp > 0 && (
-          <Tooltip content={new Date(msg.timestamp).toLocaleString('zh-CN')} side="bottom">
-            <time
-              dateTime={new Date(msg.timestamp).toISOString()}
-              className="text-[10px] text-netease-muted/65 tabular-nums whitespace-nowrap"
-            >
-              {formatChatTime(msg.timestamp)}
-            </time>
-          </Tooltip>
-        )}
-      </div>
-      <div className={`flex min-w-0 max-w-[90%] items-start gap-1.5 ${isMe ? 'flex-row-reverse justify-end' : ''}`}>
-        <div className={`flex min-w-0 max-w-full flex-col ${isMe ? 'items-end' : 'items-start'}`}>
-          {isStickerImage ? (
-            <div className={`flex min-w-0 max-w-full flex-col gap-1 ${isMe ? 'items-end' : 'items-start'}`}>
-              {msg.replyTo && (
-                <div className={replyBubbleClass} onContextMenu={handleContextMenu}>
-                  {renderReplyPreview()}
-                </div>
-              )}
-              <div className="min-w-0 max-w-full" onContextMenu={handleContextMenu}>
-                {renderStickerContent()}
-              </div>
-            </div>
-          ) : (
-            <div className={bubbleClass} onContextMenu={handleContextMenu}>
-              {msg.replyTo && (
-                <div className={`mb-1 ${isPhotoOnly ? 'mx-1 mt-1' : ''}`}>
-                  {renderReplyPreview()}
-                </div>
-              )}
-              {renderPhotoContent()}
-              {msg.text ? renderMessageText(msg.text, 'message', chatScrollRoot, nicknames) : null}
-            </div>
-          )}
-          <ChatMessageReactions
-            reactions={msg.reactions}
-            myUserId={myUserId}
-            alignEnd={isMe}
-            onToggle={(emoji) => onToggleReaction(msg.id, emoji)}
-            containerRef={chatPanelRef}
-            scrollRoot={chatScrollRoot}
+    <div className={`group flex w-full min-w-0 max-w-full items-start gap-2 ${isMe ? 'flex-row-reverse' : ''}`}>
+      {avatarNode}
+      <div className={`flex min-w-0 flex-1 flex-col ${showAvatars ? 'max-w-[calc(100%-2.5rem)]' : 'max-w-full'} ${isMe ? 'items-end' : 'items-start'}`}>
+        <div className={`mb-0.5 flex max-w-full min-w-0 items-center gap-1.5 ${isMe ? 'flex-row-reverse' : ''}`}>
+          <button
+            type="button"
+            onClick={() => user && onMentionUser(user)}
+            className={`min-w-0 truncate text-[10px] ${isMe ? 'text-netease-red/80' : 'text-netease-muted'} hover:text-sky-300`}
+          >
+            {msg.nickname}
+          </button>
+          <UserRoleMarks
+            isOwner={isRoomCreator}
+            isAdmin={isRoomAdmin && !isRoomCreator}
+            memberTier={userMemberTier}
           />
-        </div>
-        <div
-          className={`relative mt-1 flex flex-col gap-0.5 transition-opacity ${
-            reactionPickerOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-          }`}
-        >
-          <Tooltip content="回复">
-            <button
-              type="button"
-              onClick={() => onReply(msg)}
-              className="rounded p-0.5 text-netease-muted hover:bg-white/10 hover:text-white"
-              aria-label="回复"
-            >
-              <Reply className="h-3 w-3" />
-            </button>
-          </Tooltip>
-          <Tooltip content="点评表情">
-            <button
-              type="button"
-              disabled={chatMuted}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => onOpenReactionPicker(reactionPickerOpen ? null : msg.id)}
-              className="rounded p-0.5 text-netease-muted hover:bg-white/10 hover:text-white disabled:opacity-40"
-              aria-label="点评表情"
-            >
-              <Smile className="h-3 w-3" />
-            </button>
-          </Tooltip>
-          {isStickerImage && msg.imageUrl && !isPureStickerHidden && (
-            <StickerSaveButton imageUrl={msg.imageUrl} imageKey={msg.imageKey} />
+          {msg.timestamp > 0 && (
+            <Tooltip content={new Date(msg.timestamp).toLocaleString('zh-CN')} side="bottom">
+              <time
+                dateTime={new Date(msg.timestamp).toISOString()}
+                className="text-[10px] text-netease-muted/65 tabular-nums whitespace-nowrap"
+              >
+                {formatChatTime(msg.timestamp)}
+              </time>
+            </Tooltip>
           )}
+        </div>
+        <div className={`flex min-w-0 max-w-full items-start gap-1.5 ${isMe ? 'flex-row-reverse justify-end' : ''}`}>
+          <div className={`flex min-w-0 max-w-[min(100%,22rem)] flex-col ${isMe ? 'items-end' : 'items-start'}`}>
+            {isStickerImage ? (
+              <div className={`flex min-w-0 max-w-full flex-col gap-1 ${isMe ? 'items-end' : 'items-start'}`}>
+                {msg.replyTo && (
+                  <div className={replyBubbleClass} onContextMenu={handleContextMenu}>
+                    {renderReplyPreview()}
+                  </div>
+                )}
+                <div className="min-w-0 max-w-full" onContextMenu={handleContextMenu}>
+                  {renderStickerContent()}
+                </div>
+              </div>
+            ) : (
+              <div className={bubbleClass} onContextMenu={handleContextMenu}>
+                {msg.replyTo && (
+                  <div className={`mb-1 ${isPhotoOnly ? 'mx-1 mt-1' : ''}`}>
+                    {renderReplyPreview()}
+                  </div>
+                )}
+                {renderPhotoContent()}
+                {msg.text ? renderMessageText(msg.text, 'message', chatScrollRoot, nicknames) : null}
+              </div>
+            )}
+            <ChatMessageReactions
+              reactions={msg.reactions}
+              myUserId={myUserId}
+              alignEnd={isMe}
+              onToggle={(emoji) => onToggleReaction(msg.id, emoji)}
+              containerRef={chatPanelRef}
+              scrollRoot={chatScrollRoot}
+            />
+          </div>
+          <div
+            className={`relative mt-1 flex flex-col gap-0.5 transition-opacity ${
+              reactionPickerOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+            }`}
+          >
+            <Tooltip content="回复">
+              <button
+                type="button"
+                onClick={() => onReply(msg)}
+                className="rounded p-0.5 text-netease-muted hover:bg-white/10 hover:text-white"
+                aria-label="回复"
+              >
+                <Reply className="h-3 w-3" />
+              </button>
+            </Tooltip>
+            <Tooltip content="点评表情">
+              <button
+                type="button"
+                disabled={chatMuted}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => onOpenReactionPicker(reactionPickerOpen ? null : msg.id)}
+                className="rounded p-0.5 text-netease-muted hover:bg-white/10 hover:text-white disabled:opacity-40"
+                aria-label="点评表情"
+              >
+                <Smile className="h-3 w-3" />
+              </button>
+            </Tooltip>
+            {isStickerImage && msg.imageUrl && !isPureStickerHidden && (
+              <StickerSaveButton imageUrl={msg.imageUrl} imageKey={msg.imageKey} />
+            )}
+          </div>
         </div>
       </div>
 
@@ -440,6 +477,7 @@ function WelcomeChatRow({
   onContentResize?: () => void;
 }) {
   const rowRef = useRef<HTMLDivElement>(null);
+  const hasText = Boolean(msg.text?.trim());
 
   useLayoutEffect(() => {
     if (!onContentResize) return;
@@ -450,6 +488,11 @@ function WelcomeChatRow({
     ro.observe(el);
     return () => ro.disconnect();
   }, [msg.id, msg.text, onContentResize]);
+
+  // 仅礼花、无欢迎语：不占聊天气泡，礼花由列表侧触发
+  if (!hasText) {
+    return <div ref={rowRef} className="h-0 overflow-hidden" aria-hidden />;
+  }
 
   return (
     <div ref={rowRef} className="flex justify-center py-1">
@@ -492,6 +535,8 @@ export default memo(ChatMessageRow, (prev, next) => (
   && prev.room.creatorId === next.room.creatorId
   && prev.room.adminIds === next.room.adminIds
   && prev.room.memberTiers === next.room.memberTiers
+  && prev.room.chatShowAvatars === next.room.chatShowAvatars
+  && prev.room.userAvatarUrls === next.room.userAvatarUrls
   && prev.chatScrollRoot === next.chatScrollRoot
 ));
 

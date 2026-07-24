@@ -7,6 +7,7 @@ import {
   buildWelcomeText,
   normalizeIncomingMemberTier,
   normalizeMemberSettings,
+  resolveMemberWelcomeSettings,
   restoreMemberTiersFromStorage,
   serializeMemberSettings,
   serializeMemberTier,
@@ -494,6 +495,7 @@ function snapshotRoomForStorage(room) {
     announcementText: String(room.announcementText || "").slice(0, MAX_ANNOUNCEMENT_LENGTH),
     customCoverUrl: normalizeCustomCoverUrl(room.customCoverUrl),
     chatHistoryVisibleOnJoin: Boolean(room.chatHistoryVisibleOnJoin),
+    chatShowAvatars: Boolean(room.chatShowAvatars),
     joinNoticeEnabled: room.joinNoticeEnabled !== false,
     joinNoticeCooldownSec: normalizeJoinNoticeCooldownSec(room.joinNoticeCooldownSec),
     songRequestEnabled: room.songRequestEnabled !== false,
@@ -557,6 +559,7 @@ function restoreRoomFromStorage(data) {
   room.announcementText = String(data.announcementText || "").slice(0, MAX_ANNOUNCEMENT_LENGTH);
   room.customCoverUrl = normalizeCustomCoverUrl(data.customCoverUrl);
   room.chatHistoryVisibleOnJoin = Boolean(data.chatHistoryVisibleOnJoin);
+  room.chatShowAvatars = Boolean(data.chatShowAvatars);
   room.joinNoticeEnabled = data.joinNoticeEnabled !== false;
   room.joinNoticeCooldownSec = normalizeJoinNoticeCooldownSec(data.joinNoticeCooldownSec);
   room.songRequestEnabled = data.songRequestEnabled !== false;
@@ -868,6 +871,8 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
     customCoverUrl: "",
     /** 进房是否可查看历史聊天；默认关闭（仅看进房后的消息） */
     chatHistoryVisibleOnJoin: false,
+    /** 聊天室昵称旁是否显示头像；默认关闭，仅房主可改 */
+    chatShowAvatars: false,
     /** 普通成员进房时是否向聊天室推送短暂系统提示 */
     joinNoticeEnabled: true,
     joinNoticeCooldownSec: DEFAULT_JOIN_NOTICE_COOLDOWN_SEC,
@@ -2224,9 +2229,6 @@ export function setRoomAdmin(roomId, actorId, targetUserId, admin = true, connec
     if (appointedCount >= MAX_ADMINS) return { error: `管理员最多 ${MAX_ADMINS} 人` };
     admins.add(targetId);
     auto.delete(targetId);
-    if (room.memberTiers?.has(targetId)) {
-      room.memberTiers.delete(targetId);
-    }
   } else {
     if (!admins.has(targetId) && !auto.has(targetId)) {
       return { room: serializeRoom(room) };
@@ -2301,11 +2303,11 @@ export function setRoomPlayMode(roomId, actorId, mode, connectionId = null) {
 export function setRoomMemberTier(roomId, actorId, targetUserId, payload = {}, connectionId = null) {
   const room = rooms.get(roomId);
   if (!room) return { error: "房间不存在" };
-  if (!isOwnerConnection(room, actorId, connectionId)) return { error: "仅房主可设置贵宾角标" };
+  const denied = requireModerator(room, actorId, connectionId);
+  if (denied) return denied;
 
   const userId = String(targetUserId || "").trim();
   if (!userId) return { error: "无效用户" };
-  if (userId === room.creatorId) return { error: "房主无需设置贵宾角标" };
 
   if (!room.memberTiers) room.memberTiers = new Map();
   const normalized = normalizeIncomingMemberTier(payload);
@@ -2324,7 +2326,8 @@ export function setRoomMemberTier(roomId, actorId, targetUserId, payload = {}, c
 export function removeRoomMemberTier(roomId, actorId, targetUserId, connectionId = null) {
   const room = rooms.get(roomId);
   if (!room) return { error: "房间不存在" };
-  if (!isOwnerConnection(room, actorId, connectionId)) return { error: "仅房主可移除贵宾角标" };
+  const denied = requireModerator(room, actorId, connectionId);
+  if (denied) return denied;
 
   const userId = String(targetUserId || "").trim();
   if (!userId) return { error: "无效用户" };
@@ -2338,7 +2341,8 @@ export function removeRoomMemberTier(roomId, actorId, targetUserId, connectionId
 export function setRoomMemberSettings(roomId, actorId, settings = {}, connectionId = null) {
   const room = rooms.get(roomId);
   if (!room) return { error: "房间不存在" };
-  if (!isOwnerConnection(room, actorId, connectionId)) return { error: "仅房主可调整贵宾设置" };
+  const denied = requireModerator(room, actorId, connectionId);
+  if (denied) return denied;
 
   room.memberSettings = normalizeMemberSettings({
     ...normalizeMemberSettings(room.memberSettings),
@@ -2403,19 +2407,22 @@ export function postMemberWelcomeMessage(roomId, userId) {
   const tier = room.memberTiers?.get(userId);
   if (!tier) return null;
 
-  const settings = normalizeMemberSettings(room.memberSettings);
-  if (!settings.welcomeEnabled) return null;
+  const settings = resolveMemberWelcomeSettings(tier, room.memberSettings);
+  const welcomeOn = Boolean(settings.welcomeEnabled);
+  const confettiOn = Boolean(settings.confettiEnabled);
+  if (!welcomeOn && !confettiOn) return null;
 
   const cooldownMs = Math.max(0, Number(settings.welcomeCooldownSec) || 0) * 1000;
   if (hasRecentMemberWelcome(room, userId, cooldownMs)) return null;
 
   const user = room.users.get(userId);
   const nickname = user?.nickname || room.userNicknames?.get(userId) || "贵宾";
+  const text = welcomeOn ? buildWelcomeText(settings, tier, nickname) : "";
   const message = {
     id: generateId(),
     userId: "system",
     nickname: "房间迎宾",
-    text: buildWelcomeText(settings, tier, nickname),
+    text,
     kind: "welcome",
     mentions: [],
     replyTo: null,
@@ -2428,6 +2435,7 @@ export function postMemberWelcomeMessage(roomId, userId) {
     },
     targetUserId: userId,
     targetNickname: nickname,
+    confettiEnabled: confettiOn,
   };
 
   room.messages.push(message);
@@ -2614,6 +2622,19 @@ export function setChatHistoryVisibleOnJoin(roomId, actorId, enabled, connection
     }
   }
 
+  persistRoom(room);
+  return { room: serializeRoom(room) };
+}
+
+/** 聊天室是否显示头像（仅房主） */
+export function setChatShowAvatars(roomId, actorId, enabled, connectionId = null) {
+  const room = rooms.get(roomId);
+  if (!room) return { error: "房间不存在" };
+  if (!isOwnerConnection(room, actorId, connectionId)) {
+    return { error: "仅房主可设置聊天头像显示" };
+  }
+
+  room.chatShowAvatars = Boolean(enabled);
   persistRoom(room);
   return { room: serializeRoom(room) };
 }
@@ -3990,6 +4011,9 @@ function serializeChatMessage(message, options = {}) {
     memberTier: message.memberTier || null,
     targetUserId: message.targetUserId || null,
     targetNickname: message.targetNickname || null,
+    confettiEnabled: message.kind === 'welcome'
+      ? message.confettiEnabled !== false
+      : Boolean(message.confettiEnabled),
   };
 }
 
@@ -4519,6 +4543,7 @@ function serializeRoom(room, options = {}) {
     announcementText: String(room.announcementText || "").slice(0, MAX_ANNOUNCEMENT_LENGTH),
     customCoverUrl: normalizeCustomCoverUrl(room.customCoverUrl) || undefined,
     chatHistoryVisibleOnJoin: Boolean(room.chatHistoryVisibleOnJoin),
+    chatShowAvatars: Boolean(room.chatShowAvatars),
     joinNoticeEnabled: room.joinNoticeEnabled !== false,
     joinNoticeCooldownSec: normalizeJoinNoticeCooldownSec(room.joinNoticeCooldownSec),
     songRequestEnabled: room.songRequestEnabled !== false,
@@ -4587,6 +4612,7 @@ export function prepareRoomBroadcast(roomId) {
     announcementText: String(room.announcementText || "").slice(0, MAX_ANNOUNCEMENT_LENGTH),
     customCoverUrl: normalizeCustomCoverUrl(room.customCoverUrl) || undefined,
     chatHistoryVisibleOnJoin: Boolean(room.chatHistoryVisibleOnJoin),
+    chatShowAvatars: Boolean(room.chatShowAvatars),
     joinNoticeEnabled: room.joinNoticeEnabled !== false,
     joinNoticeCooldownSec: normalizeJoinNoticeCooldownSec(room.joinNoticeCooldownSec),
     songRequestEnabled: room.songRequestEnabled !== false,
