@@ -21,32 +21,43 @@ function resolveTier(label: string): QualityTier {
   return 'standard';
 }
 
-function shortenLabel(label: string): string {
-  const map: Record<string, string> = {
+/** 按平台短标：SQ 是绿点术语，红点用「无损」 */
+function shortenLabel(label: string, source?: MusicSource | null): string {
+  if (source === 'tencent') {
+    const tencentMap: Record<string, string> = {
+      标准品质: '标准',
+      HQ高品质: 'HQ',
+      SQ无损品质: 'SQ',
+      臻品全景声: '全景声',
+      臻品母带: '母带',
+    };
+    return tencentMap[label] || label;
+  }
+
+  if (source === 'kugou') {
+    return label;
+  }
+
+  const neteaseMap: Record<string, string> = {
     标准: '标准',
-    标准品质: '标准',
     较高: '较高',
     极高: '极高',
-    HQ高品质: 'HQ',
-    无损: 'SQ',
-    SQ无损品质: 'SQ',
+    无损: '无损',
     高解析度无损: 'Hi-Res',
     高清臻音: '臻音',
     沉浸环绕声: '环绕声',
     超清母带: '母带',
     杜比全景声: '杜比全景声',
-    臻品全景声: '全景声',
-    臻品母带: '母带',
   };
-  return map[label] || label;
+  return neteaseMap[label] || label;
 }
 
 const NETEASE_TIER_CLASS: Record<QualityTier, string> = {
-  standard: 'border-white/25 text-white/55',
-  high: 'border-white/40 text-white/80',
-  lossless: 'border-white/55 text-white/90',
-  hires: 'border-white/70 text-white',
-  vip: 'border-[#ec4141]/80 text-[#ec4141]',
+  standard: 'border-[#ec4141]/35 text-[#ec4141]/70',
+  high: 'border-[#ec4141]/50 text-[#ec4141]/85',
+  lossless: 'border-[#ec4141]/70 text-[#ec4141]',
+  hires: 'border-[#ec4141]/85 text-[#ec4141]',
+  vip: 'border-[#ec4141] text-[#ec4141]',
 };
 
 const TENCENT_TIER_CLASS: Record<QualityTier, string> = {
@@ -77,7 +88,7 @@ export default function PlaybackQualityTag({ label, source, className = '' }: Pr
   const raw = label?.trim() || (source === 'kugou' ? '标准' : '');
   if (!raw) return null;
 
-  const short = shortenLabel(raw);
+  const short = shortenLabel(raw, source);
   const tier = source === 'kugou' && !label?.trim() ? 'standard' : resolveTier(raw);
   const tierClass = tierClassForSource(source, tier);
 
