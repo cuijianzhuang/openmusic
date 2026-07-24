@@ -139,6 +139,8 @@ import {
 } from '../lib/roomVisualFxLive';
 import { resetSharedAudioElement } from '../lib/audioElement';
 import { useAudioStore } from '../stores/audioStore';
+import { markGuideFeatureUsed } from '../lib/userGuide';
+import UserGuideTour from '../components/UserGuideTour';
 import {
   createEnterSteps,
   createExitSteps,
@@ -2031,6 +2033,7 @@ export default function Room() {
 
   const renderQueueSection = (fillHeight = false) => (
     <div
+      data-guide="room-queue"
       className={`surface-panel rounded-2xl overflow-hidden flex flex-col ${
         fillHeight ? 'h-full flex-1 min-h-0' : 'flex-shrink-0'
       }`}
@@ -2095,7 +2098,10 @@ export default function Room() {
       </div>
       <button
         type="button"
-        onClick={handleSearch}
+        onClick={() => {
+          markGuideFeatureUsed('room-search');
+          handleSearch();
+        }}
         disabled={!query.trim() || (searchMode === 'song' && searching)}
         className="flex-shrink-0 px-3.5 sm:px-5 py-3 sm:py-3.5 rounded-xl sm:rounded-2xl bg-netease-red text-white text-sm font-medium hover:bg-netease-red/85 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
       >
@@ -2243,7 +2249,10 @@ export default function Room() {
         />
         <button
           type="button"
-          onClick={handleSearch}
+          onClick={() => {
+            markGuideFeatureUsed('room-search');
+            handleSearch();
+          }}
           disabled={!query.trim() || (searchMode === 'song' && searching)}
           className="ml-3 flex-shrink-0 rounded-full px-3 py-1 text-[11px] font-medium text-[#eafffb] transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
         >
@@ -2274,35 +2283,50 @@ export default function Room() {
     <div className="flex items-center justify-center gap-1.5 overflow-x-auto">
       <button
         type="button"
-        onClick={() => setSongHistoryOpen(true)}
+        onClick={() => {
+          markGuideFeatureUsed('room-search');
+          setSongHistoryOpen(true);
+        }}
         className={`whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] text-white/55 ${immersiveGlassChip}`}
       >
         播放历史
       </button>
       <button
         type="button"
-        onClick={() => setRecommendDrawerOpen(true)}
+        onClick={() => {
+          markGuideFeatureUsed('room-search');
+          setRecommendDrawerOpen(true);
+        }}
         className={`whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] text-white/55 ${immersiveGlassChip}`}
       >
         热榜歌单
       </button>
       <button
         type="button"
-        onClick={() => setDjRadioDrawerOpen(true)}
+        onClick={() => {
+          markGuideFeatureUsed('room-search');
+          setDjRadioDrawerOpen(true);
+        }}
         className={`whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] text-white/55 ${immersiveGlassChip}`}
       >
         音乐电台
       </button>
       <button
         type="button"
-        onClick={openFavorites}
+        onClick={() => {
+          markGuideFeatureUsed('room-search');
+          openFavorites();
+        }}
         className={`whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] text-white/55 ${immersiveGlassChip}`}
       >
         我的收藏
       </button>
       <button
         type="button"
-        onClick={() => setPlaylistImportOpen(true)}
+        onClick={() => {
+          markGuideFeatureUsed('room-search');
+          setPlaylistImportOpen(true);
+        }}
         className={`whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] text-white/55 ${immersiveGlassChip}`}
       >
         导入歌单
@@ -2565,7 +2589,7 @@ export default function Room() {
           immersiveMode || visualFxDragging ? 'pointer-events-none opacity-0' : ''
         }`}
       >
-      <header className={`relative z-30 flex-shrink-0 border-b px-3 py-2.5 sm:px-4 sm:py-3 safe-top ${ambientGlassClass}`}>
+      <header className={`relative z-30 flex-shrink-0 border-b px-3 py-2.5 sm:px-4 sm:py-3 safe-top ${ambientGlassClass}`} data-guide="room-header">
 
         <div className="max-w-[1680px] mx-auto flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
 
@@ -2675,7 +2699,10 @@ export default function Room() {
                   <Tooltip side="bottom" content="房间设置">
                     <button
                       type="button"
-                      onClick={() => setSettingsOpen(true)}
+                      onClick={() => {
+                        markGuideFeatureUsed('room-header');
+                        setSettingsOpen(true);
+                      }}
                       className="flex-shrink-0 rounded-lg p-1 text-netease-muted transition-colors hover:bg-white/10 hover:text-white"
                       aria-label="房间设置"
                     >
@@ -2712,7 +2739,12 @@ export default function Room() {
                   {room.userCount} 人在线
                 </span>
                 <RoomFmModeBadge fmMode={room.neteaseFmMode} />
-                <RoomQualityBadge onClick={() => setQualityOpen(true)} />
+                <RoomQualityBadge
+                  onClick={() => {
+                    markGuideFeatureUsed('room-header');
+                    setQualityOpen(true);
+                  }}
+                />
                 {room.songRequestEnabled === false && (
                   <span className="inline-flex h-5 items-center text-[10px] leading-none text-amber-400/90 bg-amber-400/10 px-1.5 rounded-full">禁止点歌</span>
                 )}
@@ -2785,7 +2817,10 @@ export default function Room() {
               <Tooltip side="bottom" content={pureMode ? '退出纯净模式（电脑端右侧滑入聊天）' : '纯净模式：隐藏动效与热榜，保留搜索与播放队列；标签页低调伪装'}>
                 <button
                   type="button"
-                  onClick={handlePureModeToggle}
+                  onClick={() => {
+                    markGuideFeatureUsed('room-header');
+                    handlePureModeToggle();
+                  }}
                   className={`flex items-center gap-1.5 text-xs transition-colors px-2.5 sm:px-3 py-1.5 rounded-lg hover:bg-netease-card ${
                     pureMode ? 'text-sky-400' : 'text-netease-muted hover:text-white'
                   }`}
@@ -2801,7 +2836,10 @@ export default function Room() {
                 <Tooltip side="bottom" content={immersiveMode ? '退出沉浸模式' : '沉浸模式：全屏视觉，边缘滑出点歌/队列/聊天'}>
                   <button
                     type="button"
-                    onClick={handleImmersiveToggle}
+                    onClick={() => {
+                      markGuideFeatureUsed('room-header');
+                      handleImmersiveToggle();
+                    }}
                     disabled={Boolean(immersiveTransition)}
                     className={`flex items-center gap-1.5 text-xs transition-colors px-2.5 sm:px-3 py-1.5 rounded-lg hover:bg-netease-card disabled:opacity-50 disabled:pointer-events-none ${
                       immersiveMode ? 'text-violet-300' : 'text-netease-muted hover:text-white'
@@ -2817,7 +2855,10 @@ export default function Room() {
 
               <Tooltip side="bottom" content="分享房间">
                 <button
-                  onClick={handleCopyRoom}
+                  onClick={() => {
+                    markGuideFeatureUsed('room-header');
+                    handleCopyRoom();
+                  }}
                   className="flex items-center gap-1.5 text-xs text-netease-muted hover:text-white transition-colors px-2.5 sm:px-3 py-1.5 rounded-lg hover:bg-netease-card"
                 >
                   {copied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
@@ -2861,7 +2902,10 @@ export default function Room() {
 
           {/* 左侧：网易云热榜 */}
           {isLgUp && !pureMode && (
-            <div className="surface-panel order-0 flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl lg:h-full">
+            <div
+              data-guide="room-hot"
+              className="surface-panel order-0 flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl lg:h-full"
+            >
               <HotSongPanel embedded addingId={addingId} onAdd={handleAdd} />
             </div>
           )}
@@ -2869,33 +2913,42 @@ export default function Room() {
           {/* 中间：搜索 + 播放队列 */}
           <div className="order-1 flex min-h-0 min-w-0 flex-col lg:h-full lg:overflow-hidden">
             {!isLgUp && !pureMode && (
-              <div className="mb-3">
+              <div className="mb-3" data-guide="room-hot">
                 <HotSongPanel compact addingId={addingId} onAdd={handleAdd} />
               </div>
             )}
 
-            <div className="flex-shrink-0">
+            <div className="flex-shrink-0" data-guide="room-search">
               <JumpRequestBanner />
               {searchBar}
               <div className="mb-2 flex items-center justify-between gap-2 overflow-x-auto px-1 sm:mb-4">
                 <div className="flex flex-shrink-0 items-center gap-1">
                   <button
                     type="button"
-                    onClick={() => setSongHistoryOpen(true)}
+                    onClick={() => {
+                      markGuideFeatureUsed('room-search');
+                      setSongHistoryOpen(true);
+                    }}
                     className="rounded-lg px-2 py-1 text-[11px] sm:text-xs text-white/75 hover:bg-white/10 hover:text-white transition-colors whitespace-nowrap"
                   >
                     播放历史
                   </button>
                   <button
                     type="button"
-                    onClick={() => setRecommendDrawerOpen(true)}
+                    onClick={() => {
+                      markGuideFeatureUsed('room-search');
+                      setRecommendDrawerOpen(true);
+                    }}
                     className="rounded-lg px-2 py-1 text-[11px] sm:text-xs text-white/75 hover:bg-white/10 hover:text-white transition-colors whitespace-nowrap"
                   >
                     热榜歌单
                   </button>
                   <button
                     type="button"
-                    onClick={() => setDjRadioDrawerOpen(true)}
+                    onClick={() => {
+                      markGuideFeatureUsed('room-search');
+                      setDjRadioDrawerOpen(true);
+                    }}
                     className="rounded-lg px-2 py-1 text-[11px] sm:text-xs text-white/75 hover:bg-white/10 hover:text-white transition-colors whitespace-nowrap"
                   >
                     音乐电台
@@ -2905,14 +2958,20 @@ export default function Room() {
                   <div className="flex flex-shrink-0 items-center gap-1">
                     <button
                       type="button"
-                      onClick={openFavorites}
+                      onClick={() => {
+                        markGuideFeatureUsed('room-search');
+                        openFavorites();
+                      }}
                       className="rounded-lg px-2 py-1 text-[11px] sm:text-xs text-white/75 hover:bg-white/10 hover:text-white transition-colors whitespace-nowrap"
                     >
                       我的收藏
                     </button>
                     <button
                       type="button"
-                      onClick={() => setPlaylistImportOpen(true)}
+                      onClick={() => {
+                        markGuideFeatureUsed('room-search');
+                        setPlaylistImportOpen(true);
+                      }}
                       className="rounded-lg px-2 py-1 text-[11px] sm:text-xs text-white/75 hover:bg-white/10 hover:text-white transition-colors whitespace-nowrap"
                     >
                       导入歌单
@@ -2944,7 +3003,7 @@ export default function Room() {
             </div>
             )}
 
-            <div className="h-[min(55vh,480px)] sm:h-[min(60vh,520px)] lg:h-full lg:min-h-0 lg:flex-1">
+            <div className="h-[min(55vh,480px)] sm:h-[min(60vh,520px)] lg:h-full lg:min-h-0 lg:flex-1" data-guide="room-chat">
               <ChatPanel />
             </div>
           </div>
@@ -3299,8 +3358,21 @@ export default function Room() {
           document.body,
         )}
 
-      {(room.current || room.randomLoading) && !(pureMode && purePlayerHidden) && !immersiveMode && (
+      {(room.current || room.randomLoading) && !(pureMode && purePlayerHidden) && !immersiveMode ? (
         <MiniPlayer onExpand={() => setShowPlayer(true)} barClassName={ambientGlassClass} />
+      ) : (
+        !immersiveMode && !(pureMode && purePlayerHidden) && (
+          <div
+            data-guide="room-player"
+            className="pointer-events-none fixed bottom-0 left-0 right-0 z-40 h-[4.75rem] opacity-0 pb-[env(safe-area-inset-bottom,0px)]"
+            aria-hidden
+          >
+            <div
+              data-guide="room-report"
+              className="absolute bottom-[calc(0.75rem+env(safe-area-inset-bottom,0px))] right-3 h-9 w-9 sm:right-5"
+            />
+          </div>
+        )
       )}
 
       {pureMode && isLgUp && <PureModeChatDock />}
@@ -3535,6 +3607,25 @@ export default function Room() {
           </div>
         </div>,
         document.body,
+      )}
+
+      {!immersiveMode && (
+        <UserGuideTour
+          scope="room"
+          paused={
+            announcementPopupOpen
+            || settingsOpen
+            || qualityOpen
+            || memberOpen
+            || playlistImportOpen
+            || recommendDrawerOpen
+            || djRadioDrawerOpen
+            || favoritesOpen
+            || songHistoryOpen
+            || Boolean(immersiveTransition)
+          }
+          delayMs={900}
+        />
       )}
 
     </div>

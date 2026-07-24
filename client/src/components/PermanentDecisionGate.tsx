@@ -6,6 +6,7 @@ import {
   type PermanentDecisionNoticePayload,
 } from '../hooks/useSocket';
 import PermanentDecisionPopup from './PermanentDecisionPopup';
+import { setGuidePauseReason } from '../lib/guidePause';
 
 function enqueueUnique(
   queue: PermanentDecisionNoticePayload[],
@@ -70,6 +71,12 @@ export default function PermanentDecisionGate() {
   }, [pushNotice]);
 
   useEffect(() => subscribePermanentDecision(pushNotice), [pushNotice]);
+
+  useEffect(() => {
+    const open = Boolean(current);
+    setGuidePauseReason('permanent-decision', open);
+    return () => setGuidePauseReason('permanent-decision', false);
+  }, [current]);
 
   return (
     <PermanentDecisionPopup

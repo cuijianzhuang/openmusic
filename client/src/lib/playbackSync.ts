@@ -544,7 +544,11 @@ export async function applyVisibilityResume(
   if (isEndedWhileServerPlaying(audio, options.song)) {
     return recoverFromEndedAudio(audio, options, 'visibility');
   }
-  return applyFollowerSync(audio, options);
+  // 切回前台：强制校正进度并 play，避免仅 routine 软恢复失败后一直静音
+  return applyFollowerSync(audio, {
+    ...options,
+    forceCorrection: true,
+  });
 }
 
 export function resetPlaybackRate(audio: HTMLAudioElement): void {

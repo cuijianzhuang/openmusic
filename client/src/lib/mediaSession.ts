@@ -10,6 +10,7 @@ export type MediaSessionActionHandlers = {
   play?: () => void;
   pause?: () => void;
   nexttrack?: () => void;
+  previoustrack?: () => void;
   seekbackward?: (details: MediaSessionActionDetails) => void;
   seekforward?: (details: MediaSessionActionDetails) => void;
   seekto?: (details: MediaSessionActionDetails) => void;
@@ -20,6 +21,7 @@ const CLEAR_ACTIONS: MediaSessionAction[] = [
   'play',
   'pause',
   'nexttrack',
+  'previoustrack',
   'seekbackward',
   'seekforward',
   'seekto',
@@ -76,6 +78,24 @@ async function buildArtwork(song: Pick<QueueItem, 'id' | 'source' | 'pic'>): Pro
     });
   }
   return artwork;
+}
+
+/** 原生通知栏用单张封面（优先中等尺寸） */
+export async function resolveMediaArtworkUrl(
+  song: Pick<QueueItem, 'id' | 'source' | 'pic'> | null,
+): Promise<string> {
+  if (!song) return '';
+  let src = toAbsoluteUrl(getCoverUrl(song, 'medium'));
+  if (!src) src = toAbsoluteUrl(getCoverUrl(song, 'full'));
+  if (src && needsApiSign(src)) {
+    try {
+      const parsed = new URL(src);
+      src = toAbsoluteUrl(await signApiUrl(`${parsed.pathname}${parsed.search}`));
+    } catch {
+      // keep unsigned
+    }
+  }
+  return src;
 }
 
 export function isMediaSessionSupported(): boolean {
@@ -190,6 +210,7 @@ export function bindMediaSessionActions(handlers: MediaSessionActionHandlers): v
   bind('play', handlers.play ? (() => handlers.play?.()) : null);
   bind('pause', handlers.pause ? (() => handlers.pause?.()) : null);
   bind('nexttrack', handlers.nexttrack ? (() => handlers.nexttrack?.()) : null);
+  bind('previoustrack', handlers.previoustrack ? (() => handlers.previoustrack?.()) : null);
   bind('stop', handlers.stop ? (() => handlers.stop?.()) : null);
   bind('seekbackward', handlers.seekbackward
     ? ((details) => handlers.seekbackward?.(details))

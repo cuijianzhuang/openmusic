@@ -26,8 +26,10 @@ import {
 import Tooltip from '../components/Tooltip';
 import ClientDownloadModal from '../components/ClientDownloadModal';
 import SiteAnnouncementPopup from '../components/SiteAnnouncementPopup';
+import UserGuideTour from '../components/UserGuideTour';
 import BrandMark from '../components/BrandMark';
 import { getRememberedAdminEntryPath } from '../lib/adminEntryShortcut';
+import { markGuideFeatureUsed } from '../lib/userGuide';
 
 /** 大厅只用接口带回的 CDN 直链，不走 meting type=pic 再查 */
 function lobbyDirectCoverUrl(pic?: string): string | null {
@@ -121,9 +123,12 @@ function lobbyCoverUrl(room: Pick<RoomSummary, 'customCoverUrl' | 'currentSong'>
 const RoomCard = memo(function RoomCard({
   room,
   onJoin,
+  guideAnchor = false,
 }: {
   room: RoomSummary;
   onJoin: (room: RoomSummary) => void;
+  /** 大厅指引高亮用：只标第一张卡片，避免整页列表把遮罩挤没 */
+  guideAnchor?: boolean;
 }) {
   const isActive = room.isPlaying && room.currentSong;
   const hardLocked = isLobbyHardLocked(room);
@@ -312,6 +317,7 @@ const RoomCard = memo(function RoomCard({
     <button
       type="button"
       ref={(node) => { cardRef.current = node; }}
+      data-guide={guideAnchor ? 'home-lobby' : undefined}
       onClick={() => onJoin(room)}
       onMouseMove={handleMouseMove}
       onMouseLeave={resetTilt}
@@ -699,44 +705,62 @@ export default function Home() {
 
             {/* 居中控制台 (Command Bar) */}
             <div className="w-full bg-white/[0.03] border border-white/10 rounded-[28px] sm:rounded-full p-2.5 flex flex-col sm:flex-row gap-2.5 shadow-2xl backdrop-blur-xl">
-              <div className="relative flex-1 group">
+              <div className="relative flex-1 group" data-guide="home-nickname">
                 <div className="absolute inset-y-0 left-5 flex items-center pointer-events-none">
                   <Users className="w-5 h-5 text-white/40 group-focus-within:text-netease-red group-focus-within:scale-110 transition-all duration-300" />
                 </div>
                 <input
                   type="text"
                   value={nickname}
-                  onChange={(e) => { setNickname(e.target.value); setError(''); }}
+                  onChange={(e) => {
+                    setNickname(e.target.value);
+                    setError('');
+                    if (e.target.value.trim()) markGuideFeatureUsed('home-nickname');
+                  }}
                   placeholder="给自己起个昵称..."
                   maxLength={20}
                   className="w-full h-12 sm:h-14 bg-transparent pl-14 pr-6 text-white caret-netease-red placeholder:text-white/30 outline-none focus:bg-white/[0.04] rounded-full transition-all text-[15px]"
                 />
               </div>
               <div className="flex gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => { setError(''); setModalError(''); setShowCreate(true); }}
-                  onMouseMove={handleBtnTilt}
-                  onMouseLeave={resetBtnTilt}
-                  className="btn-shine btn-tilt group/create flex-1 sm:flex-none h-12 sm:h-14 px-6 sm:px-8 rounded-full bg-netease-red hover:bg-netease-red/90 text-white font-semibold shadow-lg shadow-netease-red/25 hover:shadow-xl hover:shadow-netease-red/45 whitespace-nowrap"
-                >
-                  <span className="btn-tilt-face flex h-full w-full items-center justify-center gap-2">
-                    <Plus className="w-5 h-5 transition-transform duration-300 ease-out group-hover/create:rotate-90" />
-                    创建房间
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setError(''); setModalError(''); setShowJoin(true); }}
-                  onMouseMove={handleBtnTilt}
-                  onMouseLeave={resetBtnTilt}
-                  className="btn-shine btn-tilt group/join flex-1 sm:flex-none h-12 sm:h-14 px-6 sm:px-8 rounded-full bg-white/5 hover:bg-white/15 border border-white/10 hover:border-white/25 text-white font-medium whitespace-nowrap"
-                >
-                  <span className="btn-tilt-face flex h-full w-full items-center justify-center">
-                    加入
-                    <ArrowRight className="h-4 w-0 ml-0 opacity-0 -translate-x-1 group-hover/join:w-4 group-hover/join:ml-1.5 group-hover/join:opacity-100 group-hover/join:translate-x-0 transition-all duration-300 ease-out" />
-                  </span>
-                </button>
+                <div data-guide="home-create" className="flex flex-1 sm:flex-none">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setError('');
+                      setModalError('');
+                      setShowCreate(true);
+                      markGuideFeatureUsed('home-create');
+                    }}
+                    onMouseMove={handleBtnTilt}
+                    onMouseLeave={resetBtnTilt}
+                    className="btn-shine btn-tilt group/create h-12 sm:h-14 w-full px-6 sm:px-8 rounded-full bg-netease-red hover:bg-netease-red/90 text-white font-semibold shadow-lg shadow-netease-red/25 hover:shadow-xl hover:shadow-netease-red/45 whitespace-nowrap"
+                  >
+                    <span className="btn-tilt-face flex h-full w-full items-center justify-center gap-2">
+                      <Plus className="w-5 h-5 transition-transform duration-300 ease-out group-hover/create:rotate-90" />
+                      创建房间
+                    </span>
+                  </button>
+                </div>
+                <div data-guide="home-join" className="flex flex-1 sm:flex-none">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setError('');
+                      setModalError('');
+                      setShowJoin(true);
+                      markGuideFeatureUsed('home-join');
+                    }}
+                    onMouseMove={handleBtnTilt}
+                    onMouseLeave={resetBtnTilt}
+                    className="btn-shine btn-tilt group/join h-12 sm:h-14 w-full px-6 sm:px-8 rounded-full bg-white/5 hover:bg-white/15 border border-white/10 hover:border-white/25 text-white font-medium whitespace-nowrap"
+                  >
+                    <span className="btn-tilt-face flex h-full w-full items-center justify-center">
+                      加入
+                      <ArrowRight className="h-4 w-0 ml-0 opacity-0 -translate-x-1 group-hover/join:w-4 group-hover/join:ml-1.5 group-hover/join:opacity-100 group-hover/join:translate-x-0 transition-all duration-300 ease-out" />
+                    </span>
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -786,12 +810,12 @@ export default function Home() {
           </div>
 
           {roomsLoading && rooms.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-32 text-white/40">
+            <div data-guide="home-lobby" className="flex flex-col items-center justify-center py-32 text-white/40">
               <Loader2 className="w-10 h-10 animate-spin mb-4 text-netease-red" />
               <p className="text-base font-medium">寻找房间中...</p>
             </div>
           ) : error && rooms.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-24 px-4 text-center bg-red-500/[0.04] border border-red-500/15 rounded-[32px]">
+            <div data-guide="home-lobby" className="flex flex-col items-center justify-center py-24 px-4 text-center bg-red-500/[0.04] border border-red-500/15 rounded-[32px]">
               <div className="w-24 h-24 rounded-full bg-red-500/10 flex items-center justify-center mb-6">
                 <Activity className="w-10 h-10 text-red-400/80" />
               </div>
@@ -808,7 +832,7 @@ export default function Home() {
               </button>
             </div>
           ) : rooms.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-24 px-4 text-center bg-white/[0.01] border border-white/5 rounded-[32px]">
+            <div data-guide="home-lobby" className="flex flex-col items-center justify-center py-24 px-4 text-center bg-white/[0.01] border border-white/5 rounded-[32px]">
               <div className="w-24 h-24 rounded-full bg-white/5 flex items-center justify-center mb-6 shadow-inner">
                 <Search className="w-10 h-10 text-white/20" />
               </div>
@@ -833,8 +857,13 @@ export default function Home() {
                   </div>
                   {/* 这里改成了更宽的网格，最大 3 列，从而让卡片变宽 */}
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 sm:gap-6">
-                    {recentRooms.map((room) => (
-                      <RoomCard key={room.id} room={room} onJoin={handleRoomCardClick} />
+                    {recentRooms.map((room, index) => (
+                      <RoomCard
+                        key={room.id}
+                        room={room}
+                        onJoin={handleRoomCardClick}
+                        guideAnchor={index === 0}
+                      />
                     ))}
                   </div>
                 </section>
@@ -849,8 +878,13 @@ export default function Home() {
                   )}
                   {/* 同样最大 3 列，保证宽度充足 */}
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 sm:gap-6">
-                    {otherRooms.map((room) => (
-                      <RoomCard key={room.id} room={room} onJoin={handleRoomCardClick} />
+                    {otherRooms.map((room, index) => (
+                      <RoomCard
+                        key={room.id}
+                        room={room}
+                        onJoin={handleRoomCardClick}
+                        guideAnchor={recentRooms.length === 0 && index === 0}
+                      />
                     ))}
                   </div>
                 </section>
@@ -992,6 +1026,8 @@ export default function Home() {
         text={siteAnnouncement?.text || ''}
         onClose={handleCloseSiteAnnouncement}
       />
+
+      <UserGuideTour scope="home" paused={siteAnnouncementOpen || showCreate || showJoin} delayMs={1000} />
     </div>
   );
 }

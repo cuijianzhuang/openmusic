@@ -3,5 +3,5 @@
     "优化异常源跳过逻辑，新增跨源取链逻辑",
     "优化其他已知问题"
   ],
-  "forcePrompt": true
+  "forcePrompt": false
 }

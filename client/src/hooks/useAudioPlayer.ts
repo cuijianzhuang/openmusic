@@ -449,18 +449,37 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     controller.enqueue(async () => {
       if (isSongPreviewSuppressingRoom()) return;
       const liveRoom = useRoomStore.getState().room;
-      if (!liveRoom?.current || skippingRef.current) return;
+      if (!liveRoom?.current || !liveRoom.isPlaying || skippingRef.current) return;
       const song = liveRoom.current;
       const audio = controller.audio;
       if (!isAudioBoundToQueue(audio, song.queueId)) return;
       if (shouldSkipForEndedTrackKey(song, audio)) return;
       if (!playbackStateMatchesCurrentTrack(song)) return;
       if (!audio.src) return;
+
+      // 长时间后台后媒体可能 error / 签名失效，先换签再续播
+      if (audio.error || audio.networkState === HTMLMediaElement.NETWORK_NO_SOURCE) {
+        await reloadAudioWithFreshSign(audio);
+        if (!liveRoom.isPlaying) return;
+      }
+
       const result = await applyVisibilityResume(audio, {
         song,
         capTime: (time, mediaDur) => capSeekTime(time, song, mediaDur),
         tvMode,
       });
+
+      // 媒体错误时再换签重试（常见于抢焦点后解码器被掐 / 签名过期）
+      if (result === 'error' && audio.paused && liveRoom.isPlaying) {
+        await reloadAudioWithFreshSign(audio);
+        const retry = await applyVisibilityResume(audio, {
+          song,
+          capTime: (time, mediaDur) => capSeekTime(time, song, mediaDur),
+          tvMode,
+        });
+        handleSyncResult(retry, audio, liveRoom, song);
+        return;
+      }
 
       handleSyncResult(result, audio, liveRoom, song);
     });
@@ -1224,26 +1243,54 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     applySync();
   }, [isPlaybackLeader, tvMode, room?.current?.queueId, trackLoading, applySync, controller]);
 
-  // visibilitychange：切走时不做任何事；切回时仅软恢复（浏览器暂停了才 play）
+  // visibilitychange / pageshow / focus：切走不做任何事；切回强制对齐并续播
   useEffect(() => {
     installBackgroundPlaybackGuards();
-    const onVisibilityChange = () => {
+    let resumeTimer: number | null = null;
+
+    const resumeFromForeground = () => {
       if (document.hidden) return;
       if (isSongPreviewSuppressingRoom()) return;
 
       const liveRoom = useRoomStore.getState().room;
-      if (!liveRoom?.current) return;
+      if (!liveRoom?.current || !liveRoom.isPlaying) return;
       if (!canSyncAudioForQueue(controller.audio, liveRoom.current.queueId)) return;
       if (!playbackStateMatchesCurrentTrack(liveRoom.current)) return;
       if (shouldSkipForEndedTrackKey(liveRoom.current, controller.audio)) return;
       if (useAudioStore.getState().trackLoading || skippingRef.current) return;
       if (!controller.audio.src) return;
 
+      tryFlushPendingSnapshot();
       applyVisibilitySync();
+
+      // 部分 Android WebView 抢焦点后首次 play 会静默失败，短延迟再补一次
+      if (resumeTimer != null) window.clearTimeout(resumeTimer);
+      resumeTimer = window.setTimeout(() => {
+        resumeTimer = null;
+        if (document.hidden) return;
+        const live = useRoomStore.getState().room;
+        const audio = controller.audio;
+        if (!live?.current || !live.isPlaying || !audio.src) return;
+        if (!audio.paused && !audio.ended) return;
+        if (!canSyncAudioForQueue(audio, live.current.queueId)) return;
+        applyVisibilitySync();
+      }, 400);
+    };
+
+    const onVisibilityChange = () => {
+      if (document.hidden) return;
+      resumeFromForeground();
     };
 
     document.addEventListener('visibilitychange', onVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('pageshow', resumeFromForeground);
+    window.addEventListener('focus', resumeFromForeground);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('pageshow', resumeFromForeground);
+      window.removeEventListener('focus', resumeFromForeground);
+      if (resumeTimer != null) window.clearTimeout(resumeTimer);
+    };
   }, [controller, applyVisibilitySync, shouldSkipForEndedTrackKey]);
 
   const handlePlayPause = useCallback(() => {

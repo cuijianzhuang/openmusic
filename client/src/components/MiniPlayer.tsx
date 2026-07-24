@@ -112,7 +112,7 @@ export default memo(function MiniPlayer({
   if (variant === 'immersive') {
     if (fmLoading) {
       return (
-        <div id="bottom-bar" className="mineradio-bottom-bar visible room-immersive-bottom mx-auto">
+        <div id="bottom-bar" data-guide="room-player" className="mineradio-bottom-bar visible room-immersive-bottom mx-auto">
           <div className="mineradio-progress-bar">
             <div className="mineradio-progress-fill" style={{ width: '0%' }} />
           </div>
@@ -144,7 +144,7 @@ export default memo(function MiniPlayer({
     if (!current) return null;
 
     return (
-      <div id="bottom-bar" className="mineradio-bottom-bar visible room-immersive-bottom mx-auto">
+      <div id="bottom-bar" data-guide="room-player" className="mineradio-bottom-bar visible room-immersive-bottom mx-auto">
         {(skipError || skipMsg) && (
           <p className={`mb-1 text-center text-[10px] ${skipMsg ? 'text-amber-300' : 'text-red-300'}`}>
             {skipMsg || skipError}
@@ -248,6 +248,7 @@ export default memo(function MiniPlayer({
             <Tooltip content="上报错误/提交意见">
               <button
                 type="button"
+                data-guide="room-report"
                 onClick={() => setReportOpen(true)}
                 className="mineradio-ctrl-btn"
                 aria-label="上报错误/提交意见"
@@ -270,7 +271,7 @@ export default memo(function MiniPlayer({
 
   if (fmLoading) {
     return (
-      <div className={playerBarClass}>
+      <div className={playerBarClass} data-guide="room-player">
         <div className="py-1.5 -my-1.5">
           <ProgressBar
             progress={0}
@@ -320,7 +321,7 @@ export default memo(function MiniPlayer({
 
   return (
 
-    <div className={playerBarClass}>
+    <div className={playerBarClass} data-guide="room-player" id="bottom-bar">
 
       {(skipError || skipMsg) && (
 
@@ -441,10 +442,11 @@ export default memo(function MiniPlayer({
         <PlayModeButton className="hidden h-8 w-8 sm:flex" iconClassName="h-4 w-4" />
 
         <VolumeControl compact className="flex-shrink-0" />
-        <FavoriteButton song={current} className="w-8 h-8 text-netease-muted hover:text-rose-300" />
+            <FavoriteButton song={current} className="w-8 h-8 text-netease-muted hover:text-rose-300" />
         <Tooltip content="上报错误/提交意见">
           <button
             type="button"
+            data-guide="room-report"
             onClick={() => setReportOpen(true)}
             className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center text-netease-muted transition-colors hover:text-white"
             aria-label="上报错误/提交意见"

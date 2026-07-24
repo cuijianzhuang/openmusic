@@ -6,6 +6,7 @@ import {
   type ErrorReportSolutionNoticePayload,
 } from '../hooks/useSocket';
 import ErrorReportSolutionPopup from './ErrorReportSolutionPopup';
+import { setGuidePauseReason } from '../lib/guidePause';
 
 function enqueueUnique(
   queue: ErrorReportSolutionNoticePayload[],
@@ -73,6 +74,12 @@ export default function ErrorReportSolutionGate() {
   }, [pushNotice]);
 
   useEffect(() => subscribeErrorReportSolution(pushNotice), [pushNotice]);
+
+  useEffect(() => {
+    const open = Boolean(current);
+    setGuidePauseReason('error-report-solution', open);
+    return () => setGuidePauseReason('error-report-solution', false);
+  }, [current]);
 
   return (
     <ErrorReportSolutionPopup

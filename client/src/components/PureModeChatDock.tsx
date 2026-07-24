@@ -63,6 +63,7 @@ export default function PureModeChatDock() {
 
       <button
         type="button"
+        data-guide="room-chat"
         onMouseEnter={isLgUp ? handleOpen : undefined}
         onClick={!isLgUp ? handleToggle : undefined}
         className={`fixed right-0 top-1/2 z-50 flex -translate-y-1/2 items-center gap-1 rounded-l-xl border border-r-0 border-white/10 bg-netease-card/90 py-3 pl-2 pr-1.5 text-netease-muted shadow-lg backdrop-blur-md transition-all duration-200 hover:bg-netease-card hover:text-white ${

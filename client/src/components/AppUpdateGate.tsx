@@ -10,6 +10,7 @@ import {
   LOCAL_APP_BUILD_ID,
   type AppVersionInfo,
 } from '../lib/appVersion';
+import { setGuidePauseReason } from '../lib/guidePause';
 
 const POLL_MS = 3 * 60 * 1000;
 
@@ -20,6 +21,11 @@ export default function AppUpdateGate() {
   const [reloading, setReloading] = useState(false);
   /** 本挂载周期内是否已自动弹过一次，避免退房间/切页后轮询再次强开 */
   const autoOpenedRef = useRef(false);
+
+  useEffect(() => {
+    setGuidePauseReason('app-update', open);
+    return () => setGuidePauseReason('app-update', false);
+  }, [open]);
 
   useEffect(() => {
     let cancelled = false;
