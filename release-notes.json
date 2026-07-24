@@ -5,5 +5,5 @@
     "优化房间设置布局，防止上蹿下跳",
     "优化其他已知问题"
   ],
-  "forcePrompt": true
+  "forcePrompt": false
 }

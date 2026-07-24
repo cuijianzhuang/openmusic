@@ -23,3 +23,13 @@ export function getSourceShortLabel(source?: MusicSource): string {
   if (!source) return SOURCE_SHORT_LABELS.netease;
   return SOURCE_SHORT_LABELS[source] ?? SOURCE_SHORT_LABELS.netease;
 }
+
+/** 跨源取链 tip：红点无音源，已通过绿点获取到音源 */
+export function formatCrossSourceTip(
+  originalSource?: MusicSource,
+  fromSource?: MusicSource | null,
+): string {
+  const original = getSourceShortLabel(originalSource);
+  const from = fromSource ? getSourceShortLabel(fromSource) : '其他平台';
+  return `${original}无音源，已通过${from}获取到音源`;
+}

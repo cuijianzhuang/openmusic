@@ -3117,7 +3117,7 @@ io.on('connection', (socket) => {
     callback?.({ success: true });
   });
 
-  socket.on('report_playback_media', ({ trackId, url, qualityLabel, crossSource } = {}, callback) => {
+  socket.on('report_playback_media', ({ trackId, url, qualityLabel, crossSource, crossSourceFrom } = {}, callback) => {
     if (rejectReadOnly(socket, callback)) return;
     if (rejectRateLimited(socket, limitSocketAction, 'report_playback_media', callback)) return;
 
@@ -3127,7 +3127,13 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const result = setSharedPlaybackMedia(roomId, { trackId, url, qualityLabel, crossSource });
+    const result = setSharedPlaybackMedia(roomId, {
+      trackId,
+      url,
+      qualityLabel,
+      crossSource,
+      crossSourceFrom,
+    });
     if (result.error) {
       callback?.({ success: false, error: result.error });
       return;

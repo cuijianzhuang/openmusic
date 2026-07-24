@@ -281,6 +281,8 @@ export interface PlaybackState {
   mediaUrl?: string;
   mediaQuality?: string;
   mediaCrossSource?: boolean;
+  /** 跨源取到音源的平台：netease / tencent / kugou */
+  mediaCrossSourceFrom?: MusicSource;
 }
 
 /** 房间广播：当前曲媒体地址（成员取链成功后分享） */
@@ -290,6 +292,7 @@ export interface PlaybackMediaShare {
   url: string;
   qualityLabel?: string;
   crossSource?: boolean;
+  crossSourceFrom?: MusicSource;
 }
 
 export interface RoomSummary {

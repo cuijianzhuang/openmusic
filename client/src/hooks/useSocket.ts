@@ -842,6 +842,7 @@ export function useSocket() {
     url: string;
     qualityLabel?: string;
     crossSource?: boolean;
+    crossSourceFrom?: string;
   }): void => {
     const url = stripApiSignParams(String(payload.url || '').trim());
     const trackId = String(payload.trackId || '').trim();
@@ -853,6 +854,7 @@ export function useSocket() {
         url,
         qualityLabel: payload.qualityLabel,
         crossSource: Boolean(payload.crossSource),
+        crossSourceFrom: payload.crossSourceFrom,
       },
       { success: false },
     );

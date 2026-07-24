@@ -48,6 +48,10 @@ import {
   invalidateTrackUrlCache,
   invalidateUnloadedSongUrlCache,
   isTrackCrossSource,
+  markTrackCrossSource,
+  isCachedUrlCrossSource,
+  getCachedUrlCrossSourceFrom,
+  getTrackCrossSourceFrom,
 } from '../lib/songPreloadCache';
 import { refreshSignedApiUrl, stripApiSignParams } from '../lib/signedApiUrl';
 import {
@@ -714,6 +718,9 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
                 || (!beforeLocked && isPlaybackQualityLockedToLowest());
               notifyLocalRecoveryToast(song, { qualityDowngraded, reason: 'media_quality_fallback' });
               runtime.tempRetries.current = 0;
+              if (isCachedUrlCrossSource(song) || isTrackCrossSource(song)) {
+                markTrackCrossSource(song, getCachedUrlCrossSourceFrom(song));
+              }
               const freshFallback = (await refreshSignedApiUrl(fallbackUrl)) || fallbackUrl;
               controller.enqueue(async () => {
                 const a = controller.audio;
@@ -953,6 +960,8 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
 
         let url: string;
         let qualityLabel: string | undefined;
+        let crossSource = false;
+        let crossSourceFrom: ReturnType<typeof getTrackCrossSourceFrom>;
         try {
           let timeoutId = 0;
           const resolved = await Promise.race([
@@ -967,6 +976,13 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
           });
           url = (await refreshSignedApiUrl(resolved.url)) || resolved.url;
           qualityLabel = resolved.qualityLabel;
+          crossSource = Boolean(resolved.crossSource)
+            || isTrackCrossSource(current)
+            || isCachedUrlCrossSource(current);
+          crossSourceFrom = resolved.crossSourceFrom
+            || getCachedUrlCrossSourceFrom(current)
+            || getTrackCrossSourceFrom(current);
+          if (crossSource) markTrackCrossSource(current, crossSourceFrom);
           if (resolveFailCountRef.current?.queueId === queueId) {
             resolveFailCountRef.current = null;
           }
@@ -1044,7 +1060,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
         await waitForAudioMinimumReady(controller.audio);
         if (gen !== loadGeneration.current) return;
 
-        rememberSongUrl(trackKey, url, qualityLabel);
+        rememberSongUrl(trackKey, url, qualityLabel, crossSource, crossSourceFrom);
         if (qualityLabel) {
           useAudioStore.getState().setActualQuality(trackKey, qualityLabel);
         }
@@ -1053,7 +1069,8 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
           trackId: current.queueId,
           url: stripApiSignParams(url),
           qualityLabel,
-          crossSource: isTrackCrossSource(current),
+          crossSource,
+          crossSourceFrom,
         });
         syncMediaDuration(controller.audio, current, trackKey);
         tryFlushPendingSnapshot();

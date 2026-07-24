@@ -1,7 +1,8 @@
 import { memo } from 'react';
 import { Trash2, Zap, ThumbsUp, ThumbsDown, AlertTriangle, Ban, GripVertical, Shuffle } from 'lucide-react';
 import { getClientId } from '../../lib/clientId';
-import { useTrackCrossSource, useTrackSourceError } from '../../hooks/useSongSourceError';
+import { useTrackCrossSource, useTrackCrossSourceFrom, useTrackSourceError } from '../../hooks/useSongSourceError';
+import { formatCrossSourceTip } from '../../lib/sourceLabels';
 import type { RoomMemberTier, QueueItem } from '../../types';
 import SongCover from '../SongCover';
 import FavoriteButton from '../FavoriteButton';
@@ -82,6 +83,7 @@ function QueueRow({
   const canRemove = !song.isCurrent && (canControlPlayback || isMine);
   const hasSourceError = useTrackSourceError(song);
   const hasCrossSource = useTrackCrossSource(song);
+  const crossSourceFrom = useTrackCrossSourceFrom(song);
   const isAdminPriority = Boolean(song.ownerPriority && song.priorityBy);
   const isOwnerPriority = Boolean(song.ownerPriority && !song.priorityBy);
   const allowDrag = canReorder && !song.isCurrent;
@@ -140,7 +142,7 @@ function QueueRow({
             </Tooltip>
           )}
           {!hasSourceError && hasCrossSource && (
-            <Tooltip content="原平台无链，已跨源取链" side="bottom">
+            <Tooltip content={formatCrossSourceTip(song.source, crossSourceFrom)} side="bottom">
               <span className="inline-flex flex-shrink-0 items-center gap-0.5 rounded-md border border-amber-500/35 bg-amber-500/12 px-1.5 py-0.5 text-[9px] sm:text-[10px] font-medium leading-tight text-amber-300/95 max-w-[9rem] sm:max-w-none">
                 <Shuffle className="h-3 w-3 flex-shrink-0" />
                 <span className="truncate sm:whitespace-nowrap">跨源取链</span>

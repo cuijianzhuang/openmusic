@@ -913,7 +913,7 @@ export default function Home() {
                 value={createRoomName}
                 onChange={(e) => { setCreateRoomName(e.target.value); if (modalError) setModalError(''); }}
                 placeholder="例如：周杰伦专场、深夜EMO"
-                maxLength={30}
+                maxLength={20}
                 className={inputCls}
                 autoFocus
                 autoComplete="off"

@@ -26,10 +26,15 @@ const MAX_URL_CACHE = 24;
 const DEFAULT_PREFETCH_COUNT = 2;
 const URL_CACHE_STORAGE_KEY = 'openmusic:song-url-cache:v2';
 
-type CachedUrlEntry = { url: string; qualityLabel?: string };
+type CachedUrlEntry = {
+  url: string;
+  qualityLabel?: string;
+  crossSource?: boolean;
+  crossSourceFrom?: MusicSource;
+};
 
 type FetchUrlResult =
-  | { ok: true; url: string; qualityLabel?: string }
+  | { ok: true; url: string; qualityLabel?: string; crossSource?: boolean; crossSourceFrom?: MusicSource }
   | { ok: false; errorClass: PlaybackErrorClass };
 
 const urlCache = loadUrlCacheFromStorage();
@@ -37,6 +42,8 @@ const pendingFetches = new Map<string, Promise<FetchUrlResult>>();
 const sourceErrorKeys = new Set<string>();
 /** 原平台无链、已用其它平台 URL 兜底成功 */
 const crossSourceKeys = new Set<string>();
+/** 实际取到音源的平台（红点/绿点/蓝点） */
+const crossSourceFromByKey = new Map<string, MusicSource>();
 const sourceErrorListeners = new Set<() => void>();
 const pendingCrossSourceFallbacks = new Map<string, Promise<string | null>>();
 const crossSourceCandidateCache = new Map<string, { expiresAt: number; candidates: SearchResult[] }>();
@@ -62,33 +69,52 @@ export function isTrackCrossSource(song: Pick<QueueItem, 'queueId' | 'id' | 'sou
   return crossSourceKeys.has(trackKeyOf(song));
 }
 
+/** 跨源取到音源的平台（红点/绿点/蓝点） */
+export function getTrackCrossSourceFrom(
+  song: Pick<QueueItem, 'queueId' | 'id' | 'source'>,
+): MusicSource | undefined {
+  return crossSourceFromByKey.get(trackKeyOf(song));
+}
+
+function normalizeMusicSource(value: unknown): MusicSource | undefined {
+  if (value === 'netease' || value === 'tencent' || value === 'kugou') return value;
+  return undefined;
+}
+
 function markTrackSourceError(song: Pick<QueueItem, 'queueId' | 'id' | 'source'>) {
   const key = trackKeyOf(song);
   const clearedCross = crossSourceKeys.delete(key);
+  const clearedFrom = crossSourceFromByKey.delete(key);
   if (sourceErrorKeys.has(key)) {
-    if (clearedCross) notifySourceErrors();
+    if (clearedCross || clearedFrom) notifySourceErrors();
     return;
   }
   sourceErrorKeys.add(key);
   notifySourceErrors();
 }
 
-function markTrackCrossSource(song: Pick<QueueItem, 'queueId' | 'id' | 'source'>) {
+/** 跨源取链成功后打标（含下一曲预取；取链中途不打，一旦成功常显到离队） */
+export function markTrackCrossSource(
+  song: Pick<QueueItem, 'queueId' | 'id' | 'source'>,
+  from?: MusicSource,
+) {
   const key = trackKeyOf(song);
   const clearedError = sourceErrorKeys.delete(key);
-  if (crossSourceKeys.has(key)) {
-    if (clearedError) notifySourceErrors();
-    return;
+  const nextFrom = normalizeMusicSource(from);
+  const had = crossSourceKeys.has(key);
+  const prevFrom = crossSourceFromByKey.get(key);
+  if (nextFrom && prevFrom !== nextFrom) {
+    crossSourceFromByKey.set(key, nextFrom);
   }
+  if (had && !clearedError && (!nextFrom || prevFrom === nextFrom)) return;
   crossSourceKeys.add(key);
   notifySourceErrors();
 }
 
+/** 仅清除源异常标，不清除跨源标（跨源一旦确认应保持到曲目离队） */
 export function clearTrackSourceError(song: Pick<QueueItem, 'queueId' | 'id' | 'source'>) {
   const key = trackKeyOf(song);
-  const clearedError = sourceErrorKeys.delete(key);
-  const clearedCross = crossSourceKeys.delete(key);
-  if (!clearedError && !clearedCross) return;
+  if (!sourceErrorKeys.delete(key)) return;
   notifySourceErrors();
 }
 
@@ -105,6 +131,13 @@ export function pruneSourceErrors(activeSongs: Array<Pick<QueueItem, 'queueId' |
   for (const key of crossSourceKeys) {
     if (!activeKeys.has(key)) {
       crossSourceKeys.delete(key);
+      crossSourceFromByKey.delete(key);
+      changed = true;
+    }
+  }
+  for (const key of crossSourceFromByKey.keys()) {
+    if (!activeKeys.has(key)) {
+      crossSourceFromByKey.delete(key);
       changed = true;
     }
   }
@@ -124,6 +157,8 @@ function loadUrlCacheFromStorage(): Map<string, CachedUrlEntry> {
         map.set(key, {
           url: value.url,
           qualityLabel: typeof value.qualityLabel === 'string' ? value.qualityLabel : undefined,
+          crossSource: Boolean(value.crossSource),
+          crossSourceFrom: normalizeMusicSource(value.crossSourceFrom),
         });
       }
     }
@@ -237,12 +272,22 @@ async function fetchCrossSourceFallback(song: QueueItem): Promise<string | null>
         const quality = getLowestQuality(candidate.source) ?? getUserPlaybackQuality(candidate.source);
         const info = await getSongUrlInfo(candidate, quality);
         if (!info.url || isBlockedPlaybackUrl(info.url)) continue;
+        const from = normalizeMusicSource(candidate.source);
         urlCache.set(urlCacheKey(song, getEffectivePlaybackQuality(song)), {
           url: info.url,
           qualityLabel: info.qualityLabel,
+          crossSource: true,
+          crossSourceFrom: from,
+        });
+        urlCache.set(trackKeyOf(song), {
+          url: info.url,
+          qualityLabel: info.qualityLabel,
+          crossSource: true,
+          crossSourceFrom: from,
         });
         trimUrlCache();
-        markTrackCrossSource(song);
+        // 取链成功即打标（含下一曲预取）；中途未拿到 URL 前不会走到这里
+        markTrackCrossSource(song, from);
         publishActualQuality(song, info.qualityLabel);
         return info.url;
       } catch {
@@ -359,7 +404,13 @@ async function fetchSongUrlOnce(
         urlCache.delete(key);
         persistUrlCacheToStorage();
       } else {
-        return { ok: true, url: cached.url, qualityLabel: cached.qualityLabel };
+        return {
+          ok: true,
+          url: cached.url,
+          qualityLabel: cached.qualityLabel,
+          crossSource: Boolean(cached.crossSource),
+          crossSourceFrom: normalizeMusicSource(cached.crossSourceFrom),
+        };
       }
     }
   }
@@ -424,8 +475,15 @@ async function fetchSongUrl(
   const first = await fetchSongUrlOnce(song, quality, options);
   if (first.ok) {
     clearTrackSourceError(song);
+    // 命中跨源缓存时补打标，避免刷新/重取后标丢失
+    if (first.crossSource) markTrackCrossSource(song, first.crossSourceFrom);
     publishActualQuality(song, first.qualityLabel);
-    return { url: first.url, qualityLabel: first.qualityLabel };
+    return {
+      url: first.url,
+      qualityLabel: first.qualityLabel,
+      crossSource: Boolean(first.crossSource),
+      crossSourceFrom: first.crossSourceFrom,
+    };
   }
 
   if (first.errorClass === 'temporary') {
@@ -437,13 +495,25 @@ async function fetchSongUrl(
     const fallback = await tryLowestQualityFetch(song);
     if (fallback.ok) {
       clearTrackSourceError(song);
+      if (fallback.crossSource) markTrackCrossSource(song, fallback.crossSourceFrom);
       publishActualQuality(song, fallback.qualityLabel);
-      return { url: fallback.url, qualityLabel: fallback.qualityLabel };
+      return {
+        url: fallback.url,
+        qualityLabel: fallback.qualityLabel,
+        crossSource: Boolean(fallback.crossSource),
+        crossSourceFrom: fallback.crossSourceFrom,
+      };
     }
   }
 
-  const crossSource = await fetchCrossSourceFallback(song as QueueItem);
-  if (crossSource) return { url: crossSource };
+  const crossSourceUrl = await fetchCrossSourceFallback(song as QueueItem);
+  if (crossSourceUrl) {
+    return {
+      url: crossSourceUrl,
+      crossSource: true,
+      crossSourceFrom: getTrackCrossSourceFrom(song),
+    };
+  }
 
   // 跨源也失败：打「将跳过」异常标；轮到播放时主控直接 source_error 切歌
   markTrackSourceError(song);
@@ -471,13 +541,39 @@ export async function fetchServiceFallbackUrl(
   return fetchCrossSourceFallback(song);
 }
 
-export function rememberSongUrl(trackKey: string, url: string, qualityLabel?: string) {
+export function rememberSongUrl(
+  trackKey: string,
+  url: string,
+  qualityLabel?: string,
+  crossSource?: boolean,
+  crossSourceFrom?: MusicSource,
+) {
   const existing = urlCache.get(trackKey);
+  const from = normalizeMusicSource(crossSourceFrom) || existing?.crossSourceFrom;
   urlCache.set(trackKey, {
     url,
     qualityLabel: qualityLabel?.trim() || existing?.qualityLabel,
+    crossSource: crossSource ?? existing?.crossSource,
+    crossSourceFrom: from,
   });
   trimUrlCache();
+}
+
+/** 缓存中该曲是否为跨源链 */
+export function isCachedUrlCrossSource(
+  song: Pick<QueueItem, 'queueId' | 'id' | 'source' | 'url'>,
+): boolean {
+  const key = urlCacheKey(song, getEffectivePlaybackQuality(song));
+  const cached = urlCache.get(key) || urlCache.get(trackKeyOf(song));
+  return Boolean(cached?.crossSource);
+}
+
+export function getCachedUrlCrossSourceFrom(
+  song: Pick<QueueItem, 'queueId' | 'id' | 'source' | 'url'>,
+): MusicSource | undefined {
+  const key = urlCacheKey(song, getEffectivePlaybackQuality(song));
+  const cached = urlCache.get(key) || urlCache.get(trackKeyOf(song));
+  return normalizeMusicSource(cached?.crossSourceFrom) || getTrackCrossSourceFrom(song);
 }
 
 /**
@@ -486,7 +582,7 @@ export function rememberSongUrl(trackKey: string, url: string, qualityLabel?: st
  */
 export function seedSharedSongUrl(
   song: Pick<QueueItem, 'queueId' | 'id' | 'source' | 'url'>,
-  entry: { url: string; qualityLabel?: string; crossSource?: boolean },
+  entry: { url: string; qualityLabel?: string; crossSource?: boolean; crossSourceFrom?: MusicSource },
 ) {
   const raw = String(entry.url || '').trim();
   if (!raw || isBlockedPlaybackUrl(raw)) return false;
@@ -496,13 +592,15 @@ export function seedSharedSongUrl(
 
   const qualityLabel = entry.qualityLabel?.trim() || undefined;
   const key = urlCacheKey(song, getEffectivePlaybackQuality(song));
-  urlCache.set(key, { url, qualityLabel });
-  urlCache.set(trackKeyOf(song), { url, qualityLabel });
+  const crossSource = Boolean(entry.crossSource);
+  const crossSourceFrom = normalizeMusicSource(entry.crossSourceFrom);
+  urlCache.set(key, { url, qualityLabel, crossSource: crossSource || undefined, crossSourceFrom });
+  urlCache.set(trackKeyOf(song), { url, qualityLabel, crossSource: crossSource || undefined, crossSourceFrom });
   trimUrlCache();
   persistUrlCacheToStorage();
 
-  if (entry.crossSource) {
-    markTrackCrossSource(song);
+  if (crossSource) {
+    markTrackCrossSource(song, crossSourceFrom);
   } else if (sourceErrorKeys.delete(trackKeyOf(song))) {
     notifySourceErrors();
   }
@@ -518,17 +616,16 @@ export function applySharedPlaybackMedia(
     url?: string;
     qualityLabel?: string;
     crossSource?: boolean;
+    crossSourceFrom?: MusicSource;
   } | null | undefined,
 ) {
-  const song = room?.current;
-  const trackId = String(media?.trackId || '').trim();
-  const url = String(media?.url || '').trim();
-  if (!song || !trackId || !url) return false;
-  if (song.queueId !== trackId) return false;
-  return seedSharedSongUrl(song, {
-    url,
-    qualityLabel: media?.qualityLabel,
+  if (!room?.current || !media?.url || !media.trackId) return false;
+  if (room.current.queueId !== media.trackId) return false;
+  return seedSharedSongUrl(room.current, {
+    url: media.url,
+    qualityLabel: media.qualityLabel,
     crossSource: Boolean(media?.crossSource),
+    crossSourceFrom: media?.crossSourceFrom,
   });
 }
 
@@ -540,6 +637,7 @@ export function applySharedPlaybackMediaFromState(
     mediaUrl?: string;
     mediaQuality?: string;
     mediaCrossSource?: boolean;
+    mediaCrossSourceFrom?: MusicSource;
   } | null | undefined,
 ) {
   if (!state?.mediaUrl) return false;
@@ -548,6 +646,7 @@ export function applySharedPlaybackMediaFromState(
     url: state.mediaUrl,
     qualityLabel: state.mediaQuality,
     crossSource: state.mediaCrossSource,
+    crossSourceFrom: state.mediaCrossSourceFrom,
   });
 }
 
@@ -563,7 +662,7 @@ export function syncActualQualityFromCache(song: Pick<QueueItem, 'queueId' | 'id
 export async function resolveSongUrl(
   song: QueueItem,
   options: { refresh?: boolean } = {},
-): Promise<{ url: string; qualityLabel?: string }> {
+): Promise<{ url: string; qualityLabel?: string; crossSource?: boolean; crossSourceFrom?: MusicSource }> {
   const result = await fetchSongUrl(song, options);
   if (result?.url) return result;
   // service 失败会 markTrackSourceError；temporary 不会
@@ -634,7 +733,7 @@ export function prefetchQueueSongs(
   pruneSourceErrors(retain);
 
   for (const song of targets) {
-    // 预取：当前音质 → 跨源（不降档）；成功打跨源标，彻底失败打「将跳过」
+    // 预取：当前音质 → 跨源（不降档）；跨源成功即常显角标；彻底失败打「将跳过」
     void fetchSongUrl(song, { allowQualityDowngrade: false });
   }
 }

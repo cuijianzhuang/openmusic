@@ -3467,7 +3467,7 @@ export default function Room() {
               type="text"
               value={renameDraft}
               onChange={(e) => setRenameDraft(e.target.value)}
-              maxLength={30}
+              maxLength={20}
               placeholder="房间名称"
               className="w-full bg-netease-dark border border-netease-border rounded-xl px-4 py-2.5 text-white text-sm placeholder:text-netease-muted/50 focus:outline-none focus:border-netease-red/50 mb-5"
               onKeyDown={(e) => e.key === 'Enter' && void handleRenameRoom()}

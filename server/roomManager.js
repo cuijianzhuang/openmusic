@@ -709,7 +709,7 @@ function truncateByGrapheme(text, maxChars) {
 
 function normalizeRoomName(name, roomId) {
   const trimmed = String(name || "").trim();
-  return truncateByGrapheme(trimmed, 30) || `房间 ${roomId}`;
+  return truncateByGrapheme(trimmed, 20) || `房间 ${roomId}`;
 }
 
 function bumpPlaybackState(room) {
@@ -755,6 +755,7 @@ export function buildPlaybackState(room) {
     state.mediaUrl = room.sharedMediaUrl.trim();
     if (room.sharedMediaQualityLabel) state.mediaQuality = String(room.sharedMediaQualityLabel).slice(0, 40);
     if (room.sharedMediaCrossSource) state.mediaCrossSource = true;
+    if (room.sharedMediaCrossSourceFrom) state.mediaCrossSourceFrom = room.sharedMediaCrossSourceFrom;
   }
   return state;
 }
@@ -765,6 +766,7 @@ function clearSharedPlaybackMedia(room) {
   room.sharedMediaTrackId = "";
   room.sharedMediaQualityLabel = "";
   room.sharedMediaCrossSource = false;
+  room.sharedMediaCrossSourceFrom = "";
   room.sharedMediaAt = 0;
 }
 
@@ -797,6 +799,10 @@ export function setSharedPlaybackMedia(roomId, payload = {}) {
   room.sharedMediaTrackId = trackId;
   room.sharedMediaQualityLabel = String(payload.qualityLabel || "").trim().slice(0, 40);
   room.sharedMediaCrossSource = Boolean(payload.crossSource);
+  const from = String(payload.crossSourceFrom || "").trim();
+  room.sharedMediaCrossSourceFrom = (
+    from === "netease" || from === "tencent" || from === "kugou"
+  ) ? from : "";
   room.sharedMediaAt = Date.now();
 
   return {
@@ -808,6 +814,7 @@ export function setSharedPlaybackMedia(roomId, payload = {}) {
       url: room.sharedMediaUrl,
       qualityLabel: room.sharedMediaQualityLabel || undefined,
       crossSource: room.sharedMediaCrossSource || undefined,
+      crossSourceFrom: room.sharedMediaCrossSourceFrom || undefined,
     },
   };
 }
@@ -839,6 +846,7 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
     sharedMediaTrackId: "",
     sharedMediaQualityLabel: "",
     sharedMediaCrossSource: false,
+    sharedMediaCrossSourceFrom: "",
     sharedMediaAt: 0,
     users: new Map(),
     ownerConnectionId: null,
