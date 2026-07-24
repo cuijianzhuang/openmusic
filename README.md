@@ -57,7 +57,7 @@ mkdir -p data/downloads && touch data/.env data/setup.lock && echo '{}' > data/r
 docker compose -f docker-compose.full.yml up -d
 ```
 
-打开 `http://<IP>:4000`，Redis 和 Meting 已自动配好，填个站点域名就完事。向导完成后自动重启。
+打开 `http://<IP>:4000`，Redis 和 Meting 已自动配好，填个站点域名就完事。向导完成后自动重启.。
 
 > 不需要内置 Meting？改用 `docker-compose.yml`。宝塔用户见 [宝塔部署](deploy/DEPLOY-BAOTA.md)。
 > 更新：`docker compose pull && docker compose up -d`
@@ -111,17 +111,17 @@ npm run install:all && npm run build && npm start
 
 ### ⚙️ 点歌规则（房主 / 管理员）
 
-| 规则 | 说明 |
-|------|------|
-| 允许成员点歌 | 关闭后仅房主与管理员可点 |
-| 允许成员插队 | 成员可对自己的点歌插队 |
-| 进房等待时间 | 新成员停留满时长后才能点歌 |
-| 每人最多点歌 | 队列中每人上限，`0` = 不限 |
-| 点歌冷却 | 不限制 / 10s / 30s / 60s / 120s |
-| 队列长度上限 | 50 / 100 / 200 |
-| 禁播歌曲 | 按歌名，跨平台均不可点 |
-| 踩歌切歌 | 按人数或在线比例 |
-| 退出后清除已点 | 离房超时后清除其待播 |
+| 规则           | 说明                            |
+| -------------- | ------------------------------- |
+| 允许成员点歌   | 关闭后仅房主与管理员可点        |
+| 允许成员插队   | 成员可对自己的点歌插队          |
+| 进房等待时间   | 新成员停留满时长后才能点歌      |
+| 每人最多点歌   | 队列中每人上限，`0` = 不限      |
+| 点歌冷却       | 不限制 / 10s / 30s / 60s / 120s |
+| 队列长度上限   | 50 / 100 / 200                  |
+| 禁播歌曲       | 按歌名，跨平台均不可点          |
+| 踩歌切歌       | 按人数或在线比例                |
+| 退出后清除已点 | 离房超时后清除其待播            |
 
 ---
 
@@ -193,18 +193,18 @@ Capacitor 远程 URL 壳，前端更新无需重打包。GitHub Actions 提供 A
 
 ## 🧱 技术栈
 
-| 层级 | 技术 |
-|------|------|
+| 层级 | 技术                                                                        |
+| ---- | --------------------------------------------------------------------------- |
 | 前端 | React · Vite · Tailwind CSS · Socket.IO Client · Three.js / R3F · Capacitor |
-| 后端 | Node.js · Express · Socket.IO · Redis（必需） |
+| 后端 | Node.js · Express · Socket.IO · Redis（必需）                               |
 
 ---
 
 ## 🙏 致谢
 
-| 项目 | 作者 | 说明 |
-|------|------|------|
-| [Mineradio](https://github.com/XxHuberrr/Mineradio) | [@XxHuberrr](https://github.com/XxHuberrr) | 星河粒子、沉浸玻璃质感、舞台歌词等 |
+| 项目                                                               | 作者                                         | 说明                                    |
+| ------------------------------------------------------------------ | -------------------------------------------- | --------------------------------------- |
+| [Mineradio](https://github.com/XxHuberrr/Mineradio)                | [@XxHuberrr](https://github.com/XxHuberrr)   | 星河粒子、沉浸玻璃质感、舞台歌词等      |
 | [sonic-topography](https://github.com/yin-yizhen/sonic-topography) | [@yin-yizhen](https://github.com/yin-yizhen) | 「声波地形」着色器（仅限个人 / 非商业） |
 
 ## 🔗 友情链接
