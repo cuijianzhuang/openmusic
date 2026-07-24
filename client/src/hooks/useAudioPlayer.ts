@@ -47,7 +47,9 @@ import {
   fetchServiceFallbackUrl,
   invalidateTrackUrlCache,
   invalidateUnloadedSongUrlCache,
+  isTrackCrossSource,
 } from '../lib/songPreloadCache';
+import { refreshSignedApiUrl, stripApiSignParams } from '../lib/signedApiUrl';
 import {
   classifyMediaPlaybackError,
   isSourceUnavailableMessage,
@@ -73,7 +75,6 @@ import {
   isAudioBoundToQueue,
   shouldSkipTrackLoad,
 } from '../lib/audioTrackBinding';
-import { refreshSignedApiUrl } from '../lib/signedApiUrl';
 import { debugLine, debugLog } from '../lib/debugTools';
 import {
   getLowestQuality,
@@ -304,7 +305,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
   const setRetryPlayback = useAudioStore((s) => s.setRetryPlayback);
   const playbackVersion = useAudioStore((s) => s.playbackVersion);
   const trackReloadNonce = useAudioStore((s) => s.trackReloadNonce);
-  const { togglePlay, seek, skipSong, finishSong, requestSkip: requestSkipVote } = useSocket();
+  const { togglePlay, seek, skipSong, finishSong, requestSkip: requestSkipVote, reportPlaybackMedia } = useSocket();
 
   const endedTrackKey = useRef<string | null>(null);
   const loadGeneration = useRef(0);
@@ -1028,6 +1029,13 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
         if (qualityLabel) {
           useAudioStore.getState().setActualQuality(trackKey, qualityLabel);
         }
+        // 向房间分享当前曲链接，后续进房者可直接命中缓存
+        reportPlaybackMedia({
+          trackId: current.queueId,
+          url: stripApiSignParams(url),
+          qualityLabel,
+          crossSource: isTrackCrossSource(current),
+        });
         syncMediaDuration(controller.audio, current, trackKey);
         tryFlushPendingSnapshot();
 
@@ -1100,6 +1108,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     setNeedsAudioUnlock,
     playAudio,
     applyPlaybackResult,
+    reportPlaybackMedia,
   ]);
 
   // 主控 loading 过久：强制切歌，防止取链挂起/跳歌失败后全屋卡死（刷新才能恢复）

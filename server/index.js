@@ -90,6 +90,7 @@ import {
   getRoomInternal,
   buildPlaybackState,
   buildQueueSnapshot,
+  setSharedPlaybackMedia,
   requestJump,
   reorderQueue,
   toggleQueueLike,
@@ -3087,6 +3088,28 @@ io.on('connection', (socket) => {
 
     broadcastRoomUpdate(roomId);
     callback?.({ success: true });
+  });
+
+  socket.on('report_playback_media', ({ trackId, url, qualityLabel, crossSource } = {}, callback) => {
+    if (rejectReadOnly(socket, callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, 'report_playback_media', callback)) return;
+
+    const roomId = socketToRoom.get(socket.id);
+    if (!roomId) {
+      callback?.({ success: false, error: '未加入房间' });
+      return;
+    }
+
+    const result = setSharedPlaybackMedia(roomId, { trackId, url, qualityLabel, crossSource });
+    if (result.error) {
+      callback?.({ success: false, error: result.error });
+      return;
+    }
+
+    if (result.updated && result.media) {
+      io.to(roomId).emit('playback_media', result.media);
+    }
+    callback?.({ success: true, updated: Boolean(result.updated) });
   });
 
   socket.on('skip_song', async ({ reason } = {}, callback) => {

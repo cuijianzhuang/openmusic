@@ -1,6 +1,7 @@
 import { getSongUrlInfo, getTrackKey, searchSongs } from '../api/music';
 import { isHttpsPageContext } from './mediaProxyUrl';
 import { shouldProxySongPlaybackUrl } from './roomVisualPreset';
+import { stripApiSignParams } from './signedApiUrl';
 import {
   getLowestQuality,
   getUserPlaybackQuality,
@@ -477,6 +478,77 @@ export function rememberSongUrl(trackKey: string, url: string, qualityLabel?: st
     qualityLabel: qualityLabel?.trim() || existing?.qualityLabel,
   });
   trimUrlCache();
+}
+
+/**
+ * 注入房间分享的当前曲播放地址，避免新进房成员重复打上游取链。
+ * url 应已去掉本机 API 签名参数；播放前仍会 refreshSignedApiUrl。
+ */
+export function seedSharedSongUrl(
+  song: Pick<QueueItem, 'queueId' | 'id' | 'source' | 'url'>,
+  entry: { url: string; qualityLabel?: string; crossSource?: boolean },
+) {
+  const raw = String(entry.url || '').trim();
+  if (!raw || isBlockedPlaybackUrl(raw)) return false;
+
+  const url = stripApiSignParams(raw);
+  if (!url) return false;
+
+  const qualityLabel = entry.qualityLabel?.trim() || undefined;
+  const key = urlCacheKey(song, getEffectivePlaybackQuality(song));
+  urlCache.set(key, { url, qualityLabel });
+  urlCache.set(trackKeyOf(song), { url, qualityLabel });
+  trimUrlCache();
+  persistUrlCacheToStorage();
+
+  if (entry.crossSource) {
+    markTrackCrossSource(song);
+  } else if (sourceErrorKeys.delete(trackKeyOf(song))) {
+    notifySourceErrors();
+  }
+  if (qualityLabel) publishActualQuality(song, qualityLabel);
+  return true;
+}
+
+/** 若分享的 media 对应当前曲，写入本机 URL 缓存 */
+export function applySharedPlaybackMedia(
+  room: Pick<RoomState, 'current'> | null | undefined,
+  media: {
+    trackId?: string;
+    url?: string;
+    qualityLabel?: string;
+    crossSource?: boolean;
+  } | null | undefined,
+) {
+  const song = room?.current;
+  const trackId = String(media?.trackId || '').trim();
+  const url = String(media?.url || '').trim();
+  if (!song || !trackId || !url) return false;
+  if (song.queueId !== trackId) return false;
+  return seedSharedSongUrl(song, {
+    url,
+    qualityLabel: media?.qualityLabel,
+    crossSource: Boolean(media?.crossSource),
+  });
+}
+
+/** 从 playback_state 注入共享媒体链 */
+export function applySharedPlaybackMediaFromState(
+  room: Pick<RoomState, 'current'> | null | undefined,
+  state: {
+    trackId?: string;
+    mediaUrl?: string;
+    mediaQuality?: string;
+    mediaCrossSource?: boolean;
+  } | null | undefined,
+) {
+  if (!state?.mediaUrl) return false;
+  return applySharedPlaybackMedia(room, {
+    trackId: state.trackId,
+    url: state.mediaUrl,
+    qualityLabel: state.mediaQuality,
+    crossSource: state.mediaCrossSource,
+  });
 }
 
 /** 从缓存恢复当前曲实际音质（跳过重新加载时用） */

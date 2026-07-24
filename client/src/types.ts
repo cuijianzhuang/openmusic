@@ -261,6 +261,19 @@ export interface PlaybackState {
   startedAt: number;
   currentTime: number;
   updatedAt: number;
+  /** 房间内已解析的当前曲播放地址（可选，进房加速） */
+  mediaUrl?: string;
+  mediaQuality?: string;
+  mediaCrossSource?: boolean;
+}
+
+/** 房间广播：当前曲媒体地址（成员取链成功后分享） */
+export interface PlaybackMediaShare {
+  roomId: string;
+  trackId: string;
+  url: string;
+  qualityLabel?: string;
+  crossSource?: boolean;
 }
 
 export interface RoomSummary {

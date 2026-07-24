@@ -9,13 +9,18 @@ import { useSongHistoryStore } from '../stores/songHistoryStore';
 import { useAudioStore } from '../stores/audioStore';
 import { songKey } from '../api/music';
 
-import type { ChatMention, ChatReplyRef, ChatMessage, FavoriteSong, PlaybackState, RoomState, Song, SongHistoryItem } from '../types';
+import type { ChatMention, ChatReplyRef, ChatMessage, FavoriteSong, PlaybackMediaShare, PlaybackState, RoomState, Song, SongHistoryItem } from '../types';
 
 import { stopSharedAudio } from '../lib/audioElement';
 import { resetDriftController } from '../lib/driftController';
 import { resetPhaseSync } from '../lib/playbackSync';
 import { resetSyncStateMachine } from '../lib/syncStateMachine';
-import { prefetchUpcomingFromRoom } from '../lib/songPreloadCache';
+import {
+  applySharedPlaybackMedia,
+  applySharedPlaybackMediaFromState,
+  prefetchUpcomingFromRoom,
+} from '../lib/songPreloadCache';
+import { stripApiSignParams } from '../lib/signedApiUrl';
 import { resetPlaybackStateCache } from '../lib/playbackState';
 import {
   schedulePlaybackState,
@@ -234,6 +239,11 @@ function applyJoinResponse(session: JoinSession, res: JoinAckResponse) {
   applyRoomSnapshot(res.room, true);
   applyJoinSnapshot(res.room, res.playbackState);
   applyJoinExtras(res.room, { messages: res.messages, chatHasMore: res.chatHasMore });
+
+  // 进房优先注入房间已分享的当前曲链接，再预取（命中缓存则免打上游）
+  if (res.playbackState) {
+    applySharedPlaybackMediaFromState(res.room, res.playbackState);
+  }
 
   const isTvSession = Boolean(session.readOnly);
   if (isTvSession) {
@@ -548,7 +558,15 @@ export function useSocket() {
     };
 
     const onPlaybackState = (state: PlaybackState) => {
+      const live = useRoomStore.getState().room;
+      if (live) applySharedPlaybackMediaFromState(live, state);
       schedulePlaybackState(state);
+    };
+
+    const onPlaybackMedia = (media: PlaybackMediaShare) => {
+      const live = useRoomStore.getState().room;
+      if (!live || live.id !== media.roomId) return;
+      applySharedPlaybackMedia(live, media);
     };
 
     const onQueueSnapshot = (payload: { queue?: RoomState['queue']; current?: RoomState['current'] }) => {
@@ -633,6 +651,8 @@ export function useSocket() {
     s.on('presence_update', onPresenceUpdate);
 
     s.on('playback_state', onPlaybackState);
+
+    s.on('playback_media', onPlaybackMedia);
 
     s.on('queue_snapshot', onQueueSnapshot);
 
@@ -816,7 +836,27 @@ export function useSocket() {
     return emitWithAck('finish_song', { queueId }, { success: false, error: '连接超时，请重试' });
   }, []);
 
-
+  /** 取链成功后上报当前曲媒体地址，供后续进房者免二次取链 */
+  const reportPlaybackMedia = useCallback((payload: {
+    trackId: string;
+    url: string;
+    qualityLabel?: string;
+    crossSource?: boolean;
+  }): void => {
+    const url = stripApiSignParams(String(payload.url || '').trim());
+    const trackId = String(payload.trackId || '').trim();
+    if (!url || !trackId) return;
+    void emitWithAck(
+      'report_playback_media',
+      {
+        trackId,
+        url,
+        qualityLabel: payload.qualityLabel,
+        crossSource: Boolean(payload.crossSource),
+      },
+      { success: false },
+    );
+  }, []);
 
   const togglePlay = useCallback((isPlaying: boolean): Promise<boolean> => {
     return emitWithAck('toggle_play', { isPlaying }, { success: false }).then((res) => res.success);
@@ -1411,6 +1451,7 @@ export function useSocket() {
 
     skipSong,
     finishSong,
+    reportPlaybackMedia,
 
     togglePlay,
 

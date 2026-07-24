@@ -729,10 +729,11 @@ export function buildPlaybackState(room) {
   const now = Date.now();
   const positionSec = getPlaybackTime(room);
   const durationSec = room.current ? getSongDurationSeconds(room.current) : 0;
-  return {
+  const trackId = room.current?.queueId || "";
+  const state = {
     roomId: room.id,
     version: room.playbackVersion || 0,
-    trackId: room.current?.queueId || "",
+    trackId,
     status: room.isPlaying ? "playing" : "paused",
     positionSec,
     durationSec: durationSec > 0 ? durationSec : 0,
@@ -740,6 +741,71 @@ export function buildPlaybackState(room) {
     startedAt: room.isPlaying && room.startedAt ? room.startedAt : 0,
     currentTime: positionSec,
     updatedAt: room.playbackUpdatedAt || now,
+  };
+  // 仅当共享链仍对应当前曲时下发，避免切歌后旧链误用
+  if (
+    trackId
+    && room.sharedMediaTrackId === trackId
+    && typeof room.sharedMediaUrl === "string"
+    && room.sharedMediaUrl.trim()
+  ) {
+    state.mediaUrl = room.sharedMediaUrl.trim();
+    if (room.sharedMediaQualityLabel) state.mediaQuality = String(room.sharedMediaQualityLabel).slice(0, 40);
+    if (room.sharedMediaCrossSource) state.mediaCrossSource = true;
+  }
+  return state;
+}
+
+function clearSharedPlaybackMedia(room) {
+  if (!room) return;
+  room.sharedMediaUrl = "";
+  room.sharedMediaTrackId = "";
+  room.sharedMediaQualityLabel = "";
+  room.sharedMediaCrossSource = false;
+  room.sharedMediaAt = 0;
+}
+
+/**
+ * 成员取链成功后上报，供后续进房者直接播，免重复打上游。
+ * @returns {{ updated: boolean, roomId?: string, media?: object, error?: string }}
+ */
+export function setSharedPlaybackMedia(roomId, payload = {}) {
+  const room = rooms.get(roomId);
+  if (!room) return { error: "房间不存在" };
+  const trackId = String(payload.trackId || "").trim();
+  const url = String(payload.url || "").trim();
+  if (!trackId || !url) return { error: "缺少 trackId 或 url" };
+  if (!room.current || room.current.queueId !== trackId) {
+    return { error: "非当前曲，已忽略" };
+  }
+  if (!/^https?:\/\//i.test(url) && !url.startsWith("/api/")) {
+    return { error: "非法播放地址" };
+  }
+  // 先到先得：当前曲已有共享链则不再覆盖，避免多人上报互相踩
+  if (
+    room.sharedMediaTrackId === trackId
+    && typeof room.sharedMediaUrl === "string"
+    && room.sharedMediaUrl.trim()
+  ) {
+    return { updated: false, roomId: room.id };
+  }
+
+  room.sharedMediaUrl = url.slice(0, 2000);
+  room.sharedMediaTrackId = trackId;
+  room.sharedMediaQualityLabel = String(payload.qualityLabel || "").trim().slice(0, 40);
+  room.sharedMediaCrossSource = Boolean(payload.crossSource);
+  room.sharedMediaAt = Date.now();
+
+  return {
+    updated: true,
+    roomId: room.id,
+    media: {
+      roomId: room.id,
+      trackId,
+      url: room.sharedMediaUrl,
+      qualityLabel: room.sharedMediaQualityLabel || undefined,
+      crossSource: room.sharedMediaCrossSource || undefined,
+    },
   };
 }
 
@@ -765,6 +831,12 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
     playbackUpdatedAt: Date.now(),
     playbackDriftAnchored: false,
     playbackDriftAnchorCooldownUntil: 0,
+    /** 当前曲已解析的播放直链（内存态，不落盘；供进房成员免二次取链） */
+    sharedMediaUrl: "",
+    sharedMediaTrackId: "",
+    sharedMediaQualityLabel: "",
+    sharedMediaCrossSource: false,
+    sharedMediaAt: 0,
     users: new Map(),
     ownerConnectionId: null,
     jumpRequests: [],
@@ -3347,6 +3419,7 @@ function setCurrentSong(room, song) {
   room.isPlaying = true;
   room.currentTime = 0;
   room.startedAt = Date.now();
+  clearSharedPlaybackMedia(room);
   recordSongPlayHistory(room, song);
   bumpPlaybackState(room);
   invalidateRoomsListCache();
@@ -3452,6 +3525,7 @@ async function playNextUnlocked(room, options = {}) {
       room.currentTime = 0;
       room.startedAt = null;
       room.randomLoading = true;
+      clearSharedPlaybackMedia(room);
       bumpPlaybackState(room);
       invalidateRoomsListCache();
       return;
@@ -3467,6 +3541,7 @@ async function playNextUnlocked(room, options = {}) {
   room.startedAt = null;
   // 漫游关闭时干净停机，不进入"漫游加载中"重试
   room.randomLoading = (room.neteaseFmMode || DEFAULT_FM_MODE) !== FM_MODE_OFF;
+  clearSharedPlaybackMedia(room);
   bumpPlaybackState(room);
   invalidateRoomsListCache();
 }
