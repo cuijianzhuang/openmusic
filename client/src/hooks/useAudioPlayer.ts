@@ -83,11 +83,15 @@ import {
 
 /** 主控本机失败后的本地恢复间隔：不切歌，等网络恢复再重试 */
 const LOCAL_PLAYBACK_RECOVERY_MS = 8000;
-/** 明确无源时更快请求服务端核实，避免卡在「网络重试」循环 */
+/** 明确无源时更快重试；仍失败则由主控核实后切歌，避免全屋卡死 */
 const SOURCE_UNAVAILABLE_RECOVERY_MS = 2500;
 const LOCAL_RECOVERY_TOAST_COOLDOWN_MS = 20000;
-/** 同一曲本机取链连续失败多少次后，才请求服务端核实是否音源异常 */
+/** 同一曲本机取链连续失败多少次后，主控请求服务端核实并切歌 */
 const SOURCE_ERROR_SERVER_VERIFY_AFTER = 2;
+/** 单次取链（含跨源）总超时，避免卡在 loading 拖死全屋 */
+const RESOLVE_URL_TIMEOUT_MS = 15000;
+/** 主控 loading 过久仍无结果时强制走音源异常切歌 */
+const LEADER_LOAD_STUCK_SKIP_MS = 20000;
 let localRecoveryTimer: number | null = null;
 let localRecoveryQueueId: string | null = null;
 let lastLocalRecoveryToastAt = 0;
@@ -479,7 +483,9 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     skippingRef.current = true;
     justSkippedRef.current = true;
     loadGeneration.current += 1;
-    // source_error：保持加载锁，避免跳过等待期间 effect 又去反复取链
+    // 打断进行中的 loadTrack：必须立刻清 loading，否则 finally 因 gen 不匹配会永久卡在加载中
+    setTrackLoading(false);
+    // source_error：短暂锁住当前曲，避免 skip 等待期间 effect 又去反复取链
     if (sourceErrorSkip && lockedQueueId) {
       loadLockRef.current = { queueId: lockedQueueId, gen: loadGeneration.current };
     } else {
@@ -495,25 +501,39 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     if (live) {
       useRoomStore.getState().setRoom({ ...live, currentTime: 0 });
     }
+
+    const unlockAfterSkipFailure = () => {
+      loadLockRef.current = EMPTY_LOAD_LOCK;
+      setTrackLoading(false);
+      // 允许 watchdog / recovery 再次接手，避免「跳歌失败后整屋卡死」
+      if (lockedQueueId && useRoomStore.getState().room?.current?.queueId === lockedQueueId) {
+        setLoadRetryNonce((n) => n + 1);
+      }
+    };
+
     skipSong({ reason: options.reason || 'manual' }).then(async (res) => {
       if (!res.success && sourceErrorSkip) {
-        // 服务端探测与本机预取不一致：以本机已确认无源为准，系统强制切歌
-        // （避免清标记后跨源换另一首歌「还能播」，并反复打失败的 type=url）
+        // 服务端探测与本机不一致：以本机已确认无源为准，系统强制切歌，避免全屋卡在不可播曲
         notifyPlaybackToast(res.error || '音源异常，正在跳过…', 'error');
         try {
-          await skipSong({ reason: 'system' });
-        } finally {
-          loadLockRef.current = EMPTY_LOAD_LOCK;
+          const forced = await skipSong({ reason: 'system' });
+          if (!forced.success) {
+            unlockAfterSkipFailure();
+            if (forced.error) notifyPlaybackToast(forced.error, 'error');
+          }
+        } catch {
+          unlockAfterSkipFailure();
         }
         return;
       }
       if (!res.success) {
-        loadLockRef.current = EMPTY_LOAD_LOCK;
+        unlockAfterSkipFailure();
+        if (res.error) notifyPlaybackToast(res.error, 'error');
       }
     }).finally(() => {
       skippingRef.current = false;
     });
-  }, [controller, skipSong]);
+  }, [controller, skipSong, setTrackLoading]);
 
   /**
    * 主控本机加载/播放失败时只做本地恢复，不 skip 全屋。
@@ -881,7 +901,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     if (isTrackSourceError(current)) {
       setTrackLoading(false);
       if (useRoomStore.getState().isPlaybackLeader) {
-        // 预取已确认无源：直接核实切歌，不再本机重试取链
+        // 预取已确认无源：主控核实切歌，避免全屋卡在不可播曲；刷新后也应能跳
         loadLockRef.current = { queueId: current.queueId, gen: loadGeneration.current };
         notifyPlaybackToast('音源异常，正在跳过…', 'error');
         requestSkip({ reason: 'source_error' });
@@ -914,7 +934,17 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
         let url: string;
         let qualityLabel: string | undefined;
         try {
-          const resolved = await resolveSongUrl(current);
+          let timeoutId = 0;
+          const resolved = await Promise.race([
+            resolveSongUrl(current),
+            new Promise<never>((_, reject) => {
+              timeoutId = window.setTimeout(() => {
+                reject(new TypeError('取链超时，请稍后重试'));
+              }, RESOLVE_URL_TIMEOUT_MS);
+            }),
+          ]).finally(() => {
+            if (timeoutId) window.clearTimeout(timeoutId);
+          });
           url = (await refreshSignedApiUrl(resolved.url)) || resolved.url;
           qualityLabel = resolved.qualityLabel;
           if (resolveFailCountRef.current?.queueId === queueId) {
@@ -927,25 +957,29 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
 
           const isLeader = useRoomStore.getState().isPlaybackLeader;
           const errMessage = err instanceof Error ? err.message : '';
+          const timedOut = /取链超时/.test(errMessage);
           const sourceUnavailable = err instanceof SourceUnavailableError
             || isSourceUnavailableMessage(errMessage)
             || isTrackSourceError(current);
 
-          if (isLeader && sourceUnavailable) {
+          if (isLeader && (sourceUnavailable || timedOut)) {
             const prev = resolveFailCountRef.current;
             const count = prev?.queueId === queueId ? prev.count + 1 : 1;
             resolveFailCountRef.current = { queueId, count };
-            if (count >= SOURCE_ERROR_SERVER_VERIFY_AFTER) {
-              // 多次本机失败后请求服务端核实；服务端确认可播则拒绝切歌
+            if (count >= SOURCE_ERROR_SERVER_VERIFY_AFTER || timedOut) {
+              // 多次失败或取链超时：主控切歌，避免 loading 挂死拖垮全屋
               resolveFailCountRef.current = null;
-              notifyPlaybackToast('音源异常，正在跳过…', 'error');
+              notifyPlaybackToast(
+                timedOut ? '音源加载超时，正在跳过…' : '音源异常，正在跳过…',
+                'error',
+              );
               requestSkip({ reason: 'source_error' });
               return;
             }
             scheduleLocalRecovery(current, 'source_unavailable');
             return;
           }
-          scheduleLocalRecovery(current, 'resolve_url_failed');
+          scheduleLocalRecovery(current, sourceUnavailable ? 'source_unavailable' : 'resolve_url_failed');
           return;
         }
 
@@ -1067,6 +1101,29 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     playAudio,
     applyPlaybackResult,
   ]);
+
+  // 主控 loading 过久：强制切歌，防止取链挂起/跳歌失败后全屋卡死（刷新才能恢复）
+  useEffect(() => {
+    if (!trackLoading || !isPlaybackLeader) return;
+    const queueId = room?.current?.queueId;
+    if (!queueId) return;
+
+    const timer = window.setTimeout(() => {
+      const live = useRoomStore.getState();
+      if (!live.isPlaybackLeader || skippingRef.current) return;
+      if (!useAudioStore.getState().trackLoading) return;
+      if (live.room?.current?.queueId !== queueId) return;
+
+      debugLog('leader_load_stuck_skip', debugLine({
+        queueId,
+        afterMs: LEADER_LOAD_STUCK_SKIP_MS,
+      }));
+      notifyPlaybackToast('音源加载超时，正在跳过…', 'error');
+      requestSkip({ reason: 'source_error', bypassThrottle: true });
+    }, LEADER_LOAD_STUCK_SKIP_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [trackLoading, isPlaybackLeader, room?.current?.queueId, requestSkip]);
 
   // room.current 与 audio.src 脱节时重试 load（受 loadLock 约束，避免重复 reload 风暴）
   useEffect(() => {

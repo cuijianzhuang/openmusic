@@ -802,8 +802,14 @@ export function useSocket() {
 
 
   const skipSong = useCallback((options?: { reason?: 'manual' | 'source_error' | 'system' }): Promise<{ success: boolean; error?: string }> => {
-    return emitWithAck('skip_song', { reason: options?.reason || 'manual' }, { success: false, error: '连接超时，请重试' });
-
+    // source_error 需等服务端探测（上游可达 12s），ack 超时必须更长，否则客户端误判失败并卡锁
+    const timeoutMs = options?.reason === 'source_error' ? 20000 : SOCKET_ACK_TIMEOUT_MS;
+    return emitWithAck(
+      'skip_song',
+      { reason: options?.reason || 'manual' },
+      { success: false, error: '连接超时，请重试' },
+      timeoutMs,
+    );
   }, []);
 
   const finishSong = useCallback((queueId: string): Promise<{ success: boolean; error?: string }> => {

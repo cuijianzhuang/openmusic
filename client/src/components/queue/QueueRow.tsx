@@ -1,7 +1,7 @@
 import { memo } from 'react';
-import { Trash2, Zap, ThumbsUp, ThumbsDown, AlertTriangle, Ban, GripVertical } from 'lucide-react';
+import { Trash2, Zap, ThumbsUp, ThumbsDown, AlertTriangle, Ban, GripVertical, Shuffle } from 'lucide-react';
 import { getClientId } from '../../lib/clientId';
-import { useTrackSourceError } from '../../hooks/useSongSourceError';
+import { useTrackCrossSource, useTrackSourceError } from '../../hooks/useSongSourceError';
 import type { RoomMemberTier, QueueItem } from '../../types';
 import SongCover from '../SongCover';
 import FavoriteButton from '../FavoriteButton';
@@ -81,6 +81,7 @@ function QueueRow({
   const canJump = !song.isCurrent && (canControlPlayback || (isMine && memberJumpEnabled));
   const canRemove = !song.isCurrent && (canControlPlayback || isMine);
   const hasSourceError = useTrackSourceError(song);
+  const hasCrossSource = useTrackCrossSource(song);
   const isAdminPriority = Boolean(song.ownerPriority && song.priorityBy);
   const isOwnerPriority = Boolean(song.ownerPriority && !song.priorityBy);
   const allowDrag = canReorder && !song.isCurrent;
@@ -135,6 +136,14 @@ function QueueRow({
               <span className="inline-flex flex-shrink-0 items-center gap-0.5 rounded-md border border-red-500/40 bg-red-500/15 px-1.5 py-0.5 text-[9px] sm:text-[10px] font-medium leading-tight text-red-400 max-w-[9rem] sm:max-w-none">
                 <AlertTriangle className="h-3 w-3 flex-shrink-0" />
                 <span className="truncate sm:whitespace-nowrap">歌曲源异常，将跳过此歌</span>
+              </span>
+            </Tooltip>
+          )}
+          {!hasSourceError && hasCrossSource && (
+            <Tooltip content="原平台无链，已跨源取链" side="bottom">
+              <span className="inline-flex flex-shrink-0 items-center gap-0.5 rounded-md border border-amber-500/35 bg-amber-500/12 px-1.5 py-0.5 text-[9px] sm:text-[10px] font-medium leading-tight text-amber-300/95 max-w-[9rem] sm:max-w-none">
+                <Shuffle className="h-3 w-3 flex-shrink-0" />
+                <span className="truncate sm:whitespace-nowrap">跨源取链</span>
               </span>
             </Tooltip>
           )}

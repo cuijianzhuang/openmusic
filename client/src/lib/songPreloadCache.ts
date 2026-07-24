@@ -17,7 +17,6 @@ import {
   lockPlaybackQualityToLowest,
   resetPlaybackQualityLock,
 } from './playbackQualityLock';
-import { useRoomStore } from '../stores/roomStore';
 import { useAudioStore } from '../stores/audioStore';
 import type { MusicSource, QueueItem, RoomState, SearchResult } from '../types';
 import { isMobileDevice } from './audioUnlock';
@@ -35,6 +34,8 @@ type FetchUrlResult =
 const urlCache = loadUrlCacheFromStorage();
 const pendingFetches = new Map<string, Promise<FetchUrlResult>>();
 const sourceErrorKeys = new Set<string>();
+/** 原平台无链、已用其它平台 URL 兜底成功 */
+const crossSourceKeys = new Set<string>();
 const sourceErrorListeners = new Set<() => void>();
 const pendingCrossSourceFallbacks = new Map<string, Promise<string | null>>();
 const crossSourceCandidateCache = new Map<string, { expiresAt: number; candidates: SearchResult[] }>();
@@ -56,26 +57,53 @@ export function isTrackSourceError(song: Pick<QueueItem, 'queueId' | 'id' | 'sou
   return sourceErrorKeys.has(trackKeyOf(song));
 }
 
+export function isTrackCrossSource(song: Pick<QueueItem, 'queueId' | 'id' | 'source'>): boolean {
+  return crossSourceKeys.has(trackKeyOf(song));
+}
+
 function markTrackSourceError(song: Pick<QueueItem, 'queueId' | 'id' | 'source'>) {
   const key = trackKeyOf(song);
-  if (sourceErrorKeys.has(key)) return;
+  const clearedCross = crossSourceKeys.delete(key);
+  if (sourceErrorKeys.has(key)) {
+    if (clearedCross) notifySourceErrors();
+    return;
+  }
   sourceErrorKeys.add(key);
+  notifySourceErrors();
+}
+
+function markTrackCrossSource(song: Pick<QueueItem, 'queueId' | 'id' | 'source'>) {
+  const key = trackKeyOf(song);
+  const clearedError = sourceErrorKeys.delete(key);
+  if (crossSourceKeys.has(key)) {
+    if (clearedError) notifySourceErrors();
+    return;
+  }
+  crossSourceKeys.add(key);
   notifySourceErrors();
 }
 
 export function clearTrackSourceError(song: Pick<QueueItem, 'queueId' | 'id' | 'source'>) {
   const key = trackKeyOf(song);
-  if (!sourceErrorKeys.delete(key)) return;
+  const clearedError = sourceErrorKeys.delete(key);
+  const clearedCross = crossSourceKeys.delete(key);
+  if (!clearedError && !clearedCross) return;
   notifySourceErrors();
 }
 
-/** 移除已不在播放列表中的源错误标记，避免 Set 无限增长 */
+/** 移除已不在播放列表中的源错误/跨源标记，避免 Set 无限增长 */
 export function pruneSourceErrors(activeSongs: Array<Pick<QueueItem, 'queueId' | 'id' | 'source'>>) {
   const activeKeys = new Set(activeSongs.map(trackKeyOf));
   let changed = false;
   for (const key of sourceErrorKeys) {
     if (!activeKeys.has(key)) {
       sourceErrorKeys.delete(key);
+      changed = true;
+    }
+  }
+  for (const key of crossSourceKeys) {
+    if (!activeKeys.has(key)) {
+      crossSourceKeys.delete(key);
       changed = true;
     }
   }
@@ -213,7 +241,7 @@ async function fetchCrossSourceFallback(song: QueueItem): Promise<string | null>
           qualityLabel: info.qualityLabel,
         });
         trimUrlCache();
-        clearTrackSourceError(song);
+        markTrackCrossSource(song);
         publishActualQuality(song, info.qualityLabel);
         return info.url;
       } catch {
@@ -384,13 +412,13 @@ async function tryLowestQualityFetch(
 
 async function fetchSongUrl(
   song: Pick<QueueItem, 'queueId' | 'id' | 'source' | 'url'>,
-  options: { refresh?: boolean } = {},
+  options: { refresh?: boolean; allowQualityDowngrade?: boolean } = {},
 ): Promise<CachedUrlEntry | null> {
   const source = songSourceOf(song);
   const quality = getEffectivePlaybackQuality(song);
   const lowest = getLowestQuality(source);
   const alreadyAtLowest = Boolean(lowest && quality === lowest);
-  const isCurrent = useRoomStore.getState().room?.current?.queueId === song.queueId;
+  const allowQualityDowngrade = options.allowQualityDowngrade !== false;
 
   const first = await fetchSongUrlOnce(song, quality, options);
   if (first.ok) {
@@ -403,10 +431,8 @@ async function fetchSongUrl(
     return null;
   }
 
-  // 原平台无链：立刻标记，预取下一首时队列即可显示「歌曲源异常」
-  markTrackSourceError(song);
-
-  if (!alreadyAtLowest) {
+  // 播放取链可降档；预取不做降档（避免 lockPlaybackQualityToLowest 影响全屋）
+  if (allowQualityDowngrade && !alreadyAtLowest) {
     const fallback = await tryLowestQualityFetch(song);
     if (fallback.ok) {
       clearTrackSourceError(song);
@@ -415,14 +441,10 @@ async function fetchSongUrl(
     }
   }
 
-  // 非当前曲预取：不做跨源搜索，保留角标即可；轮到播放时再完整兜底
-  if (!isCurrent) {
-    return null;
-  }
-
   const crossSource = await fetchCrossSourceFallback(song as QueueItem);
   if (crossSource) return { url: crossSource };
 
+  // 跨源也失败：打「将跳过」异常标；轮到播放时主控直接 source_error 切歌
   markTrackSourceError(song);
   return null;
 }
@@ -482,7 +504,7 @@ export async function resolveSongUrl(
 /** 加入房间后立即预取当前歌曲 URL，缩短刷新后的加载等待 */
 export function prefetchCurrentSong(song: QueueItem | null | undefined) {
   if (!song) return;
-  void fetchSongUrl(song);
+  void fetchSongUrl(song, { allowQualityDowngrade: false });
 }
 
 type UrlPrefetchSong = Pick<QueueItem, 'queueId' | 'id' | 'source' | 'url'>;
@@ -540,8 +562,8 @@ export function prefetchQueueSongs(
   pruneSourceErrors(retain);
 
   for (const song of targets) {
-    // 预取取链：失败时 markTrackSourceError，队列行立刻显示「歌曲源异常」
-    void fetchSongUrl(song);
+    // 预取：当前音质 → 跨源（不降档）；成功打跨源标，彻底失败打「将跳过」
+    void fetchSongUrl(song, { allowQualityDowngrade: false });
   }
 }
 

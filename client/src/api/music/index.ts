@@ -343,7 +343,7 @@ export async function createRoom(name?: string, password?: string): Promise<{ id
 }
 
 export async function listRooms(): Promise<RoomSummary[]> {
-  const res = await fetchWithTimeout('/api/rooms');
+  const res = await fetchWithTimeout('/api/rooms', {}, 12000);
   if (!res.ok) throw new Error('获取房间列表失败');
   return res.json();
 }
