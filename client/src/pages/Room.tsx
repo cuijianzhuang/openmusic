@@ -471,6 +471,8 @@ export default function Room() {
     lastSongRequestAtRef.current,
     canControlPlayback,
   );
+  // 开启点歌冷却后批量点歌会立刻触发冷却，隐藏一键点歌
+  const showBulkAddSong = (room?.songRequestCooldownSec ?? 0) <= 0;
   const canModerate = isOwner || isAdmin;
   const canOpenRoomSettings = canModerate;
   const songRequestSettings: SongRequestSettings = useMemo(() => ({
@@ -2032,17 +2034,20 @@ export default function Room() {
     !searching && searchedKeyword && !showPlaylistSearch && results.length > 0,
   );
 
-  const renderBulkAddPageButton = (className = '') => (
-    <button
-      type="button"
-      onClick={handleAddCurrentPage}
-      disabled={addingPage || listPageSongs.length === 0}
-      className={`flex flex-shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-netease-red transition-colors hover:bg-netease-red/10 disabled:cursor-not-allowed disabled:opacity-40 ${className}`}
-    >
-      {addingPage ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ListPlus className="h-3.5 w-3.5" />}
-      一键点歌本页
-    </button>
-  );
+  const renderBulkAddPageButton = (className = '') => {
+    if (!showBulkAddSong) return null;
+    return (
+      <button
+        type="button"
+        onClick={handleAddCurrentPage}
+        disabled={addingPage || listPageSongs.length === 0}
+        className={`flex flex-shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-netease-red transition-colors hover:bg-netease-red/10 disabled:cursor-not-allowed disabled:opacity-40 ${className}`}
+      >
+        {addingPage ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ListPlus className="h-3.5 w-3.5" />}
+        一键点歌本页
+      </button>
+    );
+  };
 
   const renderQueueSection = (fillHeight = false) => (
     <div
@@ -3240,17 +3245,19 @@ export default function Room() {
                 </p>
               </div>
               <div className="flex items-center gap-1.5">
-                <Tooltip content="当前页点歌">
-                  <button
-                    type="button"
-                    onClick={() => void handleAddPageFavorites()}
-                    disabled={pagedFavorites.length === 0 || addingAllFavorites || importingFavorites}
-                    className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs text-netease-red hover:bg-netease-red/10 hover:text-netease-red disabled:opacity-50"
-                  >
-                    {addingAllFavorites ? <Loader2 className="h-4 w-4 animate-spin" /> : <ListPlus className="h-4 w-4" />}
-                    一键点歌
-                  </button>
-                </Tooltip>
+                {showBulkAddSong && (
+                  <Tooltip content="当前页点歌">
+                    <button
+                      type="button"
+                      onClick={() => void handleAddPageFavorites()}
+                      disabled={pagedFavorites.length === 0 || addingAllFavorites || importingFavorites}
+                      className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs text-netease-red hover:bg-netease-red/10 hover:text-netease-red disabled:opacity-50"
+                    >
+                      {addingAllFavorites ? <Loader2 className="h-4 w-4 animate-spin" /> : <ListPlus className="h-4 w-4" />}
+                      一键点歌
+                    </button>
+                  </Tooltip>
+                )}
                 <Tooltip content="导入歌单">
                   <button
                     type="button"
