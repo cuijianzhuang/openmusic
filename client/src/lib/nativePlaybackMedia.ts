@@ -4,7 +4,17 @@ export type NativeMediaAction =
   | 'play'
   | 'pause'
   | 'nexttrack'
-  | 'previoustrack';
+  | 'previoustrack'
+  | 'seekto'
+  | 'audiofocusloss'
+  | 'audiofocusgain';
+
+export type NativeMediaActionEvent = {
+  action: NativeMediaAction;
+  positionSec?: number;
+  /** 通知栏/锁屏/耳机键等用户操作；用于放行后台暂停 */
+  fromUserControl?: boolean;
+};
 
 export type NativePlaybackMetadata = {
   hasTrack: boolean;
@@ -17,7 +27,7 @@ export type NativePlaybackMetadata = {
   positionSec?: number;
   /** 暂停/播放键：需有暂停权限且房间开启系统播放绑定 */
   playBound?: boolean;
-  /** 上一首（回退）：需有拖进度权限 */
+  /** 上一首（回退）/拖进度：需有拖进度权限 */
   prevBound?: boolean;
   /** 下一首：需有切歌权限且房间开启系统切歌绑定 */
   nextBound?: boolean;
@@ -29,6 +39,8 @@ type PlaybackMediaPlugin = {
     playing: boolean;
     durationSec?: number;
     positionSec?: number;
+    /** true：强制采用进度（切歌 / seek / 进后台锚点） */
+    forcePosition?: boolean;
   }): Promise<void>;
   setControls(options: {
     playBound?: boolean;
@@ -38,7 +50,7 @@ type PlaybackMediaPlugin = {
   clear(): Promise<void>;
   addListener(
     eventName: 'mediaAction',
-    listenerFunc: (event: { action: NativeMediaAction }) => void,
+    listenerFunc: (event: NativeMediaActionEvent) => void,
   ): Promise<PluginListenerHandle>;
 };
 
@@ -62,6 +74,7 @@ export async function syncNativePlaybackState(options: {
   playing: boolean;
   durationSec?: number;
   positionSec?: number;
+  forcePosition?: boolean;
 }): Promise<void> {
   if (!isNativePlaybackMediaAvailable()) return;
   try {
@@ -81,12 +94,12 @@ export async function clearNativePlaybackMedia(): Promise<void> {
 }
 
 export async function subscribeNativeMediaActions(
-  handler: (action: NativeMediaAction) => void,
+  handler: (event: NativeMediaActionEvent) => void,
 ): Promise<() => void> {
   if (!isNativePlaybackMediaAvailable()) return () => {};
   try {
     const handle = await PlaybackMedia.addListener('mediaAction', (event) => {
-      if (event?.action) handler(event.action);
+      if (event?.action) handler(event);
     });
     return () => {
       void handle.remove();

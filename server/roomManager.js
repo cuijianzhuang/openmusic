@@ -655,9 +655,14 @@ export async function initRooms() {
 
   const restartGraceMs = getRuntimeConfig().roomRestartGraceMs;
   const emptyTtlMs = getRuntimeConfig().roomEmptyTtlMs;
+  // 进房/贵宾通知静默窗：服务端固定 1 分钟，与房主设置、空房 TTL 无关
+  const RESTART_NOTICE_MUTE_MS = 60 * 1000;
+  const noticeMuteUntil = Date.now() + RESTART_NOTICE_MUTE_MS;
   let preservedCount = 0;
   for (const data of stored) {
     const room = restoreRoomFromStorage(data);
+    // 恢复出的房间：1 分钟内已知成员重连不刷进房/贵宾通知
+    room.restartNoticeMuteUntil = noticeMuteUntil;
     rooms.set(room.id, room);
     if (room.users.size === 0) {
       // 重启时 socket 全断，房间会短暂无人。有队列/当前曲的房间给重连宽限期；
@@ -885,6 +890,11 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
     joinNoticeEnabled: true,
     joinNoticeCooldownSec: DEFAULT_JOIN_NOTICE_COOLDOWN_SEC,
     lastJoinNoticeAt: new Map(),
+    /**
+     * 进程重启恢复后，已知成员重连时静默进房/贵宾通知的截止时间。
+     * 静默时长由服务端固定为 1 分钟，不由房主配置。
+     */
+    restartNoticeMuteUntil: 0,
     songRequestEnabled: true,
     songRequestMinStaySec: 0,
     songRequestMaxPerUser: 0,
@@ -2373,6 +2383,36 @@ export function setRoomJoinNotice(roomId, actorId, settings = {}, connectionId =
   }
   persistRoom(room);
   return { room: serializeRoom(room) };
+}
+
+/** 进房前判断：是否为本房已知成员（须在 addUser 写入 knownUserIds 之前调用） */
+export function wasKnownRoomUser(room, userId) {
+  if (!room || !userId) return false;
+  if (room.knownUserIds?.has(userId)) return true;
+  if (room.userNicknames?.has(userId)) return true;
+  if (room.memberTiers?.has(userId)) return true;
+  if (room.creatorId === userId) return true;
+  if (room.adminIds?.has(userId)) return true;
+  return false;
+}
+
+/**
+ * 是否应跳过进房系统提醒与贵宾迎宾。
+ * - 同会话多端/短线重连（hadActiveSession）
+ * - 客户端标记的自动重连（rejoin），且确认为已知成员（防滥用）
+ * - 服务重启后 1 分钟内的已知成员回流（服务端固定，非房主设置）
+ */
+export function shouldMuteJoinAnnouncements(room, userId, {
+  hadActiveSession = false,
+  rejoin = false,
+  wasKnown = false,
+} = {}) {
+  if (hadActiveSession) return true;
+  const known = wasKnown || wasKnownRoomUser(room, userId);
+  if (rejoin && known) return true;
+  const muteUntil = Number(room?.restartNoticeMuteUntil) || 0;
+  if (known && muteUntil > 0 && Date.now() < muteUntil) return true;
+  return false;
 }
 
 export function postJoinNoticeMessage(roomId, userId) {

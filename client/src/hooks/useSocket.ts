@@ -200,12 +200,13 @@ function emitWithAck<TResponse>(
   });
 }
 
-function joinPayload(session: JoinSession) {
+function joinPayload(session: JoinSession, options: { rejoin?: boolean } = {}) {
   return {
     roomId: session.roomId,
     nickname: session.nickname,
     password: session.password?.trim() || undefined,
     readOnly: Boolean(session.readOnly),
+    rejoin: Boolean(options.rejoin),
     clientIp: session.networkInfo?.ip,
     clientLocation: session.networkInfo?.location,
   };
@@ -380,7 +381,7 @@ function emitJoinRoom(s: Socket, session: JoinSession): Promise<JoinAckResponse>
   return new Promise((resolve) => {
     s.timeout(SOCKET_ACK_TIMEOUT_MS).emit(
       'join_room',
-      joinPayload(session),
+      joinPayload(session, { rejoin: true }),
       (err: Error | null, res: JoinAckResponse | undefined) => {
         if (err || !res) {
           resolve({ success: false, error: err?.message || '加入房间失败' });

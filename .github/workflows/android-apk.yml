@@ -15,12 +15,23 @@ on:
         options:
           - debug
           - release
+      bump_version:
+        description: '打包前自增 versionCode / versionName 并回写仓库'
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # 允许后续把版本 bump 推回当前分支
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/setup-node@v4
         with:
@@ -38,6 +49,12 @@ jobs:
 
       - name: Install client dependencies
         run: npm ci
+        working-directory: client
+
+      - name: Bump Android version
+        id: bump
+        if: ${{ inputs.bump_version }}
+        run: node scripts/bump-android-version.mjs
         working-directory: client
 
       - name: Sync Capacitor (remote URL)
@@ -64,6 +81,22 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: openmusic-${{ inputs.build_type }}-${{ github.run_number }}
+          name: openmusic-${{ inputs.build_type }}-${{ steps.bump.outputs.version_name || github.run_number }}
           path: openmusic.apk
           if-no-files-found: error
+
+      - name: Commit version bump
+        if: ${{ inputs.bump_version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add client/android/app/build.gradle
+          if git diff --staged --quiet; then
+            echo "无版本变更，跳过提交"
+            exit 0
+          fi
+          NAME="${{ steps.bump.outputs.version_name }}"
+          CODE="${{ steps.bump.outputs.version_code }}"
+          git commit -m "chore(android): bump to ${NAME} (${CODE})"
+          # 推回触发本次 workflow 的分支，供下次打包继续自增
+          git push origin "HEAD:${GITHUB_REF_NAME}"

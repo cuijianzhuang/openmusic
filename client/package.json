@@ -18,7 +18,8 @@
     "cap:run:android": "npm run cap:sync:android && npx cap run android",
     "cap:run:ios": "npm run cap:sync:ios && npx cap run ios",
     "cap:build:apk": "node scripts/build-android-apk.mjs debug",
-    "cap:build:apk:release": "node scripts/build-android-apk.mjs release"
+    "cap:build:apk:release": "node scripts/build-android-apk.mjs release",
+    "android:bump": "node scripts/bump-android-version.mjs"
   },
   "dependencies": {
     "@ant-design/icons": "^6.3.2",

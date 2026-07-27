@@ -205,12 +205,12 @@ const RoomCard = memo(function RoomCard({
 
           {/* 信息区块（倾斜时视差浮起） */}
           <div className="min-w-0 flex-1 flex flex-col h-full justify-center transition-transform duration-300 ease-out [transform:translateZ(0)] group-hover:[transform:translateZ(24px)]">
-            <div className="flex items-start gap-2.5 mb-1.5">
-              <h3 className={`min-w-0 flex-1 text-xl sm:text-[22px] font-black tracking-tight break-words whitespace-normal leading-snug ${hardLocked ? 'text-white/50' : 'text-emboss'}`}>
+            <div className="flex items-center gap-2.5 mb-1.5 min-h-[3.5rem] sm:min-h-[3.75rem]">
+              <h3 className={`min-w-0 flex-1 text-xl sm:text-[22px] font-black tracking-tight break-words whitespace-normal leading-snug line-clamp-2 ${hardLocked ? 'text-white/50' : 'text-emboss'}`}>
                 {room.name}
               </h3>
               {room.hasPassword && !hardLocked && (
-                <span className="flex-shrink-0 mt-1 p-1 rounded-full bg-amber-400/10 text-amber-400 group-hover:bg-amber-400/20 transition-colors">
+                <span className="flex-shrink-0 p-1 rounded-full bg-amber-400/10 text-amber-400 group-hover:bg-amber-400/20 transition-colors">
                   <Lock className="w-3.5 h-3.5" />
                 </span>
               )}
@@ -264,32 +264,17 @@ const RoomCard = memo(function RoomCard({
   );
 
   return (
-    <BorderGlow
-      className="w-full rounded-[24px]"
-      color="#ff4d55"
-      colorSecondary="#c084fc"
-      duration={6}
-      bloom={0.6}
-      edgeProximity
-      edgeZone={56}
+    <TiltedCard
       disabled={hardLocked}
+      rotateAmplitude={11}
+      scaleOnHover={1.025}
+      spotlightColor="rgba(255, 77, 85, 0.2)"
+      onClick={() => onJoin(room)}
+      data-guide={guideAnchor ? 'home-lobby' : undefined}
+      className={cardClassName}
     >
-      <SpotlightCard
-        className="w-full rounded-[24px] border-0 bg-transparent p-0 shadow-none"
-        spotlightColor="rgba(255, 77, 85, 0.2)"
-      >
-        <TiltedCard
-          disabled={hardLocked}
-          rotateAmplitude={11}
-          scaleOnHover={1.025}
-          onClick={() => onJoin(room)}
-          data-guide={guideAnchor ? 'home-lobby' : undefined}
-          className={cardClassName}
-        >
-          {body}
-        </TiltedCard>
-      </SpotlightCard>
-    </BorderGlow>
+      {body}
+    </TiltedCard>
   );
 });
 

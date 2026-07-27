@@ -332,7 +332,8 @@ body {
   );
 }
 
-.rb-tilted-card:hover .rb-tilted-card__glare {
+.rb-tilted-card:hover .rb-tilted-card__glare,
+.rb-tilted-card:hover .rb-tilted-card__spotlight {
   opacity: 1;
 }
 

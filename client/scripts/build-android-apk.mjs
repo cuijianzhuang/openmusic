@@ -1,16 +1,28 @@
 /**
  * 本地命令行打 APK（无需 Android Studio，但仍需 JDK + Android SDK）。
  * 用法：npm run cap:build:apk
+ *
+ * 默认每次打包自动 bump versionCode +1、versionName 末位 +1。
+ * 跳过自增：npm run cap:build:apk -- --no-bump
+ * GitHub Actions 见 .github/workflows/android-apk.yml（同样会 bump 并回写仓库）。
  */
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+} from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { bumpAndroidVersion, readAndroidVersion } from './bump-android-version.mjs';
 
 const clientRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const repoRoot = resolve(clientRoot, '..');
 const androidRoot = resolve(clientRoot, 'android');
-const buildType = (process.argv[2] || 'debug').toLowerCase();
+const rawArgs = process.argv.slice(2);
+const noBump = rawArgs.includes('--no-bump');
+const buildType = (rawArgs.find((a) => !a.startsWith('--')) || 'debug').toLowerCase();
 const task = buildType === 'release' ? 'assembleRelease' : 'assembleDebug';
 
 function findAndroidHome() {
@@ -49,6 +61,17 @@ if (!androidHome) {
 process.env.ANDROID_HOME = androidHome;
 process.env.ANDROID_SDK_ROOT = androidHome;
 
+let versionLabel = '';
+if (noBump) {
+  const v = readAndroidVersion();
+  versionLabel = `${v.versionName} (${v.versionCode})`;
+  console.log(`[build-apk] 跳过版本自增，沿用 ${versionLabel}`);
+} else {
+  const bumped = bumpAndroidVersion();
+  versionLabel = `${bumped.versionName} (${bumped.versionCode})`;
+  console.log(`[build-apk] 版本已自增 → ${versionLabel}`);
+}
+
 console.log('[build-apk] 先同步 Capacitor…');
 const sync = spawnSync('node', ['scripts/cap-sync.mjs', 'android'], {
   cwd: clientRoot,
@@ -80,6 +103,7 @@ copyFileSync(builtPath, deployPath);
 
 console.log(`
 [build-apk] 完成。
+  版本:     ${versionLabel}
   构建产物: ${builtPath}
   下载位:   ${deployPath}
 

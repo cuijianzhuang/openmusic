@@ -66,6 +66,8 @@ import {
   postMemberWelcomeMessage,
   setRoomJoinNotice,
   postJoinNoticeMessage,
+  shouldMuteJoinAnnouncements,
+  wasKnownRoomUser,
   setRoomFmMode,
   setRoomPlayMode,
   setRoomAnnouncement,
@@ -2235,6 +2237,7 @@ io.on('connection', (socket) => {
     nickname,
     password,
     readOnly,
+    rejoin,
     clientIp: reportedClientIp,
     clientLocation,
   } = {}, callback) => {
@@ -2316,6 +2319,13 @@ io.on('connection', (socket) => {
         || priorUser.connectionId
       ),
     );
+    // addUser 会写入 knownUserIds，须在进房前判断「是否旧成员」
+    const wasKnown = wasKnownRoomUser(joinInternalBefore, userId);
+    const muteJoinAnnouncements = shouldMuteJoinAnnouncements(joinInternalBefore, userId, {
+      hadActiveSession,
+      rejoin: Boolean(rejoin),
+      wasKnown,
+    });
 
     // 安全限流仍使用连接来源 IP；客户端上报值仅用于成员归属展示/同端统计。
     const clientIp = normalizeReportedClientIp(reportedClientIp) || getClientIp(socket);
@@ -2340,8 +2350,8 @@ io.on('connection', (socket) => {
     socketToUserId.set(socket.id, userId);
     socket.join(id);
 
-    const welcomeMessage = hadActiveSession ? null : postMemberWelcomeMessage(id, userId);
-    const joinNoticeMessage = hadActiveSession ? null : postJoinNoticeMessage(id, userId);
+    const welcomeMessage = muteJoinAnnouncements ? null : postMemberWelcomeMessage(id, userId);
+    const joinNoticeMessage = muteJoinAnnouncements ? null : postJoinNoticeMessage(id, userId);
 
     // 无当前歌曲且队列为空时，加入后会异步拉取随机歌曲，先告知客户端"加载中"，
     // 避免播放条在随机歌曲到达前直接消失。

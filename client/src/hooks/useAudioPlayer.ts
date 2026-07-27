@@ -34,6 +34,9 @@ import { sharedAudioGeneration } from '../lib/audioElement';
 import {
   installBackgroundPlaybackGuards,
   isLikelySystemMediaSuspend,
+  isRecentExternalAudioFocusLoss,
+  isRecentUserMediaPauseIntent,
+  markUserMediaPauseIntent,
 } from '../lib/backgroundPlayback';
 import { ensureGalaxyAudioOutput } from '../components/galaxy/lib/galaxyAudio';
 import { canSeekInRoom } from '../lib/roomPermissions';
@@ -662,8 +665,10 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
       });
 
       audio.addEventListener('pause', () => {
-        // 仅对抗息屏瞬间的系统挂起；锁屏控件主动暂停不在此窗口内
+        // 仅对抗息屏瞬间的系统挂起；用户/其它 App 抢焦点暂停不得续播
         if (!isLikelySystemMediaSuspend()) return;
+        if (isRecentUserMediaPauseIntent()) return;
+        if (isRecentExternalAudioFocusLoss()) return;
         const live = useRoomStore.getState();
         if (!live.room?.isPlaying || !live.room.current) return;
         if (!isAudioBoundToQueue(audio, live.room.current.queueId)) return;
@@ -1319,6 +1324,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     const live = useRoomStore.getState().room;
     const audio = controller.audio;
     if (!isPlaying) {
+      markUserMediaPauseIntent();
       audio.pause();
       if (live) useRoomStore.getState().setRoom({ ...live, isPlaying: false });
       return;

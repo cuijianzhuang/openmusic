@@ -31,6 +31,36 @@ public class PlaybackMediaPlugin extends Plugin {
         if (plugin == null) return;
         JSObject data = new JSObject();
         data.put("action", action);
+        // 用户从系统媒体控件触发，前端不得按「后台保房」忽略
+        data.put("fromUserControl", true);
+        plugin.notifyListeners("mediaAction", data, true);
+    }
+
+    public static void emitSeek(double positionSec) {
+        PlaybackMediaPlugin plugin = instance;
+        if (plugin == null) return;
+        JSObject data = new JSObject();
+        data.put("action", "seekto");
+        data.put("positionSec", positionSec);
+        data.put("fromUserControl", true);
+        plugin.notifyListeners("mediaAction", data, true);
+    }
+
+    /** 其它 App 抢走音频焦点 */
+    public static void emitAudioFocusLoss() {
+        PlaybackMediaPlugin plugin = instance;
+        if (plugin == null) return;
+        JSObject data = new JSObject();
+        data.put("action", "audiofocusloss");
+        plugin.notifyListeners("mediaAction", data, true);
+    }
+
+    /** 重新获得音频焦点（无暂停权限时仅恢复本机播放） */
+    public static void emitAudioFocusGain() {
+        PlaybackMediaPlugin plugin = instance;
+        if (plugin == null) return;
+        JSObject data = new JSObject();
+        data.put("action", "audiofocusgain");
         plugin.notifyListeners("mediaAction", data, true);
     }
 
@@ -49,7 +79,6 @@ public class PlaybackMediaPlugin extends Plugin {
         Boolean playBound = call.getBoolean("playBound");
         Boolean prevBound = call.getBoolean("prevBound");
         Boolean nextBound = call.getBoolean("nextBound");
-        // 兼容旧字段 skipBound：同时控制上一首/下一首
         Boolean skipBound = call.getBoolean("skipBound");
         if (playBound != null || prevBound != null || nextBound != null || skipBound != null) {
             boolean play = playBound == null || playBound;
@@ -61,14 +90,20 @@ public class PlaybackMediaPlugin extends Plugin {
         Double durationSec = call.getDouble("durationSec");
         Double positionSec = call.getDouble("positionSec");
         if (playing != null || durationSec != null || positionSec != null) {
+            long posMs = positionSec != null
+                ? Math.round(positionSec * 1000)
+                : state.getExtrapolatedPositionMs();
+            // 元数据同步视为权威锚点（切歌 / 权限 / 封面）
             state.setPlayback(
                 playing != null && playing,
                 durationSec != null ? Math.round(durationSec * 1000) : state.getDurationMs(),
-                positionSec != null ? Math.round(positionSec * 1000) : state.getPositionMs()
+                posMs,
+                true
             );
         }
         PlaybackKeepAliveService.refresh(context);
         PlaybackKeepAliveService.loadArtworkAsync(context, state.getArtworkUrl());
+        PlaybackAudioFocus.get(context).syncWithState();
         call.resolve();
     }
 
@@ -78,12 +113,32 @@ public class PlaybackMediaPlugin extends Plugin {
         Boolean playing = call.getBoolean("playing");
         Double durationSec = call.getDouble("durationSec");
         Double positionSec = call.getDouble("positionSec");
-        state.setPlayback(
-            playing != null && playing,
-            durationSec != null ? Math.round(durationSec * 1000) : state.getDurationMs(),
-            positionSec != null ? Math.round(positionSec * 1000) : state.getPositionMs()
+        boolean forcePosition = Boolean.TRUE.equals(call.getBoolean("forcePosition", false));
+        boolean wasPlaying = state.isPlaying();
+        boolean nextPlaying = playing != null ? playing : wasPlaying;
+
+        long nextDurationMs = durationSec != null
+            ? Math.round(durationSec * 1000)
+            : state.getDurationMs();
+        long nextPositionMs = positionSec != null
+            ? Math.round(positionSec * 1000)
+            : state.getExtrapolatedPositionMs();
+
+        boolean changed = state.setPlayback(
+            nextPlaying,
+            nextDurationMs,
+            nextPositionMs,
+            forcePosition
         );
-        PlaybackKeepAliveService.refresh(resolveContext());
+
+        if (changed) {
+            if (wasPlaying != state.isPlaying()) {
+                PlaybackKeepAliveService.refresh(resolveContext());
+            } else {
+                PlaybackKeepAliveService.refreshPlaybackStateOnly(resolveContext());
+            }
+        }
+        PlaybackAudioFocus.get(resolveContext()).syncWithState();
         call.resolve();
     }
 
@@ -109,8 +164,9 @@ public class PlaybackMediaPlugin extends Plugin {
     @PluginMethod
     public void clear(PluginCall call) {
         PlaybackMediaState.get().setTrack("OpenMusic", "", "OpenMusic", "", false);
-        PlaybackMediaState.get().setPlayback(false, 0, 0);
+        PlaybackMediaState.get().setPlayback(false, 0, 0, true);
         PlaybackKeepAliveService.refresh(resolveContext());
+        PlaybackAudioFocus.get(resolveContext()).syncWithState();
         call.resolve();
     }
 

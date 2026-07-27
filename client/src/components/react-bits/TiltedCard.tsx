@@ -15,6 +15,8 @@ export interface TiltedCardProps {
   rotateAmplitude?: number;
   /** hover 放大，默认 1.02 */
   scaleOnHover?: number;
+  /** 跟手红色聚光（与卡片同层变换，避免外层描边错位） */
+  spotlightColor?: string;
   disabled?: boolean;
   onClick?: () => void;
   'data-guide'?: string;
@@ -28,6 +30,7 @@ export default function TiltedCard({
   className = '',
   rotateAmplitude = 12,
   scaleOnHover = 1.02,
+  spotlightColor,
   disabled = false,
   onClick,
   'data-guide': dataGuide,
@@ -95,6 +98,15 @@ export default function TiltedCard({
 
   return (
     <button ref={ref} data-guide={dataGuide} {...buttonProps}>
+      {!disabled && spotlightColor && (
+        <div
+          aria-hidden
+          className="rb-tilted-card__spotlight pointer-events-none absolute inset-0 z-[1] opacity-0 transition-opacity duration-300"
+          style={{
+            background: `radial-gradient(520px circle at var(--tc-mx, 50%) var(--tc-my, 50%), ${spotlightColor}, transparent 55%)`,
+          }}
+        />
+      )}
       {!disabled && (
         <div
           aria-hidden

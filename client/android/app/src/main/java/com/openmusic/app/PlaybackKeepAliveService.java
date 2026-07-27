@@ -12,6 +12,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.os.Build;
 import android.os.IBinder;
+import android.os.SystemClock;
 import android.support.v4.media.MediaMetadataCompat;
 import android.support.v4.media.session.MediaSessionCompat;
 import android.support.v4.media.session.PlaybackStateCompat;
@@ -29,8 +30,9 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * 媒体前台服务：息屏/切后台保活，并展示 QQ 音乐风格的系统媒体通知栏
- *（封面 / 歌名 / 播放暂停 / 切歌）。
+ * 媒体前台服务：息屏/切后台保活，并展示系统 MediaStyle 通知栏
+ *（封面 / 歌名 / 进度条 / 播放暂停 / 切歌）。
+ * 进度条由 MediaSession playbackSpeed 外推，勿用滞后 JS 进度每秒覆盖。
  */
 public class PlaybackKeepAliveService extends Service {
     public static final String ACTION_START = "com.openmusic.app.KEEPALIVE_START";
@@ -48,6 +50,7 @@ public class PlaybackKeepAliveService extends Service {
 
     private MediaSessionCompat mediaSession;
     private boolean startedAsForeground;
+    private String lastMetadataFingerprint = "";
 
     public static void start(Context context) {
         if (context == null) return;
@@ -65,11 +68,19 @@ public class PlaybackKeepAliveService extends Service {
         context.stopService(new Intent(context, PlaybackKeepAliveService.class));
     }
 
-    /** 曲目/进度变更时刷新已在跑的前台通知 */
+    /** 曲目/控件/播放态变更：刷新 MediaSession，必要时才重绘通知 */
     public static void refresh(Context context) {
         PlaybackKeepAliveService running = RUNNING.get();
         if (running != null) {
-            running.updateNotificationAndSession();
+            running.updateNotificationAndSession(false);
+        }
+    }
+
+    /** 仅进度锚点校正：只写 MediaSession，不重建通知（避免闪烁） */
+    public static void refreshPlaybackStateOnly(Context context) {
+        PlaybackKeepAliveService running = RUNNING.get();
+        if (running != null) {
+            running.updateMediaSession(false);
         }
     }
 
@@ -98,6 +109,10 @@ public class PlaybackKeepAliveService extends Service {
     public void onCreate() {
         super.onCreate();
         mediaSession = new MediaSessionCompat(this, "OpenMusicPlayback");
+        mediaSession.setFlags(
+            MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS
+                | MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS
+        );
         mediaSession.setCallback(new MediaSessionCompat.Callback() {
             @Override
             public void onPlay() {
@@ -108,6 +123,14 @@ public class PlaybackKeepAliveService extends Service {
             @Override
             public void onPause() {
                 if (!PlaybackMediaState.get().isPlayBound()) return;
+                PlaybackMediaState state = PlaybackMediaState.get();
+                state.setPlayback(
+                    false,
+                    state.getDurationMs(),
+                    state.getExtrapolatedPositionMs(),
+                    true
+                );
+                refresh(PlaybackKeepAliveService.this);
                 PlaybackMediaPlugin.emitAction("pause");
             }
 
@@ -127,6 +150,13 @@ public class PlaybackKeepAliveService extends Service {
             public void onStop() {
                 if (!PlaybackMediaState.get().isPlayBound()) return;
                 PlaybackMediaPlugin.emitAction("pause");
+            }
+
+            @Override
+            public void onSeekTo(long pos) {
+                if (!PlaybackMediaState.get().isPrevBound()) return;
+                // 有拖进度权限时允许通知栏/锁屏 scrub；回传秒数给前端
+                PlaybackMediaPlugin.emitSeek(pos / 1000.0);
             }
         });
         mediaSession.setActive(true);
@@ -149,6 +179,14 @@ public class PlaybackKeepAliveService extends Service {
         }
         if (ACTION_PAUSE.equals(action)) {
             if (PlaybackMediaState.get().isPlayBound()) {
+                PlaybackMediaState state = PlaybackMediaState.get();
+                state.setPlayback(
+                    false,
+                    state.getDurationMs(),
+                    state.getExtrapolatedPositionMs(),
+                    true
+                );
+                refresh(this);
                 PlaybackMediaPlugin.emitAction("pause");
             }
             return START_STICKY;
@@ -168,7 +206,10 @@ public class PlaybackKeepAliveService extends Service {
 
         RUNNING.set(this);
         ensureChannel();
-        updateMediaSession();
+        // 首次拉起必须完整刷新指纹，确保带按钮的通知立刻出现
+        PlaybackMediaState.get().invalidateNotificationFingerprint();
+        lastMetadataFingerprint = "";
+        updateMediaSession(true);
         Notification notification = buildNotification();
         if (!startedAsForeground) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -181,9 +222,11 @@ public class PlaybackKeepAliveService extends Service {
                 startForeground(NOTIFICATION_ID, notification);
             }
             startedAsForeground = true;
+            PlaybackMediaState.get().takeNotificationDirty();
         } else {
             NotificationManager nm = getSystemService(NotificationManager.class);
             if (nm != null) nm.notify(NOTIFICATION_ID, notification);
+            PlaybackMediaState.get().takeNotificationDirty();
         }
         return START_STICKY;
     }
@@ -198,6 +241,7 @@ public class PlaybackKeepAliveService extends Service {
         }
         stopForeground(STOP_FOREGROUND_REMOVE);
         startedAsForeground = false;
+        lastMetadataFingerprint = "";
         super.onDestroy();
     }
 
@@ -206,9 +250,10 @@ public class PlaybackKeepAliveService extends Service {
         return null;
     }
 
-    private void updateNotificationAndSession() {
+    private void updateNotificationAndSession(boolean forceMetadata) {
         if (!startedAsForeground) return;
-        updateMediaSession();
+        updateMediaSession(forceMetadata);
+        if (!PlaybackMediaState.get().takeNotificationDirty()) return;
         NotificationManager nm = getSystemService(NotificationManager.class);
         if (nm != null) {
             nm.notify(NOTIFICATION_ID, buildNotification());
@@ -230,23 +275,30 @@ public class PlaybackKeepAliveService extends Service {
         nm.createNotificationChannel(channel);
     }
 
-    private void updateMediaSession() {
+    private void updateMediaSession(boolean forceMetadata) {
         if (mediaSession == null) return;
         PlaybackMediaState state = PlaybackMediaState.get();
 
-        MediaMetadataCompat.Builder meta = new MediaMetadataCompat.Builder()
-            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, state.getTitle())
-            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, state.getArtist())
-            .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, state.getAlbum());
-        if (state.getDurationMs() > 0) {
-            meta.putLong(MediaMetadataCompat.METADATA_KEY_DURATION, state.getDurationMs());
+        String metaFp = state.getTitle() + '\u0001' + state.getArtist() + '\u0001'
+            + state.getAlbum() + '\u0001' + state.getDurationMs() + '\u0001'
+            + state.getArtworkUrl() + '\u0001'
+            + (state.getArtwork() != null ? System.identityHashCode(state.getArtwork()) : 0);
+        if (forceMetadata || !metaFp.equals(lastMetadataFingerprint)) {
+            lastMetadataFingerprint = metaFp;
+            MediaMetadataCompat.Builder meta = new MediaMetadataCompat.Builder()
+                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, state.getTitle())
+                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, state.getArtist())
+                .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, state.getAlbum());
+            if (state.getDurationMs() > 0) {
+                meta.putLong(MediaMetadataCompat.METADATA_KEY_DURATION, state.getDurationMs());
+            }
+            Bitmap art = state.getArtwork();
+            if (art != null) {
+                meta.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, art);
+                meta.putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON, art);
+            }
+            mediaSession.setMetadata(meta.build());
         }
-        Bitmap art = state.getArtwork();
-        if (art != null) {
-            meta.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, art);
-            meta.putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON, art);
-        }
-        mediaSession.setMetadata(meta.build());
 
         long actions = 0;
         if (state.isPlayBound()) {
@@ -259,17 +311,25 @@ public class PlaybackKeepAliveService extends Service {
             actions |= PlaybackStateCompat.ACTION_SKIP_TO_NEXT;
         }
         if (state.isPrevBound()) {
-            actions |= PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS;
+            actions |= PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS
+                | PlaybackStateCompat.ACTION_SEEK_TO;
         }
 
         int pbState = state.isPlaying()
             ? PlaybackStateCompat.STATE_PLAYING
             : (state.hasTrack() ? PlaybackStateCompat.STATE_PAUSED : PlaybackStateCompat.STATE_NONE);
 
+        float speed = state.isPlaying() ? 1f : 0f;
+        long updateTime = state.getPositionUpdatedAtElapsed();
+        if (updateTime <= 0) updateTime = SystemClock.elapsedRealtime();
+
         mediaSession.setPlaybackState(new PlaybackStateCompat.Builder()
             .setActions(actions)
-            .setState(pbState, state.getPositionMs(), state.isPlaying() ? 1f : 0f)
+            .setState(pbState, state.getPositionMs(), speed, updateTime)
+            .setBufferedPosition(state.getDurationMs())
             .build());
+
+        PlaybackAudioFocus.get(this).syncWithState();
     }
 
     private Notification buildNotification() {
@@ -303,7 +363,8 @@ public class PlaybackKeepAliveService extends Service {
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setSilent(true);
+            .setSilent(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW);
 
         Bitmap art = state.getArtwork();
         if (art != null) {
@@ -347,17 +408,16 @@ public class PlaybackKeepAliveService extends Service {
             compact.add(compact.size());
         }
 
-        if (!compact.isEmpty() && mediaSession != null) {
-            int[] compactArr = new int[compact.size()];
-            for (int i = 0; i < compact.size(); i++) compactArr[i] = compact.get(i);
-
+        if (mediaSession != null) {
             MediaStyle style = new MediaStyle()
                 .setMediaSession(mediaSession.getSessionToken())
-                .setShowActionsInCompactView(compactArr)
                 .setShowCancelButton(false);
+            if (!compact.isEmpty()) {
+                int[] compactArr = new int[compact.size()];
+                for (int i = 0; i < compact.size(); i++) compactArr[i] = compact.get(i);
+                style.setShowActionsInCompactView(compactArr);
+            }
             builder.setStyle(style);
-        } else if (mediaSession != null) {
-            builder.setStyle(new MediaStyle().setMediaSession(mediaSession.getSessionToken()));
         }
 
         return builder.build();
