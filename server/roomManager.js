@@ -2953,6 +2953,8 @@ export function transferOwner(roomId, actorId, targetUserId, connectionId = null
   auto.delete(targetId);
 
   room.creatorId = targetId;
+  // 同步设备绑定：否则原房主刷新进房时会因 creatorDeviceId 匹配被「恢复」为房主
+  room.creatorDeviceId = sanitizeCreatorId(target.deviceId) || null;
 
   // 原房主降为正式管理员（名额允许时），避免转让后立刻失去管理权
   if (actorId && actorId !== targetId) {

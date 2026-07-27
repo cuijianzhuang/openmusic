@@ -57,7 +57,7 @@ mkdir -p data/downloads && touch data/.env data/setup.lock && echo '{}' > data/r
 docker compose -f docker-compose.full.yml up -d
 ```
 
-打开 `http://<IP>:4000`，Redis 和 Meting 已自动配好，填个站点域名就完事。向导完成后自动重启.。
+打开 `http://<IP>:4000`，Redis 和 Meting 已自动配好，填个站点域名就完事。向导完成后自动重启。
 
 > 不需要内置 Meting？改用 `docker-compose.yml`。宝塔用户见 [宝塔部署](deploy/DEPLOY-BAOTA.md)。
 > 更新：`docker compose pull && docker compose up -d`

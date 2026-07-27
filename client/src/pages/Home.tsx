@@ -28,6 +28,14 @@ import ClientDownloadModal from '../components/ClientDownloadModal';
 import SiteAnnouncementPopup from '../components/SiteAnnouncementPopup';
 import UserGuideTour from '../components/UserGuideTour';
 import BrandMark from '../components/BrandMark';
+import HomeAuroraBackdrop from '../components/react-bits/HomeAuroraBackdrop';
+import GradientText from '../components/react-bits/GradientText';
+import ShinyText from '../components/react-bits/ShinyText';
+import SpotlightCard from '../components/react-bits/SpotlightCard';
+import BlurText from '../components/react-bits/BlurText';
+import Magnet from '../components/react-bits/Magnet';
+import TiltedCard from '../components/react-bits/TiltedCard';
+import BorderGlow from '../components/react-bits/BorderGlow';
 import { getRememberedAdminEntryPath } from '../lib/adminEntryShortcut';
 import { markGuideFeatureUsed } from '../lib/userGuide';
 
@@ -52,7 +60,12 @@ function GiteeIcon({ className }: { className?: string }) {
   );
 }
 
-const repoLinkCls = 'p-2.5 rounded-full text-white/50 border border-white/5 bg-white/[0.02] hover:text-white hover:bg-white/10 hover:border-white/10 transition-all duration-300';
+const headerIconCls =
+  'home-header-icon group/hicon relative inline-flex items-center justify-center h-10 w-10 rounded-full text-white/55 border border-white/8 bg-white/[0.03] outline-none transition-[color,background,border-color,transform,box-shadow] duration-300 hover:text-white hover:bg-white/[0.1] hover:border-white/18 hover:-translate-y-0.5 hover:shadow-[0_8px_22px_rgba(0,0,0,0.35)] focus-visible:text-white focus-visible:ring-2 focus-visible:ring-netease-red/40';
+
+const headerPillCls =
+  'home-header-pill group/pill inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-sm font-medium text-white/65 border border-white/8 bg-white/[0.03] outline-none transition-[color,background,border-color,transform,box-shadow] duration-300 hover:text-white hover:bg-white/[0.1] hover:border-white/18 hover:-translate-y-0.5 hover:shadow-[0_8px_22px_rgba(0,0,0,0.3)] focus-visible:ring-2 focus-visible:ring-netease-red/40';
+
 
 /** 逐字母渐变色：品牌红 → 玫红 → 紫，跨整个词插值（hover 时逐字点亮） */
 function buildGradientLetters(text: string) {
@@ -141,59 +154,11 @@ const RoomCard = memo(function RoomCard({
     setCoverFailed(false);
   }, [coverUrl]);
 
-  const cardRef = useRef<HTMLDivElement | HTMLButtonElement | null>(null);
-  const frameRef = useRef<number | null>(null);
-
-  const resetTilt = useCallback(() => {
-    const el = cardRef.current;
-    if (!el) return;
-    if (frameRef.current) cancelAnimationFrame(frameRef.current);
-    el.style.setProperty('--rx', '0deg');
-    el.style.setProperty('--ry', '0deg');
-    el.style.setProperty('--tx', '0px');
-    el.style.setProperty('--ty', '0px');
-    el.style.setProperty('--tz', '0px');
-  }, []);
-
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (hardLocked) return;
-    const el = cardRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const px = (e.clientX - rect.left) / rect.width;   // 0..1
-    const py = (e.clientY - rect.top) / rect.height;   // 0..1
-    if (frameRef.current) cancelAnimationFrame(frameRef.current);
-    frameRef.current = requestAnimationFrame(() => {
-      el.style.setProperty('--rx', `${(0.5 - py) * 10}deg`);
-      el.style.setProperty('--ry', `${(px - 0.5) * 12}deg`);
-      // 朝鼠标一侧偏移
-      el.style.setProperty('--tx', `${(px - 0.5) * 14}px`);
-      el.style.setProperty('--ty', `${(py - 0.5) * 14}px`);
-      el.style.setProperty('--tz', '24px');
-      // 跟随鼠标的高光位置
-      el.style.setProperty('--mx', `${px * 100}%`);
-      el.style.setProperty('--my', `${py * 100}%`);
-    });
-  }, [hardLocked]);
-
-  useEffect(() => () => {
-    if (frameRef.current) cancelAnimationFrame(frameRef.current);
-  }, []);
-
-  const cardClassName = `group relative w-full text-left rounded-[24px] border overflow-hidden backdrop-blur-md will-change-transform
+  const cardClassName = `group relative w-full text-left rounded-[24px] border overflow-hidden backdrop-blur-md
     ${hardLocked
       ? 'border-white/5 bg-black/40 opacity-60 cursor-not-allowed'
       : 'border-white/10 bg-gradient-to-br from-white/[0.09] to-white/[0.02] shadow-xl shadow-black/40 hover:border-white/25 hover:from-white/[0.14] hover:to-white/[0.04] hover:shadow-2xl hover:shadow-black/70'
     }`;
-
-  const tiltStyle: React.CSSProperties = hardLocked
-    ? {}
-    : {
-        transform:
-          'perspective(900px) rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg)) translate3d(var(--tx,0px),var(--ty,0px),var(--tz,0px))',
-        transition: 'transform 0.18s ease-out, border-color 0.3s ease, box-shadow 0.3s ease',
-        transformStyle: 'preserve-3d',
-      };
 
   const body = (
     <>
@@ -202,20 +167,9 @@ const RoomCard = memo(function RoomCard({
         <div className={`absolute -top-20 -right-20 w-48 h-48 rounded-full bg-gradient-to-br ${gradient} opacity-[0.08] blur-3xl group-hover:opacity-20 transition-opacity duration-500 pointer-events-none`} />
       )}
 
-      {/* 鼠标跟随高光 */}
-      {!hardLocked && (
-        <div
-          className="pointer-events-none absolute inset-0 z-10 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-          style={{
-            background:
-              'radial-gradient(340px circle at var(--mx,50%) var(--my,50%), rgba(255,255,255,0.14), transparent 60%)',
-          }}
-        />
-      )}
-
       {/* 顶部细亮线，增强边缘立体感 */}
       {!hardLocked && (
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/25 to-transparent" />
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-[11] h-px bg-gradient-to-r from-transparent via-white/25 to-transparent" />
       )}
 
       <div className="relative p-5 sm:p-6" style={{ transformStyle: 'preserve-3d' }}>
@@ -252,7 +206,6 @@ const RoomCard = memo(function RoomCard({
           {/* 信息区块（倾斜时视差浮起） */}
           <div className="min-w-0 flex-1 flex flex-col h-full justify-center transition-transform duration-300 ease-out [transform:translateZ(0)] group-hover:[transform:translateZ(24px)]">
             <div className="flex items-start gap-2.5 mb-1.5">
-              {/* 房间名：过长换行完整显示，不用省略号 */}
               <h3 className={`min-w-0 flex-1 text-xl sm:text-[22px] font-black tracking-tight break-words whitespace-normal leading-snug ${hardLocked ? 'text-white/50' : 'text-emboss'}`}>
                 {room.name}
               </h3>
@@ -263,14 +216,12 @@ const RoomCard = memo(function RoomCard({
               )}
             </div>
 
-            {/* 歌名行：凹陷刻槽，和凸起的标题形成对比 */}
             {room.currentSong ? (
               <div className="min-w-0 max-w-full self-start mt-0.5 rounded-lg bg-black/25 px-2.5 py-1 shadow-[inset_0_1.5px_3px_rgba(0,0,0,0.55),0_1px_0_rgba(255,255,255,0.06)]">
                 <p className={`flex items-center gap-1.5 text-[13px] truncate transition-colors ${isActive && !hardLocked ? 'text-white/65' : 'text-white/50'} group-hover:text-white/75`}>
                   {isActive && !hardLocked && (
                     <span className="flex-shrink-0 text-netease-red/80 text-[12px] animate-pulse">♪</span>
                   )}
-                  {/* 歌名优先：不参与收缩、最多占满整行；歌手名只用剩余空间被截断 */}
                   <span className="flex-none max-w-full truncate">{room.currentSong.name}</span>
                   <span className="flex-shrink-0 text-white/25">·</span>
                   <span className="min-w-0 truncate text-white/35 group-hover:text-white/50 transition-colors">{room.currentSong.artist}</span>
@@ -280,7 +231,6 @@ const RoomCard = memo(function RoomCard({
               <p className="self-start mt-0.5 rounded-lg bg-black/25 px-2.5 py-1 shadow-[inset_0_1.5px_3px_rgba(0,0,0,0.55),0_1px_0_rgba(255,255,255,0.06)] text-[13px] text-white/30 italic group-hover:text-white/50 transition-colors">等待点播...</p>
             )}
 
-            {/* 底部状态栏：分隔线做成刻痕（上暗下亮） */}
             <div className="flex items-center gap-2 sm:gap-5 mt-4 pt-3.5 border-t border-black/40 [box-shadow:inset_0_1px_0_rgba(255,255,255,0.08)] transition-colors">
               <div className="flex min-w-0 items-center gap-1.5 sm:gap-2.5">
                 <span className="inline-flex flex-shrink-0 items-center gap-1 sm:gap-1.5 whitespace-nowrap rounded-lg px-1.5 sm:px-2 py-1 text-xs font-semibold text-white/55 group-hover:text-white/85 transition-colors bg-gradient-to-b from-white/[0.09] to-white/[0.02] border border-white/10 shadow-[0_2px_4px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.12)]">
@@ -314,18 +264,32 @@ const RoomCard = memo(function RoomCard({
   );
 
   return (
-    <button
-      type="button"
-      ref={(node) => { cardRef.current = node; }}
-      data-guide={guideAnchor ? 'home-lobby' : undefined}
-      onClick={() => onJoin(room)}
-      onMouseMove={handleMouseMove}
-      onMouseLeave={resetTilt}
-      className={cardClassName}
-      style={tiltStyle}
+    <BorderGlow
+      className="w-full rounded-[24px]"
+      color="#ff4d55"
+      colorSecondary="#c084fc"
+      duration={6}
+      bloom={0.6}
+      edgeProximity
+      edgeZone={56}
+      disabled={hardLocked}
     >
-      {body}
-    </button>
+      <SpotlightCard
+        className="w-full rounded-[24px] border-0 bg-transparent p-0 shadow-none"
+        spotlightColor="rgba(255, 77, 85, 0.2)"
+      >
+        <TiltedCard
+          disabled={hardLocked}
+          rotateAmplitude={11}
+          scaleOnHover={1.025}
+          onClick={() => onJoin(room)}
+          data-guide={guideAnchor ? 'home-lobby' : undefined}
+          className={cardClassName}
+        >
+          {body}
+        </TiltedCard>
+      </SpotlightCard>
+    </BorderGlow>
   );
 });
 
@@ -591,15 +555,11 @@ export default function Home() {
 
   return (
     <div className="h-full flex flex-col relative overflow-hidden bg-[#050505] text-white font-sans selection:bg-netease-red/30">
-      {/* 背景光效 */}
-      <div className="absolute inset-0 pointer-events-none">
-        <div className="absolute top-[-20%] left-[10%] w-[600px] h-[600px] bg-netease-red/5 rounded-full blur-[140px] mix-blend-screen" />
-        <div className="absolute bottom-[-10%] right-[10%] w-[500px] h-[500px] bg-purple-600/5 rounded-full blur-[120px] mix-blend-screen" />
-        <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-[0.02]" />
-      </div>
+      {/* React Bits Aurora 背景（弱设备 / 移动端自动降级） */}
+      <HomeAuroraBackdrop />
 
       {/* 悬浮顶栏 */}
-      <header className="relative z-20 pt-6 px-4 sm:px-6 max-w-7xl mx-auto w-full">
+      <header className="home-hero-stage home-hero-stage--header relative z-20 pt-6 px-4 sm:px-6 max-w-7xl mx-auto w-full">
         <div className="bg-white/[0.03] border border-white/10 backdrop-blur-xl rounded-full px-5 py-3 flex items-center justify-between shadow-2xl">
           <div className="flex items-center gap-3">
             <BrandMark className="h-10 w-10 drop-shadow-[0_8px_20px_rgba(255,77,85,.18)]" />
@@ -620,39 +580,59 @@ export default function Home() {
             </span>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-2.5">
             {!isMobileDevice() && (
-              <div className="hidden lg:flex items-center gap-2 mr-2">
+              <div className="hidden lg:flex items-center gap-2 mr-1">
                 <Tooltip content="下载 Android 客户端">
-                  <a href={ANDROID_APK_URL} download="openmusic.apk" className="flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium text-white/70 hover:text-white bg-white/5 hover:bg-white/10 border border-white/5 transition-all">
-                    <Download className="w-4 h-4" /> Android
+                  <a href={ANDROID_APK_URL} download="openmusic.apk" className={headerPillCls}>
+                    <Download className="home-header-pill__dl w-4 h-4" />
+                    Android
                   </a>
                 </Tooltip>
                 <Tooltip content="下载 iOS IPA（需自签安装）">
-                  <a href={IOS_IPA_URL} download="openmusic.ipa" className="flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium text-white/70 hover:text-white bg-white/5 hover:bg-white/10 border border-white/5 transition-all">
-                    <Download className="w-4 h-4" /> iOS
+                  <a href={IOS_IPA_URL} download="openmusic.ipa" className={headerPillCls}>
+                    <Download className="home-header-pill__dl w-4 h-4" />
+                    iOS
                   </a>
                 </Tooltip>
               </div>
             )}
-            {adminEntryPath && (
-              <Tooltip content="管理后台（仅本机可见）">
-                <a href={adminEntryPath} className={`hidden sm:flex ${repoLinkCls}`} aria-label="管理后台">
-                  <ShieldCheck className="w-5 h-5" />
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              {adminEntryPath && (
+                <Tooltip content="管理后台（仅本机可见）">
+                  <a href={adminEntryPath} className={`hidden sm:inline-flex ${headerIconCls}`} aria-label="管理后台">
+                    <ShieldCheck className="home-header-icon__shield w-5 h-5" />
+                  </a>
+                </Tooltip>
+              )}
+              <Tooltip content="Gitee 仓库">
+                <a
+                  href="https://gitee.com/w3126197382/openmusic"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={`hidden sm:inline-flex ${headerIconCls}`}
+                  aria-label="Gitee"
+                >
+                  <GiteeIcon className="home-header-icon__gitee w-5 h-5" />
                 </a>
               </Tooltip>
-            )}
-            <a href="https://gitee.com/w3126197382/openmusic" target="_blank" rel="noopener noreferrer" className={`hidden sm:flex ${repoLinkCls}`} aria-label="Gitee">
-              <GiteeIcon className="w-5 h-5" />
-            </a>
-            <a href="https://github.com/qq01-hub/openmusic" target="_blank" rel="noopener noreferrer" className={`hidden sm:flex ${repoLinkCls}`} aria-label="GitHub">
-              <Github className="w-5 h-5" />
-            </a>
-            {isMobileDevice() && (
-              <button type="button" onClick={() => setDownloadModalOpen(true)} className={repoLinkCls} aria-label="App">
-                <Smartphone className="w-5 h-5" />
-              </button>
-            )}
+              <Tooltip content="GitHub · 欢迎 Star">
+                <a
+                  href="https://github.com/qq01-hub/openmusic"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={`hidden sm:inline-flex ${headerIconCls}`}
+                  aria-label="GitHub"
+                >
+                  <Github className="w-5 h-5" />
+                </a>
+              </Tooltip>
+              {isMobileDevice() && (
+                <button type="button" onClick={() => setDownloadModalOpen(true)} className={headerIconCls} aria-label="App">
+                  <Smartphone className="home-header-icon__phone w-5 h-5" />
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </header>
@@ -664,104 +644,143 @@ export default function Home() {
           {/* 精简居中版 Hero Section */}
           <section className="mb-16 flex flex-col items-center text-center max-w-3xl mx-auto">
             {/* 状态徽章 */}
-            <div className="mb-6 inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/[0.04] border border-white/10 backdrop-blur-md text-xs sm:text-[13px] font-medium text-white/70">
+            <div className="home-hero-stage home-hero-stage--badge mb-6 inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/[0.04] border border-white/10 backdrop-blur-md text-xs sm:text-[13px] font-medium">
               <span className="relative flex h-2 w-2">
                 <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-ping" />
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
               </span>
-              多人实时同步 · 边听边聊
+              <ShinyText
+                text="多人实时同步 · 边听边聊"
+                speed={5.8}
+                color="rgba(255,255,255,0.58)"
+                shineColor="rgba(255,255,255,0.95)"
+              />
             </div>
 
-            <h1 className="relative text-4xl sm:text-5xl lg:text-[68px] font-black tracking-tight leading-[1.1] mb-5">
-              <span aria-label="和喜欢的人">
-                {'和喜欢的人'.split('').map((char, index) => (
-                  <span key={index} aria-hidden className="hero-char">{char}</span>
-                ))}
-              </span>
+            <h1 className="home-hero-stage home-hero-stage--title relative text-4xl sm:text-5xl lg:text-[68px] font-black tracking-tight leading-[1.1] mb-5">
+              <BlurText
+                text="和喜欢的人"
+                delay={60}
+                startDelay={280}
+                charClassName="hero-char"
+              />
               {' '}
               <br className="sm:hidden" />
-              <span className="hero-gradient relative inline-block sm:ml-4">
+              <span className="relative inline-block sm:ml-4 align-baseline home-hero-gradient-enter">
                 <span
                   aria-hidden
-                  className="hero-gradient-glow hero-gradient-text absolute inset-0 text-transparent bg-clip-text blur-2xl opacity-60 select-none transition-opacity duration-500"
+                  className="home-gradient-glow pointer-events-none absolute inset-0 select-none blur-2xl"
+                >
+                  <GradientText
+                    className="text-4xl sm:text-5xl lg:text-[68px] font-black tracking-tight leading-[1.1]"
+                    colors={['#ff4d55', '#fb7185', '#e17ce8', '#fb7185', '#ff4d55']}
+                    animationSpeed={8}
+                    direction="diagonal"
+                  >
+                    听同一首歌
+                  </GradientText>
+                </span>
+                <GradientText
+                  className="relative text-4xl sm:text-5xl lg:text-[68px] font-black tracking-tight leading-[1.1]"
+                  colors={['#ff4d55', '#fb7185', '#e17ce8', '#fb7185', '#ff4d55']}
+                  animationSpeed={8}
+                  direction="diagonal"
                 >
                   听同一首歌
-                </span>
-                <span className="hero-gradient-text relative text-transparent bg-clip-text">
-                  听同一首歌
-                </span>
+                </GradientText>
               </span>
             </h1>
 
             <p
               ref={heroCopyRef}
               onMouseMove={handleHeroCopyMove}
-              className="hero-copy text-[15px] sm:text-lg mb-10 max-w-xl leading-relaxed"
+              className="home-hero-stage home-hero-stage--copy hero-copy text-[15px] sm:text-lg mb-10 max-w-xl leading-relaxed"
             >
-              全网曲库秒搜秒播，歌词实时同步，打破距离的限制，创建属于你们的
+              打破距离的限制，创造属于你们的
               <br />
-              <span className="font-semibold">专属音乐宇宙</span>。
+              <span className="font-semibold">专属音乐时刻</span>
             </p>
 
-            {/* 居中控制台 (Command Bar) */}
-            <div className="w-full bg-white/[0.03] border border-white/10 rounded-[28px] sm:rounded-full p-2.5 flex flex-col sm:flex-row gap-2.5 shadow-2xl backdrop-blur-xl">
-              <div className="relative flex-1 group" data-guide="home-nickname">
-                <div className="absolute inset-y-0 left-5 flex items-center pointer-events-none">
-                  <Users className="w-5 h-5 text-white/40 group-focus-within:text-netease-red group-focus-within:scale-110 transition-all duration-300" />
-                </div>
-                <input
-                  type="text"
-                  value={nickname}
-                  onChange={(e) => {
-                    setNickname(e.target.value);
-                    setError('');
-                    if (e.target.value.trim()) markGuideFeatureUsed('home-nickname');
-                  }}
-                  placeholder="给自己起个昵称..."
-                  maxLength={20}
-                  className="w-full h-12 sm:h-14 bg-transparent pl-14 pr-6 text-white caret-netease-red placeholder:text-white/30 outline-none focus:bg-white/[0.04] rounded-full transition-all text-[15px]"
-                />
-              </div>
-              <div className="flex gap-2.5">
-                <div data-guide="home-create" className="flex flex-1 sm:flex-none">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setError('');
-                      setModalError('');
-                      setShowCreate(true);
-                      markGuideFeatureUsed('home-create');
-                    }}
-                    onMouseMove={handleBtnTilt}
-                    onMouseLeave={resetBtnTilt}
-                    className="btn-shine btn-tilt group/create h-12 sm:h-14 w-full px-6 sm:px-8 rounded-full bg-netease-red hover:bg-netease-red/90 text-white font-semibold shadow-lg shadow-netease-red/25 hover:shadow-xl hover:shadow-netease-red/45 whitespace-nowrap"
-                  >
-                    <span className="btn-tilt-face flex h-full w-full items-center justify-center gap-2">
-                      <Plus className="w-5 h-5 transition-transform duration-300 ease-out group-hover/create:rotate-90" />
-                      创建房间
-                    </span>
-                  </button>
-                </div>
-                <div data-guide="home-join" className="flex flex-1 sm:flex-none">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setError('');
-                      setModalError('');
-                      setShowJoin(true);
-                      markGuideFeatureUsed('home-join');
-                    }}
-                    onMouseMove={handleBtnTilt}
-                    onMouseLeave={resetBtnTilt}
-                    className="btn-shine btn-tilt group/join h-12 sm:h-14 w-full px-6 sm:px-8 rounded-full bg-white/5 hover:bg-white/15 border border-white/10 hover:border-white/25 text-white font-medium whitespace-nowrap"
-                  >
-                    <span className="btn-tilt-face flex h-full w-full items-center justify-center">
-                      加入
-                      <ArrowRight className="h-4 w-0 ml-0 opacity-0 -translate-x-1 group-hover/join:w-4 group-hover/join:ml-1.5 group-hover/join:opacity-100 group-hover/join:translate-x-0 transition-all duration-300 ease-out" />
-                    </span>
-                  </button>
-                </div>
-              </div>
+            {/* 居中控制台 — Spotlight + BorderGlow（与房间卡片同款跟手高亮） */}
+            <div className="home-hero-stage home-hero-stage--bar w-full">
+              <BorderGlow
+                className="w-full rounded-[28px] sm:rounded-full"
+                color="#ff4d55"
+                colorSecondary="#c084fc"
+                duration={7}
+                bloom={0.55}
+                edgeProximity
+                edgeZone={48}
+              >
+                <SpotlightCard
+                  className="w-full rounded-[28px] sm:rounded-full border-0 bg-white/[0.03] p-2.5 shadow-2xl backdrop-blur-xl"
+                  spotlightColor="rgba(255, 77, 85, 0.22)"
+                >
+                  <div className="flex flex-col sm:flex-row gap-2.5">
+                    <div className="relative flex-1 group" data-guide="home-nickname">
+                      <div className="absolute inset-y-0 left-5 flex items-center pointer-events-none">
+                        <Users className="w-5 h-5 text-white/40 transition-all duration-300 group-focus-within:text-netease-red group-focus-within:scale-110" />
+                      </div>
+                      <input
+                        type="text"
+                        value={nickname}
+                        onChange={(e) => {
+                          setNickname(e.target.value);
+                          setError('');
+                          if (e.target.value.trim()) markGuideFeatureUsed('home-nickname');
+                        }}
+                        placeholder="给自己起个昵称..."
+                        maxLength={20}
+                        className="w-full h-12 sm:h-14 bg-transparent pl-14 pr-6 text-white caret-netease-red placeholder:text-white/30 outline-none rounded-full text-[15px] transition-colors focus:bg-white/[0.04]"
+                      />
+                    </div>
+                    <div className="flex gap-2.5">
+                      <Magnet className="flex flex-1 sm:flex-none" strength={0.28} maxOffset={8}>
+                        <div data-guide="home-create" className="flex w-full">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setError('');
+                              setModalError('');
+                              setShowCreate(true);
+                              markGuideFeatureUsed('home-create');
+                            }}
+                            onMouseMove={handleBtnTilt}
+                            onMouseLeave={resetBtnTilt}
+                            className="btn-shine btn-tilt group/create h-12 sm:h-14 w-full px-6 sm:px-8 rounded-full bg-netease-red hover:bg-netease-red/90 text-white font-semibold shadow-lg shadow-netease-red/25 hover:shadow-xl hover:shadow-netease-red/45 whitespace-nowrap"
+                          >
+                            <span className="btn-tilt-face flex h-full w-full items-center justify-center gap-2">
+                              <Plus className="w-5 h-5 transition-transform duration-300 ease-out group-hover/create:rotate-90" />
+                              创建房间
+                            </span>
+                          </button>
+                        </div>
+                      </Magnet>
+                      <Magnet className="flex flex-1 sm:flex-none" strength={0.28} maxOffset={8}>
+                        <div data-guide="home-join" className="flex w-full">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setError('');
+                              setModalError('');
+                              setShowJoin(true);
+                              markGuideFeatureUsed('home-join');
+                            }}
+                            onMouseMove={handleBtnTilt}
+                            onMouseLeave={resetBtnTilt}
+                            className="btn-shine btn-tilt group/join h-12 sm:h-14 w-full px-6 sm:px-8 rounded-full bg-white/5 hover:bg-white/15 border border-white/10 hover:border-white/25 text-white font-medium whitespace-nowrap"
+                          >
+                            <span className="btn-tilt-face flex h-full w-full items-center justify-center">
+                              加入
+                              <ArrowRight className="h-4 w-0 ml-0 opacity-0 -translate-x-1 group-hover/join:w-4 group-hover/join:ml-1.5 group-hover/join:opacity-100 group-hover/join:translate-x-0 transition-all duration-300 ease-out" />
+                            </span>
+                          </button>
+                        </div>
+                      </Magnet>
+                    </div>
+                  </div>
+                </SpotlightCard>
+              </BorderGlow>
             </div>
 
             {error && rooms.length > 0 && (
