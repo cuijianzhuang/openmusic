@@ -23,7 +23,6 @@ public class MainActivity extends BridgeActivity {
         // 须在 super 之前注册，供 Web 同步媒体通知栏元数据
         registerPlugin(PlaybackMediaPlugin.class);
         super.onCreate(savedInstanceState);
-        PlaybackAudioFocus.get(this);
         requestNotificationPermissionIfNeeded();
     }
 

@@ -21,10 +21,7 @@ import {
   syncNativePlaybackState,
 } from '../lib/nativePlaybackMedia';
 import {
-  clearExternalAudioFocusLoss,
   installBackgroundPlaybackGuards,
-  markExternalAudioFocusLoss,
-  markUserMediaPauseIntent,
   shouldIgnoreBackgroundRoomPause,
 } from '../lib/backgroundPlayback';
 import { canPauseInRoom, canSeekInRoom } from '../lib/roomPermissions';
@@ -32,14 +29,7 @@ import { readRoomPureMode } from '../lib/roomPureMode';
 import type { RoomState } from '../types';
 
 const SEEK_STEP_SEC = 10;
-/** Web Media Session 进度同步间隔 */
-const WEB_POSITION_UPDATE_MS = 1000;
-/**
- * Android 原生侧按 MediaSession speed 外推进度。
- * JS 仅在前台低频校正；后台禁止覆盖，否则进度条会「+1 又退回」。
- */
-const NATIVE_POSITION_CORRECT_MS = 12000;
-const NATIVE_SEEK_DETECT_SEC = 2;
+const POSITION_UPDATE_MS = 1000;
 
 type MediaSessionControls = {
   /** false 时禁用（如 TV 投屏页不占用系统媒体会话） */
@@ -59,8 +49,7 @@ function resolveSystemMediaControlFlags(
   const systemSkip = room?.systemMediaSkipBound !== false;
   return {
     playBound: systemPlay && canPauseInRoom(room, canControlPlayback),
-    // 通知栏不展示「上一首」（原为回退 10s，易与真·上一曲混淆）
-    prevBound: false,
+    prevBound: canSeekInRoom(room, canControlPlayback),
     nextBound: systemSkip && canControlPlayback,
   };
 }
@@ -93,21 +82,6 @@ export function useMediaSession({
 
     installBackgroundPlaybackGuards();
 
-    let nativeAnchorSec = 0;
-    let nativeAnchorAtMs = 0;
-    let nativeAnchorPlaying = false;
-
-    const markNativeAnchor = (position: number, playing: boolean) => {
-      nativeAnchorSec = position;
-      nativeAnchorAtMs = performance.now();
-      nativeAnchorPlaying = playing;
-    };
-
-    const expectedNativePosition = () => {
-      if (!nativeAnchorPlaying) return nativeAnchorSec;
-      return nativeAnchorSec + Math.max(0, (performance.now() - nativeAnchorAtMs) / 1000);
-    };
-
     const handlePlay = () => {
       const { room, canControlPlayback } = useRoomStore.getState();
       if (!room?.current) return;
@@ -122,14 +96,13 @@ export function useMediaSession({
       }
     };
 
-    const handlePause = (fromUserControl = false) => {
+    const handlePause = () => {
       const { room, canControlPlayback } = useRoomStore.getState();
       if (!room?.current) return;
       if (!resolveSystemMediaControlFlags(room, canControlPlayback).playBound) return;
       const { localPlayback } = useAudioStore.getState();
 
-      // 系统抢焦点的 pause 忽略；通知栏/锁屏用户点的暂停必须生效
-      if (shouldIgnoreBackgroundRoomPause(fromUserControl) && room.isPlaying) {
+      if (shouldIgnoreBackgroundRoomPause() && room.isPlaying) {
         updateMediaSessionPlaybackState('playing');
         if (!document.hidden) {
           localPlayback?.(true);
@@ -138,38 +111,9 @@ export function useMediaSession({
         return;
       }
 
-      markUserMediaPauseIntent();
       updateMediaSessionPlaybackState('paused');
       localPlayback?.(false);
-      void syncNativePlaybackState({
-        playing: false,
-        forcePosition: true,
-      });
       void controlsRef.current.togglePlay(false);
-    };
-
-    const handleExternalAudioFocusLoss = () => {
-      const { room, canControlPlayback } = useRoomStore.getState();
-      if (!room?.current || !room.isPlaying) return;
-      const flags = resolveSystemMediaControlFlags(room, canControlPlayback);
-
-      markExternalAudioFocusLoss();
-      markUserMediaPauseIntent();
-      updateMediaSessionPlaybackState('paused');
-      useAudioStore.getState().localPlayback?.(false);
-      void syncNativePlaybackState({ playing: false, forcePosition: true });
-
-      if (flags.playBound) {
-        void controlsRef.current.togglePlay(false);
-      }
-    };
-
-    const handleAudioFocusGain = () => {
-      clearExternalAudioFocusLoss();
-      const { room } = useRoomStore.getState();
-      if (!room?.current || !room.isPlaying) return;
-      // 无暂停权限时房间仍在播，焦点回来仅恢复本机音频
-      useAudioStore.getState().retryPlayback?.(true);
     };
 
     const handleNext = () => {
@@ -188,17 +132,7 @@ export function useMediaSession({
       controlsRef.current.seekTo(Math.max(0, time - SEEK_STEP_SEC));
     };
 
-    const handleSeekTo = (positionSec: number) => {
-      const { room, canControlPlayback } = useRoomStore.getState();
-      if (!canSeekInRoom(room, canControlPlayback)) return;
-      if (!Number.isFinite(positionSec)) return;
-      controlsRef.current.seekTo(Math.max(0, positionSec));
-    };
-
-    /**
-     * @param forceNative 切歌/暂停/进后台锚点/显式 seek 时强制写原生进度
-     */
-    const syncPosition = (forceNative = false) => {
+    const syncPosition = () => {
       const room = useRoomStore.getState().room;
       const current = room?.current;
       if (!current) return;
@@ -213,8 +147,6 @@ export function useMediaSession({
       if (!(duration > 0)) return;
 
       const position = Math.min(Math.max(0, smoothPlaybackTime), duration);
-      const playing = Boolean(room?.isPlaying);
-
       if (webSessionOk) {
         updateMediaSessionPositionState({
           duration,
@@ -222,22 +154,13 @@ export function useMediaSession({
           playbackRate: 1,
         });
       }
-      if (!nativeOk) return;
-
-      // 后台播放：禁止用可能停滞的 JS 时间覆盖原生外推进度
-      if (!forceNative && playing && document.hidden) return;
-
-      const drift = Math.abs(position - expectedNativePosition());
-      if (!forceNative && playing && drift < NATIVE_SEEK_DETECT_SEC) return;
-
-      const shouldForce = forceNative || !playing || drift >= NATIVE_SEEK_DETECT_SEC;
-      markNativeAnchor(position, playing);
-      void syncNativePlaybackState({
-        playing,
-        durationSec: duration,
-        positionSec: position,
-        forcePosition: shouldForce,
-      });
+      if (nativeOk) {
+        void syncNativePlaybackState({
+          playing: Boolean(room?.isPlaying),
+          durationSec: duration,
+          positionSec: position,
+        });
+      }
     };
 
     const syncHandlers = () => {
@@ -250,7 +173,7 @@ export function useMediaSession({
       if (webSessionOk) {
         bindMediaSessionActions({
           play: hasTrack && playBound ? handlePlay : undefined,
-          pause: hasTrack && playBound ? () => handlePause(false) : undefined,
+          pause: hasTrack && playBound ? handlePause : undefined,
           nexttrack: hasTrack && nextBound ? handleNext : undefined,
           previoustrack: hasTrack && prevBound ? handlePrevious : undefined,
           seekbackward: hasTrack && canSeek
@@ -275,7 +198,17 @@ export function useMediaSession({
             : undefined,
           stop: hasTrack && playBound
             ? () => {
-                handlePause(false);
+                const room = useRoomStore.getState().room;
+                if (shouldIgnoreBackgroundRoomPause() && room?.isPlaying) {
+                  updateMediaSessionPlaybackState('playing');
+                  if (!document.hidden) {
+                    useAudioStore.getState().localPlayback?.(true);
+                  }
+                  void syncNativePlaybackState({ playing: true });
+                  return;
+                }
+                useAudioStore.getState().localPlayback?.(false);
+                void controlsRef.current.togglePlay(false);
               }
             : undefined,
         });
@@ -312,9 +245,6 @@ export function useMediaSession({
         mediaTrackKey,
       });
       const pure = readRoomPureMode();
-      const position = Math.max(0, smoothPlaybackTime);
-      const playing = Boolean(room?.isPlaying);
-      markNativeAnchor(position, playing);
 
       // 先立刻同步按键权限（不等封面），避免无权限用户短暂看到可点按钮
       void syncNativePlaybackMetadata({
@@ -322,9 +252,9 @@ export function useMediaSession({
         title: pure ? '正在播放' : (current.name || '未知歌曲'),
         artist: pure ? '' : (current.artist || '未知歌手'),
         album: pure ? 'OpenMusic' : (current.album || 'OpenMusic'),
-        playing,
+        playing: Boolean(room?.isPlaying),
         durationSec: duration > 0 ? duration : undefined,
-        positionSec: position,
+        positionSec: Math.max(0, smoothPlaybackTime),
         playBound: flags.playBound,
         prevBound: flags.prevBound,
         nextBound: flags.nextBound,
@@ -335,18 +265,15 @@ export function useMediaSession({
         const live = liveStore.room;
         if (live?.current?.queueId !== current.queueId) return;
         const liveFlags = resolveSystemMediaControlFlags(live, liveStore.canControlPlayback);
-        const livePos = Math.max(0, useAudioStore.getState().smoothPlaybackTime);
-        const livePlaying = Boolean(live?.isPlaying);
-        markNativeAnchor(livePos, livePlaying);
         void syncNativePlaybackMetadata({
           hasTrack: true,
           title: pure ? '正在播放' : (current.name || '未知歌曲'),
           artist: pure ? '' : (current.artist || '未知歌手'),
           album: pure ? 'OpenMusic' : (current.album || 'OpenMusic'),
           artworkUrl: pure ? '' : artworkUrl,
-          playing: livePlaying,
+          playing: Boolean(live?.isPlaying),
           durationSec: duration > 0 ? duration : undefined,
-          positionSec: livePos,
+          positionSec: Math.max(0, useAudioStore.getState().smoothPlaybackTime),
           playBound: liveFlags.playBound,
           prevBound: liveFlags.prevBound,
           nextBound: liveFlags.nextBound,
@@ -356,21 +283,15 @@ export function useMediaSession({
 
     syncHandlers();
     syncMetadataAndState();
-    syncPosition(true);
+    syncPosition();
 
     let removeNativeActions: (() => void) | undefined;
     if (nativeOk) {
-      void subscribeNativeMediaActions((event) => {
-        // 原生通知栏/耳机键一律视为用户操作
-        const fromUser = true;
-        if (event.action === 'play') handlePlay();
-        else if (event.action === 'pause') handlePause(fromUser);
-        else if (event.action === 'nexttrack') handleNext();
-        else if (event.action === 'audiofocusloss') handleExternalAudioFocusLoss();
-        else if (event.action === 'audiofocusgain') handleAudioFocusGain();
-        else if (event.action === 'seekto' && typeof event.positionSec === 'number') {
-          handleSeekTo(event.positionSec);
-        }
+      void subscribeNativeMediaActions((action) => {
+        if (action === 'play') handlePlay();
+        else if (action === 'pause') handlePause();
+        else if (action === 'nexttrack') handleNext();
+        else if (action === 'previoustrack') handlePrevious();
       }).then((dispose) => {
         removeNativeActions = dispose;
       });
@@ -392,7 +313,7 @@ export function useMediaSession({
       ) {
         syncHandlers();
         syncMetadataAndState();
-        syncPosition(true);
+        syncPosition();
       }
     });
 
@@ -401,33 +322,17 @@ export function useMediaSession({
         state.mediaDurationMs !== prev.mediaDurationMs
         || state.lrcDurationMs !== prev.lrcDurationMs
       ) {
-        syncPosition(true);
+        syncPosition();
         syncMetadataAndState();
       }
     });
 
-    const onVisibility = () => {
-      // 进后台前打一次权威锚点，之后交给原生外推
-      syncPosition(true);
-    };
-    document.addEventListener('visibilitychange', onVisibility);
-
-    const webTimer = webSessionOk
-      ? window.setInterval(() => syncPosition(false), WEB_POSITION_UPDATE_MS)
-      : 0;
-    const nativeTimer = nativeOk
-      ? window.setInterval(() => {
-          if (document.hidden) return;
-          syncPosition(false);
-        }, NATIVE_POSITION_CORRECT_MS)
-      : 0;
+    const timer = window.setInterval(syncPosition, POSITION_UPDATE_MS);
 
     return () => {
       unsubRoom();
       unsubAudio();
-      document.removeEventListener('visibilitychange', onVisibility);
-      if (webTimer) window.clearInterval(webTimer);
-      if (nativeTimer) window.clearInterval(nativeTimer);
+      window.clearInterval(timer);
       removeNativeActions?.();
       clearMediaSession();
       void clearNativePlaybackMedia();
