@@ -1,7 +1,13 @@
 import { useEffect, useState } from 'react';
-import { SafetyCertificateOutlined, UserOutlined, LockOutlined } from '@ant-design/icons';
+import {
+  GithubOutlined,
+  LockOutlined,
+  SafetyCertificateOutlined,
+  UserOutlined,
+} from '@ant-design/icons';
 import { Alert, Button, Card, Divider, Form, Input, Layout, Space, Typography } from 'antd';
 import { adminFetch } from './utils';
+import { LinuxDoIcon } from './brandIcons';
 
 const LINUXDO_LOGIN_ERRORS: Record<string, string> = {
   denied: '这个 Linux.do 账号还没有绑定管理员，请先用账号密码登录后在后台绑定',
@@ -116,6 +122,7 @@ export default function LoginForm({ onLoggedIn }: { onLoggedIn: () => void }) {
             {linuxdoEnabled && (
               <Button
                 block
+                icon={<LinuxDoIcon />}
                 onClick={() => { window.location.href = '/api/admin/linuxdo/login/start'; }}
               >
                 使用 Linux.do 登录
@@ -124,6 +131,7 @@ export default function LoginForm({ onLoggedIn }: { onLoggedIn: () => void }) {
             {githubEnabled && (
               <Button
                 block
+                icon={<GithubOutlined />}
                 onClick={() => { window.location.href = '/api/admin/github/login/start'; }}
               >
                 使用 GitHub 登录

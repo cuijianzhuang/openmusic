@@ -4,6 +4,7 @@ import {
   CheckCircleOutlined,
   CheckOutlined,
   CloseOutlined,
+  CopyOutlined,
   DeleteOutlined,
   LogoutOutlined,
   MenuOutlined,
@@ -85,15 +86,54 @@ const REPORT_DEBUG_PRE_STYLE: CSSProperties = {
   border: '1px solid rgba(0,0,0,0.06)',
 };
 
+function ReportDebugPane({ text }: { text: string }) {
+  const { message } = App.useApp();
+  const content = text || '（无）';
+  const canCopy = Boolean(text.trim());
+
+  const handleCopy = async () => {
+    if (!canCopy) {
+      message.warning('没有可复制的内容');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(content);
+      message.success('已复制到剪贴板');
+    } catch {
+      message.error('复制失败，请手动选择文本');
+    }
+  };
+
+  return (
+    <div>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'flex-end',
+          marginBottom: 8,
+        }}
+      >
+        <Button
+          size="small"
+          icon={<CopyOutlined />}
+          onClick={() => void handleCopy()}
+          disabled={!canCopy}
+        >
+          一键复制
+        </Button>
+      </div>
+      <pre style={REPORT_DEBUG_PRE_STYLE}>{content}</pre>
+    </div>
+  );
+}
+
 function buildReportDebugTabItems(report: ErrorReportDetail) {
   const items = [
     {
       key: 'meta',
       label: '上下文',
       children: (
-        <pre style={REPORT_DEBUG_PRE_STYLE}>
-          {JSON.stringify(report.meta || {}, null, 2)}
-        </pre>
+        <ReportDebugPane text={JSON.stringify(report.meta || {}, null, 2)} />
       ),
     },
   ];
@@ -108,9 +148,7 @@ function buildReportDebugTabItems(report: ErrorReportDetail) {
       items.push({
         key: 'snapshots',
         label: 'Debug 快照',
-        children: (
-          <pre style={REPORT_DEBUG_PRE_STYLE}>{snapshotText}</pre>
-        ),
+        children: <ReportDebugPane text={snapshotText} />,
       });
     }
 
@@ -118,11 +156,11 @@ function buildReportDebugTabItems(report: ErrorReportDetail) {
       key: 'events',
       label: `事件 (${report.events?.length || 0})`,
       children: (
-        <pre style={REPORT_DEBUG_PRE_STYLE}>
-          {(report.events || [])
+        <ReportDebugPane
+          text={(report.events || [])
             .map((ev) => `[${ev.at}] ${ev.name}${ev.line ? ` ${ev.line}` : ''}`.trimEnd())
-            .join('\n') || '（无）'}
-        </pre>
+            .join('\n')}
+        />
       ),
     });
   }

@@ -5,6 +5,7 @@ import { useImmersiveModeStore } from '../../stores/immersiveModeStore';
 import { applySiteFeatures, isSvipQualityEnabled } from '../../stores/siteFeaturesStore';
 import { fetchWithTimeout } from '../http';
 import { requireSessionBootstrap } from '../../lib/sessionBootstrap';
+import { isWeakPlaybackDevice } from '../../lib/weakPlaybackDevice';
 
 export type NeteaseQuality =
   | 'standard'
@@ -37,6 +38,9 @@ export const DEFAULT_ROOM_AUDIO_QUALITY: RoomAudioQuality = {
 
 /** 沉浸模式本机播放音质上限（不改写用户设置） */
 export const IMMERSIVE_PLAYBACK_QUALITY_CAP = 'exhigh';
+
+/** 弱设备本机播放音质上限：避开 FLAC / 臻音 / 母带等重解码档 */
+export const WEAK_DEVICE_PLAYBACK_QUALITY_CAP = 'exhigh';
 
 export interface QualityOption {
   value: string;
@@ -159,22 +163,43 @@ export async function refreshQualityCapabilities(): Promise<boolean> {
   }
 }
 
-/** 沉浸模式：音质不超过极高；若用户设置更低则沿用设置 */
-export function capQualityForImmersive(source: MusicSource, quality: string): string {
+/** 将音质钳到不超过 maxQuality；选项列表中找不到上限时退回 maxQuality */
+export function capQualityToMax(
+  source: MusicSource,
+  quality: string,
+  maxQuality: string,
+): string {
   const options = getQualityOptionsForSource(source);
   if (options.length === 0) return quality;
   const normalized = QUALITY_ALIASES[quality] || quality;
-  const capIndex = options.findIndex((opt) => opt.value === IMMERSIVE_PLAYBACK_QUALITY_CAP);
+  const capIndex = options.findIndex((opt) => opt.value === maxQuality);
   if (capIndex < 0) return normalized;
   const currentIndex = options.findIndex((opt) => opt.value === normalized);
-  if (currentIndex < 0) return IMMERSIVE_PLAYBACK_QUALITY_CAP;
-  return currentIndex <= capIndex ? normalized : IMMERSIVE_PLAYBACK_QUALITY_CAP;
+  if (currentIndex < 0) return maxQuality;
+  return currentIndex <= capIndex ? normalized : maxQuality;
+}
+
+/** 沉浸模式：音质不超过极高；若用户设置更低则沿用设置 */
+export function capQualityForImmersive(source: MusicSource, quality: string): string {
+  return capQualityToMax(source, quality, IMMERSIVE_PLAYBACK_QUALITY_CAP);
 }
 
 export function applyImmersivePlaybackQualityCap(quality: RoomAudioQuality): RoomAudioQuality {
   return {
     netease: capQualityForImmersive('netease', quality.netease),
     tencent: capQualityForImmersive('tencent', quality.tencent),
+  };
+}
+
+/** 弱设备：音质不超过极高，避免 FLAC/母带在低配 WebView 半速播放 */
+export function capQualityForWeakDevice(source: MusicSource, quality: string): string {
+  return capQualityToMax(source, quality, WEAK_DEVICE_PLAYBACK_QUALITY_CAP);
+}
+
+export function applyWeakDevicePlaybackQualityCap(quality: RoomAudioQuality): RoomAudioQuality {
+  return {
+    netease: capQualityForWeakDevice('netease', quality.netease),
+    tencent: capQualityForWeakDevice('tencent', quality.tencent),
   };
 }
 
@@ -185,6 +210,9 @@ export function getUserPlaybackQuality(source: MusicSource): string | undefined 
   const immersive = useImmersiveModeStore.getState();
   if (immersive.qualityCapActive || immersive.enabled) {
     quality = applyImmersivePlaybackQualityCap(quality);
+  }
+  if (isWeakPlaybackDevice()) {
+    quality = applyWeakDevicePlaybackQualityCap(quality);
   }
   if (source === 'netease') return clampQualityToCapabilities('netease', quality.netease);
   if (source === 'tencent') return clampQualityToCapabilities('tencent', quality.tencent);

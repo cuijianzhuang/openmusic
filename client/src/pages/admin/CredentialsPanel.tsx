@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { KeyOutlined } from '@ant-design/icons';
+import { GithubOutlined, KeyOutlined } from '@ant-design/icons';
 import { App, Button, Card, Col, Divider, Input, Row, Space, Tag, Typography } from 'antd';
 import { adminFetch } from './utils';
+import { LinuxDoIcon } from './brandIcons';
 
 interface LinuxdoAdminBinding {
   id: string;
@@ -216,7 +217,10 @@ export default function CredentialsPanel({
               </Button>
             </Space>
           ) : (
-            <Button onClick={() => { window.location.href = '/api/admin/linuxdo/bind/start'; }}>
+            <Button
+              icon={<LinuxDoIcon />}
+              onClick={() => { window.location.href = '/api/admin/linuxdo/bind/start'; }}
+            >
               绑定 Linux.do 账号
             </Button>
           )}
@@ -244,7 +248,10 @@ export default function CredentialsPanel({
               </Button>
             </Space>
           ) : (
-            <Button onClick={() => { window.location.href = '/api/admin/github/bind/start'; }}>
+            <Button
+              icon={<GithubOutlined />}
+              onClick={() => { window.location.href = '/api/admin/github/bind/start'; }}
+            >
               绑定 GitHub 账号
             </Button>
           )}

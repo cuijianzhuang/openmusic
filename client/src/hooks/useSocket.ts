@@ -492,6 +492,9 @@ export function useSocket() {
       id: s.id,
       connected: s.connected,
       transport: s.io.engine?.transport?.name,
+      active: s.active,
+      recovered: s.recovered,
+      engineReadyState: s.io.engine?.readyState,
     }));
     if (socketListenersAttached) return;
     socketListenersAttached = true;
@@ -695,6 +698,9 @@ export function useSocket() {
       id: s.id,
       connected: s.connected,
       transport: s.io.engine?.transport?.name,
+      active: s.active,
+      recovered: s.recovered,
+      engineReadyState: s.io.engine?.readyState,
     }));
     if (!connected.current && !socketConnectRequested) {
 
@@ -805,6 +811,9 @@ export function useSocket() {
       id: s.id,
       connected: s.connected,
       transport: s.io.engine?.transport?.name,
+      active: s.active,
+      recovered: s.recovered,
+      engineReadyState: s.io.engine?.readyState,
     }));
     if (s.connected) {
       s.timeout(SOCKET_ACK_TIMEOUT_MS).emit('leave_room', {}, () => { });
