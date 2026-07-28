@@ -6,6 +6,8 @@ import {
   CloseOutlined,
   CopyOutlined,
   DeleteOutlined,
+  EyeInvisibleOutlined,
+  EyeOutlined,
   LogoutOutlined,
   MenuOutlined,
   ReloadOutlined,
@@ -66,6 +68,7 @@ import {
   filterAdminRooms,
   formatAuditAction,
   formatAuditTime,
+  formatRelativeTime,
   type AdminRoomStatusFilter,
 } from './admin/utils';
 
@@ -216,6 +219,9 @@ function AdminPage() {
   const [roomsPageSize, setRoomsPageSize] = useState(10);
   const [roomsKeyword, setRoomsKeyword] = useState('');
   const [roomsStatusFilter, setRoomsStatusFilter] = useState<AdminRoomStatusFilter[]>([]);
+  /** 按需揭示的房间明文密码（不进列表接口） */
+  const [revealedPasswords, setRevealedPasswords] = useState<Record<string, string | null>>({});
+  const [revealingPasswordId, setRevealingPasswordId] = useState<string | null>(null);
   const [bansPage, setBansPage] = useState(1);
   const [reportsPage, setReportsPage] = useState(1);
   const [refreshing, setRefreshing] = useState(false);
@@ -249,6 +255,8 @@ function AdminPage() {
     setLoggedIn(false);
     setOverview(null);
     setRooms([]);
+    setRevealedPasswords({});
+    setRevealingPasswordId(null);
     setBans([]);
     setErrorReports([]);
     setReportDetail(null);
@@ -402,6 +410,40 @@ function AdminPage() {
       setDeletingId(null);
     }
   }, [message, refresh]);
+
+  const revealRoomPassword = useCallback(async (room: AdminRoom) => {
+    if (!room.hasPassword) return;
+
+    let shouldFetch = true;
+    setRevealedPasswords((prev) => {
+      if (!Object.prototype.hasOwnProperty.call(prev, room.id)) return prev;
+      shouldFetch = false;
+      const next = { ...prev };
+      delete next[room.id];
+      return next;
+    });
+    if (!shouldFetch) return;
+
+    setRevealingPasswordId(room.id);
+    try {
+      const res = await adminFetch<{
+        roomId: string;
+        hasPassword: boolean;
+        password: string | null;
+      }>(`/api/admin/rooms/${room.id}/password`);
+      setRevealedPasswords((prev) => ({
+        ...prev,
+        [room.id]: res.password,
+      }));
+      if (res.hasPassword && !res.password) {
+        message.warning('该房间密码为升级前设置，明文不可恢复；请房主重新设置密码');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '查看密码失败');
+    } finally {
+      setRevealingPasswordId(null);
+    }
+  }, [message]);
 
   const toggleRoomProtection = useCallback(async (room: AdminRoom) => {
     setProtectingId(room.id);
@@ -748,13 +790,33 @@ function AdminPage() {
             ? '常驻'
             : '普通';
         const attrs: string[] = [];
-        if (room.hasPassword) attrs.push('密码');
         if (room.isLocked) attrs.push('上锁');
+        const passwordRevealed = Object.prototype.hasOwnProperty.call(revealedPasswords, room.id);
+        const revealedPassword = passwordRevealed ? revealedPasswords[room.id] : undefined;
         return (
           <div className="admin-room-status" style={{ lineHeight: 1.35 }}>
             <Badge status={badgeStatus} text={badgeText} />
+            {room.hasPassword ? (
+              <div className="admin-room-status__attrs" style={{ fontSize: 11, marginTop: 2 }}>
+                <Button
+                  type="link"
+                  size="small"
+                  loading={revealingPasswordId === room.id}
+                  icon={passwordRevealed ? <EyeInvisibleOutlined /> : <EyeOutlined />}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void revealRoomPassword(room);
+                  }}
+                  style={{ padding: 0, height: 'auto', fontSize: 11 }}
+                >
+                  {passwordRevealed
+                    ? (revealedPassword ? `密码: ${revealedPassword}` : '密码: 不可恢复')
+                    : '点击查看密码'}
+                </Button>
+              </div>
+            ) : null}
             {attrs.length > 0 ? (
-              <div className="admin-room-status__attrs">
+              <div className="admin-room-status__attrs" style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)' }}>
                 {attrs.join(' · ')}
               </div>
             ) : null}
@@ -770,6 +832,24 @@ function AdminPage() {
       render: (count: number) => (
         <Typography.Text type={count > 0 ? undefined : 'secondary'}>{count}</Typography.Text>
       ),
+    },
+    {
+      title: '最后进房',
+      width: 110,
+      sorter: (a, b) => (a.lastJoinedAt || 0) - (b.lastJoinedAt || 0),
+      defaultSortOrder: undefined,
+      render: (_, room) => {
+        const at = room.lastJoinedAt;
+        if (!at) return <Typography.Text type="secondary">—</Typography.Text>;
+        return (
+          <div style={{ lineHeight: 1.35 }}>
+            <Typography.Text>{formatRelativeTime(at)}</Typography.Text>
+            <Typography.Text type="secondary" style={{ display: 'block', fontSize: 11 }}>
+              {formatAuditTime(at)}
+            </Typography.Text>
+          </div>
+        );
+      },
     },
     {
       title: '播放',

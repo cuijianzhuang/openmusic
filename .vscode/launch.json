@@ -1,0 +1,64 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "OpenMusic Mobile (local Web)",
+      "cwd": "mobile",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "deviceId": "web-server",
+      "toolArgs": [
+        "--web-port",
+        "57920",
+        "--web-hostname",
+        "localhost"
+      ],
+      "args": [
+        "--dart-define=OM_FLAVOR=local",
+        "--dart-define=OM_SERVER_URL=http://localhost:4000"
+      ]
+    },
+    {
+      "name": "OpenMusic Mobile (local Windows)",
+      "cwd": "mobile",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "deviceId": "windows",
+      "args": [
+        "--dart-define=OM_FLAVOR=local",
+        "--dart-define=OM_SERVER_URL=http://localhost:4000"
+      ]
+    },
+    {
+      "name": "OpenMusic Mobile (local Android emulator)",
+      "cwd": "mobile",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "args": [
+        "--dart-define=OM_FLAVOR=local",
+        "--dart-define=OM_SERVER_URL=http://10.0.2.2:4000"
+      ]
+    },
+    {
+      "name": "OpenMusic Mobile (prod Web)",
+      "cwd": "mobile",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "deviceId": "web-server",
+      "toolArgs": [
+        "--web-port",
+        "57921",
+        "--web-hostname",
+        "localhost"
+      ],
+      "args": [
+        "--dart-define=OM_FLAVOR=prod",
+        "--dart-define=OM_SERVER_URL=https://qqovo.top"
+      ]
+    }
+  ]
+}

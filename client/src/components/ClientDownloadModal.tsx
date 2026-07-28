@@ -22,7 +22,7 @@ export default function ClientDownloadModal({ open, onClose }: Props) {
         <div className="flex items-center justify-between gap-3 border-b border-netease-border/50 px-4 py-3">
           <div className="flex items-center gap-2 min-w-0">
             <Smartphone className="h-4 w-4 flex-shrink-0 text-netease-muted" />
-            <h2 className="text-sm font-semibold text-white">下载客户端</h2>
+            <h2 className="text-sm font-semibold text-white">下载原生客户端</h2>
           </div>
           <button
             type="button"
@@ -45,7 +45,7 @@ export default function ClientDownloadModal({ open, onClose }: Props) {
             </span>
             <span className="min-w-0">
               <span className="block text-sm font-medium text-emerald-300">Android</span>
-              <span className="mt-0.5 block text-xs text-white/45">下载 APK 后直接安装</span>
+              <span className="mt-0.5 block text-xs text-white/45">Flutter 原生 APK，后台播放无需 WebView</span>
             </span>
           </a>
 

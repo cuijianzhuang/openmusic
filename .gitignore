@@ -33,3 +33,16 @@ client/build/ipa/
 # 本地打包（不上传）
 scripts/package-build.mjs
 .github/workflows/release.yml
+
+# Flutter mobile 本地构建产物（mobile/.gitignore 的补充）
+mobile/.dart_tool/
+mobile/build/
+mobile/android/.gradle/
+mobile/android/**/build/
+mobile/android/**/.cxx/
+mobile/android/**/.externalNativeBuild/
+mobile/ios/Pods/
+mobile/ios/Flutter/ephemeral/
+mobile/windows/flutter/ephemeral/
+mobile/linux/flutter/ephemeral/
+mobile/macos/Flutter/ephemeral/

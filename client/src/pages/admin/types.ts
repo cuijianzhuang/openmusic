@@ -51,6 +51,7 @@ export interface AdminAuditEntry {
   githubUsername?: string;
   approved?: boolean;
   reason?: string;
+  recoverable?: boolean;
 }
 
 export interface SiteAnnouncementConfig {
@@ -113,7 +114,7 @@ export interface RuntimeConfig {
   configuredSecrets: Record<string, boolean>;
 }
 
-export type MusicApiPlatform = 'netease' | 'tencent' | 'kugou';
+export type MusicApiPlatform = 'netease' | 'tencent' | 'kugou' | 'lyrics';
 export type MusicApiOperation = 'search' | 'song' | 'url' | 'lrc' | 'pic' | 'playlist' | 'search_playlist';
 
 export interface CustomMusicApi {
@@ -243,6 +244,7 @@ export interface AdminRoom {
   currentSong: { name: string; artist: string } | null;
   queueLength: number;
   createdAt: number;
+  lastJoinedAt?: number | null;
   protectedFromDestroy: boolean;
   ownerNickname?: string;
   permanentApplication?: {

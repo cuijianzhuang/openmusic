@@ -14,7 +14,6 @@ import {
   runWithMetingRequestContext,
 } from './metingUpstream.js';
 import { fetchCustomMusicApi, hasCustomMusicApi } from './customMusicApi.js';
-import { fetchLrcapiLyrics, getLrcapiUpstreamStatus } from './lrcapiUpstream.js';
 import { mountWechatFileHelperProxy } from './wechatFileHelperProxy.js';
 import { mountAdminApi } from './adminApi.js';
 import { initAdminCredentials } from './adminCredentials.js';
@@ -133,8 +132,6 @@ import {
 } from './permanentApplication.js';
 import {
   isCyapiConfigured,
-  searchKugouMusic,
-  getKugouSongDetail,
 } from './cyapi.js';
 import { importNeteasePlaylist, importQqPlaylist, fetchNeteasePlaylistMetas } from './playlistImport.js';
 import { fetchNeteaseHotToplist } from './neteaseToplist.js';
@@ -226,14 +223,37 @@ const app = express();
 app.set('trust proxy', TRUST_PROXY ? 1 : false);
 const httpServer = createServer(app);
 
+/** 本地调试 Origin（Flutter Web / Vite 等任意端口） */
+function isLocalDevOrigin(origin) {
+  if (!origin || typeof origin !== 'string') return false;
+  try {
+    const { protocol, hostname } = new URL(origin);
+    if (protocol !== 'http:' && protocol !== 'https:') return false;
+    return hostname === 'localhost'
+      || hostname === '127.0.0.1'
+      || hostname === '[::1]'
+      || hostname.endsWith('.localhost');
+  } catch {
+    return false;
+  }
+}
+
 function corsOrigin(origin, callback) {
   if (!origin) {
     callback(null, true);
     return;
   }
 
+  const normalized = origin.replace(/\/$/, '');
+
   // 首次部署尚无 CLIENT_URL；安装 API 自身仍执行严格同 Host 校验。
   if (isSetupRequired()) {
+    callback(null, true);
+    return;
+  }
+
+  // 非生产：允许本机任意端口跨域（Flutter Web、Vite 等），即使 CLIENT_URL 指向正式域。
+  if (!IS_PRODUCTION && isLocalDevOrigin(normalized)) {
     callback(null, true);
     return;
   }
@@ -243,13 +263,14 @@ function corsOrigin(origin, callback) {
     return;
   }
 
-  callback(null, ALLOWED_ORIGINS.has(origin.replace(/\/$/, '')));
+  callback(null, ALLOWED_ORIGINS.has(normalized));
 }
 
 const io = new Server(httpServer, {
   cors: {
     origin: corsOrigin,
     methods: ['GET', 'POST'],
+    credentials: true,
   },
   // 表情 data URL 需 >1MB；4MB 兼顾防大包 DoS 与本地贴纸
   maxHttpBufferSize: 4 * 1024 * 1024,
@@ -263,7 +284,19 @@ const io = new Server(httpServer, {
   pingTimeout: 60_000,
 });
 
-app.use(cors({ origin: corsOrigin }));
+app.use(cors({
+  origin: corsOrigin,
+  credentials: true,
+  methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
+  allowedHeaders: [
+    'Content-Type',
+    'Accept',
+    'Authorization',
+    'X-OM-Ts',
+    'X-OM-Nonce',
+    'X-OM-Sign',
+  ],
+}));
 app.use((_req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
@@ -889,11 +922,11 @@ app.get('/api/music/sources', (_req, res) => {
       name: '蓝点',
       shortName: '蓝点',
       color: '#2688ee',
-      supportsSearch: isCyapiConfigured() || hasCustomMusicApi('kugou', 'search'),
+      supportsSearch: hasCustomMusicApi('kugou', 'search'),
       supportsIdLookup: false,
       description: hasCustomMusicApi('kugou', 'search')
         ? '通过自定义接口搜索'
-        : isCyapiConfigured() ? '通过迟言 API 搜索' : '请配置酷狗搜索接口',
+        : '请配置酷狗搜索接口',
     },
   ];
   res.json(sources);
@@ -1013,7 +1046,7 @@ app.get('/api/media-proxy', async (req, res) => {
   }
 });
 
-/** cyapi 蓝点音乐搜索 */
+/** 蓝点音乐搜索：统一走自定义接口 */
 app.get('/api/music/cyapi/kugou/search', async (req, res) => {
   if (!requireSessionIdentity(req, res)) return;
   if (!limitProxyRequest(proxyLimitKey('kugou', req))) {
@@ -1026,24 +1059,17 @@ app.get('/api/music/cyapi/kugou/search', async (req, res) => {
   if (!keyword) return res.json([]);
 
   try {
-    try {
-      const custom = await fetchCustomMusicApi({
-        server: 'kugou',
-        type: 'search',
-        id: keyword,
-        keyword,
-        limit: num,
-      });
-      if (custom) return res.json(await custom.json());
-    } catch (err) {
-      console.warn(`自定义蓝点搜索失败，继续尝试 cyapi：${err?.message || err}`);
-    }
-    if (!isCyapiConfigured()) {
-      return res.status(503).json({ error: '未配置蓝点自定义接口或 CYAPI_KEY' });
-    }
-    res.json(await searchKugouMusic(keyword, num));
+    const custom = await fetchCustomMusicApi({
+      server: 'kugou',
+      type: 'search',
+      id: keyword,
+      keyword,
+      limit: num,
+    });
+    if (custom) return res.json(await custom.json());
+    return res.status(503).json({ error: '未配置蓝点自定义接口' });
   } catch (err) {
-    console.error('Cyapi Kugou search error:', err.message);
+    console.error('Kugou search error:', err.message);
     res.status(502).json({ error: '蓝点音乐搜索失败' });
   }
 });
@@ -1073,7 +1099,7 @@ app.post('/api/music/playlist/import', async (req, res) => {
   }
 });
 
-/** cyapi 蓝点音乐详情（播放链接、歌词） */
+/** 蓝点音乐详情（播放链接、歌词）：统一走自定义接口 */
 app.get('/api/music/cyapi/kugou/song', async (req, res) => {
   if (!requireSessionIdentity(req, res)) return;
   if (!limitProxyRequest(proxyLimitKey('kugou-song', req))) {
@@ -1084,85 +1110,44 @@ app.get('/api/music/cyapi/kugou/song', async (req, res) => {
   if (!id) return res.status(400).json({ error: '缺少歌曲 id' });
 
   try {
-    let customDetail = null;
     const customOperations = ['song', 'url', 'lrc', 'pic'].filter((operation) => (
       hasCustomMusicApi('kugou', operation)
     ));
-    if (customOperations.length > 0) {
-      const results = await Promise.allSettled(customOperations.map(async (operation) => {
-        const response = await fetchCustomMusicApi({ server: 'kugou', type: operation, id });
-        if (!response) return [operation, null];
-        if (operation === 'song') {
-          const songs = await response.json();
-          return [operation, Array.isArray(songs) ? songs[0] : songs];
-        }
-        return [operation, await response.text()];
-      }));
-      customDetail = { id, source: 'kugou' };
-      let customHit = false;
-      for (const result of results) {
-        if (result.status !== 'fulfilled') {
-          console.warn(`自定义蓝点详情字段失败：${result.reason?.message || result.reason}`);
-          continue;
-        }
-        const [operation, value] = result.value;
-        if (operation === 'song' && value && typeof value === 'object') {
-          Object.assign(customDetail, value);
-          customHit = true;
-        } else if (value) {
-          customDetail[operation] = value;
-          customHit = true;
-        }
+    if (customOperations.length === 0) {
+      return res.status(503).json({ error: '未配置蓝点自定义接口' });
+    }
+    const results = await Promise.allSettled(customOperations.map(async (operation) => {
+      const response = await fetchCustomMusicApi({ server: 'kugou', type: operation, id });
+      if (!response) return [operation, null];
+      if (operation === 'song') {
+        const songs = await response.json();
+        return [operation, Array.isArray(songs) ? songs[0] : songs];
       }
-      if (!customHit) customDetail = null;
+      return [operation, await response.text()];
+    }));
+    const customDetail = { id, source: 'kugou' };
+    let customHit = false;
+    for (const result of results) {
+      if (result.status !== 'fulfilled') {
+        console.warn(`自定义蓝点详情字段失败：${result.reason?.message || result.reason}`);
+        continue;
+      }
+      const [operation, value] = result.value;
+      if (operation === 'song' && value && typeof value === 'object') {
+        Object.assign(customDetail, value);
+        customHit = true;
+      } else if (value) {
+        customDetail[operation] = value;
+        customHit = true;
+      }
     }
-    if (isCyapiConfigured() && (!customDetail?.url || !customDetail?.lrc)) {
-      const fallbackDetail = await getKugouSongDetail(id);
-      if (fallbackDetail) customDetail = { ...fallbackDetail, ...customDetail };
+    if (!customHit) {
+      return res.status(404).json({ error: '歌曲不存在或接口未返回可用结果' });
     }
-    if (customDetail) return res.json(customDetail);
-    if (!isCyapiConfigured()) {
-      return res.status(503).json({ error: '未配置蓝点自定义接口或 CYAPI_KEY' });
-    }
-    const detail = await getKugouSongDetail(id);
-    if (!detail) return res.status(404).json({ error: '歌曲不存在' });
-    res.json(detail);
+    res.json(customDetail);
   } catch (err) {
-    console.error('Cyapi Kugou song error:', err.message);
+    console.error('Kugou song error:', err.message);
     res.status(502).json({ error: '蓝点音乐获取失败' });
-  }
-});
-
-/** 歌词备用：52vmy，按歌名搜索 */
-app.get('/api/music/lrc-fallback', async (req, res) => {
-  if (!requireSessionIdentity(req, res)) return;
-  if (!limitProxyRequest(proxyLimitKey('lrc', req))) {
-    return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
-  }
-
-  const msg = limitText(req.query.msg, 120);
-  const artist = limitText(req.query.artist, 120);
-  const album = limitText(req.query.album, 120);
-  const n = String(req.query.n || '1');
-  if (!msg) return res.status(400).json({ error: '缺少歌曲名' });
-
-  // 兜底链：LrcAPI（带歌手/专辑，匹配更准，支持多上游负载均衡）→ 52vmy（仅按歌名）
-  const lrcapiText = await fetchLrcapiLyrics({ title: msg, artist, album });
-  if (lrcapiText) {
-    return res.type('text/plain; charset=utf-8').send(lrcapiText);
-  }
-
-  try {
-    const params = new URLSearchParams({ msg, n });
-    const response = await fetchWithTimeout(`${getRuntimeConfig().vmyLrcUrl}?${params}`);
-    if (!response.ok) {
-      return res.status(502).json({ error: '歌词接口请求失败' });
-    }
-    const text = await response.text();
-    res.type('text/plain; charset=utf-8').send(text);
-  } catch (err) {
-    console.error('LRC fallback error:', err.message);
-    res.status(502).json({ error: '歌词获取失败' });
   }
 });
 
@@ -1244,7 +1229,13 @@ function setIdentityCookieHeaders(res, userId, token, deviceId = null) {
   // 临时 HTTP 部署必须由管理员显式允许不安全 Cookie。
   const useSecureCookie = (IS_PRODUCTION && !ALLOW_INSECURE_COOKIES) || res.req?.secure;
   const secure = useSecureCookie ? '; Secure' : '';
-  const base = `Path=/; Max-Age=${IDENTITY_COOKIE_MAX_AGE_SEC}; HttpOnly; SameSite=Lax${secure}`;
+  const origin = res.req?.headers?.origin;
+  // 同主机跨端口（Flutter :57920 → API :4000）仍是 same-site，Lax 即可。
+  // SameSite=None 必须带 Secure；本地 HTTP 若写 None 无 Secure，Chrome 会直接丢弃 Cookie。
+  const sameSite = (useSecureCookie && !IS_PRODUCTION && isLocalDevOrigin(origin))
+    ? 'SameSite=None'
+    : 'SameSite=Lax';
+  const base = `Path=/; Max-Age=${IDENTITY_COOKIE_MAX_AGE_SEC}; HttpOnly; ${sameSite}${secure}`;
   const cookies = [
     `${IDENTITY_UID_COOKIE}=${encodeURIComponent(userId)}; ${base}`,
     `${IDENTITY_TOKEN_COOKIE}=${encodeURIComponent(token)}; ${base}`,

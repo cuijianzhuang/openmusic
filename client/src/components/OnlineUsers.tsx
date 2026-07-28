@@ -51,6 +51,7 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
   const [avatarError, setAvatarError] = useState("");
   const [avatarSaving, setAvatarSaving] = useState(false);
   const [previewAvatarUrl, setPreviewAvatarUrl] = useState<string | null>(null);
+  const [avatarPickOnOpen, setAvatarPickOnOpen] = useState(false);
   const userAvatarUrls = useRoomStore((s) => s.room?.userAvatarUrls) || {};
   const avatar_url = useRoomStore((s) => s.avatar_url);
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -115,6 +116,19 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
     setDraftName(nickname);
   }, [nickname]);
 
+  useEffect(() => {
+    return () => {
+      if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!showAvatarModal || !avatarPickOnOpen) return;
+    setAvatarPickOnOpen(false);
+    const timer = window.setTimeout(() => avatarFileInputRef.current?.click(), 0);
+    return () => window.clearTimeout(timer);
+  }, [showAvatarModal, avatarPickOnOpen]);
+
   const saveNickname = async () => {
     const nextName = draftName.trim();
     if (!nextName || saving) return;
@@ -177,29 +191,68 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
     setAdminTogglingId(null);
   };
 
+  const clearAvatarClickTimer = () => {
+    if (clickTimerRef.current) {
+      clearTimeout(clickTimerRef.current);
+      clickTimerRef.current = null;
+    }
+  };
+
+  const openAvatarFilePicker = () => {
+    avatarFileInputRef.current?.click();
+  };
+
+  const openAvatarSettings = (pickFile = false) => {
+    setAvatarDraft(avatar_url);
+    setAvatarError("");
+    setAvatarPickOnOpen(pickFile);
+    setShowAvatarModal(true);
+  };
+
+  /** 他人头像：单击查看 */
   const handleAvatarPreview = (url: string) => {
-    if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
+    clearAvatarClickTimer();
     clickTimerRef.current = setTimeout(() => setPreviewAvatarUrl(url), 220);
   };
 
-  const handleAvatarDoubleClick = () => {
-    if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
-    setAvatarDraft(avatar_url);
-    setAvatarError("");
-    setShowAvatarModal(true);
+  /** 自己头像：单击选择文件（打开设置并弹出文件选择） */
+  const handleOwnAvatarClick = () => {
+    clearAvatarClickTimer();
+    clickTimerRef.current = setTimeout(() => openAvatarSettings(true), 220);
+  };
+
+  /** 自己头像：双击查看 */
+  const handleOwnAvatarDoubleClick = () => {
+    clearAvatarClickTimer();
+    if (avatar_url) setPreviewAvatarUrl(avatar_url);
+  };
+
+  /** 设置弹窗内头像：单击选择文件 */
+  const handleModalAvatarClick = () => {
+    clearAvatarClickTimer();
+    clickTimerRef.current = setTimeout(() => openAvatarFilePicker(), 220);
+  };
+
+  /** 设置弹窗内头像：双击查看 */
+  const handleModalAvatarDoubleClick = () => {
+    clearAvatarClickTimer();
+    if (avatarDraft) setPreviewAvatarUrl(avatarDraft);
   };
 
   const handleAvatarFile = async (file: File | undefined) => {
     if (!file) return;
     if (!isSupportedAvatarFile(file)) {
       setAvatarError("仅支持 JPG / PNG 图片");
+      setShowAvatarModal(true);
       return;
     }
     setAvatarError("");
     try {
       setAvatarDraft(await fileToAvatarDataUrl(file));
+      setShowAvatarModal(true);
     } catch (err) {
       setAvatarError(err instanceof Error ? err.message : "图片处理失败");
+      setShowAvatarModal(true);
     }
   };
 
@@ -305,37 +358,62 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
                   className={`rounded-xl border px-2.5 py-2 ${isMe ? "border-netease-red/30 bg-netease-red/10" : "border-white/5 bg-white/[0.03]"}`}
                 >
                   <div className="flex items-center gap-2">
-                    <div
-                      onClick={() => {
-                        const url = getUserAvatar(user.id);
-                        if (url) handleAvatarPreview(url);
-                        else if (isMe && !user.offline) handleAvatarDoubleClick();
-                      }}
-                      onDoubleClick={isMe ? handleAvatarDoubleClick : undefined}
-                      className={`relative w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0 ${
-                        getUserAvatar(user.id) ? "cursor-pointer" : ""
-                      } ${
-                        getUserAvatar(user.id)
-                          ? ""
-                          : isRoomCreator
-                            ? "bg-gradient-to-br from-amber-500 to-orange-600"
-                            : isMe
-                              ? "bg-gradient-to-br from-netease-red to-pink-500"
-                              : "bg-gradient-to-br from-zinc-500 to-zinc-700"
-                      }`}
-                    >
-                      {getUserAvatar(user.id) ? (
-                        <img src={getUserAvatar(user.id)} alt="" className="w-full h-full rounded-full object-cover" />
-                      ) : (
-                        getDisplayInitial(user.nickname)
-                      )}
-                      {isMe && (
-                        <div className="absolute inset-0 flex items-center justify-center rounded-full bg-black/50 opacity-0 hover:opacity-100 transition-opacity">
-                          <Image className="w-3.5 h-3.5 text-white" />
+                    {(() => {
+                      const avatarUrl = getUserAvatar(user.id);
+                      const avatarNode = (
+                        <div
+                          onClick={() => {
+                            if (isMe && !user.offline) {
+                              handleOwnAvatarClick();
+                              return;
+                            }
+                            if (avatarUrl) handleAvatarPreview(avatarUrl);
+                          }}
+                          onDoubleClick={
+                            isMe
+                              ? handleOwnAvatarDoubleClick
+                              : avatarUrl
+                                ? () => {
+                                    clearAvatarClickTimer();
+                                    setPreviewAvatarUrl(avatarUrl);
+                                  }
+                                : undefined
+                          }
+                          className={`group relative w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0 ${
+                            isMe || avatarUrl ? "cursor-pointer" : ""
+                          } ${
+                            avatarUrl
+                              ? ""
+                              : isRoomCreator
+                                ? "bg-gradient-to-br from-amber-500 to-orange-600"
+                                : isMe
+                                  ? "bg-gradient-to-br from-netease-red to-pink-500"
+                                  : "bg-gradient-to-br from-zinc-500 to-zinc-700"
+                          }`}
+                        >
+                          {avatarUrl ? (
+                            <img src={avatarUrl} alt="" className="w-full h-full rounded-full object-cover" />
+                          ) : (
+                            getDisplayInitial(user.nickname)
+                          )}
+                          {isMe && (
+                            <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-full bg-black/50 opacity-0 transition-opacity group-hover:opacity-100">
+                              <Image className="w-3.5 h-3.5 text-white" />
+                            </div>
+                          )}
+                          {isRoomCreator && <Crown className="absolute -top-1 -right-1 w-3 h-3 text-amber-300" />}
                         </div>
-                      )}
-                      {isRoomCreator && <Crown className="absolute -top-1 -right-1 w-3 h-3 text-amber-300" />}
-                    </div>
+                      );
+
+                      if (isMe) {
+                        return (
+                          <Tooltip content="双击查看" side="bottom">
+                            {avatarNode}
+                          </Tooltip>
+                        );
+                      }
+                      return avatarNode;
+                    })()}
 
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 items-center gap-1.5">
@@ -491,36 +569,55 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
 
       <ChatImageLightbox imageUrl={previewAvatarUrl} onClose={() => setPreviewAvatarUrl(null)} />
 
+      <input
+        ref={avatarFileInputRef}
+        type="file"
+        accept="image/jpeg,image/png"
+        className="hidden"
+        onChange={(event) => {
+          void handleAvatarFile(event.target.files?.[0]);
+          event.target.value = "";
+        }}
+      />
+
       <Modal open={showAvatarModal} onClose={() => setShowAvatarModal(false)}>
         <h3 className="text-base font-medium text-white mb-4">设置头像</h3>
-        <input
-          ref={avatarFileInputRef}
-          type="file"
-          accept="image/jpeg,image/png"
-          className="hidden"
-          onChange={(event) => {
-            void handleAvatarFile(event.target.files?.[0]);
-            event.target.value = "";
-          }}
-        />
         <div className="flex items-center gap-4">
-          <div className="flex h-20 w-20 flex-shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-white/5">
-            {avatarDraft ? (
-              <img src={avatarDraft} alt="头像预览" className="h-full w-full object-cover" />
-            ) : (
-              <span className="text-lg font-bold text-white/60">{getDisplayInitial(nickname)}</span>
-            )}
-          </div>
+          <Tooltip content="双击查看" side="bottom">
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={handleModalAvatarClick}
+              onDoubleClick={handleModalAvatarDoubleClick}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  openAvatarFilePicker();
+                }
+              }}
+              className="group relative flex h-20 w-20 flex-shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-full border border-white/10 bg-white/5"
+              aria-label="单击选择文件，双击查看"
+            >
+              {avatarDraft ? (
+                <img src={avatarDraft} alt="头像预览" className="h-full w-full object-cover" />
+              ) : (
+                <span className="text-lg font-bold text-white/60">{getDisplayInitial(nickname)}</span>
+              )}
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-full bg-black/50 opacity-0 transition-opacity group-hover:opacity-100">
+                <Upload className="w-5 h-5 text-white" />
+              </div>
+            </div>
+          </Tooltip>
           <div className="min-w-0 flex-1">
             <button
               type="button"
-              onClick={() => avatarFileInputRef.current?.click()}
+              onClick={openAvatarFilePicker}
               className="inline-flex items-center gap-1.5 rounded-lg border border-netease-border/60 px-3 py-1.5 text-sm text-white hover:bg-white/10 transition-colors"
             >
               <Upload className="w-3.5 h-3.5" />
               选择图片
             </button>
-            <p className="mt-2 text-[11px] text-netease-muted">支持 JPG / PNG，自动裁剪为正方形并压缩，保存在本设备</p>
+            <p className="mt-2 text-[11px] text-netease-muted">单击选择文件，双击查看。支持 JPG / PNG，自动裁剪为正方形并压缩</p>
           </div>
         </div>
         {avatarError && <p className="mt-3 text-xs text-netease-red">{avatarError}</p>}

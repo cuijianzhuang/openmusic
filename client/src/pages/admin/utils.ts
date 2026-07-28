@@ -37,6 +37,23 @@ export function formatAuditTime(at: number) {
   }
 }
 
+/** 相对时间，如「刚刚」「5 分钟前」「2 小时前」「3 天前」 */
+export function formatRelativeTime(at: number | null | undefined): string {
+  const ts = Number(at) || 0;
+  if (!ts) return '—';
+  const diffMs = Date.now() - ts;
+  if (diffMs < 0) return formatAuditTime(ts);
+  const sec = Math.floor(diffMs / 1000);
+  if (sec < 60) return '刚刚';
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min} 分钟前`;
+  const hour = Math.floor(min / 60);
+  if (hour < 48) return `${hour} 小时前`;
+  const day = Math.floor(hour / 24);
+  if (day < 30) return `${day} 天前`;
+  return formatAuditTime(ts);
+}
+
 export function formatAuditAction(entry: AdminAuditEntry) {
   switch (entry.action) {
     case 'login_ok': {
@@ -69,6 +86,10 @@ export function formatAuditAction(entry: AdminAuditEntry) {
       return `更新站点公告（${entry.enabled ? '启用' : '停用'}）`;
     case 'set_room_protection':
       return `${entry.enabled ? '开启' : '关闭'}房间保活 ${entry.roomId || ''}`;
+    case 'view_room_password':
+      return `查看房间密码 ${entry.roomId || ''}${
+        entry.recoverable === false ? '（明文不可恢复）' : ''
+      }`;
     case 'review_permanent_application':
       return `${entry.approved ? '通过' : '拒绝'}常驻申请 ${entry.roomId || ''}${
         entry.reason ? `：${entry.reason}` : ''

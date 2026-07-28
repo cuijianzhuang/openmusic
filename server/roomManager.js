@@ -462,6 +462,7 @@ function snapshotRoomForStorage(room) {
     id: room.id,
     name: room.name,
     passwordHash: room.passwordHash,
+    passwordPlain: room.passwordPlain || null,
     isLocked: Boolean(room.isLocked),
     muteAll: Boolean(room.muteAll),
     mutedUserIds: Array.from(room.mutedUserIds || []),
@@ -518,11 +519,13 @@ function snapshotRoomForStorage(room) {
     memberTiers: serializeMemberTiersMap(room.memberTiers),
     memberSettings: serializeMemberSettings(room.memberSettings),
     createdAt: room.createdAt,
+    lastJoinedAt: Number(room.lastJoinedAt) || room.createdAt || Date.now(),
   };
 }
 
 function restoreRoomFromStorage(data) {
   const room = createEmptyRoom(data.id, data.name, data.passwordHash ?? null);
+  room.passwordPlain = data.passwordPlain || null;
   room.queue = (data.queue || []).map(serializeQueueItemForRoom).filter(Boolean);
   room.current = serializeQueueItemForRoom(data.current) ?? null;
   room.isPlaying = Boolean(data.isPlaying);
@@ -582,6 +585,7 @@ function restoreRoomFromStorage(data) {
   room.memberTiers = restoreMemberTiersFromStorage(data.memberTiers);
   room.memberSettings = normalizeMemberSettings(data.memberSettings);
   room.createdAt = data.createdAt ?? Date.now();
+  room.lastJoinedAt = Number(data.lastJoinedAt) || room.createdAt;
 
   if (room.isPlaying && room.current) {
     room.startedAt = Date.now() - room.currentTime * 1000;
@@ -655,13 +659,12 @@ export async function initRooms() {
 
   const restartGraceMs = getRuntimeConfig().roomRestartGraceMs;
   const emptyTtlMs = getRuntimeConfig().roomEmptyTtlMs;
-  // 进房/贵宾通知静默窗：服务端固定 1 分钟，与房主设置、空房 TTL 无关
-  const RESTART_NOTICE_MUTE_MS = 60 * 1000;
+  // 进房/贵宾通知静默窗：重启后已知成员回流（客户端也会带 rejoin）
+  const RESTART_NOTICE_MUTE_MS = 5 * 60 * 1000;
   const noticeMuteUntil = Date.now() + RESTART_NOTICE_MUTE_MS;
   let preservedCount = 0;
   for (const data of stored) {
     const room = restoreRoomFromStorage(data);
-    // 恢复出的房间：1 分钟内已知成员重连不刷进房/贵宾通知
     room.restartNoticeMuteUntil = noticeMuteUntil;
     rooms.set(room.id, room);
     if (room.users.size === 0) {
@@ -829,6 +832,8 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
     id: roomId,
     name: normalizeRoomName(name, roomId),
     passwordHash,
+    /** 明文密码（仅内存 + Redis，管理后台可查） */
+    passwordPlain: null,
     isLocked: false,
     muteAll: false,
     mutedUserIds: new Set(),
@@ -892,7 +897,7 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
     lastJoinNoticeAt: new Map(),
     /**
      * 进程重启恢复后，已知成员重连时静默进房/贵宾通知的截止时间。
-     * 静默时长由服务端固定为 1 分钟，不由房主配置。
+     * 静默时长由服务端固定，不由房主配置。
      */
     restartNoticeMuteUntil: 0,
     songRequestEnabled: true,
@@ -919,6 +924,8 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
     memberTiers: new Map(),
     memberSettings: { ...DEFAULT_MEMBER_SETTINGS },
     createdAt: Date.now(),
+    /** 最近一次非 TV 成员进房时间（管理后台闲置判断） */
+    lastJoinedAt: Date.now(),
     destroyTimer: null,
   };
 }
@@ -1624,6 +1631,7 @@ export function createRoom({ name, password, creatorId, creatorDeviceId } = {}) 
   const trimmed = normalizeRoomPasswordInput(password);
   const passwordHash = trimmed ? hashPassword(trimmed) : null;
   const room = createEmptyRoom(roomId, name, passwordHash);
+  room.passwordPlain = trimmed || null;
   const reservedCreator = sanitizeCreatorId(creatorId);
   if (reservedCreator) {
     room.creatorId = reservedCreator;
@@ -1744,30 +1752,58 @@ export function listRoomIds() {
 // 管理后台：全量房间列表（不过滤大厅隐藏房间，附带成员昵称）
 export function listRoomsForAdmin() {
   return Array.from(rooms.values())
-    .map((room) => ({
-      id: room.id,
-      name: room.name,
-      userCount: room.users.size,
-      users: Array.from(room.users.values()).map((u) => ({
-        id: u.id,
-        nickname: u.nickname,
-        clientIp: u.clientIp || "",
-        deviceId: u.deviceId || "",
-      })),
-      hasPassword: Boolean(room.passwordHash),
-      isLocked: Boolean(room.isLocked),
-      isPlaying: room.isPlaying,
-      currentSong: room.current ? { name: room.current.name, artist: room.current.artist } : null,
-      queueLength: room.queue.length,
-      createdAt: room.createdAt,
-      protectedFromDestroy: protectedRoomIds.has(room.id),
-      permanentApplication: null,
-      ownerNickname: (() => {
-        const oid = room.ownerId || room.creatorId;
-        return oid ? (room.users.get(oid)?.nickname || "") : "";
-      })(),
-    }))
+    .map((room) => {
+      // 旧房间无 lastJoinedAt 时，用在线成员进房时间 / 创建时间兜底
+      const onlineJoinedAt = Array.from(room.users.values())
+        .filter((u) => !u.readOnly)
+        .reduce((max, u) => Math.max(max, Number(u.joinedAt) || 0), 0);
+      const lastJoinedAt = Math.max(
+        Number(room.lastJoinedAt) || 0,
+        onlineJoinedAt,
+        Number(room.createdAt) || 0,
+      ) || null;
+      return {
+        id: room.id,
+        name: room.name,
+        userCount: room.users.size,
+        users: Array.from(room.users.values()).map((u) => ({
+          id: u.id,
+          nickname: u.nickname,
+          clientIp: u.clientIp || "",
+          deviceId: u.deviceId || "",
+        })),
+        hasPassword: Boolean(room.passwordHash),
+        isLocked: Boolean(room.isLocked),
+        isPlaying: room.isPlaying,
+        currentSong: room.current ? { name: room.current.name, artist: room.current.artist } : null,
+        queueLength: room.queue.length,
+        createdAt: room.createdAt,
+        lastJoinedAt,
+        protectedFromDestroy: protectedRoomIds.has(room.id),
+        permanentApplication: null,
+        ownerNickname: (() => {
+          const oid = room.ownerId || room.creatorId;
+          return oid ? (room.users.get(oid)?.nickname || "") : "";
+        })(),
+      };
+    })
     .sort((a, b) => b.userCount - a.userCount || b.createdAt - a.createdAt);
+}
+
+/** 管理后台按需查看房间明文密码（不进列表；调用方须自行审计） */
+export function getRoomPasswordForAdmin(roomId) {
+  const id = String(roomId || "").toUpperCase();
+  const room = rooms.get(id);
+  if (!room) return { error: "房间不存在" };
+  if (!room.passwordHash) {
+    return { roomId: id, hasPassword: false, password: null };
+  }
+  return {
+    roomId: id,
+    hasPassword: true,
+    // 旧房间可能只有哈希、无明文（升级前设置的密码）
+    password: room.passwordPlain || null,
+  };
 }
 
 /** 管理后台房间列表（含常驻申请，待审优先） */
@@ -2079,6 +2115,11 @@ export function addUser(roomId, userId, nickname, options = {}) {
   const readOnly = Boolean(options.readOnly);
   const chatVisibleSince = resolveChatVisibleSince(room, userId, existing);
 
+  // 非 TV 进房刷新「最后进房时间」（含重连重进；多标签同会话也刷新无妨）
+  if (!readOnly) {
+    room.lastJoinedAt = Date.now();
+  }
+
   room.users.set(userId, {
     id: userId,
     nickname: resolvedNickname,
@@ -2208,10 +2249,12 @@ export function setRoomLock(roomId, actorId, options = {}, connectionId = null) 
   if (!locked) {
     room.isLocked = false;
     room.passwordHash = null;
+    room.passwordPlain = null;
   } else {
     room.isLocked = true;
     const trimmed = normalizeRoomPasswordInput(options.password);
     room.passwordHash = trimmed ? hashPassword(trimmed) : null;
+    room.passwordPlain = trimmed || null;
   }
 
   persistRoom(room);
@@ -2398,9 +2441,9 @@ export function wasKnownRoomUser(room, userId) {
 
 /**
  * 是否应跳过进房系统提醒与贵宾迎宾。
- * - 同会话多端/短线重连（hadActiveSession）
- * - 客户端标记的自动重连（rejoin），且确认为已知成员（防滥用）
- * - 服务重启后 1 分钟内的已知成员回流（服务端固定，非房主设置）
+ * - 同会话仍在线（hadActiveSession）
+ * - 客户端「重新连接中」自动重进（rejoin）——不再要求 known，避免重启后身份未恢复仍刷屏
+ * - 服务重启静默窗内的已知成员回流
  */
 export function shouldMuteJoinAnnouncements(room, userId, {
   hadActiveSession = false,
@@ -2408,8 +2451,9 @@ export function shouldMuteJoinAnnouncements(room, userId, {
   wasKnown = false,
 } = {}) {
   if (hadActiveSession) return true;
+  // 「重新连接中」路径发出的 join：一律不发进房/贵宾通知
+  if (rejoin) return true;
   const known = wasKnown || wasKnownRoomUser(room, userId);
-  if (rejoin && known) return true;
   const muteUntil = Number(room?.restartNoticeMuteUntil) || 0;
   if (known && muteUntil > 0 && Date.now() < muteUntil) return true;
   return false;

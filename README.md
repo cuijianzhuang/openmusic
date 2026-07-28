@@ -86,7 +86,7 @@ npm run install:all && npm run build && npm start
 - 歌单导入、电台节目、个人收藏与点歌历史（JSON 导入 / 导出）
 - TV 大屏：`/tv/:roomId`
 - 队列拖拽排序、媒体键
-- 移动端后台播放（Capacitor）
+- 移动端后台播放（Flutter 原生客户端，见 `mobile/`）
 
 ### 🏠 房间
 
@@ -106,7 +106,7 @@ npm run install:all && npm run build && npm start
 ### 🌌 视觉与客户端
 
 - 星河 / 声波地形 3D 背景、封面模糊背景、桌面沉浸模式
-- Android / iOS（Capacitor 远程 URL）
+- Android / iOS
 - 静默 / 强制更新提示
 
 ### ⚙️ 点歌规则（房主 / 管理员）
@@ -187,7 +187,17 @@ GITHUB_SCOPE=read:user
 
 ## 📱 Android / iOS
 
-Capacitor 远程 URL 壳，前端更新无需重打包。GitHub Actions 提供 APK / IPA 构建。
+原生客户端位于 [`mobile/`](mobile/)（Flutter，**不嵌入 WebView**），与网页共用 Socket.IO 后端。
+
+```bash
+cd mobile
+flutter pub get
+flutter run --dart-define=OM_SERVER_URL=https://your-host
+```
+
+GitHub Actions：`flutter-android-apk.yml` / `flutter-ios-ipa.yml`。产物仍发布到 `/downloads/openmusic.apk` 与 `/downloads/openmusic.ipa`。
+
+历史 Capacitor WebView 壳见 `client/android/DEPRECATED.md`（仅过渡回退）。
 
 ---
 
@@ -195,7 +205,8 @@ Capacitor 远程 URL 壳，前端更新无需重打包。GitHub Actions 提供 A
 
 | 层级 | 技术                                                                        |
 | ---- | --------------------------------------------------------------------------- |
-| 前端 | React · Vite · Tailwind CSS · Socket.IO Client · Three.js / R3F · Capacitor |
+| 前端 | React · Vite · Tailwind CSS · Socket.IO Client · Three.js / R3F |
+| 移动端 | Flutter · just_audio · audio_service · Socket.IO Client |
 | 后端 | Node.js · Express · Socket.IO · Redis（必需）                               |
 
 ---

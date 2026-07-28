@@ -8,7 +8,6 @@ export function hasValidLrc(text: string): boolean {
   if (/暂无歌词|无歌词|not found|404/i.test(trimmed)) return false;
   return LRC_LINE_RE.test(trimmed);
 }
-
 export async function fetchFallbackLrc(
   songName: string,
   options: { artist?: string; album?: string } = {},
@@ -26,3 +25,4 @@ export async function fetchFallbackLrc(
   const text = await res.text();
   return hasValidLrc(text) ? text : '';
 }
+

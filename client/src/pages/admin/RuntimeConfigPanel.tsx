@@ -97,23 +97,6 @@ const RUNTIME_FIELD_GROUPS: RuntimeFieldGroup[] = [
     ],
   },
   {
-    id: 'cyapi',
-    title: '迟言 API',
-    purpose: '酷狗（蓝点）音乐搜索与播放。不配置则蓝点音源不可用。',
-    fields: [
-      { key: 'cyapiBase', label: 'API 地址', placeholder: 'https://cyapi.top/API' },
-      { key: 'cyapiKey', label: 'API 密钥', secret: true },
-    ],
-  },
-  {
-    id: 'lyrics',
-    title: '歌词备用',
-    purpose: '主音源拿不到歌词时，按歌名向该接口兜底拉取。一般保持默认即可。',
-    fields: [
-      { key: 'vmyLrcUrl', label: '备用歌词 API', placeholder: 'https://api.52vmy.cn/api/music/lrc' },
-    ],
-  },
-  {
     id: 'qiniu',
     title: '七牛云存储',
     purpose: '房间聊天发图依赖此项。四项齐全后才能上传图片；缺一则无法发送图片消息。',
@@ -141,6 +124,7 @@ const MUSIC_API_PLATFORMS: { value: MusicApiPlatform; label: string }[] = [
   { value: 'netease', label: '网易云' },
   { value: 'tencent', label: 'QQ 音乐' },
   { value: 'kugou', label: '酷狗' },
+  { value: 'lyrics', label: '歌词备用' },
 ];
 
 const MUSIC_API_OPERATIONS: { value: MusicApiOperation; label: string }[] = [
@@ -649,12 +633,15 @@ export default function RuntimeConfigPanel({
   const customApiSection = (
       <SettingsSection
         title="自定义音乐接口"
-        description="按平台和功能分别接入任意 JSON API；同一平台、同一功能可添加多个接口，服务端会轮询并在故障时自动切换。留空则该平台/功能默认走上面的 Meting 音源。"
+        description="按平台和功能分别接入任意 JSON API；同一平台、同一功能可添加多个接口，服务端会轮询并在故障时自动切换。`歌词备用` 也统一在这里配置，不再单独维护预设备用源。留空则网易/QQ 默认走上面的 Meting 音源。"
       >
         <Space direction="vertical" style={{ width: '100%' }} size="middle">
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
             填好地址后点「解析响应」，再点字段旁的「选择」，在下方响应里点「选这个」即可完成映射，无需手写路径。
-            URL、参数、请求头和 Body 支持 {'{id}'}、{'{keyword}'}、{'{quality}'}、{'{limit}'}、{'{server}'} 变量。
+            URL、参数、请求头和 Body 支持 {'{id}'}、{'{keyword}'}、{'{quality}'}、{'{limit}'}、{'{server}'}、{'{artist}'}、{'{album}'}、{'{n}'} 变量。
+          </Typography.Text>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            配 `酷狗` 时建议把 `search / url / lrc / pic` 分成功能清晰的几条接口；配 `歌词备用` 时选择平台 `歌词备用`、功能 `歌词`，可直接用歌名/歌手/专辑做兜底容灾。
           </Typography.Text>
           {draft.musicApis.length === 0 && (
             <Empty description="暂无自定义接口" image={Empty.PRESENTED_IMAGE_SIMPLE} />
@@ -1172,10 +1159,6 @@ export default function RuntimeConfigPanel({
       label: '第三方服务',
       children: (
         <>
-          {fieldGroup('cyapi')}
-          <Divider style={{ margin: 0 }} />
-          {fieldGroup('lyrics')}
-          <Divider style={{ margin: 0 }} />
           {fieldGroup('qiniu')}
           <Divider style={{ margin: 0 }} />
           {fieldGroup('apihz')}

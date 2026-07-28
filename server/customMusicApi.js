@@ -1,6 +1,6 @@
 import { getRuntimeConfig } from './runtimeConfig.js';
 
-export const MUSIC_API_PLATFORMS = new Set(['netease', 'tencent', 'kugou']);
+export const MUSIC_API_PLATFORMS = new Set(['netease', 'tencent', 'kugou', 'lyrics']);
 export const MUSIC_API_OPERATIONS = new Set([
   'search',
   'song',
@@ -12,7 +12,7 @@ export const MUSIC_API_OPERATIONS = new Set([
 ]);
 export const MUSIC_API_METHODS = new Set(['GET', 'POST']);
 
-const TEMPLATE_VARIABLES = new Set(['id', 'keyword', 'quality', 'limit', 'server']);
+const TEMPLATE_VARIABLES = new Set(['id', 'keyword', 'quality', 'limit', 'server', 'artist', 'album', 'n']);
 const DEFAULT_WEIGHT = 100;
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_FAILURE_THRESHOLD = 3;
@@ -286,6 +286,9 @@ function operationVariables(query) {
     quality: String(query?.quality || ''),
     limit: String(query?.limit || ''),
     server: String(query?.server || ''),
+    artist: String(query?.artist || ''),
+    album: String(query?.album || ''),
+    n: String(query?.n || ''),
   };
 }
 

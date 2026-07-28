@@ -2,6 +2,7 @@ import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import {
   listRoomsForAdmin,
   listRoomsForAdminDetailed,
+  getRoomPasswordForAdmin,
   adminDestroyRoom,
   isRedisEnabled,
   setRoomProtectedFromDestroy,
@@ -849,6 +850,22 @@ export function mountAdminApi(app, { io, socketToRoom, socketToUserId, getClient
 
   app.get('/api/admin/rooms', requireAdmin, async (_req, res) => {
     res.json({ rooms: await listRoomsForAdminDetailed() });
+  });
+
+  // 按需查看房间明文密码：列表不下发，每次查看写审计
+  app.get('/api/admin/rooms/:id/password', requireAdmin, requireAdminSetupComplete, (req, res) => {
+    const roomId = String(req.params.id || '').toUpperCase();
+    const ip = getClientIp?.(req) || req.ip || '';
+    const result = getRoomPasswordForAdmin(roomId);
+    if (result.error) {
+      return res.status(404).json({ error: result.error });
+    }
+    audit('view_room_password', {
+      roomId,
+      hasPassword: result.hasPassword,
+      recoverable: Boolean(result.password),
+    }, ip);
+    res.json(result);
   });
 
   app.put('/api/admin/rooms/:id/protection', requireAdminOrigin, requireAdmin, requireAdminSetupComplete, async (req, res) => {
