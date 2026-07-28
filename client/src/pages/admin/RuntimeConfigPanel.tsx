@@ -124,7 +124,6 @@ const MUSIC_API_PLATFORMS: { value: MusicApiPlatform; label: string }[] = [
   { value: 'netease', label: '网易云' },
   { value: 'tencent', label: 'QQ 音乐' },
   { value: 'kugou', label: '酷狗' },
-  { value: 'lyrics', label: '歌词备用' },
 ];
 
 const MUSIC_API_OPERATIONS: { value: MusicApiOperation; label: string }[] = [

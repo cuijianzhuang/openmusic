@@ -471,9 +471,9 @@ export default function Room() {
     lastSongRequestAtRef.current,
     canControlPlayback,
   );
-  // 开启点歌冷却后批量点歌会立刻触发冷却，隐藏一键点歌
-  const showBulkAddSong = (room?.songRequestCooldownSec ?? 0) <= 0;
   const canModerate = isOwner || isAdmin;
+  // 普通成员在点歌冷却开启时隐藏批量点歌，房主/管理员不受此限制
+  const showBulkAddSong = canModerate || (room?.songRequestCooldownSec ?? 0) <= 0;
   const canOpenRoomSettings = canModerate;
   const songRequestSettings: SongRequestSettings = useMemo(() => ({
     enabled: room?.songRequestEnabled !== false,

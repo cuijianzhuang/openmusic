@@ -23,7 +23,6 @@ import {
   resetMetingUpstreamCooldown,
   setMetingUpstreamDisabled,
 } from './metingUpstream.js';
-import { getLrcapiUpstreamStatus } from './lrcapiUpstream.js';
 import {
   getCustomMusicApiStatus,
   previewCustomMusicApi,
@@ -697,7 +696,6 @@ export function mountAdminApi(app, { io, socketToRoom, socketToUserId, getClient
       redisEnabled: isRedisEnabled(),
       metingUpstreams: getMetingUpstreamStatus(),
       customMusicApis: getCustomMusicApiStatus(),
-      lrcapiUpstreams: getLrcapiUpstreamStatus(),
       entryPath: getAdminEntryPath(),
       adminUsername: getAdminUsername(),
       credentialsPersisted: isAdminCredentialsPersisted(),

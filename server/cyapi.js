@@ -165,20 +165,6 @@ function getLrcFallbackDurationMs(lrc) {
   return lastTimeSec > 0 ? Math.round(lastTimeSec * 1000 + LRC_TAIL_PADDING_MS) : undefined;
 }
 
-async function fetchFallbackLrc(songName) {
-  const msg = String(songName || '').trim();
-  if (!msg) return '';
-
-  try {
-    const params = new URLSearchParams({ msg, n: '1' });
-    const response = await fetchWithTimeout(`${getRuntimeConfig().vmyLrcUrl}?${params}`, {}, RANDOM_DURATION_TIMEOUT_MS);
-    if (!response.ok) return '';
-    return await response.text();
-  } catch {
-    return '';
-  }
-}
-
 async function resolveRandomDurationMs(song, raw) {
   const explicit = normalizeDurationMs(
     raw.duration ?? raw.time ?? raw.interval ?? raw.durationMs ?? raw.timeLength,
@@ -188,7 +174,7 @@ async function resolveRandomDurationMs(song, raw) {
   const mp3Duration = await resolveMp3DurationMs(song.url);
   if (mp3Duration) return mp3Duration;
 
-  const lrc = raw.lrc || raw.lyric || raw.lyrics || await fetchFallbackLrc(song.name);
+  const lrc = raw.lrc || raw.lyric || raw.lyrics || '';
   return getLrcFallbackDurationMs(lrc);
 }
 

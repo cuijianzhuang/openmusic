@@ -204,10 +204,9 @@ function markFailure(upstream, err, query = {}) {
   pushRecentError(upstream, message, query);
 }
 
-/** 单曲无源等软失败：记日志与 softFailCount，不冷却、不拉低可用率 */
+/** 单曲无源等软失败：仅记 softFailCount，不冷却、不写错误日志 */
 function markSoftFailure(upstream, message, query = {}) {
   upstream.softFailCount = (upstream.softFailCount || 0) + 1;
-  pushRecentError(upstream, message, query);
 }
 
 function markSuccess(upstream) {

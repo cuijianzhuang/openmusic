@@ -80,9 +80,8 @@ function envDefaults() {
     musicApis: [],
     cyapiBase: envText('CYAPI_BASE', envText('CYAPI_URL').replace(/\/qq_music\.php$/i, '') || 'https://cyapi.top/API'),
     cyapiKey: envText('CYAPI_KEY'),
-    vmyLrcUrl: envText('VMY_LRC_URL', 'https://api.52vmy.cn/api/music/lrc'),
-    // 支持英文逗号分隔多个 LrcAPI 上游做负载均衡；置空则禁用该级兜底
-    lrcapiUrl: envText('LRCAPI_URL', 'https://api.lrc.cx'),
+    vmyLrcUrl: envText('VMY_LRC_URL'),
+    lrcapiUrl: envText('LRCAPI_URL'),
     qiniuAccessKey: envText('QINIU_ACCESS_KEY'),
     qiniuSecretKey: envText('QINIU_SECRET_KEY'),
     qiniuBucket: envText('QINIU_BUCKET'),
@@ -263,7 +262,7 @@ function normalize(config) {
     musicApis,
     cyapiBase: trimTrailingSlash(config.cyapiBase) || 'https://cyapi.top/API',
     cyapiKey: String(config.cyapiKey || '').trim(),
-    vmyLrcUrl: trimTrailingSlash(config.vmyLrcUrl) || 'https://api.52vmy.cn/api/music/lrc',
+    vmyLrcUrl: trimTrailingSlash(config.vmyLrcUrl),
     lrcapiUrl: String(config.lrcapiUrl ?? '')
       .split(',')
       .map((s) => trimTrailingSlash(s))
@@ -420,7 +419,7 @@ export function setRuntimeConfig(raw = {}) {
       allowPrivate: true,
     }),
     validateHttpUrl(normalized.cyapiBase, '迟言 API 地址'),
-    validateHttpUrl(normalized.vmyLrcUrl, '歌词备用地址'),
+    validateHttpUrl(normalized.vmyLrcUrl, '歌词备用地址', { allowEmpty: true }),
     validateHttpUrl(normalized.lrcapiUrl, 'LrcAPI 歌词地址', { allowEmpty: true, allowList: true }),
     validateHttpUrl(normalized.qiniuDomain, '七牛云域名', { allowEmpty: true }),
     validateHttpUrl(normalized.apihzBaseUrl, '接口盒子地址'),

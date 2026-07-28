@@ -3,7 +3,7 @@ import { getSourceShortLabel } from '../../lib/sourceLabels';
 import type { MusicProviderMeta } from './types';
 import { providers, getAllSources } from './sources';
 import { interleaveSearchResults } from './merge';
-import { hasValidLrc, fetchFallbackLrc } from './lrcFallback';
+import { hasValidLrc } from './lrcFallback';
 import { fetchWithTimeout } from '../http';
 import { toProxiedMediaUrl, toLocalMetingPicUrl, shouldProxyPlaybackUrl } from '../../lib/mediaProxyUrl';
 import { shouldProxySongPlaybackUrl } from '../../lib/roomVisualPreset';
@@ -148,11 +148,6 @@ async function fetchLyrics(song: LyricsSong): Promise<string> {
   }
 
   if (hasValidLrc(lrc)) return lrc;
-
-  if (song.name) {
-    const fallback = await fetchFallbackLrc(song.name, { artist: song.artist, album: song.album });
-    if (fallback) return fallback;
-  }
 
   return lrc;
 }
