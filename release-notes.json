@@ -6,5 +6,5 @@
     "修复其他已知小问题",
     "安卓/ios版正在原生重构过程中"
   ],
-  "forcePrompt": true
+  "forcePrompt": false
 }

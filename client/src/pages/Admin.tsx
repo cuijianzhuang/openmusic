@@ -318,7 +318,8 @@ function AdminPage() {
         const status = err && typeof err === 'object' && 'status' in err
           ? Number((err as { status?: number }).status)
           : 0;
-        if (status === 401 || status === 503) setLoggedIn(false);
+        // 503 可能只是某个后台能力未配置/暂不可用，不应误判成登录失效
+        if (status === 401) setLoggedIn(false);
       } finally {
         loadingRef.current = false;
         setRefreshing(false);

@@ -353,6 +353,7 @@ function sendSiteBannedResponse(req, res) {
   // 站点封禁拦截不写审计：被封用户会高频重试，日志无运维价值且易刷爆
   const wantsHtml = String(req.headers.accept || '').includes('text/html')
     || !String(req.path || '').startsWith('/api/');
+  res.setHeader('X-OpenMusic-Site-Blocked', '1');
   if (wantsHtml) {
     res.status(503).type('html').send(`<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>

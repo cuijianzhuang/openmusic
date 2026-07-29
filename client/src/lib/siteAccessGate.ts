@@ -28,8 +28,8 @@ function freezeSiteAccessUi() {
   }
 }
 
-/** 识别服务端全站封禁响应（503 + 模糊文案） */
+/** 识别服务端全站封禁响应：必须带明确标记，避免把普通 503 误判成全站封禁 */
 export function detectSiteAccessBlockResponse(res: Response | null | undefined): boolean {
   if (!res || res.status !== 503) return false;
-  return true;
+  return res.headers.get('x-openmusic-site-blocked') === '1';
 }
