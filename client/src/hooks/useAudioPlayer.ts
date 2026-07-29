@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback, useState, type MutableRefObject } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useRoomStore } from '../stores/roomStore';
 import { useAudioStore } from '../stores/audioStore';
 import { useSocket } from '../hooks/useSocket';
@@ -13,7 +14,7 @@ import {
   resolveTrackDurationSeconds,
 } from '../hooks/useTrackDuration';
 import { reportTrackDurationToServer } from '../lib/reportTrackDuration';
-import type { QueueItem } from '../types';
+import type { QueueItem, RoomState } from '../types';
 import { getAudioController } from '../lib/audioController';
 import {
   onWeChatBridgeReady,
@@ -296,7 +297,13 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
   const tvMode = options.tvMode ?? false;
   const controller = getAudioController();
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const room = useRoomStore((s) => s.room);
+  // 只订阅播放相关的这几个字段，避免成员上下线/地理位置等无关房间变化导致播放引擎跟着重渲染。
+  const room: Pick<RoomState, 'current' | 'isPlaying' | 'queue' | 'nextRandom'> | null = useRoomStore(useShallow((s) => (s.room ? {
+    current: s.room.current,
+    isPlaying: s.room.isPlaying,
+    queue: s.room.queue,
+    nextRandom: s.room.nextRandom,
+  } : null)));
   const isPlaybackLeader = useRoomStore((s) => s.isPlaybackLeader);
   const trackLoading = useAudioStore((s) => s.trackLoading);
   const setTrackLoading = useAudioStore((s) => s.setTrackLoading);

@@ -4,9 +4,18 @@ import type { QueueItem } from '../types';
 import { ROOM_VISUAL_MODE_META, type RoomVisualMode } from '../lib/roomVisualPreset';
 import { roomVisualFxLive, subscribeRoomVisualFx } from '../lib/roomVisualFxLive';
 import { effectiveBackgroundColor } from '../lib/roomVisualAppearance';
-import { syncGalaxyHandGestureMode } from './galaxy/lib/galaxyHandGesture';
 import AmbientCoverLayers from './AmbientCoverLayers';
 import { lazyWithRetry } from '../lib/lazyWithRetry';
+
+// 动态引入：手势识别依赖 @mediapipe/tasks-vision + three.js（数百 KB），只有真正开启
+// 摄像头手势交互时才需要加载。挂载/切歌时都会以 mode='off' 调用一次做兜底关闭，
+// 如果模块从未加载过（意味着手势本来就没开过），'off' 直接跳过，不触发这次网络加载。
+let gestureModulePromise: Promise<typeof import('./galaxy/lib/galaxyHandGesture')> | null = null;
+function syncGalaxyHandGestureMode(mode: 'off' | 'gesture'): Promise<void> {
+  if (mode === 'off' && !gestureModulePromise) return Promise.resolve();
+  gestureModulePromise ??= import('./galaxy/lib/galaxyHandGesture');
+  return gestureModulePromise.then((mod) => mod.syncGalaxyHandGestureMode(mode));
+}
 
 const GalaxyBackground = lazyWithRetry(() => import('./galaxy/GalaxyBackground3D'), 'GalaxyBackground3D');
 const TopographyBackground = lazyWithRetry(() => import('./topography/TopographyBackground3D'), 'TopographyBackground3D');

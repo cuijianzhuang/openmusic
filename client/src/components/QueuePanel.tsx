@@ -108,7 +108,7 @@ interface Props {
   fillHeight?: boolean;
 }
 
-export default function QueuePanel({ fillHeight = false }: Props) {
+function QueuePanel({ fillHeight = false }: Props) {
   const queue = useRoomStore((s) => s.room?.queue);
   const currentSong = useRoomStore((s) => s.room?.current);
   const memberTiers = useRoomStore((s) => s.room?.memberTiers);
@@ -427,3 +427,5 @@ export default function QueuePanel({ fillHeight = false }: Props) {
     </div>
   );
 }
+
+export default memo(QueuePanel);

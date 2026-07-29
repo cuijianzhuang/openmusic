@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { MessageCircle, MicOff } from 'lucide-react';
 import { useRoomStore } from '../stores/roomStore';
@@ -19,7 +19,7 @@ import { useChatRoomMeta, useChatRoomSlice } from '../lib/chatRoomSlice';
 import { fetchChatUploadEnabled } from '../api/chatImage';
 import { fetchStickerSearchEnabled } from '../api/stickerSearch';
 
-export default function ChatPanel({ className = '' }: { className?: string }) {
+function ChatPanel({ className = '' }: { className?: string }) {
   const chatRoomSlice = useChatRoomSlice();
   const roomMeta = useChatRoomMeta();
   const nickname = useRoomStore((s) => s.nickname);
@@ -326,3 +326,5 @@ export default function ChatPanel({ className = '' }: { className?: string }) {
     </div>
   );
 }
+
+export default memo(ChatPanel);
