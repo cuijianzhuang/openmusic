@@ -73,7 +73,8 @@ export function kickConnectionsMatchingBan(ban, ctx = {}) {
     }
     socketToRoom.delete(sid);
     socketToUserId.delete(sid);
-    s.emit('kicked', { message: '连接已断开，请刷新后重试' });
+    s.emit('kicked', { message: '连接已断开，请刷新后重试', stopReconnect: true });
+    s.disconnect(true);
     kicked += 1;
   }
 

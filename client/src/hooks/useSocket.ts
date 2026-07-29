@@ -97,6 +97,12 @@ function getSocket(): Socket {
 
 function waitForSocketConnect(s: Socket, timeoutMs = SOCKET_ACK_TIMEOUT_MS): Promise<void> {
   if (s.connected) return Promise.resolve();
+  try {
+    // 若曾因全站封禁关掉自动重连，正常进房时重新打开
+    s.io.reconnection(true);
+  } catch {
+    // ignore
+  }
   return new Promise((resolve, reject) => {
     const timer = window.setTimeout(() => {
       s.off('connect', onConnect);
@@ -632,7 +638,7 @@ export function useSocket() {
       useChatStore.getState().updateReactions(messageId, reactions);
     };
 
-    const onKicked = ({ message }: { message?: string }) => {
+    const onKicked = ({ message, stopReconnect }: { message?: string; stopReconnect?: boolean }) => {
       joinGeneration += 1;
       lastJoinSession = null;
       lastTvJoinSession = null;
@@ -654,6 +660,16 @@ export function useSocket() {
       useAudioStore.getState().setNeedsAudioUnlock(false);
       useAudioStore.getState().setSmoothPlaybackTime(0);
       resetSession();
+      // 全站封禁等场景：彻底停掉自动重连，避免每 10 秒刷进房
+      if (stopReconnect) {
+        try {
+          s.io.reconnection(false);
+          if (s.connected) s.disconnect();
+        } catch {
+          // ignore
+        }
+        socketConnectRequested = false;
+      }
       useRoomStore.getState().setExitReason(
         message || '你已被房主移出房间，无法再次进入',
       );

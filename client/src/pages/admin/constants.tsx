@@ -39,6 +39,7 @@ export const AUDIT_ACTION_OPTIONS: { value: string; label: string }[] = [
   { value: 'room_create_blocked', label: '拦截建房' },
   { value: 'room_create_auto_ban', label: '自动封禁建房' },
   { value: 'join_blocked', label: '拦截进房' },
+  { value: 'site_access_blocked', label: '拦截全站访问' },
   { value: 'session_blocked', label: '拦截会话' },
   { value: 'error_report_update', label: '处理错误上报' },
   { value: 'error_report_delete', label: '删除错误上报' },

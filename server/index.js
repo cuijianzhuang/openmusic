@@ -17,6 +17,7 @@ import { fetchCustomMusicApi, hasCustomMusicApi } from './customMusicApi.js';
 import { mountWechatFileHelperProxy } from './wechatFileHelperProxy.js';
 import { mountAdminApi, appendAdminAudit } from './adminApi.js';
 import { initAdminCredentials } from './adminCredentials.js';
+import { getAdminEntryPath } from './adminConfig.js';
 import { isSetupRequired, mountSetupApi } from './setupApi.js';
 import { buildRobotsTxt, buildSitemapXml, resolveSiteOrigin } from './seoFiles.js';
 import { patchClientIndexHtml, readClientIndexHtml } from './seoIndexHtml.js';
@@ -326,6 +327,91 @@ app.use(express.json({
     req.rawBody = buf;
   },
 }));
+
+/** 全站封禁审计节流：同一 IP/设备 15 分钟内同类拦截只记一条，避免刷爆审计 */
+const SITE_BAN_AUDIT_THROTTLE_MS = 15 * 60 * 1000;
+/** @type {Map<string, number>} */
+const siteBanAuditAt = new Map();
+let siteBanAuditSweepAt = 0;
+
+function noteSiteBanAudit(action, detail = {}, ip = '') {
+  const now = Date.now();
+  if (now - siteBanAuditSweepAt > 60_000) {
+    siteBanAuditSweepAt = now;
+    for (const [k, at] of siteBanAuditAt) {
+      if (now - at > SITE_BAN_AUDIT_THROTTLE_MS) siteBanAuditAt.delete(k);
+    }
+  }
+  const key = [
+    action,
+    ip || '',
+    detail.deviceId || '',
+    detail.banType || '',
+    detail.value || '',
+  ].join('|');
+  const last = siteBanAuditAt.get(key) || 0;
+  if (now - last < SITE_BAN_AUDIT_THROTTLE_MS) return false;
+  siteBanAuditAt.set(key, now);
+  if (siteBanAuditAt.size > 8_000) {
+    const oldest = siteBanAuditAt.keys().next().value;
+    if (oldest !== undefined) siteBanAuditAt.delete(oldest);
+  }
+  appendAdminAudit(action, detail, ip);
+  return true;
+}
+
+function isExemptFromSiteBan(reqPath = '') {
+  const p = String(reqPath || '');
+  if (p.startsWith('/api/admin')) return true;
+  if (p.startsWith('/api/setup')) return true;
+  if (p.startsWith('/socket.io')) return true;
+  try {
+    const entry = getAdminEntryPath();
+    if (entry && (p === entry || p.startsWith(`${entry}/`))) return true;
+  } catch {
+    // ignore
+  }
+  return false;
+}
+
+function resolveSiteBanFromRequest(req) {
+  const ip = getRequestIp(req);
+  const deviceId = resolveDeviceIdFromCookieHeader(req.headers?.cookie || '');
+  const ban = isSiteBanned({ ip, deviceId });
+  return { ban, ip, deviceId };
+}
+
+function sendSiteBannedResponse(req, res, { ban, ip, deviceId }) {
+  noteSiteBanAudit('site_access_blocked', {
+    reason: 'site_ban',
+    banType: ban?.type || '',
+    value: ban?.value || '',
+    deviceId: deviceId || '',
+    path: String(req.path || '').slice(0, 80),
+  }, ip);
+  const wantsHtml = String(req.headers.accept || '').includes('text/html')
+    || !String(req.path || '').startsWith('/api/');
+  if (wantsHtml) {
+    res.status(503).type('html').send(`<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>暂时无法访问</title>
+<style>
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+font-family:system-ui,sans-serif;background:#0b0d12;color:#e8eaed}
+p{opacity:.75;font-size:15px}
+</style></head><body><p>系统开小差了，请稍后再试</p></body></html>`);
+    return;
+  }
+  res.status(503).json({ error: '系统开小差了，请稍后再试' });
+}
+
+/** 全站封禁：首页 / API / SPA 一律拦截（管理后台入口除外） */
+app.use((req, res, next) => {
+  if (isExemptFromSiteBan(req.path)) return next();
+  const { ban, ip, deviceId } = resolveSiteBanFromRequest(req);
+  if (!ban) return next();
+  sendSiteBannedResponse(req, res, { ban, ip, deviceId });
+});
 
 mountSetupApi(app);
 
@@ -1669,12 +1755,12 @@ app.post('/api/rooms', async (req, res) => {
   };
 
   if (isSiteBanned({ ip: createIp, deviceId: createDeviceId })) {
-    appendAdminAudit('room_create_blocked', {
+    noteSiteBanAudit('room_create_blocked', {
       reason: 'site_ban',
       deviceId: createDeviceId || '',
     }, createIp);
     // 不暴露封禁
-    return res.status(500).json({ error: '系统开小差了，请稍后再试' });
+    return res.status(503).json({ error: '系统开小差了，请稍后再试' });
   }
 
   const name = req.body?.name;
@@ -1745,7 +1831,7 @@ app.post('/api/rooms', async (req, res) => {
       maxOwnedRooms: maxOwned,
     }, createIp);
     return res.status(400).json({
-      error: `最多同时创建 ${maxOwned} 个房间，请先解散或等空房自动回收后再试`,
+      error: '你创建的房间有点多啦，先解散不用的房间，再回来开新的吧～',
     });
   }
 
@@ -2353,6 +2439,25 @@ function hardenSocketHandlers(target) {
 io.on('connection', (socket) => {
   hardenSocketHandlers(socket);
 
+  // 建连即拦：避免被封用户反复 join_room 刷审计 / 占连接
+  {
+    const joinProbeIp = getClientIp(socket);
+    const deviceId = resolveDeviceIdFromCookieHeader(socket.handshake?.headers?.cookie || '');
+    const siteBan = isSiteBanned({ ip: joinProbeIp, deviceId });
+    if (siteBan) {
+      noteSiteBanAudit('site_access_blocked', {
+        reason: 'site_ban',
+        banType: siteBan.type || '',
+        value: siteBan.value || '',
+        deviceId: deviceId || '',
+        path: 'socket',
+      }, joinProbeIp);
+      socket.emit('kicked', { message: '系统开小差了，请稍后再试', stopReconnect: true });
+      socket.disconnect(true);
+      return;
+    }
+  }
+
   socket.on('join_room', async ({
     roomId,
     nickname,
@@ -2385,22 +2490,12 @@ io.on('connection', (socket) => {
     }
 
     const deviceId = resolveDeviceIdFromCookieHeader(socket.handshake?.headers?.cookie || '');
-    const auth = await verifyRoomPassword(id, password, { clientId: userId, deviceId });
-    if (!auth.ok) {
-      if (!limitJoinPasswordFail(`joinfail:${ip}:${id}`)) {
-        callback?.({ success: false, error: '尝试过于频繁，请稍后再试' });
-        return;
-      }
-      callback?.({ success: false, error: auth.error, needsPassword: auth.needsPassword });
-      return;
-    }
 
-    // 安全限流仍使用连接来源 IP；客户端上报值仅用于成员归属展示/同端统计。
-    // 站点封禁在密码校验前检查，避免被封用户反复试密码。
+    // 站点封禁优先：踢出并断开，阻止客户端无限重连刷日志
     const joinProbeIp = getClientIp(socket);
     const siteBan = isSiteBanned({ ip: joinProbeIp, deviceId });
     if (siteBan) {
-      appendAdminAudit('join_blocked', {
+      noteSiteBanAudit('join_blocked', {
         reason: 'site_ban',
         roomId: id,
         userId,
@@ -2408,8 +2503,19 @@ io.on('connection', (socket) => {
         banType: siteBan.type || '',
         value: siteBan.value || '',
       }, joinProbeIp);
-      // 不暴露封禁，对外表现成临时失败
       callback?.({ success: false, error: '系统开小差了，请稍后再试' });
+      socket.emit('kicked', { message: '系统开小差了，请稍后再试', stopReconnect: true });
+      socket.disconnect(true);
+      return;
+    }
+
+    const auth = await verifyRoomPassword(id, password, { clientId: userId, deviceId });
+    if (!auth.ok) {
+      if (!limitJoinPasswordFail(`joinfail:${ip}:${id}`)) {
+        callback?.({ success: false, error: '尝试过于频繁，请稍后再试' });
+        return;
+      }
+      callback?.({ success: false, error: auth.error, needsPassword: auth.needsPassword });
       return;
     }
 

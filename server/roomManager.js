@@ -1764,9 +1764,9 @@ export function countOwnedRooms({ creatorId, creatorDeviceId } = {}) {
 }
 
 /**
- * 查找该身份已创建、仍空闲（无人/无曲/无队列）的房间。
- * 用于堵住「只建不进、反复刷房号」：有空房则复用，不再新建。
- * 仅按 userId / deviceId 匹配
+ * 查找该身份已创建、仍空闲（无人）的房间。
+ * 无人即可复用；残留当前曲/队列在 reuseIdleOwnedRoom 时清空。
+ * 仅按 userId / deviceId 匹配。
  */
 export function findIdleOwnedRoom({ creatorId, creatorDeviceId } = {}) {
   const uid = sanitizeCreatorId(creatorId);
@@ -1776,8 +1776,8 @@ export function findIdleOwnedRoom({ creatorId, creatorDeviceId } = {}) {
   let best = null;
   for (const room of rooms.values()) {
     if (protectedRoomIds.has(room.id)) continue;
+    // 只要有人在就不复用（含自己还在房里）
     if (room.users.size > 0) continue;
-    if (room.current || room.isPlaying || room.queue.length > 0) continue;
     if (!roomOwnedBy({ room, creatorId: uid, creatorDeviceId: did })) continue;
     if (!best || (Number(room.createdAt) || 0) > (Number(best.createdAt) || 0)) {
       best = room;
@@ -1787,14 +1787,13 @@ export function findIdleOwnedRoom({ creatorId, creatorDeviceId } = {}) {
 }
 
 /**
- * 复用空闲自建房：可更新名称/密码，并重新挂销毁倒计时。
+ * 复用空闲自建房：可更新名称/密码，清空残留播放状态，并重新挂销毁倒计时。
  */
 export function reuseIdleOwnedRoom(roomId, { name, password } = {}) {
   const id = String(roomId || "").toUpperCase();
   const room = rooms.get(id);
   if (!room) return null;
   if (room.users.size > 0) return null;
-  if (room.current || room.isPlaying || room.queue.length > 0) return null;
 
   if (name !== undefined) {
     room.name = normalizeRoomName(name, room.id);
@@ -1804,6 +1803,18 @@ export function reuseIdleOwnedRoom(roomId, { name, password } = {}) {
     room.passwordHash = trimmed ? hashPassword(trimmed) : null;
     room.passwordPlain = trimmed || null;
   }
+
+  // 当作新建：清掉上次残留的曲目/播放状态，避免「空房却无法复用」
+  room.queue = [];
+  room.current = null;
+  room.isPlaying = false;
+  room.currentTime = 0;
+  room.startedAt = null;
+  room.randomLoading = false;
+  room.skipRequests = [];
+  room.playbackVersion = (room.playbackVersion || 0) + 1;
+  room.playbackUpdatedAt = Date.now();
+
   persistRoom(room);
   invalidateRoomsListCache();
   scheduleRoomDestroy(room.id);

@@ -531,7 +531,7 @@ export default function RuntimeConfigPanel({
               aria-label="最多自建房间数"
               style={{ width: 100 }}
             />
-            <Typography.Text type="secondary">人最多同时保留的自建房（空房会复用；0=不限制）</Typography.Text>
+            <Typography.Text type="secondary">同一用户最多同时保留的自建房数（无人空房会复用房号；0=不限制）</Typography.Text>
           </Space>
 
           <Space wrap>
