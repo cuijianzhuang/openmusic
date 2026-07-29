@@ -1,8 +1,8 @@
 /**
  * 建房限流 + 疑似自动建房检测。
- * - 硬限流：同一 IP / 设备 / 用户 每 5 分钟最多创建 1 次
+ * - 硬限流：同一设备 / 用户 每 5 分钟最多创建 1 次（不含 IP，避免公司 NAT 误伤）
  * - 空闲自建房复用（见 index.js findIdleOwnedRoom）堵住刷房号
- * - 软检测：按节奏、同名、空房堆积等打分，超阈值自动全站封禁
+ * - 软检测：按节奏、同名、空房堆积等打分，超阈值自动全站封禁（可含 IP）
  */
 
 import { addSiteBan, isSiteBanned } from './siteBan.js';
@@ -64,14 +64,20 @@ function sanitizeId(value) {
   return /^[a-zA-Z0-9_-]{8,64}$/.test(id) ? id : '';
 }
 
-/** 限流桶：ip / device / userId */
-function cooldownKeys({ ip, deviceId, userId }) {
+/** 硬限流桶：仅 userId / deviceId（不用 IP，避免公司 NAT 误伤） */
+function cooldownKeys({ deviceId, userId }) {
   const keys = [];
-  if (ip) keys.push(`ip:${ip}`);
   const did = sanitizeId(deviceId);
   if (did) keys.push(`did:${did}`);
   const uid = sanitizeId(userId);
   if (uid) keys.push(`uid:${uid}`);
+  return keys;
+}
+
+/** 行为历史桶：含 IP，仅用于自动拉黑打分 */
+function historyKeys({ ip, deviceId, userId }) {
+  const keys = cooldownKeys({ deviceId, userId });
+  if (ip) keys.push(`ip:${ip}`);
   return keys;
 }
 
@@ -90,8 +96,22 @@ function banTargets({ ip, deviceId }) {
 export function checkRoomCreateCooldown({ ip, deviceId, userId } = {}) {
   const now = Date.now();
   sweep(now);
-  const keys = cooldownKeys({ ip, deviceId, userId });
+  const keys = cooldownKeys({ deviceId, userId });
   if (keys.length === 0) {
+    // 无设备/用户标识时退化为按 IP 宽松限流（防裸刷），阈值单独更大
+    if (ip) {
+      const ipKey = `ip-loose:${ip}`;
+      const until = cooldownUntil.get(ipKey) || 0;
+      if (until > now) {
+        pushTimed(rejectHistory, `ip:${ip}`, now);
+        const retryAfterSec = Math.max(1, Math.ceil((until - now) / 1000));
+        return {
+          allowed: false,
+          error: '系统开小差了，请稍后再试',
+          retryAfterSec,
+        };
+      }
+    }
     return { allowed: true };
   }
 
@@ -105,6 +125,7 @@ export function checkRoomCreateCooldown({ ip, deviceId, userId } = {}) {
     for (const key of keys) {
       pushTimed(rejectHistory, key, now);
     }
+    if (ip) pushTimed(rejectHistory, `ip:${ip}`, now);
     const retryAfterSec = Math.max(1, Math.ceil((blockedUntil - now) / 1000));
     return {
       allowed: false,
@@ -117,8 +138,14 @@ export function checkRoomCreateCooldown({ ip, deviceId, userId } = {}) {
 
 function markCooldown({ ip, deviceId, userId }, now) {
   const until = now + CREATE_COOLDOWN_MS;
-  for (const key of cooldownKeys({ ip, deviceId, userId })) {
-    rememberMapEntry(cooldownUntil, key, until, MAX_KEYS);
+  const keys = cooldownKeys({ deviceId, userId });
+  if (keys.length > 0) {
+    for (const key of keys) {
+      rememberMapEntry(cooldownUntil, key, until, MAX_KEYS);
+    }
+  } else if (ip) {
+    // 无 did/uid：IP 用更短冷却，降低 NAT 误伤面
+    rememberMapEntry(cooldownUntil, `ip-loose:${ip}`, now + 60_000, MAX_KEYS);
   }
 }
 
@@ -270,7 +297,7 @@ function countEmptyOwnedRooms({ ip, deviceId, userId }, listRoomsFn) {
 
 async function maybeAutoBanKeys({ ip, deviceId, userId, listRoomsForGuard }) {
   const emptyOwnedRooms = countEmptyOwnedRooms({ ip, deviceId, userId }, listRoomsForGuard);
-  const relatedKeys = cooldownKeys({ ip, deviceId, userId });
+  const relatedKeys = historyKeys({ ip, deviceId, userId });
   const events = mergeEvents(relatedKeys);
   const rejects = mergeRejects(relatedKeys);
   const { score, reasons } = scoreAutomation(events, rejects, emptyOwnedRooms);
@@ -335,7 +362,7 @@ export async function recordRoomCreateAndMaybeAutoBan({
     reused: Boolean(reused),
   };
 
-  for (const key of cooldownKeys({ ip, deviceId, userId })) {
+  for (const key of historyKeys({ ip, deviceId, userId })) {
     const list = createHistory.get(key) || [];
     list.push(event);
     const trimmed = list.filter((item) => now - item.at <= HISTORY_TTL_MS);
