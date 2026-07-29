@@ -1307,7 +1307,6 @@ export default function Room() {
     setAddingId(null);
     if (res.success) {
       lastSongRequestAtRef.current = Date.now();
-      showToast('点歌成功', 'success');
     } else if (res.error) {
       showToast(res.error, 'error');
     }

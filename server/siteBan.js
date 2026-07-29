@@ -11,10 +11,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const LEGACY_LOCAL_PATH = path.join(__dirname, 'siteBans.json');
 const REDIS_KEY = 'openmusic:site:bans';
 const generateBanId = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz', 12);
-const MAX_REASON_LENGTH = 80;
+const MAX_REASON_LENGTH = 120;
 const MAX_BANS = 500;
 
-/** @type {Array<{ id: string, type: 'ip'|'device', value: string, reason: string, at: number }>} */
+/** @type {Array<{ id: string, type: 'ip'|'device', value: string, reason: string, source: 'manual'|'auto', at: number }>} */
 let bans = [];
 
 function normalizeIp(raw) {
@@ -44,6 +44,7 @@ function sanitizeBanList(parsed) {
         type,
         value,
         reason: String(item.reason || '').trim().slice(0, MAX_REASON_LENGTH),
+        source: item?.source === 'auto' ? 'auto' : 'manual',
         at: Number(item.at) || Date.now(),
       };
     })
@@ -126,7 +127,7 @@ export function isSiteBanned({ ip, deviceId } = {}) {
   return null;
 }
 
-export async function addSiteBan({ type, value, reason } = {}) {
+export async function addSiteBan({ type, value, reason, source } = {}) {
   const banType = type === 'device' ? 'device' : (type === 'ip' ? 'ip' : '');
   const normalized = normalizeBanValue(banType, value);
   if (!banType) return { success: false, error: '封禁类型无效（ip / device）' };
@@ -145,6 +146,7 @@ export async function addSiteBan({ type, value, reason } = {}) {
     type: banType,
     value: normalized,
     reason: String(reason || '').trim().slice(0, MAX_REASON_LENGTH),
+    source: source === 'auto' ? 'auto' : 'manual',
     at: Date.now(),
   };
   bans.unshift(entry);

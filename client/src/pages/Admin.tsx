@@ -765,9 +765,13 @@ function AdminPage() {
             <Typography.Text type="secondary" code style={{ fontSize: 11 }}>
               {room.id}
             </Typography.Text>
-            {room.ownerNickname ? (
+            {room.ownerNickname || room.creatorNickname ? (
               <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-                {room.ownerNickname}
+                {room.ownerNickname || room.creatorNickname}
+              </Typography.Text>
+            ) : room.creatorIp || room.creatorDeviceId ? (
+              <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                建房人
               </Typography.Text>
             ) : null}
           </Space>
@@ -853,32 +857,15 @@ function AdminPage() {
     },
     {
       title: '播放',
-      ellipsis: true,
-      render: (_, room) => (
-        room.currentSong ? (
-          <div style={{ minWidth: 0, lineHeight: 1.35 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-              <Badge status={room.isPlaying ? 'processing' : 'default'} />
-              <Typography.Text ellipsis style={{ flex: 1, minWidth: 0, maxWidth: 240 }}>
-                {room.currentSong.name}
-              </Typography.Text>
-            </div>
-            <Typography.Text
-              type="secondary"
-              ellipsis
-              style={{ display: 'block', fontSize: 12, maxWidth: 260, paddingLeft: 14 }}
-            >
-              {room.isPlaying ? '播放中' : '已暂停'}
-              {' · '}
-              {room.currentSong.artist}
-            </Typography.Text>
-          </div>
-        ) : (
-          <Typography.Text type="secondary">
-            <Badge status="default" text="未播放" />
-          </Typography.Text>
-        )
-      ),
+      width: 96,
+      render: (_, room) => {
+        if (!room.currentSong) {
+          return <Badge status="default" text="未播放" />;
+        }
+        return room.isPlaying
+          ? <Badge status="processing" text="播放中" />
+          : <Badge status="default" text="已暂停" />;
+      },
     },
     {
       title: '队列',
@@ -963,6 +950,15 @@ function AdminPage() {
   ];
 
   const banColumns: ColumnsType<SiteBanEntry> = [
+    {
+      title: '来源',
+      width: 88,
+      render: (_, ban) => (
+        <Tag color={ban.source === 'auto' ? 'orange' : 'default'}>
+          {ban.source === 'auto' ? '自动' : '手动'}
+        </Tag>
+      ),
+    },
     {
       title: '类型',
       width: 88,
@@ -1306,9 +1302,90 @@ function AdminPage() {
                             ]}
                           />
                         ) : (
-                          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                            当前无在线成员
-                          </Typography.Text>
+                          <div style={{ display: 'grid', gap: 8 }}>
+                            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                              当前无在线成员
+                              {(room.creatorNickname || room.creatorId || room.creatorIp || room.creatorDeviceId)
+                                ? ' · 建房人信息如下（创建时记录，人不在线也能看）'
+                                : ' · 暂无建房人记录（旧房间可能未保存）'}
+                            </Typography.Text>
+                            {(room.creatorNickname || room.creatorId || room.creatorIp || room.creatorDeviceId) ? (
+                              <Table
+                                size="small"
+                                pagination={false}
+                                rowKey="id"
+                                dataSource={[{
+                                  id: 'creator',
+                                  nickname: room.creatorNickname || room.ownerNickname || '—',
+                                  clientIp: room.creatorIp || '',
+                                  deviceId: room.creatorDeviceId || '',
+                                  userId: room.creatorId || '',
+                                }]}
+                                columns={[
+                                  {
+                                    title: '昵称',
+                                    width: 120,
+                                    ellipsis: true,
+                                    render: (_, row) => row.nickname || '—',
+                                  },
+                                  {
+                                    title: '用户 ID',
+                                    width: 140,
+                                    ellipsis: true,
+                                    render: (_, row) => (
+                                      row.userId ? (
+                                        <Typography.Text code copyable={{ text: row.userId }} ellipsis style={{ maxWidth: 120 }}>
+                                          {row.userId}
+                                        </Typography.Text>
+                                      ) : (
+                                        <Typography.Text type="secondary">—</Typography.Text>
+                                      )
+                                    ),
+                                  },
+                                  {
+                                    title: 'IP',
+                                    width: 200,
+                                    render: (_, row) => (
+                                      row.clientIp ? (
+                                        <Space size={6} wrap>
+                                          <Typography.Text code copyable={{ text: row.clientIp }}>
+                                            {row.clientIp}
+                                          </Typography.Text>
+                                          <Button size="small" onClick={() => quickBan('ip', row.clientIp)}>
+                                            封禁
+                                          </Button>
+                                        </Space>
+                                      ) : (
+                                        <Typography.Text type="secondary">—</Typography.Text>
+                                      )
+                                    ),
+                                  },
+                                  {
+                                    title: '设备 ID',
+                                    render: (_, row) => (
+                                      row.deviceId ? (
+                                        <Space size={6} wrap>
+                                          <Typography.Text
+                                            code
+                                            copyable={{ text: row.deviceId }}
+                                            ellipsis
+                                            style={{ maxWidth: 220 }}
+                                          >
+                                            {row.deviceId}
+                                          </Typography.Text>
+                                          <Button size="small" onClick={() => quickBan('device', row.deviceId)}>
+                                            封禁
+                                          </Button>
+                                        </Space>
+                                      ) : (
+                                        <Typography.Text type="secondary">—</Typography.Text>
+                                      )
+                                    ),
+                                  },
+                                ]}
+                              />
+                            ) : null}
+                          </div>
                         )}
                       </div>
                     );
@@ -1357,7 +1434,7 @@ function AdminPage() {
                         value={banReason}
                         onChange={(e) => setBanReason(e.target.value)}
                         placeholder="简要说明"
-                        maxLength={80}
+                        maxLength={120}
                       />
                     </Form.Item>
                   </Col>
@@ -1380,10 +1457,20 @@ function AdminPage() {
                 <Alert type="success" showIcon message={banHint} style={{ marginBottom: 8 }} />
               )}
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                封禁后无法进房 / 建房。可从「房间管理」展开成员行一键填入。
+                封禁后无法进房 / 建房。可从「房间管理」展开成员或建房人一行键填入。
+                建房限流为每 IP/设备 5 分钟 1 次；若持续按节奏刷房或同名堆积，系统会自动拉黑（来源显示为「自动」）。
               </Typography.Text>
             </Card>
-            <Card title={`封禁记录（${bans.length}）`}>
+            <Card
+              title={`封禁记录（${bans.length}）`}
+              extra={
+                bans.some((b) => b.source === 'auto') ? (
+                  <Tag color="orange">
+                    自动 {bans.filter((b) => b.source === 'auto').length}
+                  </Tag>
+                ) : null
+              }
+            >
               <Table
                 rowKey="id"
                 size="middle"

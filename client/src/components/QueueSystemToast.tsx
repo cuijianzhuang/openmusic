@@ -34,11 +34,11 @@ export default function QueueSystemToast() {
     return (
       <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center px-2">
         <p
-          className="flex max-w-full items-center gap-1.5 truncate rounded-full bg-black px-3 py-0.5 text-center text-xs leading-5 text-white"
+          className="flex max-w-full items-center gap-1.5 truncate rounded-full border border-white/20 bg-black px-3 py-1 text-center text-[11px] leading-4 text-white shadow-lg"
           role="status"
           aria-live="polite"
         >
-          <Loader2 className="h-3 w-3 flex-shrink-0 animate-spin" />
+          <Loader2 className="h-3 w-3 flex-shrink-0 animate-spin text-white/70" />
           <span className="truncate">连接已断开，正在自动重新加入房间…</span>
         </p>
       </div>
@@ -50,7 +50,7 @@ export default function QueueSystemToast() {
   return (
     <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center px-2">
       <p
-        className={`max-w-full truncate rounded-full border border-netease-border/50 bg-netease-card px-3 py-0.5 text-center text-xs leading-5 text-netease-muted transition-opacity duration-300 ${
+        className={`max-w-full truncate rounded-full border border-white/20 bg-black px-3 py-1 text-center text-[11px] leading-4 text-white shadow-lg transition-opacity duration-300 ${
           phase === 'exit' ? 'opacity-0' : 'opacity-100 animate-fade-in'
         }`}
         role="status"

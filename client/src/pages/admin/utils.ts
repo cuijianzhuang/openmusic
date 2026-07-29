@@ -180,6 +180,11 @@ function roomMatchesKeyword(room: AdminRoom, keyword: string): boolean {
   if (room.name.toLowerCase().includes(kw)) return true;
   if (room.currentSong?.name.toLowerCase().includes(kw)) return true;
   if (room.currentSong?.artist.toLowerCase().includes(kw)) return true;
+  if (room.ownerNickname?.toLowerCase().includes(kw)) return true;
+  if (room.creatorNickname?.toLowerCase().includes(kw)) return true;
+  if (room.creatorId?.toLowerCase().includes(kw)) return true;
+  if (room.creatorIp?.toLowerCase().includes(kw)) return true;
+  if (room.creatorDeviceId?.toLowerCase().includes(kw)) return true;
   return room.users.some((user) => (
     user.nickname.toLowerCase().includes(kw)
     || user.clientIp?.toLowerCase().includes(kw)
@@ -187,22 +192,13 @@ function roomMatchesKeyword(room: AdminRoom, keyword: string): boolean {
   ));
 }
 
-/** 播放态优先：播放中 → 已暂停 → 有人未播 → 空房；同组按人数、创建时间 */
-function roomActivityRank(room: AdminRoom): number {
-  if (room.isPlaying) return 0;
-  if (room.currentSong) return 1;
-  if (room.userCount > 0) return 2;
-  return 3;
-}
-
+/** 常驻优先 → 人数多优先 → 最后进房新优先 */
 function compareAdminRooms(a: AdminRoom, b: AdminRoom): number {
-  const ap = a.permanentApplication?.status === 'pending' ? 0 : 1;
-  const bp = b.permanentApplication?.status === 'pending' ? 0 : 1;
-  if (ap !== bp) return ap - bp;
-  const rankDiff = roomActivityRank(a) - roomActivityRank(b);
-  if (rankDiff !== 0) return rankDiff;
+  const aProtected = a.protectedFromDestroy ? 0 : 1;
+  const bProtected = b.protectedFromDestroy ? 0 : 1;
+  if (aProtected !== bProtected) return aProtected - bProtected;
   if (a.userCount !== b.userCount) return b.userCount - a.userCount;
-  return b.createdAt - a.createdAt;
+  return (b.lastJoinedAt || 0) - (a.lastJoinedAt || 0);
 }
 
 export function filterAdminRooms(

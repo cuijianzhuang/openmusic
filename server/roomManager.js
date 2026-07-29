@@ -424,6 +424,27 @@ function cancelRoomDestroy(room) {
     clearTimeout(room.destroyTimer);
     room.destroyTimer = null;
   }
+  if (room) room.destroyAt = 0;
+}
+
+/** 真正销毁：先同步移出内存，再异步清七牛/Redis，避免删图卡住或持久化竞态把空房「救活」 */
+function destroyRoomNow(roomId) {
+  const id = String(roomId || "").toUpperCase();
+  const room = rooms.get(id);
+  if (!room) return false;
+  if (room.users.size > 0) return false;
+  if (protectedRoomIds.has(id)) return false;
+
+  cancelRoomDestroy(room);
+  clearAllPendingLeaveClears(room);
+  clearSkipRequestExpiryTimersForRoom(id);
+  rooms.delete(id);
+  invalidateRoomsListCache();
+  void deleteRoomChatImages(id).catch((err) => {
+    console.error(`删除房间 ${id} 聊天图片失败:`, err?.message || err);
+  });
+  void deleteRoomFromStorage(id);
+  return true;
 }
 
 function scheduleRoomDestroy(roomId, ttlMsOverride) {
@@ -433,18 +454,49 @@ function scheduleRoomDestroy(roomId, ttlMsOverride) {
   cancelRoomDestroy(room);
   if (protectedRoomIds.has(roomId)) return;
   const ttlMs = Number.isFinite(ttlMsOverride) ? ttlMsOverride : getRuntimeConfig().roomEmptyTtlMs;
+  room.destroyAt = Date.now() + Math.max(0, ttlMs);
+  if (ttlMs <= 0) {
+    destroyRoomNow(roomId);
+    return;
+  }
   room.destroyTimer = setTimeout(() => {
-    const current = rooms.get(roomId);
-    if (current && current.users.size === 0 && !protectedRoomIds.has(roomId)) {
-      clearAllPendingLeaveClears(current);
-      clearSkipRequestExpiryTimersForRoom(roomId);
-      void deleteRoomChatImages(roomId).finally(() => {
-        rooms.delete(roomId);
-        invalidateRoomsListCache();
-        void deleteRoomFromStorage(roomId);
-      });
-    }
+    destroyRoomNow(roomId);
   }, ttlMs);
+}
+
+/** 空房已无人多久（优先 emptySince；旧房间用 lastJoinedAt/createdAt 兜底） */
+function getRoomEmptySince(room) {
+  const emptySince = Number(room.emptySince) || 0;
+  if (emptySince > 0) return emptySince;
+  return Math.max(Number(room.lastJoinedAt) || 0, Number(room.createdAt) || 0) || Date.now();
+}
+
+/** 兜底清扫：定时器丢失 / 异步删图竞态导致的僵尸空房 */
+function sweepStaleEmptyRooms() {
+  const ttlMs = getRuntimeConfig().roomEmptyTtlMs;
+  const now = Date.now();
+  const hardLimitMs = Math.max(60 * 60 * 1000, (ttlMs > 0 ? ttlMs : 60_000) * 2);
+
+  for (const room of rooms.values()) {
+    if (room.users.size > 0) continue;
+    if (protectedRoomIds.has(room.id)) continue;
+
+    const destroyAt = Number(room.destroyAt) || 0;
+    if (destroyAt > 0 && now >= destroyAt) {
+      destroyRoomNow(room.id);
+      continue;
+    }
+
+    if (!room.destroyTimer && destroyAt <= 0) {
+      scheduleRoomDestroy(room.id);
+      continue;
+    }
+
+    // 极端兜底：空闲过久仍未销毁（例如旧进程遗留、定时器丢失）
+    if (now - getRoomEmptySince(room) >= hardLimitMs) {
+      destroyRoomNow(room.id);
+    }
+  }
 }
 
 /** 房间是否含值得跨重启保留的内容（队列 / 当前曲 / 点歌历史） */
@@ -468,6 +520,7 @@ function snapshotRoomForStorage(room) {
     mutedUserIds: Array.from(room.mutedUserIds || []),
     creatorId: room.creatorId ?? null,
     creatorDeviceId: room.creatorDeviceId ?? null,
+    creatorIp: room.creatorIp || null,
     bannedUserIds: Array.from(room.bannedUserIds || []),
     bannedDeviceIds: Array.from(room.bannedDeviceIds || []),
     queue: room.queue.map(serializeQueueItemForRoom).filter(Boolean),
@@ -520,6 +573,9 @@ function snapshotRoomForStorage(room) {
     memberSettings: serializeMemberSettings(room.memberSettings),
     createdAt: room.createdAt,
     lastJoinedAt: Number(room.lastJoinedAt) || room.createdAt || Date.now(),
+    emptySince: room.users.size === 0
+      ? (Number(room.emptySince) || Number(room.lastJoinedAt) || room.createdAt || Date.now())
+      : null,
   };
 }
 
@@ -544,6 +600,7 @@ function restoreRoomFromStorage(data) {
   room.nextRandom = serializeSongMeta(data.nextRandom);
   room.creatorId = data.creatorId ?? null;
   room.creatorDeviceId = sanitizeCreatorId(data.creatorDeviceId) || null;
+  room.creatorIp = String(data.creatorIp || "").trim().slice(0, 64) || null;
   room.bannedUserIds = new Set(data.bannedUserIds || []);
   room.bannedDeviceIds = new Set(data.bannedDeviceIds || []);
   room.isLocked = Boolean(data.isLocked);
@@ -586,6 +643,8 @@ function restoreRoomFromStorage(data) {
   room.memberSettings = normalizeMemberSettings(data.memberSettings);
   room.createdAt = data.createdAt ?? Date.now();
   room.lastJoinedAt = Number(data.lastJoinedAt) || room.createdAt;
+  // 重启后 socket 全断，视为此刻变空，以便重连宽限期从启动算起（勿用陈旧 lastJoinedAt）
+  room.emptySince = Date.now();
 
   if (room.isPlaying && room.current) {
     room.startedAt = Date.now() - room.currentTime * 1000;
@@ -684,9 +743,28 @@ export async function initRooms() {
     console.log(`已从 Redis 恢复 ${stored.length} 个房间（保留 ${preservedCount} 个空闲房间不因重启解散）`);
   }
 
+  // 每分钟兜底清扫超时空房（含「播放中但无人」的僵尸房）
+  setInterval(() => {
+    try {
+      sweepStaleEmptyRooms();
+    } catch (err) {
+      console.error("空房清扫失败:", err?.message || err);
+    }
+  }, 60_000);
+  // 启动后稍延迟跑一次，尽快清掉已超时僵尸
+  setTimeout(() => {
+    try {
+      sweepStaleEmptyRooms();
+    } catch (err) {
+      console.error("空房清扫失败:", err?.message || err);
+    }
+  }, 5_000);
+
   if (isRedisEnabled()) {
     setInterval(() => {
       for (const room of rooms.values()) {
+        // 无人且已进入销毁倒计时的空房不再刷写，降低与销毁的竞态
+        if (room.users.size === 0 && room.destroyTimer) continue;
         if (room.isPlaying || room.users.size > 0 || room.queue.length > 0) {
           persistRoom(room);
         }
@@ -839,6 +917,7 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
     mutedUserIds: new Set(),
     creatorId: null,
     creatorDeviceId: null,
+    creatorIp: null,
     ownerId: null,
     bannedUserIds: new Set(),
     bannedDeviceIds: new Set(),
@@ -926,7 +1005,10 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
     createdAt: Date.now(),
     /** 最近一次非 TV 成员进房时间（管理后台闲置判断） */
     lastJoinedAt: Date.now(),
+    /** 变为空房的时间；有人在时为 null。用于空房 TTL 兜底清扫 */
+    emptySince: Date.now(),
     destroyTimer: null,
+    destroyAt: 0,
   };
 }
 
@@ -1622,7 +1704,7 @@ function getSongDurationSeconds(song) {
   return 0;
 }
 
-export function createRoom({ name, password, creatorId, creatorDeviceId } = {}) {
+export function createRoom({ name, password, creatorId, creatorDeviceId, creatorIp } = {}) {
   let roomId;
   do {
     roomId = generateRoomId();
@@ -1637,9 +1719,13 @@ export function createRoom({ name, password, creatorId, creatorDeviceId } = {}) 
     room.creatorId = reservedCreator;
     room.creatorDeviceId = sanitizeCreatorId(creatorDeviceId) || null;
   }
+  const ip = String(creatorIp || "").trim().slice(0, 64);
+  if (ip) room.creatorIp = ip;
   rooms.set(roomId, room);
   persistRoom(room);
   invalidateRoomsListCache();
+  // 创建后若无人进房，按空房 TTL 自动销毁，避免只建不进导致后台堆积
+  scheduleRoomDestroy(roomId);
   return serializeRoom(room);
 }
 
@@ -1781,13 +1867,36 @@ export function listRoomsForAdmin() {
         lastJoinedAt,
         protectedFromDestroy: protectedRoomIds.has(room.id),
         permanentApplication: null,
+        creatorId: room.creatorId || null,
+        creatorDeviceId: room.creatorDeviceId || null,
+        creatorIp: room.creatorIp || null,
+        creatorNickname: (() => {
+          const oid = room.creatorId || room.ownerId;
+          if (!oid) return "";
+          return (
+            room.users.get(oid)?.nickname
+            || room.userNicknames?.get(oid)
+            || ""
+          );
+        })(),
         ownerNickname: (() => {
           const oid = room.ownerId || room.creatorId;
-          return oid ? (room.users.get(oid)?.nickname || "") : "";
+          if (!oid) return "";
+          return (
+            room.users.get(oid)?.nickname
+            || room.userNicknames?.get(oid)
+            || ""
+          );
         })(),
       };
     })
-    .sort((a, b) => b.userCount - a.userCount || b.createdAt - a.createdAt);
+    .sort((a, b) => {
+      const aProtected = a.protectedFromDestroy ? 0 : 1;
+      const bProtected = b.protectedFromDestroy ? 0 : 1;
+      if (aProtected !== bProtected) return aProtected - bProtected;
+      if (a.userCount !== b.userCount) return b.userCount - a.userCount;
+      return (b.lastJoinedAt || 0) - (a.lastJoinedAt || 0);
+    });
 }
 
 /** 管理后台按需查看房间明文密码（不进列表；调用方须自行审计） */
@@ -1828,10 +1937,11 @@ export async function listRoomsForAdminDetailed() {
       };
     })
     .sort((a, b) => {
-      const ap = a.permanentApplication?.status === "pending" ? 0 : 1;
-      const bp = b.permanentApplication?.status === "pending" ? 0 : 1;
-      if (ap !== bp) return ap - bp;
-      return b.userCount - a.userCount || b.createdAt - a.createdAt;
+      const aProtected = a.protectedFromDestroy ? 0 : 1;
+      const bProtected = b.protectedFromDestroy ? 0 : 1;
+      if (aProtected !== bProtected) return aProtected - bProtected;
+      if (a.userCount !== b.userCount) return b.userCount - a.userCount;
+      return (b.lastJoinedAt || 0) - (a.lastJoinedAt || 0);
     });
 }
 
@@ -1927,7 +2037,7 @@ export async function setRoomProtectedFromDestroy(roomId, enabled) {
   return { success: true, roomId: id, protectedFromDestroy: next };
 }
 
-// 管理后台：立即解散房间（调用方负责先踢出房内 socket）
+  // 管理后台：立即解散房间（调用方负责先踢出房内 socket）
 export function adminDestroyRoom(roomId) {
   const id = roomId?.toUpperCase();
   const room = rooms.get(id);
@@ -1944,10 +2054,8 @@ export function adminDestroyRoom(roomId) {
   void clearPermanentApplicationForRoom(id);
   rooms.delete(id);
   invalidateRoomsListCache();
-  deleteRoomChatImages(id)
-    .catch((err) => console.error(`删除房间 ${id} 聊天图片失败:`, err))
-    .then(() => deleteRoomFromStorage(id))
-    .catch((err) => console.error(`删除房间 ${id} 存储失败:`, err));
+  void deleteRoomChatImages(id).catch((err) => console.error(`删除房间 ${id} 聊天图片失败:`, err));
+  void deleteRoomFromStorage(id).catch((err) => console.error(`删除房间 ${id} 存储失败:`, err));
   return { success: true, name };
 }
 
@@ -2118,6 +2226,7 @@ export function addUser(roomId, userId, nickname, options = {}) {
   // 非 TV 进房刷新「最后进房时间」（含重连重进；多标签同会话也刷新无妨）
   if (!readOnly) {
     room.lastJoinedAt = Date.now();
+    room.emptySince = null;
   }
 
   room.users.set(userId, {
@@ -2979,6 +3088,7 @@ export async function kickUser(roomId, actorId, targetUserId, connectionId = nul
     }
     room.ownerId = null;
     room.ownerConnectionId = null;
+    room.emptySince = Date.now();
     persistRoom(room);
     scheduleRoomDestroy(roomId);
     invalidateRoomsListCache();
@@ -3104,6 +3214,7 @@ export function removeUser(roomId, userId, connectionId = null) {
     }
     room.ownerId = null;
     room.ownerConnectionId = null;
+    room.emptySince = Date.now();
     persistRoom(room);
     scheduleRoomDestroy(roomId);
     invalidateRoomsListCache();

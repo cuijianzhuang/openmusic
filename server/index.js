@@ -47,6 +47,7 @@ import {
   getRoomPublic,
   getRoom,
   listRooms,
+  listRoomsForAdmin,
   listRoomIds,
   verifyRoomPassword,
   roomExists,
@@ -146,6 +147,12 @@ import {
 } from './apihzSticker.js';
 import { getSiteAnnouncement, initSiteAnnouncement } from './siteAnnouncement.js';
 import { initSiteBans, isSiteBanned } from './siteBan.js';
+import {
+  checkRoomCreateCooldown,
+  recordRoomCreateAndMaybeAutoBan,
+  evaluateRoomCreateRejectAutoBan,
+} from './roomCreateGuard.js';
+import { kickConnectionsMatchingBan } from './kickSiteBan.js';
 import { createErrorReport, listPendingSolutionsForUser, ackErrorReportSolution } from './errorReports.js';
 import { getRuntimeConfig, getPublicSiteSeo } from './runtimeConfig.js';
 import {
@@ -520,7 +527,6 @@ function createRateLimiter({ windowMs, max, maxBuckets = 10_000 }) {
   };
 }
 
-const limitRoomCreate = createRateLimiter({ windowMs: 60_000, max: 20 });
 const limitJoinAttempt = createRateLimiter({ windowMs: 60_000, max: 30 });
 const limitJoinPasswordFail = createRateLimiter({ windowMs: 60_000, max: 8 });
 const limitProxyRequest = createRateLimiter({ windowMs: 60_000, max: 120 });
@@ -1619,9 +1625,42 @@ app.get('/api/rooms', async (_req, res) => {
   res.json(await listRooms());
 });
 
-app.post('/api/rooms', (req, res) => {
-  if (!limitRoomCreate(`room:${getRequestIp(req)}`)) {
+app.post('/api/rooms', async (req, res) => {
+  const createIp = getRequestIp(req);
+  const createDeviceId = resolveDeviceIdFromCookieHeader(req.headers?.cookie || '');
+
+  const enforceAutoBans = (bans) => {
+    if (!Array.isArray(bans) || bans.length === 0) return;
+    for (const ban of bans) {
+      kickConnectionsMatchingBan(ban, {
+        io,
+        socketToRoom,
+        socketToUserId,
+        getClientIp: (request) => getClientIpFromHeaders(request?.headers, request?.socket?.remoteAddress || ''),
+        getRoomInternal,
+        removeUser,
+        prepareRoomBroadcast,
+        roomUpdateForViewer,
+      });
+    }
+  };
+
+  if (isSiteBanned({ ip: createIp, deviceId: createDeviceId })) {
+    // 不暴露封禁，对外表现与限流一致
+    res.setHeader('Retry-After', '300');
     return res.status(429).json({ error: '创建房间过于频繁，请稍后再试' });
+  }
+
+  const cooldown = checkRoomCreateCooldown({ ip: createIp, deviceId: createDeviceId });
+  if (!cooldown.allowed) {
+    const { bans } = await evaluateRoomCreateRejectAutoBan({
+      ip: createIp,
+      deviceId: createDeviceId,
+      listRoomsForGuard: listRoomsForAdmin,
+    });
+    enforceAutoBans(bans);
+    res.setHeader('Retry-After', String(cooldown.retryAfterSec || 300));
+    return res.status(429).json({ error: cooldown.error });
   }
 
   const name = req.body?.name;
@@ -1630,17 +1669,28 @@ app.post('/api/rooms', (req, res) => {
   if (!identity?.userId) {
     return res.status(401).json({ error: '会话未就绪，请刷新页面后重试' });
   }
-  const createIp = getRequestIp(req);
-  const createDeviceId = resolveDeviceIdFromCookieHeader(req.headers?.cookie || '');
-  if (isSiteBanned({ ip: createIp, deviceId: createDeviceId })) {
-    return res.status(403).json({ error: '你已被站点封禁，无法创建房间' });
-  }
+
   const room = createRoom({
     name,
     password,
     creatorId: identity.userId,
     creatorDeviceId: createDeviceId,
+    creatorIp: createIp,
   });
+
+  try {
+    const { bans } = await recordRoomCreateAndMaybeAutoBan({
+      ip: createIp,
+      deviceId: createDeviceId,
+      name: room.name,
+      roomId: room.id,
+      listRoomsForGuard: listRoomsForAdmin,
+    });
+    enforceAutoBans(bans);
+  } catch (err) {
+    console.error('room-create auto-ban failed:', err?.message || err);
+  }
+
   res.json(room);
 });
 
@@ -2270,7 +2320,8 @@ io.on('connection', (socket) => {
     const joinProbeIp = getClientIp(socket);
     const siteBan = isSiteBanned({ ip: joinProbeIp, deviceId });
     if (siteBan) {
-      callback?.({ success: false, error: '你已被站点封禁，无法进入房间' });
+      // 不暴露封禁，对外表现成临时失败
+      callback?.({ success: false, error: '暂时无法加入，请稍后再试' });
       return;
     }
 

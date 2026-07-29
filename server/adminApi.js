@@ -37,6 +37,7 @@ import {
 } from './adminConfig.js';
 import { getSiteAnnouncementForAdmin, setSiteAnnouncement } from './siteAnnouncement.js';
 import { listSiteBans, addSiteBan, removeSiteBan } from './siteBan.js';
+import { kickConnectionsMatchingBan } from './kickSiteBan.js';
 import {
   listErrorReports,
   getErrorReport,
@@ -943,57 +944,26 @@ export function mountAdminApi(app, { io, socketToRoom, socketToUserId, getClient
       type: req.body?.type,
       value: req.body?.value,
       reason: req.body?.reason,
+      source: 'manual',
     });
     if (!result.success) return res.status(400).json({ error: result.error });
 
-    // 立即踢出在线匹配连接
-    let kicked = 0;
     const ban = result.ban;
-    const affectedRooms = new Set();
-    for (const [sid, userId] of socketToUserId.entries()) {
-      const s = io.sockets.sockets.get(sid);
-      if (!s) continue;
-      const sockIp = getClientIp?.(s.request) || '';
-      const cookies = parseCookieHeader(s.handshake?.headers?.cookie || '');
-      const deviceId = sanitizeDeviceId(cookies.openmusic_did);
-      const roomId = socketToRoom.get(sid);
-      const user = roomId ? getRoomInternal(roomId)?.users?.get(userId) : null;
-
-      let match = false;
-      if (ban.type === 'ip') {
-        if ((sockIp && sockIp === ban.value) || (user?.clientIp && user.clientIp === ban.value)) {
-          match = true;
-        }
-      } else if (ban.type === 'device') {
-        if ((deviceId && deviceId === ban.value) || (user?.deviceId && user.deviceId === ban.value)) {
-          match = true;
-        }
-      }
-      if (!match) continue;
-
-      if (roomId) {
-        removeUser(roomId, userId, sid);
-        affectedRooms.add(roomId);
-        s.leave(roomId);
-      }
-      socketToRoom.delete(sid);
-      socketToUserId.delete(sid);
-      s.emit('kicked', { message: '你已被站点封禁' });
-      kicked += 1;
-    }
-    for (const roomId of affectedRooms) {
-      const prepared = prepareRoomBroadcast(roomId);
-      if (!prepared) continue;
-      for (const [sid, rid] of socketToRoom.entries()) {
-        if (rid !== roomId) continue;
-        const s = io.sockets.sockets.get(sid);
-        s?.emit('room_update', roomUpdateForViewer(prepared, socketToUserId.get(sid)));
-      }
-    }
+    const { kicked } = kickConnectionsMatchingBan(ban, {
+      io,
+      socketToRoom,
+      socketToUserId,
+      getClientIp,
+      getRoomInternal,
+      removeUser,
+      prepareRoomBroadcast,
+      roomUpdateForViewer,
+    });
 
     audit('site_ban_add', {
       banType: ban.type,
       value: ban.value,
+      source: ban.source || 'manual',
       kicked,
     }, adminIp);
     res.json({ success: true, ban, kicked });

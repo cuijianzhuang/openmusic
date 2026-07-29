@@ -176,6 +176,7 @@ export interface SiteBanEntry {
   type: 'ip' | 'device';
   value: string;
   reason: string;
+  source?: 'manual' | 'auto';
   at: number;
 }
 
@@ -247,6 +248,10 @@ export interface AdminRoom {
   lastJoinedAt?: number | null;
   protectedFromDestroy: boolean;
   ownerNickname?: string;
+  creatorId?: string | null;
+  creatorDeviceId?: string | null;
+  creatorIp?: string | null;
+  creatorNickname?: string | null;
   permanentApplication?: {
     status: 'pending';
     appliedAt: number;
