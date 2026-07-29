@@ -1630,8 +1630,7 @@ function AdminPage() {
                 <Alert type="success" showIcon message={banHint} style={{ marginBottom: 8 }} />
               )}
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                封禁后无法进房 / 建房。可在「房间管理」展开成员后直接封禁或一键拉黑（IP+设备）。
-                建房限流与自动拉黑阈值可在「系统设置 → 房间」调整。
+                封禁后无法进房 / 建房；房间成员可一键拉黑
               </Typography.Text>
             </Card>
             <Card
@@ -1725,9 +1724,6 @@ function AdminPage() {
                   </Button>
                 </Space>
                 {annHint && <Typography.Text type="success" style={{ display: 'block', marginTop: 8 }}>{annHint}</Typography.Text>}
-                <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
-                  保存后立即生效，并写入 Redis 持久化
-                </Typography.Text>
               </Form>
             </Card>
             <Card title="全局广播">
@@ -1738,12 +1734,12 @@ function AdminPage() {
                     onChange={(e) => setBroadcastText(e.target.value)}
                     maxLength={300}
                     rows={2}
-                    placeholder="向所有房间发送系统通知（维护 / 活动预告）"
+                    placeholder="维护 / 活动预告"
                   />
                 </Form.Item>
                 <Space wrap style={{ justifyContent: 'space-between', width: '100%' }}>
                   <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    会写入各房间聊天记录，并弹出短暂提示
+                    写入聊天并弹窗提示
                   </Typography.Text>
                   <Button
                     type="primary"
@@ -1777,7 +1773,7 @@ function AdminPage() {
               onError={setError}
               securityTab={(
                 <>
-                  <SettingsSection title="登录地址" description="管理后台的入口路径。修改后旧地址失效，请收藏新链接。">
+                  <SettingsSection title="登录地址" description="修改后旧地址失效，请收藏新链接">
                     <Space direction="vertical" style={{ width: '100%' }}>
                       <Input
                         addonBefore={typeof window !== 'undefined' ? window.location.origin : ''}
@@ -1819,7 +1815,7 @@ function AdminPage() {
                         {(overview?.credentialsPersisted ?? true) ? 'Redis 持久化' : 'Redis 未就绪'}
                       </Tag>
                     )}
-                    description="密码以 scrypt 哈希存 Redis；新密码至少 8 位。修改后其它登录会话立即失效。"
+                    description="新密码至少 8 位；修改后其它会话立即失效"
                   >
                     <CredentialsPanel
                       bare
@@ -2032,12 +2028,14 @@ function AdminPage() {
               : null),
           }}
         >
-          <Typography.Paragraph
-            type="secondary"
-            style={{ marginTop: 0, marginBottom: 16, flexShrink: 0 }}
-          >
-            {TAB_META[activeTab].description}
-          </Typography.Paragraph>
+          {TAB_META[activeTab].description ? (
+            <Typography.Paragraph
+              type="secondary"
+              style={{ marginTop: 0, marginBottom: 16, flexShrink: 0 }}
+            >
+              {TAB_META[activeTab].description}
+            </Typography.Paragraph>
+          ) : null}
           {error && (
             <Alert
               type="error"
@@ -2136,7 +2134,7 @@ function AdminPage() {
                 extra={
                   reportDetail.status === 'resolved' && reportDetail.solutionAckedAt
                     ? `用户已于 ${formatAuditTime(reportDetail.solutionAckedAt)} 确认`
-                    : '处理后用户在线即弹窗，否则下次进入时弹出'
+                    : '处理后在线用户会收到弹窗'
                 }
               >
                 <Input.TextArea

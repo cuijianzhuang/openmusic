@@ -110,11 +110,16 @@ class _LobbyPageState extends ConsumerState<LobbyPage> {
         children: [
           OmField(controller: nameCtrl, label: '房间名', hint: '$nick 的房间'),
           const SizedBox(height: 12),
-          OmField(controller: pwdCtrl, label: '访问密码', hint: '留空即公开', obscure: true),
+          OmField(controller: pwdCtrl, label: '访问密码', hint: '可选，至少 4 位', obscure: true),
         ],
       ),
     );
     if (ok != true || !mounted) return;
+    final password = pwdCtrl.text.trim();
+    if (password.isNotEmpty && password.length < 4) {
+      omSnack(context, '房间密码至少 4 位');
+      return;
+    }
     try {
       final room = await RoomApi.createRoom(
         nameCtrl.text.trim().isEmpty ? '$nick 的房间' : nameCtrl.text.trim(),
@@ -122,7 +127,6 @@ class _LobbyPageState extends ConsumerState<LobbyPage> {
       );
       await _rememberRoom(room.id);
       if (!mounted) return;
-      final password = pwdCtrl.text.trim();
       final query = password.isEmpty ? '' : '?password=${Uri.encodeQueryComponent(password)}';
       context.push('/room/${room.id}$query');
     } catch (e) {

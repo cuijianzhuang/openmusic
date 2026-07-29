@@ -1734,14 +1734,18 @@ app.post('/api/rooms', async (req, res) => {
     creatorDeviceId: createDeviceId,
   });
   if (idleOwned) {
-    const reused = reuseIdleOwnedRoom(idleOwned.id, { name, password }) || idleOwned;
+    const reused = reuseIdleOwnedRoom(idleOwned.id, { name, password });
+    if (reused?.error) {
+      return res.status(400).json({ error: reused.error });
+    }
+    const room = reused || idleOwned;
     try {
       const { bans } = await recordRoomCreateAndMaybeAutoBan({
         ip: createIp,
         deviceId: createDeviceId,
         userId: identity.userId,
-        name: reused.name,
-        roomId: reused.id,
+        name: room.name,
+        roomId: room.id,
         reused: true,
         listRoomsForGuard: listRoomsForAdmin,
       });
@@ -1749,7 +1753,7 @@ app.post('/api/rooms', async (req, res) => {
     } catch (err) {
       console.error('room-create auto-ban failed:', err?.message || err);
     }
-    return res.json(reused);
+    return res.json(room);
   }
 
   const cooldown = checkRoomCreateCooldown({
@@ -1800,6 +1804,9 @@ app.post('/api/rooms', async (req, res) => {
     creatorDeviceId: createDeviceId,
     creatorIp: createIp,
   });
+  if (room?.error) {
+    return res.status(400).json({ error: room.error });
+  }
 
   try {
     const { bans } = await recordRoomCreateAndMaybeAutoBan({

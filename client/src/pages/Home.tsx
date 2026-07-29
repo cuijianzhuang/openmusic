@@ -479,12 +479,18 @@ export default function Home() {
     setActionLoading(true);
     setError('');
     setModalError('');
+    const pwd = createPassword.trim();
+    if (pwd && pwd.length < 4) {
+      setModalError('房间密码至少 4 位');
+      setActionLoading(false);
+      return;
+    }
     try {
       const room = await createRoom(createRoomName, createPassword);
       setShowCreate(false);
       setCreateRoomName('');
       setCreatePassword('');
-      goToRoom(room.id, createPassword.trim() || undefined);
+      goToRoom(room.id, pwd || undefined);
     } catch (err) {
       const msg = err instanceof Error ? err.message.trim() : '';
       setModalError(msg || '创建房间失败，请重试');
@@ -537,7 +543,8 @@ export default function Home() {
     };
   }, [rooms]);
 
-  const inputCls = 'w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-3.5 text-white text-[15px] placeholder:text-white/30 focus:outline-none focus:border-netease-red/60 focus:bg-white/[0.03] transition-all duration-300';
+  const inputCls =
+    'home-modal-input w-full rounded-2xl px-5 py-3.5 text-white text-[15px] caret-white placeholder:text-white/30 outline-none border border-white/10 bg-[#1a1a1a] focus:border-netease-red/60 transition-[border-color] duration-200';
 
   return (
     <div className="h-full flex flex-col relative overflow-hidden bg-[#050505] text-white font-sans selection:bg-netease-red/30">
@@ -646,8 +653,8 @@ export default function Home() {
             <h1 className="home-hero-stage home-hero-stage--title relative text-4xl sm:text-5xl lg:text-[68px] font-black tracking-tight leading-[1.1] mb-5">
               <BlurText
                 text="和喜欢的人"
-                delay={60}
-                startDelay={280}
+                delay={40}
+                startDelay={60}
                 charClassName="hero-char"
               />
               {' '}
@@ -928,18 +935,23 @@ export default function Home() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-white/60 mb-2 pl-1">访问密码 <span className="text-white/30 font-normal">(可选)</span></label>
+              <label className="block text-sm font-medium text-white/60 mb-2 pl-1">访问密码 <span className="text-white/30 font-normal">(可选，至少 4 位)</span></label>
               <input
-                type="password"
-                name="om-room-access-code"
+                type="text"
+                inputMode="text"
+                name="om-room-gate"
                 value={createPassword}
                 onChange={(e) => { setCreatePassword(e.target.value); if (modalError) setModalError(''); }}
                 placeholder="留空即为公开房间"
                 maxLength={32}
-                className={inputCls}
-                autoComplete="new-password"
+                className={`${inputCls} om-secret-input`}
+                autoComplete="off"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
                 data-1p-ignore
                 data-lpignore="true"
+                data-bwignore="true"
                 data-form-type="other"
               />
             </div>
@@ -992,16 +1004,21 @@ export default function Home() {
             <div>
               <label className="block text-sm font-medium text-white/60 mb-2 pl-1">房间密码 <span className="text-white/30 font-normal">(如未上锁请留空)</span></label>
               <input
-                type="password"
-                name="om-room-join-code"
+                type="text"
+                inputMode="text"
+                name="om-room-gate-join"
                 value={joinPassword}
                 onChange={(e) => { setJoinPassword(e.target.value); if (modalError) setModalError(''); }}
                 placeholder="输入密码"
                 maxLength={32}
-                className={inputCls}
-                autoComplete="new-password"
+                className={`${inputCls} om-secret-input`}
+                autoComplete="off"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
                 data-1p-ignore
                 data-lpignore="true"
+                data-bwignore="true"
                 data-form-type="other"
               />
             </div>

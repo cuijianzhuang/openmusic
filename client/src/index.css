@@ -36,6 +36,29 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* 暗色输入框：抑制 Chrome 自动填充/切焦点时的白底闪烁 */
+.home-modal-input {
+  background-color: #1a1a1a;
+  color: #fff;
+  caret-color: #fff;
+}
+.home-modal-input:-webkit-autofill,
+.home-modal-input:-webkit-autofill:hover,
+.home-modal-input:-webkit-autofill:focus,
+.home-modal-input:-webkit-autofill:active {
+  -webkit-text-fill-color: #fff !important;
+  caret-color: #fff;
+  box-shadow: 0 0 0 1000px #1a1a1a inset !important;
+  background-color: #1a1a1a !important;
+  transition: background-color 99999s ease-out 0s;
+}
+
+/* 伪装密码框：不用 type=password，避免 Edge/Chrome 弹出「已保存的密码」 */
+.om-secret-input {
+  -webkit-text-security: disc;
+  text-security: disc;
+}
+
 * {
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
@@ -247,7 +270,7 @@ body {
 .home-hero-gradient-enter {
   opacity: 0;
   transform: translate3d(0, 10px, 0);
-  animation: home-hero-gradient-in 0.85s cubic-bezier(0.22, 1, 0.36, 1) 0.55s forwards;
+  animation: home-hero-gradient-in 0.7s cubic-bezier(0.22, 1, 0.36, 1) 0.22s forwards;
 }
 
 @keyframes home-hero-gradient-in {
@@ -258,11 +281,14 @@ body {
 }
 
 .home-hero-stage--copy {
-  animation-delay: 0.52s;
+  animation-delay: 0.18s;
+  animation-duration: 0.7s;
 }
 
+/* 输入区尽早出现，不跟标题逐字动画串行等待 */
 .home-hero-stage--bar {
-  animation-delay: 0.68s;
+  animation-delay: 0.1s;
+  animation-duration: 0.65s;
 }
 
 .home-hero-stage--header {

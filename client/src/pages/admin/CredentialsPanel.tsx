@@ -202,7 +202,7 @@ export default function CredentialsPanel({
             Linux.do 登录
           </Typography.Text>
           <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>
-            绑定后可以用这个 Linux.do 账号直接登录后台，作为账号密码之外的另一种登录方式；不影响账号密码本身。
+            绑定后可用该账号登录后台
           </Typography.Paragraph>
           {linuxdoBound ? (
             <Space align="center" style={{ width: '100%', justifyContent: 'space-between' }}>
@@ -233,7 +233,7 @@ export default function CredentialsPanel({
             GitHub 登录
           </Typography.Text>
           <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>
-            绑定后可以用这个 GitHub 账号直接登录后台，作为账号密码之外的另一种登录方式；不影响账号密码本身。
+            绑定后可用该账号登录后台
           </Typography.Paragraph>
           {githubBound ? (
             <Space align="center" style={{ width: '100%', justifyContent: 'space-between' }}>
@@ -283,7 +283,7 @@ export default function CredentialsPanel({
       )}
     >
       <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>
-        密码以 scrypt 哈希存 Redis（不落盘）；新密码至少 8 位且不能是默认密码；修改后其它会话立即失效
+        新密码至少 8 位；修改后其它会话立即失效
       </Typography.Paragraph>
       {body}
       {oauthSections}

@@ -616,11 +616,15 @@ export default function Room() {
 
   const handleLockRoom = useCallback(async () => {
     if (lockSaving) return;
+    const pwd = lockPassword.trim();
+    if (pwd && pwd.length < 4) {
+      showToast('房间密码至少 4 位', 'error');
+      return;
+    }
     setLockSaving(true);
-    const res = await setRoomLock(true, lockPassword.trim() || undefined);
+    const res = await setRoomLock(true, pwd || undefined);
     setLockSaving(false);
     if (res.success) {
-      const pwd = lockPassword.trim();
       if (pwd && room?.id) rememberRoomPassword(room.id, pwd);
       setLockOpen(false);
       setLockPassword('');
@@ -1901,8 +1905,9 @@ export default function Room() {
           <p className="text-sm text-netease-muted mb-4">输入密码后即可进入房间</p>
           <label className="block text-xs text-white/50 mb-1.5">房间密码</label>
           <input
-            type="password"
-            name="om-room-entry-code"
+            type="text"
+            inputMode="text"
+            name="om-room-gate-entry"
             value={passwordDraft}
             onChange={(e) => {
               setPasswordDraft(e.target.value);
@@ -1913,12 +1918,16 @@ export default function Room() {
             }}
             maxLength={32}
             autoFocus
-            autoComplete="new-password"
+            autoComplete="off"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
             data-1p-ignore
             data-lpignore="true"
+            data-bwignore="true"
             data-form-type="other"
             placeholder="输入房间密码"
-            className="w-full bg-netease-dark border border-netease-border rounded-xl px-4 py-2.5 text-white text-sm placeholder:text-netease-muted/50 focus:outline-none focus:border-netease-red/50 mb-3"
+            className="om-secret-input w-full bg-netease-dark border border-netease-border rounded-xl px-4 py-2.5 text-white text-sm placeholder:text-netease-muted/50 focus:outline-none focus:border-netease-red/50 mb-3"
           />
           {joinError && <p className="text-xs text-netease-red mb-3">{joinError}</p>}
           <button
@@ -3619,19 +3628,24 @@ export default function Room() {
             ) : (
               <div className="space-y-4">
                 <p className="text-sm text-white/70">上锁后其他人需密码（或无法进入）。你作为创建者始终可免密进入。</p>
-                <label className="block text-xs text-white/50 mb-1.5">进入密码（可选）</label>
+                <label className="block text-xs text-white/50 mb-1.5">进入密码（可选，至少 4 位）</label>
                 <input
-                  type="password"
-                  name="om-room-lock-code"
+                  type="text"
+                  inputMode="text"
+                  name="om-room-gate-lock"
                   value={lockPassword}
                   onChange={(e) => setLockPassword(e.target.value)}
                   maxLength={32}
-                  autoComplete="new-password"
+                  autoComplete="off"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
                   data-1p-ignore
                   data-lpignore="true"
+                  data-bwignore="true"
                   data-form-type="other"
                   placeholder="留空则仅创建者可进入"
-                  className="w-full bg-netease-dark border border-netease-border rounded-xl px-4 py-2.5 text-white text-sm placeholder:text-netease-muted/50 focus:outline-none focus:border-netease-red/50"
+                  className="om-secret-input w-full bg-netease-dark border border-netease-border rounded-xl px-4 py-2.5 text-white text-sm placeholder:text-netease-muted/50 focus:outline-none focus:border-netease-red/50"
                 />
                 <button
                   type="button"

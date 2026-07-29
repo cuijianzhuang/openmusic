@@ -346,11 +346,22 @@ const rooms = new Map();
 const ensurePlaybackInflight = new Map();
 
 const MAX_ROOM_PASSWORD_LENGTH = 64;
+const MIN_ROOM_PASSWORD_LENGTH = 4;
 
 function normalizeRoomPasswordInput(password) {
   return String(password || "")
     .trim()
     .slice(0, MAX_ROOM_PASSWORD_LENGTH);
+}
+
+/** 空密码允许（公开房 / 仅房主可进）；有密码则至少 4 位 */
+export function validateRoomPassword(password) {
+  const trimmed = normalizeRoomPasswordInput(password);
+  if (!trimmed) return { ok: true, password: "" };
+  if (trimmed.length < MIN_ROOM_PASSWORD_LENGTH) {
+    return { ok: false, error: "房间密码至少 4 位" };
+  }
+  return { ok: true, password: trimmed };
 }
 
 function hashPassword(password) {
@@ -1717,12 +1728,15 @@ function getSongDurationSeconds(song) {
 }
 
 export function createRoom({ name, password, creatorId, creatorDeviceId, creatorIp } = {}) {
+  const pwd = validateRoomPassword(password);
+  if (!pwd.ok) return { error: pwd.error };
+
   let roomId;
   do {
     roomId = generateRoomId();
   } while (rooms.has(roomId));
 
-  const trimmed = normalizeRoomPasswordInput(password);
+  const trimmed = pwd.password;
   const passwordHash = trimmed ? hashPassword(trimmed) : null;
   const room = createEmptyRoom(roomId, name, passwordHash);
   room.passwordPlain = trimmed || null;
@@ -1799,7 +1813,9 @@ export function reuseIdleOwnedRoom(roomId, { name, password } = {}) {
     room.name = normalizeRoomName(name, room.id);
   }
   if (password !== undefined) {
-    const trimmed = normalizeRoomPasswordInput(password);
+    const pwd = validateRoomPassword(password);
+    if (!pwd.ok) return { error: pwd.error };
+    const trimmed = pwd.password;
     room.passwordHash = trimmed ? hashPassword(trimmed) : null;
     room.passwordPlain = trimmed || null;
   }
@@ -2475,8 +2491,10 @@ export function setRoomLock(roomId, actorId, options = {}, connectionId = null) 
     room.passwordHash = null;
     room.passwordPlain = null;
   } else {
+    const pwd = validateRoomPassword(options.password);
+    if (!pwd.ok) return { error: pwd.error };
     room.isLocked = true;
-    const trimmed = normalizeRoomPasswordInput(options.password);
+    const trimmed = pwd.password;
     room.passwordHash = trimmed ? hashPassword(trimmed) : null;
     room.passwordPlain = trimmed || null;
   }

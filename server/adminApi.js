@@ -99,8 +99,53 @@ const ALLOW_INSECURE_COOKIES = process.env.DEPLOYMENT_MODE === 'test'
   || process.env.ALLOW_INSECURE_COOKIES === '1'
   || process.env.ALLOW_INSECURE_COOKIES === 'true';
 const ADMIN_AUDIT_KEY = 'openmusic:admin:audit';
-/** Redis 保留最近 N 条；面板只展示前 50 条 */
-const AUDIT_MAX = 500;
+/** 审计日志保留天数 */
+const AUDIT_RETENTION_DAYS = 15;
+const AUDIT_RETENTION_MS = AUDIT_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+/** 安全上限：防止单日刷爆；主清理策略是按时间 */
+const AUDIT_MAX = 10_000;
+/** 过期清理节流，避免每次写入都扫全表 */
+let auditPruneAt = 0;
+const AUDIT_PRUNE_INTERVAL_MS = 60 * 60 * 1000;
+
+function auditCutoffMs(now = Date.now()) {
+  return now - AUDIT_RETENTION_MS;
+}
+
+/** 删除超过保留期的审计记录（Redis list，新→旧） */
+async function pruneExpiredAdminAudit(client, { force = false } = {}) {
+  if (!client) return 0;
+  const now = Date.now();
+  if (!force && now - auditPruneAt < AUDIT_PRUNE_INTERVAL_MS) return 0;
+  auditPruneAt = now;
+  const cutoff = auditCutoffMs(now);
+  try {
+    const rows = await client.lRange(ADMIN_AUDIT_KEY, 0, -1);
+    if (!rows.length) return 0;
+    const kept = [];
+    for (const raw of rows) {
+      try {
+        const entry = JSON.parse(raw);
+        if (Number(entry?.at) >= cutoff) kept.push(raw);
+      } catch {
+        // 损坏条目直接丢弃
+      }
+    }
+    const trimmed = kept.length > AUDIT_MAX ? kept.slice(0, AUDIT_MAX) : kept;
+    if (trimmed.length === rows.length) return 0;
+    const multi = client.multi();
+    multi.del(ADMIN_AUDIT_KEY);
+    if (trimmed.length) {
+      // node-redis 支持一次传入数组，避免超大 spread
+      multi.rPush(ADMIN_AUDIT_KEY, trimmed);
+    }
+    await multi.exec();
+    return rows.length - trimmed.length;
+  } catch (err) {
+    console.error('admin-audit 过期清理失败:', err?.message || err);
+    return 0;
+  }
+}
 
 // 进程内会话表：重启后全部失效；logout / 吊销可立即生效（不依赖前端清存储）
 const activeSessions = new Map();
@@ -209,7 +254,10 @@ export function appendAdminAudit(action, detail = {}, ip = '') {
   }
   void client
     .lPush(ADMIN_AUDIT_KEY, JSON.stringify(entry))
-    .then(() => client.lTrim(ADMIN_AUDIT_KEY, 0, AUDIT_MAX - 1))
+    .then(async () => {
+      await client.lTrim(ADMIN_AUDIT_KEY, 0, AUDIT_MAX - 1);
+      await pruneExpiredAdminAudit(client);
+    })
     .catch((err) => {
       console.error('admin-audit Redis 写入失败:', err?.message || err);
     });
@@ -261,14 +309,16 @@ async function listAuditLogPage({ offset = 0, limit = 10, q = '', action = '' } 
   const client = getRedisClient();
   if (!client) return { items: [], total: 0, offset: start, limit: pageSize };
   try {
-    const rows = await client.lRange(ADMIN_AUDIT_KEY, 0, AUDIT_MAX - 1);
+    await pruneExpiredAdminAudit(client);
+    const cutoff = auditCutoffMs();
+    const rows = await client.lRange(ADMIN_AUDIT_KEY, 0, -1);
     const all = rows.map((raw) => {
       try {
         return JSON.parse(raw);
       } catch {
         return null;
       }
-    }).filter(Boolean);
+    }).filter((entry) => entry && Number(entry.at) >= cutoff);
 
     const filtered = all.filter((entry) => {
       if (actionSet && !actionSet.has(entry.action)) return false;
@@ -406,6 +456,8 @@ setInterval(() => {
   for (const [ip, entry] of gateAttempts.entries()) {
     if (now - entry.windowStart > 120_000) gateAttempts.delete(ip);
   }
+  const redis = getRedisClient();
+  if (redis) void pruneExpiredAdminAudit(redis);
 }, 300_000).unref();
 
 function pathsEqual(a, b) {

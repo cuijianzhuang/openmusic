@@ -70,7 +70,7 @@ interface RuntimeFieldDef {
 interface RuntimeFieldGroup {
   id: string;
   title: string;
-  purpose: string;
+  purpose: ReactNode;
   fields: RuntimeFieldDef[];
   includeQiniuZone?: boolean;
 }
@@ -79,11 +79,19 @@ const RUNTIME_FIELD_GROUPS: RuntimeFieldGroup[] = [
   {
     id: 'linuxdo',
     title: 'Linux.do 登录',
-    purpose: '房主绑定/找回身份、后台管理员绑定登录都依赖这组配置。需要先在 connect.linux.do 注册应用，并向 Linux.do 核实真实的授权/令牌/用户信息接口地址——不要照抄示例值。授权/令牌/用户信息三个接口地址与客户端凭据均填写后才会启用。',
+    purpose: (
+      <>
+        申请：
+        <Typography.Link href="https://connect.linux.do" target="_blank" rel="noreferrer">
+          connect.linux.do
+        </Typography.Link>
+        ；填齐后启用，接口地址以官方为准
+      </>
+    ),
     fields: [
       { key: 'linuxdoClientId', label: 'Client ID' },
       { key: 'linuxdoClientSecret', label: 'Client Secret', secret: true },
-      { key: 'linuxdoRedirectUri', label: '回调地址', placeholder: 'https://你的域名/api/auth/linuxdo/callback', tip: '需要与 Linux.do 应用里登记的回调地址完全一致；房主绑定/找回和后台绑定/登录共用这一个地址' },
+      { key: 'linuxdoRedirectUri', label: '回调地址', placeholder: 'https://你的域名/api/auth/linuxdo/callback', tip: '须与 Linux.do 应用登记一致' },
       { key: 'linuxdoAuthorizeUrl', label: '授权接口地址' },
       { key: 'linuxdoTokenUrl', label: '令牌接口地址' },
       { key: 'linuxdoUserInfoUrl', label: '用户信息接口地址' },
@@ -93,30 +101,38 @@ const RUNTIME_FIELD_GROUPS: RuntimeFieldGroup[] = [
   {
     id: 'github',
     title: 'GitHub 登录',
-    purpose: '房主绑定/找回身份、后台管理员绑定登录都依赖这组配置。去 https://github.com/settings/developers 注册一个 OAuth App 即可，授权/令牌/用户信息接口地址是 GitHub 固定的公开地址，不需要单独配置。',
+    purpose: (
+      <>
+        申请：
+        <Typography.Link href="https://github.com/settings/developers" target="_blank" rel="noreferrer">
+          github.com/settings/developers
+        </Typography.Link>
+        ；创建 OAuth App 后填入即可
+      </>
+    ),
     fields: [
       { key: 'githubClientId', label: 'Client ID' },
       { key: 'githubClientSecret', label: 'Client Secret', secret: true },
-      { key: 'githubRedirectUri', label: '回调地址', placeholder: 'https://你的域名/api/auth/github/callback', tip: '需要与 GitHub OAuth App 里登记的 Authorization callback URL 完全一致；房主绑定/找回和后台绑定/登录共用这一个地址' },
+      { key: 'githubRedirectUri', label: '回调地址', placeholder: 'https://你的域名/api/auth/github/callback', tip: '须与 GitHub App 回调地址一致' },
       { key: 'githubScope', label: 'Scope', placeholder: 'read:user' },
     ],
   },
   {
     id: 'qiniu',
     title: '七牛云存储',
-    purpose: '房间聊天发图依赖此项。四项齐全后才能上传图片；缺一则无法发送图片消息。',
+    purpose: '聊天发图；四项齐全才可用',
     includeQiniuZone: true,
     fields: [
       { key: 'qiniuAccessKey', label: 'Access Key', secret: true },
       { key: 'qiniuSecretKey', label: 'Secret Key', secret: true },
-      { key: 'qiniuBucket', label: 'Bucket', tip: '对象存储空间名称' },
-      { key: 'qiniuDomain', label: 'CDN 域名', placeholder: 'https://cdn.example.com', tip: '对外访问图片用的域名，需带 https://' },
+      { key: 'qiniuBucket', label: 'Bucket' },
+      { key: 'qiniuDomain', label: 'CDN 域名', placeholder: 'https://cdn.example.com', tip: '需带 https://' },
     ],
   },
   {
     id: 'apihz',
     title: '接口盒子',
-    purpose: '用于表情包搜索。不配置则表情搜索不可用。',
+    purpose: '表情包搜索',
     fields: [
       { key: 'apihzBaseUrl', label: 'API 地址', placeholder: 'https://cn.apihz.cn/api' },
       { key: 'apihzId', label: '用户 ID', secret: true },
@@ -486,7 +502,7 @@ export default function RuntimeConfigPanel({
   const roomSection = (
       <SettingsSection
         title="房间"
-        description="空房回收与建房防护。冷却/上限改完立即生效；0 表示关闭对应限制。"
+        description="0 表示关闭对应限制"
       >
         <Space direction="vertical" size="middle" style={{ width: '100%' }}>
           <Space wrap>
@@ -515,7 +531,7 @@ export default function RuntimeConfigPanel({
               aria-label="建房冷却（分钟）"
               style={{ width: 100 }}
             />
-            <Typography.Text type="secondary">分钟内同一用户/设备只能新建一次（含复用会记冷却；0=关闭）</Typography.Text>
+            <Typography.Text type="secondary">分钟建房冷却（按用户/设备）</Typography.Text>
           </Space>
 
           <Space wrap>
@@ -531,7 +547,7 @@ export default function RuntimeConfigPanel({
               aria-label="最多自建房间数"
               style={{ width: 100 }}
             />
-            <Typography.Text type="secondary">同一用户最多同时保留的自建房数（无人空房会复用房号；0=不限制）</Typography.Text>
+            <Typography.Text type="secondary">每人最多同时保留自建房数</Typography.Text>
           </Space>
 
           <Space wrap>
@@ -547,7 +563,7 @@ export default function RuntimeConfigPanel({
               aria-label="无身份 IP 冷却（秒）"
               style={{ width: 100 }}
             />
-            <Typography.Text type="secondary">秒：无设备/用户标识时按 IP 宽松冷却（0=关闭）</Typography.Text>
+            <Typography.Text type="secondary">秒无身份时按 IP 冷却</Typography.Text>
           </Space>
 
           <Space align="center" wrap>
@@ -556,7 +572,7 @@ export default function RuntimeConfigPanel({
               onChange={(checked) => setDraft({ ...draft, roomCreateAutoBanEnabled: checked })}
               aria-label="自动封禁疑似刷房"
             />
-            <Typography.Text>疑似自动建房时自动全站封禁</Typography.Text>
+            <Typography.Text>疑似刷房自动封禁</Typography.Text>
           </Space>
 
           <Space wrap>
@@ -573,7 +589,7 @@ export default function RuntimeConfigPanel({
               aria-label="自动封禁打分阈值"
               style={{ width: 100 }}
             />
-            <Typography.Text type="secondary">自动封禁打分阈值（越高越难触发，默认 55）</Typography.Text>
+            <Typography.Text type="secondary">自动封禁阈值（默认 55）</Typography.Text>
           </Space>
         </Space>
       </SettingsSection>
@@ -582,7 +598,7 @@ export default function RuntimeConfigPanel({
   const qualitySection = (
     <SettingsSection
       title="音质能力"
-      description="控制房间内「我的音质」是否展示 SVIP 档。开启前请确认 Meting Cookie 具备对应会员；关闭后用户端不显示这些选项。"
+      description="需 Meting Cookie 有对应会员"
     >
       <Space align="center">
         <Switch
@@ -590,14 +606,7 @@ export default function RuntimeConfigPanel({
           onChange={(checked) => setDraft({ ...draft, svipQualityEnabled: checked })}
           aria-label="开放 SVIP 音质"
         />
-        <div>
-          <Typography.Text>开放 SVIP 音质</Typography.Text>
-          <div>
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              红点：沉浸环绕声 / 超清母带 / 杜比全景声；绿点：臻品全景声 / 臻品母带
-            </Typography.Text>
-          </div>
-        </div>
+        <Typography.Text>开放 SVIP 音质</Typography.Text>
       </Space>
     </SettingsSection>
   );
@@ -605,7 +614,7 @@ export default function RuntimeConfigPanel({
   const metingSection = (
       <SettingsSection
         title="Meting 音源"
-        description="网易云 / QQ 音乐的标准 Meting 兼容源。多个源轮询使用，故障自动切换。"
+        description="多源轮询，故障自动切换"
       >
         <Space direction="vertical" style={{ width: '100%' }} size="middle">
           {draft.metingSources.length === 0 && (
@@ -713,15 +722,11 @@ export default function RuntimeConfigPanel({
   const customApiSection = (
       <SettingsSection
         title="自定义音乐接口"
-        description="按平台和功能分别接入任意 JSON API；同一平台、同一功能可添加多个接口，服务端会轮询并在故障时自动切换。`歌词备用` 也统一在这里配置，不再单独维护预设备用源。留空则网易/QQ 默认走上面的 Meting 音源。"
+        description="留空则网易/QQ 走上方 Meting；多接口自动轮询切换"
       >
         <Space direction="vertical" style={{ width: '100%' }} size="middle">
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            填好地址后点「解析响应」，再点字段旁的「选择」，在下方响应里点「选这个」即可完成映射，无需手写路径。
-            URL、参数、请求头和 Body 支持 {'{id}'}、{'{keyword}'}、{'{quality}'}、{'{limit}'}、{'{server}'}、{'{artist}'}、{'{album}'}、{'{n}'} 变量。
-          </Typography.Text>
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            配 `酷狗` 时建议把 `search / url / lrc / pic` 分成功能清晰的几条接口；配 `歌词备用` 时选择平台 `歌词备用`、功能 `歌词`，可直接用歌名/歌手/专辑做兜底容灾。
+            先「解析响应」，再点字段旁「选择」映射；URL/参数支持 {'{id}'} {'{keyword}'} {'{quality}'} 等变量
           </Typography.Text>
           {draft.musicApis.length === 0 && (
             <Empty description="暂无自定义接口" image={Empty.PRESENTED_IMAGE_SIMPLE} />
@@ -1070,7 +1075,7 @@ export default function RuntimeConfigPanel({
               onChange={(zone) => setDraft({ ...draft, qiniuZone: zone })}
             />
             <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>
-              须与创建 Bucket 时选的区域一致
+              与 Bucket 区域一致
             </Typography.Text>
           </Col>
         )}
@@ -1086,11 +1091,11 @@ export default function RuntimeConfigPanel({
   const seoSection = (
     <SettingsSection
       title="搜索引擎优化"
-      description="只改搜索引擎看到的标题、描述、关键词等，不影响首页可见界面。留空用内置默认；关键词请写正常人会搜的词（一起听歌、多人听歌、异地一起听歌）。"
+      description="只影响搜索引擎抓取，不影响首页界面"
     >
       <Row gutter={[12, 12]}>
         <Col span={24}>
-          <Typography.Text type="secondary" style={{ fontSize: 11 }}>页面标题（建议 60 字内）</Typography.Text>
+          <Typography.Text type="secondary" style={{ fontSize: 11 }}>页面标题</Typography.Text>
           <Input
             value={draft.seoTitle}
             maxLength={120}
@@ -1099,7 +1104,7 @@ export default function RuntimeConfigPanel({
           />
         </Col>
         <Col span={24}>
-          <Typography.Text type="secondary" style={{ fontSize: 11 }}>站点名称（OG / 结构化数据）</Typography.Text>
+          <Typography.Text type="secondary" style={{ fontSize: 11 }}>站点名称</Typography.Text>
           <Input
             value={draft.seoSiteName}
             maxLength={80}
@@ -1108,7 +1113,7 @@ export default function RuntimeConfigPanel({
           />
         </Col>
         <Col span={24}>
-          <Typography.Text type="secondary" style={{ fontSize: 11 }}>页面描述（建议 80–160 字）</Typography.Text>
+          <Typography.Text type="secondary" style={{ fontSize: 11 }}>页面描述</Typography.Text>
           <Input.TextArea
             value={draft.seoDescription}
             maxLength={300}
@@ -1119,39 +1124,36 @@ export default function RuntimeConfigPanel({
           />
         </Col>
         <Col span={24}>
-          <Typography.Text type="secondary" style={{ fontSize: 11 }}>关键词（英文逗号分隔，口语词靠前）</Typography.Text>
+          <Typography.Text type="secondary" style={{ fontSize: 11 }}>关键词（逗号分隔）</Typography.Text>
           <Input.TextArea
             value={draft.seoKeywords}
             maxLength={400}
             rows={2}
             showCount
-            placeholder="一起听歌,多人听歌,和朋友一起听歌,两个人一起听歌,情侣一起听歌,异地一起听歌,..."
+            placeholder="一起听歌,多人听歌,异地一起听歌"
             onChange={(e) => setDraft({ ...draft, seoKeywords: e.target.value })}
           />
         </Col>
         <Col xs={24} sm={12}>
-          <Typography.Text type="secondary" style={{ fontSize: 11 }}>规范主域（sitemap / canonical）</Typography.Text>
+          <Typography.Text type="secondary" style={{ fontSize: 11 }}>规范主域</Typography.Text>
           <Input
             value={draft.seoCanonicalUrl}
             maxLength={200}
             placeholder="https://qqovo.top"
             onChange={(e) => setDraft({ ...draft, seoCanonicalUrl: e.target.value })}
           />
-          <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>
-            必须是最终不 301 的 https 域名；优先于环境变量 SITE_CANONICAL_URL
-          </Typography.Text>
         </Col>
         <Col xs={24} sm={12}>
           <Typography.Text type="secondary" style={{ fontSize: 11 }}>百度站长验证码</Typography.Text>
           <Input
             value={draft.seoBaiduVerification}
             maxLength={120}
-            placeholder="只填 content，如 codeva-xxxx（会写入 HTML 源码，格式与百度一致）"
+            placeholder="codeva-xxxx"
             onChange={(e) => setDraft({ ...draft, seoBaiduVerification: e.target.value })}
           />
         </Col>
         <Col span={24}>
-          <Typography.Text type="secondary" style={{ fontSize: 11 }}>OG 分享图（路径或完整 URL）</Typography.Text>
+          <Typography.Text type="secondary" style={{ fontSize: 11 }}>OG 分享图</Typography.Text>
           <Input
             value={draft.seoOgImage}
             maxLength={500}
@@ -1160,7 +1162,7 @@ export default function RuntimeConfigPanel({
           />
         </Col>
         <Col xs={24} sm={12}>
-          <Typography.Text type="secondary" style={{ fontSize: 11 }}>爬虫主标题（不影响首页 H1）</Typography.Text>
+          <Typography.Text type="secondary" style={{ fontSize: 11 }}>爬虫主标题</Typography.Text>
           <Input
             value={draft.seoHeroHeadline}
             maxLength={40}
@@ -1169,7 +1171,7 @@ export default function RuntimeConfigPanel({
           />
         </Col>
         <Col xs={24} sm={12}>
-          <Typography.Text type="secondary" style={{ fontSize: 11 }}>爬虫副标题（不影响首页文案）</Typography.Text>
+          <Typography.Text type="secondary" style={{ fontSize: 11 }}>爬虫副标题</Typography.Text>
           <Input
             value={draft.seoHeroSubline}
             maxLength={80}
@@ -1282,7 +1284,7 @@ export default function RuntimeConfigPanel({
           }}
         >
           <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-            密钥回显为首尾片段；未改动保持原值，清空保存则关闭，填入则更新
+            密钥：未改保持原值；清空保存则关闭
           </Typography.Text>
           <Button type="primary" onClick={() => void save()} loading={saving}>
             保存配置
