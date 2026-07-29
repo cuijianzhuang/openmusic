@@ -115,7 +115,6 @@ function QrBlock({
 }
 
 function PlatformCard({
-  platform,
   label,
   account,
   busy,
