@@ -1729,6 +1729,55 @@ export function createRoom({ name, password, creatorId, creatorDeviceId, creator
   return serializeRoom(room);
 }
 
+/**
+ * 查找该身份已创建、仍空闲（无人/无曲/无队列）的房间。
+ * 用于堵住「只建不进、反复刷房号」：有空房则复用，不再新建。
+ * 仅按 userId / deviceId 匹配
+ */
+export function findIdleOwnedRoom({ creatorId, creatorDeviceId } = {}) {
+  const uid = sanitizeCreatorId(creatorId);
+  const did = sanitizeCreatorId(creatorDeviceId);
+  if (!uid && !did) return null;
+
+  let best = null;
+  for (const room of rooms.values()) {
+    if (protectedRoomIds.has(room.id)) continue;
+    if (room.users.size > 0) continue;
+    if (room.current || room.isPlaying || room.queue.length > 0) continue;
+    const matchUser = uid && room.creatorId === uid;
+    const matchDid = did && room.creatorDeviceId === did;
+    if (!matchUser && !matchDid) continue;
+    if (!best || (Number(room.createdAt) || 0) > (Number(best.createdAt) || 0)) {
+      best = room;
+    }
+  }
+  return best ? serializeRoom(best) : null;
+}
+
+/**
+ * 复用空闲自建房：可更新名称/密码，并重新挂销毁倒计时。
+ */
+export function reuseIdleOwnedRoom(roomId, { name, password } = {}) {
+  const id = String(roomId || "").toUpperCase();
+  const room = rooms.get(id);
+  if (!room) return null;
+  if (room.users.size > 0) return null;
+  if (room.current || room.isPlaying || room.queue.length > 0) return null;
+
+  if (name !== undefined) {
+    room.name = normalizeRoomName(name, room.id);
+  }
+  if (password !== undefined) {
+    const trimmed = normalizeRoomPasswordInput(password);
+    room.passwordHash = trimmed ? hashPassword(trimmed) : null;
+    room.passwordPlain = trimmed || null;
+  }
+  persistRoom(room);
+  invalidateRoomsListCache();
+  scheduleRoomDestroy(room.id);
+  return serializeRoom(room);
+}
+
 const coverResolveInflight = new Map();
 /** 解析失败负缓存，避免每次 listRooms 都打慢上游 */
 const coverResolveFailedAt = new Map();

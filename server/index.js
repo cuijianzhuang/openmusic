@@ -48,6 +48,8 @@ import {
   getRoom,
   listRooms,
   listRoomsForAdmin,
+  findIdleOwnedRoom,
+  reuseIdleOwnedRoom,
   listRoomIds,
   verifyRoomPassword,
   roomExists,
@@ -1308,7 +1310,7 @@ function proxyLimitKey(kind, req) {
 app.post('/api/session/bootstrap', async (req, res) => {
   const requestIp = getRequestIp(req);
   if (!limitSessionBootstrap(`session:${requestIp}`)) {
-    return res.status(429).json({ error: '会话请求过于频繁，请稍后再试' });
+    return res.status(500).json({ error: '系统开小差了，请稍后再试' });
   }
   const cookieDeviceId = resolveDeviceIdFromCookieHeader(req.headers?.cookie || '');
   const bodyDeviceId = resolveBodyDeviceId(req);
@@ -1342,7 +1344,7 @@ app.post('/api/session/bootstrap', async (req, res) => {
   }
 
   if (!limitNewSessionBootstrap(`session-new:${requestIp}`)) {
-    return res.status(429).json({ error: '新会话创建过于频繁，请稍后再试' });
+    return res.status(500).json({ error: '系统开小差了，请稍后再试' });
   }
   const userId = createServerClientId();
   const deviceId = cookieDeviceId || createServerClientId();
@@ -1646,21 +1648,8 @@ app.post('/api/rooms', async (req, res) => {
   };
 
   if (isSiteBanned({ ip: createIp, deviceId: createDeviceId })) {
-    // 不暴露封禁，对外表现与限流一致
-    res.setHeader('Retry-After', '300');
-    return res.status(429).json({ error: '创建房间过于频繁，请稍后再试' });
-  }
-
-  const cooldown = checkRoomCreateCooldown({ ip: createIp, deviceId: createDeviceId });
-  if (!cooldown.allowed) {
-    const { bans } = await evaluateRoomCreateRejectAutoBan({
-      ip: createIp,
-      deviceId: createDeviceId,
-      listRoomsForGuard: listRoomsForAdmin,
-    });
-    enforceAutoBans(bans);
-    res.setHeader('Retry-After', String(cooldown.retryAfterSec || 300));
-    return res.status(429).json({ error: cooldown.error });
+    // 不暴露封禁
+    return res.status(500).json({ error: '系统开小差了，请稍后再试' });
   }
 
   const name = req.body?.name;
@@ -1668,6 +1657,46 @@ app.post('/api/rooms', async (req, res) => {
   const identity = resolveIdentityFromRequest(req);
   if (!identity?.userId) {
     return res.status(401).json({ error: '会话未就绪，请刷新页面后重试' });
+  }
+
+  const cooldown = checkRoomCreateCooldown({
+    ip: createIp,
+    deviceId: createDeviceId,
+    userId: identity.userId,
+  });
+  if (!cooldown.allowed) {
+    const { bans } = await evaluateRoomCreateRejectAutoBan({
+      ip: createIp,
+      deviceId: createDeviceId,
+      userId: identity.userId,
+      listRoomsForGuard: listRoomsForAdmin,
+    });
+    enforceAutoBans(bans);
+    return res.status(500).json({ error: '系统开小差了，请稍后再试' });
+  }
+
+  // 已有空闲自建房：复用，堵住「只建不进反复刷房号」
+  const idleOwned = findIdleOwnedRoom({
+    creatorId: identity.userId,
+    creatorDeviceId: createDeviceId,
+  });
+  if (idleOwned) {
+    const reused = reuseIdleOwnedRoom(idleOwned.id, { name, password }) || idleOwned;
+    try {
+      const { bans } = await recordRoomCreateAndMaybeAutoBan({
+        ip: createIp,
+        deviceId: createDeviceId,
+        userId: identity.userId,
+        name: reused.name,
+        roomId: reused.id,
+        reused: true,
+        listRoomsForGuard: listRoomsForAdmin,
+      });
+      enforceAutoBans(bans);
+    } catch (err) {
+      console.error('room-create auto-ban failed:', err?.message || err);
+    }
+    return res.json(reused);
   }
 
   const room = createRoom({
@@ -1682,6 +1711,7 @@ app.post('/api/rooms', async (req, res) => {
     const { bans } = await recordRoomCreateAndMaybeAutoBan({
       ip: createIp,
       deviceId: createDeviceId,
+      userId: identity.userId,
       name: room.name,
       roomId: room.id,
       listRoomsForGuard: listRoomsForAdmin,
@@ -2321,7 +2351,7 @@ io.on('connection', (socket) => {
     const siteBan = isSiteBanned({ ip: joinProbeIp, deviceId });
     if (siteBan) {
       // 不暴露封禁，对外表现成临时失败
-      callback?.({ success: false, error: '暂时无法加入，请稍后再试' });
+      callback?.({ success: false, error: '系统开小差了，请稍后再试' });
       return;
     }
 

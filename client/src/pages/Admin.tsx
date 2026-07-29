@@ -1176,17 +1176,27 @@ function AdminPage() {
                 }}
                 locale={{ emptyText: rooms.length === 0 ? '当前没有活跃房间' : '没有匹配的房间' }}
                 onRow={(room) => ({
-                  style: (room.users.length > 0 || room.permanentApplication?.status === 'pending')
+                  style: (
+                    room.users.length > 0
+                    || room.permanentApplication?.status === 'pending'
+                    || Boolean(room.creatorId || room.creatorIp || room.creatorDeviceId)
+                  )
                     ? { cursor: 'pointer' }
                     : undefined,
                 })}
                 expandable={{
                   expandRowByClick: true,
                   rowExpandable: (room) => (
-                    room.users.length > 0 || room.permanentApplication?.status === 'pending'
+                    room.users.length > 0
+                    || room.permanentApplication?.status === 'pending'
+                    || Boolean(room.creatorId || room.creatorIp || room.creatorDeviceId)
                   ),
                   expandIcon: ({ expanded, onExpand, record }) => (
-                    (record.users.length > 0 || record.permanentApplication?.status === 'pending') ? (
+                    (
+                      record.users.length > 0
+                      || record.permanentApplication?.status === 'pending'
+                      || Boolean(record.creatorId || record.creatorIp || record.creatorDeviceId)
+                    ) ? (
                       <RightOutlined
                         rotate={expanded ? 90 : 0}
                         onClick={(e) => onExpand(record, e)}
