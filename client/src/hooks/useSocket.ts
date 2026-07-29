@@ -61,6 +61,9 @@ let rejoinInFlight = false;
 let joinGeneration = 0;
 let reconnectTimer: number | null = null;
 let reconnectAttempt = 0;
+/** 断线后短暂保留旧成员列表，避免服务重启时「全员消失再逐个回来」 */
+let usersStabilizeUntil = 0;
+const USERS_STABILIZE_MS = 18_000;
 
 function getSocket(): Socket {
 
@@ -275,9 +278,29 @@ function applyJoinResponse(session: JoinSession, res: JoinAckResponse) {
 
 function applyRoomSnapshot(room: RoomState, force = false) {
   const current = useRoomStore.getState().room;
-  const merged = force ? room : mergeRoomState(room, current);
+  let merged = force ? room : mergeRoomState(room, current);
+
+  // 部署/断线重连窗口内：成员只增不减，避免服务端空表覆盖导致「全员消失」
+  if (
+    current
+    && current.id === merged.id
+    && Date.now() < usersStabilizeUntil
+    && Array.isArray(current.users)
+    && Array.isArray(merged.users)
+    && merged.users.length < current.users.length
+  ) {
+    const byId = new Map(current.users.map((user) => [user.id, user]));
+    for (const user of merged.users) byId.set(user.id, user);
+    const users = Array.from(byId.values());
+    merged = {
+      ...merged,
+      users,
+      userCount: Math.max(Number(merged.userCount) || 0, users.length),
+    };
+  }
+
   useRoomStore.getState().setRoom(merged);
-  useRoomStore.getState().syncRolesFromRoom(room);
+  useRoomStore.getState().syncRolesFromRoom(merged);
 
   // 房主开启「进房可看历史」后，放开本地聊天截断，允许上滑拉取更早消息
   if (
@@ -463,6 +486,7 @@ function handleSocketDisconnect(reason: string) {
   if (!shouldMaintainRoomSession()) return;
 
   // 普通断线不等于会话失效；40+ 人同时 bootstrap + join 会打爆服务端
+  usersStabilizeUntil = Date.now() + USERS_STABILIZE_MS;
   useRoomStore.getState().setReconnecting(true);
 
   if (reason === 'io server disconnect') {

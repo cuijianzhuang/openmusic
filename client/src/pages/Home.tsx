@@ -485,8 +485,9 @@ export default function Home() {
       setCreateRoomName('');
       setCreatePassword('');
       goToRoom(room.id, createPassword.trim() || undefined);
-    } catch {
-      setModalError('创建房间失败，请重试');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message.trim() : '';
+      setModalError(msg || '创建房间失败，请重试');
     } finally {
       setActionLoading(false);
     }

@@ -1,7 +1,7 @@
 import { customAlphabet } from "nanoid";
 import { scrypt, scryptSync, randomBytes, timingSafeEqual } from "crypto";
 import { fetchMetingFmSong, normalizeFmMode, DEFAULT_FM_MODE, FM_MODE_OFF } from "./metingFm.js";
-import { getRedisClient, initRoomStorage, isRedisEnabled, loadAllRoomsFromStorage, queueSaveRoomToStorage, deleteRoomFromStorage } from "./roomStorage.js";
+import { getRedisClient, initRoomStorage, isRedisEnabled, loadAllRoomsFromStorage, queueSaveRoomToStorage, deleteRoomFromStorage, saveRoomToStorage } from "./roomStorage.js";
 import {
   DEFAULT_MEMBER_SETTINGS,
   buildWelcomeText,
@@ -684,6 +684,18 @@ function persistRoom(room) {
     persistFlushScheduled = true;
     setImmediate(flushPendingPersists);
   }
+}
+
+/** 优雅退出前：把内存中待写房间全部同步刷进 Redis */
+export async function flushAllPendingRoomPersists() {
+  persistFlushScheduled = false;
+  const snapshots = [];
+  for (const room of pendingPersistRooms.values()) {
+    snapshots.push(snapshotRoomForStorage(room));
+  }
+  pendingPersistRooms.clear();
+  if (snapshots.length === 0) return;
+  await Promise.all(snapshots.map((snap) => saveRoomToStorage(snap)));
 }
 
 let cachedListRooms = null;

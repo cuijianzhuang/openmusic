@@ -51,6 +51,7 @@ import {
   findIdleOwnedRoom,
   reuseIdleOwnedRoom,
   listRoomIds,
+  flushAllPendingRoomPersists,
   verifyRoomPassword,
   roomExists,
   initRooms,
@@ -1659,23 +1660,7 @@ app.post('/api/rooms', async (req, res) => {
     return res.status(401).json({ error: '会话未就绪，请刷新页面后重试' });
   }
 
-  const cooldown = checkRoomCreateCooldown({
-    ip: createIp,
-    deviceId: createDeviceId,
-    userId: identity.userId,
-  });
-  if (!cooldown.allowed) {
-    const { bans } = await evaluateRoomCreateRejectAutoBan({
-      ip: createIp,
-      deviceId: createDeviceId,
-      userId: identity.userId,
-      listRoomsForGuard: listRoomsForAdmin,
-    });
-    enforceAutoBans(bans);
-    return res.status(500).json({ error: '系统开小差了，请稍后再试' });
-  }
-
-  // 已有空闲自建房：复用，堵住「只建不进反复刷房号」
+  // 先复用空闲自建房，避免 5 分钟冷却把「再建一次」误拦成失败
   const idleOwned = findIdleOwnedRoom({
     creatorId: identity.userId,
     creatorDeviceId: createDeviceId,
@@ -1697,6 +1682,22 @@ app.post('/api/rooms', async (req, res) => {
       console.error('room-create auto-ban failed:', err?.message || err);
     }
     return res.json(reused);
+  }
+
+  const cooldown = checkRoomCreateCooldown({
+    ip: createIp,
+    deviceId: createDeviceId,
+    userId: identity.userId,
+  });
+  if (!cooldown.allowed) {
+    const { bans } = await evaluateRoomCreateRejectAutoBan({
+      ip: createIp,
+      deviceId: createDeviceId,
+      userId: identity.userId,
+      listRoomsForGuard: listRoomsForAdmin,
+    });
+    enforceAutoBans(bans);
+    return res.status(500).json({ error: '系统开小差了，请稍后再试' });
   }
 
   const room = createRoom({
@@ -3790,4 +3791,49 @@ httpServer.listen(PORT, () => {
   console.log(`🎤 Cyapi (绿点/蓝点): ${isCyapiConfigured() ? '已配置' : '未配置'}`);
   console.log(`💾 持久化存储: ${isRedisEnabled() ? 'Redis' : '未连接（仅安装向导）'}`);
   startMetingHealthProbe();
+});
+
+let shuttingDown = false;
+
+async function gracefulShutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`${signal}: 正在优雅退出，通知客户端重连并刷写房间…`);
+
+  const forceTimer = setTimeout(() => {
+    console.error('优雅退出超时，强制结束进程');
+    process.exit(1);
+  }, 25_000);
+  forceTimer.unref?.();
+
+  try {
+    // 先断开 Socket，让客户端立刻进入重连；再关 HTTP
+    try {
+      io.close();
+    } catch (err) {
+      console.warn('关闭 Socket.IO 失败:', err?.message || err);
+    }
+    await new Promise((resolve) => {
+      httpServer.close(() => resolve());
+    });
+  } catch (err) {
+    console.warn('关闭 HTTP 服务失败:', err?.message || err);
+  }
+
+  try {
+    await flushAllPendingRoomPersists();
+  } catch (err) {
+    console.warn('刷写房间状态失败:', err?.message || err);
+  }
+
+  clearTimeout(forceTimer);
+  console.log('优雅退出完成');
+  process.exit(0);
+}
+
+process.on('SIGTERM', () => {
+  void gracefulShutdown('SIGTERM');
+});
+process.on('SIGINT', () => {
+  void gracefulShutdown('SIGINT');
 });
