@@ -56,6 +56,16 @@ function envDefaults() {
   return {
     roomEmptyTtlMs: envRoomEmptyTtlMs(),
     roomRestartGraceMs: envRoomRestartGraceMs(),
+    /** 同一用户/设备建房冷却（毫秒）；0 = 关闭冷却 */
+    roomCreateCooldownMs: 5 * 60 * 1000,
+    /** 同一用户/设备最多同时保留的自建房数；0 = 不限制 */
+    roomCreateMaxOwned: 2,
+    /** 无设备/用户标识时按 IP 的宽松冷却（毫秒）；0 = 关闭 */
+    roomCreateIpLooseCooldownMs: 60 * 1000,
+    /** 疑似自动建房时是否自动全站封禁 */
+    roomCreateAutoBanEnabled: true,
+    /** 自动建房检测打分阈值（越高越难触发） */
+    roomCreateAutoBanScore: 55,
     // Linux.do OAuth2（房主身份绑定 / 后台登录）：全部留空表示未配置、功能自动关闭。
     // 需要先在 https://connect.linux.do 注册应用拿到 client_id / secret / 回调地址，
     // 并向 Linux.do 核实真实的授权 / 令牌 / 用户信息接口地址后再填写，不要照抄示例值。
@@ -229,6 +239,10 @@ function trimTrailingSlash(value) {
 function normalize(config) {
   const roomEmptyTtlMs = Number(config.roomEmptyTtlMs);
   const roomRestartGraceMs = Number(config.roomRestartGraceMs);
+  const roomCreateCooldownMs = Number(config.roomCreateCooldownMs);
+  const roomCreateMaxOwned = Number(config.roomCreateMaxOwned);
+  const roomCreateIpLooseCooldownMs = Number(config.roomCreateIpLooseCooldownMs);
+  const roomCreateAutoBanScore = Number(config.roomCreateAutoBanScore);
   let musicApis = [];
   try {
     musicApis = normalizeMusicApis(config.musicApis);
@@ -242,6 +256,24 @@ function normalize(config) {
     roomRestartGraceMs: Number.isFinite(roomRestartGraceMs)
       ? Math.max(0, Math.min(Math.round(roomRestartGraceMs), 7 * 24 * 60 * 60 * 1000))
       : 0,
+    roomCreateCooldownMs: Number.isFinite(roomCreateCooldownMs)
+      ? Math.max(0, Math.min(Math.round(roomCreateCooldownMs), 24 * 60 * 60 * 1000))
+      : 5 * 60 * 1000,
+    roomCreateMaxOwned: Number.isFinite(roomCreateMaxOwned)
+      ? Math.max(0, Math.min(Math.round(roomCreateMaxOwned), 50))
+      : 2,
+    roomCreateIpLooseCooldownMs: Number.isFinite(roomCreateIpLooseCooldownMs)
+      ? Math.max(0, Math.min(Math.round(roomCreateIpLooseCooldownMs), 60 * 60 * 1000))
+      : 60 * 1000,
+    roomCreateAutoBanEnabled: !(
+      config.roomCreateAutoBanEnabled === false
+      || config.roomCreateAutoBanEnabled === 0
+      || String(config.roomCreateAutoBanEnabled ?? '').trim().toLowerCase() === 'false'
+      || String(config.roomCreateAutoBanEnabled ?? '').trim() === '0'
+    ),
+    roomCreateAutoBanScore: Number.isFinite(roomCreateAutoBanScore)
+      ? Math.max(1, Math.min(Math.round(roomCreateAutoBanScore), 200))
+      : 55,
     linuxdoClientId: String(config.linuxdoClientId || '').trim(),
     linuxdoClientSecret: String(config.linuxdoClientSecret || '').trim(),
     linuxdoRedirectUri: String(config.linuxdoRedirectUri || '').trim(),

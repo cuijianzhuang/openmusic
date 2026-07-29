@@ -1115,6 +1115,14 @@ export function useSocket() {
     });
   }, []);
 
+  const destroyRoom = useCallback((): Promise<{ success: boolean; error?: string; message?: string }> => {
+    return emitWithAck<{ success: boolean; error?: string; message?: string }>(
+      'destroy_room',
+      {},
+      { success: false, error: '连接超时，请重试' },
+    );
+  }, []);
+
   const setRoomAdmin = useCallback((userId: string, admin: boolean): Promise<{ success: boolean; error?: string; message?: string }> => {
     return emitWithAck<{ success: boolean; error?: string; message?: string; room?: RoomState }>(
       'set_room_admin',
@@ -1553,6 +1561,8 @@ export function useSocket() {
     kickUser,
 
     transferOwner,
+
+    destroyRoom,
 
     setRoomAdmin,
 

@@ -286,7 +286,7 @@ export default function Room() {
     noindex: true,
   });
 
-  const { joinRoom, addSong, leaveRoom, listFavorites, setFavorite, importFavorites, renameRoomName, setRoomLock, setRoomFmMode, setRoomAnnouncement, setRoomCustomCover, setChatHistoryVisibleOnJoin, setChatShowAvatars, setRoomJoinNotice, setSongRequestEnabled, unbanRoomSong, addRoomForbiddenWord, removeRoomForbiddenWord, setRoomMemberTier, removeRoomMemberTier, setRoomMemberSettings, loadSongHistory, transferOwner, applyRoomPermanent, cancelRoomPermanent, clearQueue } = useSocket();
+  const { joinRoom, addSong, leaveRoom, listFavorites, setFavorite, importFavorites, renameRoomName, setRoomLock, setRoomFmMode, setRoomAnnouncement, setRoomCustomCover, setChatHistoryVisibleOnJoin, setChatShowAvatars, setRoomJoinNotice, setSongRequestEnabled, unbanRoomSong, addRoomForbiddenWord, removeRoomForbiddenWord, setRoomMemberTier, removeRoomMemberTier, setRoomMemberSettings, loadSongHistory, transferOwner, destroyRoom, applyRoomPermanent, cancelRoomPermanent, clearQueue } = useSocket();
   const { applyFavorites } = useFavorites();
   const { queueKeys, playedKeys } = useRoomSongKeySets();
 
@@ -372,6 +372,7 @@ export default function Room() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [fmSaving, setFmSaving] = useState(false);
   const [transferSaving, setTransferSaving] = useState(false);
+  const [destroySaving, setDestroySaving] = useState(false);
   const [permanentSaving, setPermanentSaving] = useState(false);
   const [announcementSaving, setAnnouncementSaving] = useState(false);
   const [announcementPopupOpen, setAnnouncementPopupOpen] = useState(false);
@@ -1367,6 +1368,19 @@ export default function Room() {
       showToast(res.error || '转让失败', 'error');
     }
   }, [transferSaving, transferOwner, showToast]);
+
+  const handleDestroyRoom = useCallback(async () => {
+    if (destroySaving) return;
+    setDestroySaving(true);
+    const res = await destroyRoom();
+    setDestroySaving(false);
+    if (res.success) {
+      setSettingsOpen(false);
+      // 服务端会踢出所有人（含自己），由 kicked 带回首页
+    } else {
+      showToast(res.error || '解散失败', 'error');
+    }
+  }, [destroySaving, destroyRoom, showToast]);
 
   const handleApplyPermanent = useCallback(async (note?: string) => {
     if (permanentSaving) return;
@@ -2553,6 +2567,7 @@ export default function Room() {
         users={room?.users ?? []}
         myUserId={mySocketId}
         transferSaving={transferSaving}
+        destroySaving={destroySaving}
         roomId={roomId}
         protectedFromDestroy={Boolean(room?.protectedFromDestroy)}
         permanentApplication={room?.permanentApplication ?? null}
@@ -2570,6 +2585,7 @@ export default function Room() {
         onSaveJoinNotice={handleSaveJoinNotice}
         onSaveSongRequest={handleSaveSongRequestSettings}
         onTransferOwner={handleTransferOwner}
+        onDestroyRoom={handleDestroyRoom}
         onApplyPermanent={handleApplyPermanent}
         onCancelPermanent={handleCancelPermanent}
       />

@@ -34,6 +34,11 @@ type RuntimeTextField = Exclude<
   keyof RuntimeConfig,
   | 'roomEmptyTtlMs'
   | 'roomRestartGraceMs'
+  | 'roomCreateCooldownMs'
+  | 'roomCreateMaxOwned'
+  | 'roomCreateIpLooseCooldownMs'
+  | 'roomCreateAutoBanEnabled'
+  | 'roomCreateAutoBanScore'
   | 'svipQualityEnabled'
   | 'configuredSecrets'
   | 'metingApiUrl'
@@ -481,19 +486,95 @@ export default function RuntimeConfigPanel({
   const roomSection = (
       <SettingsSection
         title="房间"
-        description="无人房间保留多久后自动销毁；设为 0 表示最后一人离开立即销毁。"
+        description="空房回收与建房防护。冷却/上限改完立即生效；0 表示关闭对应限制。"
       >
-        <Space>
-          <InputNumber
-            min={0}
-            max={1440}
-            step={1}
-            value={Math.round(draft.roomEmptyTtlMs / 60000)}
-            onChange={(val) => setDraft({ ...draft, roomEmptyTtlMs: Math.max(0, Number(val) || 0) * 60000 })}
-            aria-label="空房销毁时间（分钟）"
-            style={{ width: 100 }}
-          />
-          <Typography.Text type="secondary">分钟后销毁空房</Typography.Text>
+        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+          <Space wrap>
+            <InputNumber
+              min={0}
+              max={1440}
+              step={1}
+              value={Math.round(draft.roomEmptyTtlMs / 60000)}
+              onChange={(val) => setDraft({ ...draft, roomEmptyTtlMs: Math.max(0, Number(val) || 0) * 60000 })}
+              aria-label="空房销毁时间（分钟）"
+              style={{ width: 100 }}
+            />
+            <Typography.Text type="secondary">分钟后销毁空房</Typography.Text>
+          </Space>
+
+          <Space wrap>
+            <InputNumber
+              min={0}
+              max={1440}
+              step={1}
+              value={Math.round((draft.roomCreateCooldownMs ?? 300000) / 60000)}
+              onChange={(val) => setDraft({
+                ...draft,
+                roomCreateCooldownMs: Math.max(0, Number(val) || 0) * 60000,
+              })}
+              aria-label="建房冷却（分钟）"
+              style={{ width: 100 }}
+            />
+            <Typography.Text type="secondary">分钟内同一用户/设备只能新建一次（含复用会记冷却；0=关闭）</Typography.Text>
+          </Space>
+
+          <Space wrap>
+            <InputNumber
+              min={0}
+              max={50}
+              step={1}
+              value={draft.roomCreateMaxOwned ?? 2}
+              onChange={(val) => setDraft({
+                ...draft,
+                roomCreateMaxOwned: Math.max(0, Math.min(50, Number(val) || 0)),
+              })}
+              aria-label="最多自建房间数"
+              style={{ width: 100 }}
+            />
+            <Typography.Text type="secondary">人最多同时保留的自建房（空房会复用；0=不限制）</Typography.Text>
+          </Space>
+
+          <Space wrap>
+            <InputNumber
+              min={0}
+              max={3600}
+              step={10}
+              value={Math.round((draft.roomCreateIpLooseCooldownMs ?? 60000) / 1000)}
+              onChange={(val) => setDraft({
+                ...draft,
+                roomCreateIpLooseCooldownMs: Math.max(0, Number(val) || 0) * 1000,
+              })}
+              aria-label="无身份 IP 冷却（秒）"
+              style={{ width: 100 }}
+            />
+            <Typography.Text type="secondary">秒：无设备/用户标识时按 IP 宽松冷却（0=关闭）</Typography.Text>
+          </Space>
+
+          <Space align="center" wrap>
+            <Switch
+              checked={draft.roomCreateAutoBanEnabled !== false}
+              onChange={(checked) => setDraft({ ...draft, roomCreateAutoBanEnabled: checked })}
+              aria-label="自动封禁疑似刷房"
+            />
+            <Typography.Text>疑似自动建房时自动全站封禁</Typography.Text>
+          </Space>
+
+          <Space wrap>
+            <InputNumber
+              min={1}
+              max={200}
+              step={1}
+              disabled={draft.roomCreateAutoBanEnabled === false}
+              value={draft.roomCreateAutoBanScore ?? 55}
+              onChange={(val) => setDraft({
+                ...draft,
+                roomCreateAutoBanScore: Math.max(1, Math.min(200, Number(val) || 55)),
+              })}
+              aria-label="自动封禁打分阈值"
+              style={{ width: 100 }}
+            />
+            <Typography.Text type="secondary">自动封禁打分阈值（越高越难触发，默认 55）</Typography.Text>
+          </Space>
         </Space>
       </SettingsSection>
   );

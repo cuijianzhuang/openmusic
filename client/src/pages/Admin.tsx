@@ -43,7 +43,7 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import AdminProviders from './admin/AdminProviders';
 import AdminLoading from './admin/AdminLoading';
-import { ADMIN_TABS, AUDIT_PAGE_SIZE, LIST_PAGE_SIZE, TAB_META } from './admin/constants';
+import { ADMIN_TABS, AUDIT_ACTION_OPTIONS, AUDIT_PAGE_SIZE, LIST_PAGE_SIZE, TAB_META } from './admin/constants';
 import CredentialsPanel from './admin/CredentialsPanel';
 import InitialSetupGate from './admin/InitialSetupGate';
 import LoginForm from './admin/LoginForm';
@@ -204,6 +204,15 @@ function AdminPage() {
   const [banReason, setBanReason] = useState('');
   const [banSaving, setBanSaving] = useState(false);
   const [banHint, setBanHint] = useState('');
+  const [quickBanDraft, setQuickBanDraft] = useState<{
+    mode: 'single' | 'both';
+    type?: 'ip' | 'device';
+    ip?: string;
+    deviceId?: string;
+    nickname?: string;
+  } | null>(null);
+  const [quickBanReason, setQuickBanReason] = useState('');
+  const [quickBanSaving, setQuickBanSaving] = useState(false);
   const [errorReports, setErrorReports] = useState<ErrorReportSummary[]>([]);
   const [reportDetail, setReportDetail] = useState<ErrorReportDetail | null>(null);
   const [reportDetailLoading, setReportDetailLoading] = useState(false);
@@ -214,6 +223,9 @@ function AdminPage() {
   const [auditTotal, setAuditTotal] = useState(0);
   const [auditPage, setAuditPage] = useState(1);
   const [auditLoading, setAuditLoading] = useState(false);
+  const [auditKeyword, setAuditKeyword] = useState('');
+  const [auditKeywordApplied, setAuditKeywordApplied] = useState('');
+  const [auditAction, setAuditAction] = useState<string | undefined>(undefined);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [roomsPage, setRoomsPage] = useState(1);
   const [roomsPageSize, setRoomsPageSize] = useState(10);
@@ -321,16 +333,24 @@ function AdminPage() {
     return () => clearInterval(timer);
   }, [loggedIn, refresh]);
 
-  const loadAudit = useCallback(async (page: number) => {
+  const loadAudit = useCallback(async (page: number, opts?: { q?: string; action?: string }) => {
+    const q = opts?.q ?? auditKeywordApplied;
+    const action = opts?.action ?? auditAction ?? '';
     setAuditLoading(true);
     try {
+      const params = new URLSearchParams({
+        page: String(page),
+        pageSize: String(AUDIT_PAGE_SIZE),
+      });
+      if (q) params.set('q', q);
+      if (action) params.set('action', action);
       const res = await adminFetch<{
         items: AdminAuditEntry[];
         total: number;
         page: number;
         pageSize: number;
         totalPages: number;
-      }>(`/api/admin/audit?page=${page}&pageSize=${AUDIT_PAGE_SIZE}`);
+      }>(`/api/admin/audit?${params.toString()}`);
       const maxPage = Math.max(1, res.totalPages || 1);
       if (page > maxPage) {
         setAuditPage(maxPage);
@@ -345,7 +365,7 @@ function AdminPage() {
     } finally {
       setAuditLoading(false);
     }
-  }, []);
+  }, [auditKeywordApplied, auditAction]);
 
   useEffect(() => {
     if (!loggedIn || activeTab !== 'audit') return;
@@ -584,6 +604,83 @@ function AdminPage() {
     }
   }, [banReason, banSaving, banType, banValue, message, refresh]);
 
+  const postSiteBan = useCallback(async (type: 'ip' | 'device', value: string, reason: string) => {
+    return adminFetch<{ kicked: number; ban?: SiteBanEntry }>('/api/admin/bans', {
+      method: 'POST',
+      body: JSON.stringify({
+        type,
+        value: value.trim(),
+        reason: reason.trim(),
+      }),
+    });
+  }, []);
+
+  const openQuickBan = useCallback((draft: NonNullable<typeof quickBanDraft>) => {
+    const hasIp = Boolean(draft.ip?.trim());
+    const hasDevice = Boolean(draft.deviceId?.trim());
+    if (draft.mode === 'single') {
+      if (draft.type === 'ip' && !hasIp) return;
+      if (draft.type === 'device' && !hasDevice) return;
+    } else if (!hasIp && !hasDevice) {
+      message.warning('该成员没有可封禁的 IP 或设备');
+      return;
+    }
+    setQuickBanDraft(draft);
+    setQuickBanReason('');
+  }, [message]);
+
+  const submitQuickBan = useCallback(async () => {
+    if (!quickBanDraft || quickBanSaving) return;
+    const reason = quickBanReason.trim();
+    setQuickBanSaving(true);
+    try {
+      let kicked = 0;
+      const done: string[] = [];
+      const skipped: string[] = [];
+
+      const tryOne = async (type: 'ip' | 'device', value?: string) => {
+        const v = String(value || '').trim();
+        if (!v) return;
+        try {
+          const res = await postSiteBan(type, v, reason);
+          kicked += Number(res.kicked) || 0;
+          done.push(type === 'ip' ? 'IP' : '设备');
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : '';
+          if (msg.includes('已在封禁')) skipped.push(type === 'ip' ? 'IP' : '设备');
+          else throw err;
+        }
+      };
+
+      if (quickBanDraft.mode === 'both') {
+        await tryOne('ip', quickBanDraft.ip);
+        await tryOne('device', quickBanDraft.deviceId);
+      } else if (quickBanDraft.type === 'ip') {
+        await tryOne('ip', quickBanDraft.ip);
+      } else {
+        await tryOne('device', quickBanDraft.deviceId);
+      }
+
+      if (done.length === 0 && skipped.length > 0) {
+        message.warning('目标已在封禁列表中');
+      } else {
+        const parts = [
+          done.length ? `已封禁${done.join('、')}` : '',
+          skipped.length ? `${skipped.join('、')}已在列表中` : '',
+          kicked > 0 ? `踢出 ${kicked} 个在线连接` : '',
+        ].filter(Boolean);
+        message.success(parts.join(' · ') || '已封禁');
+      }
+      setQuickBanDraft(null);
+      setQuickBanReason('');
+      await refresh({ force: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '封禁失败');
+    } finally {
+      setQuickBanSaving(false);
+    }
+  }, [message, postSiteBan, quickBanDraft, quickBanReason, quickBanSaving, refresh]);
+
   const removeBan = useCallback(async (banId: string) => {
     try {
       await adminFetch(`/api/admin/bans/${banId}`, { method: 'DELETE' });
@@ -664,15 +761,6 @@ function AdminPage() {
       },
     });
   }, [message, modal, refresh, reportDetail?.id]);
-
-  const quickBan = useCallback((type: 'ip' | 'device', value: string) => {
-    if (!value) return;
-    setBanType(type);
-    setBanValue(value);
-    setBanHint(`已填入${type === 'ip' ? ' IP' : ' deviceId'}，确认后点击「添加封禁」`);
-    setActiveTab('bans');
-    setMobileMenuOpen(false);
-  }, []);
 
   const randomizeEntryPath = useCallback(() => {
     setEntryPathDraft(createRandomEntryPath());
@@ -1278,7 +1366,16 @@ function AdminPage() {
                                       <Typography.Text code copyable={{ text: u.clientIp }}>
                                         {u.clientIp}
                                       </Typography.Text>
-                                      <Button size="small" onClick={() => quickBan('ip', u.clientIp!)}>
+                                      <Button
+                                        size="small"
+                                        onClick={() => openQuickBan({
+                                          mode: 'single',
+                                          type: 'ip',
+                                          ip: u.clientIp,
+                                          deviceId: u.deviceId,
+                                          nickname: u.nickname,
+                                        })}
+                                      >
                                         封禁
                                       </Button>
                                     </Space>
@@ -1300,13 +1397,42 @@ function AdminPage() {
                                       >
                                         {u.deviceId}
                                       </Typography.Text>
-                                      <Button size="small" onClick={() => quickBan('device', u.deviceId!)}>
+                                      <Button
+                                        size="small"
+                                        onClick={() => openQuickBan({
+                                          mode: 'single',
+                                          type: 'device',
+                                          ip: u.clientIp,
+                                          deviceId: u.deviceId,
+                                          nickname: u.nickname,
+                                        })}
+                                      >
                                         封禁
                                       </Button>
                                     </Space>
                                   ) : (
                                     <Typography.Text type="secondary">—</Typography.Text>
                                   )
+                                ),
+                              },
+                              {
+                                title: '操作',
+                                width: 100,
+                                fixed: 'right' as const,
+                                render: (_, u) => (
+                                  <Button
+                                    size="small"
+                                    danger
+                                    disabled={!u.clientIp && !u.deviceId}
+                                    onClick={() => openQuickBan({
+                                      mode: 'both',
+                                      ip: u.clientIp,
+                                      deviceId: u.deviceId,
+                                      nickname: u.nickname,
+                                    })}
+                                  >
+                                    一键拉黑
+                                  </Button>
                                 ),
                               },
                             ]}
@@ -1361,7 +1487,16 @@ function AdminPage() {
                                           <Typography.Text code copyable={{ text: row.clientIp }}>
                                             {row.clientIp}
                                           </Typography.Text>
-                                          <Button size="small" onClick={() => quickBan('ip', row.clientIp)}>
+                                          <Button
+                                            size="small"
+                                            onClick={() => openQuickBan({
+                                              mode: 'single',
+                                              type: 'ip',
+                                              ip: row.clientIp,
+                                              deviceId: row.deviceId,
+                                              nickname: row.nickname,
+                                            })}
+                                          >
                                             封禁
                                           </Button>
                                         </Space>
@@ -1383,13 +1518,41 @@ function AdminPage() {
                                           >
                                             {row.deviceId}
                                           </Typography.Text>
-                                          <Button size="small" onClick={() => quickBan('device', row.deviceId)}>
+                                          <Button
+                                            size="small"
+                                            onClick={() => openQuickBan({
+                                              mode: 'single',
+                                              type: 'device',
+                                              ip: row.clientIp,
+                                              deviceId: row.deviceId,
+                                              nickname: row.nickname,
+                                            })}
+                                          >
                                             封禁
                                           </Button>
                                         </Space>
                                       ) : (
                                         <Typography.Text type="secondary">—</Typography.Text>
                                       )
+                                    ),
+                                  },
+                                  {
+                                    title: '操作',
+                                    width: 100,
+                                    render: (_, row) => (
+                                      <Button
+                                        size="small"
+                                        danger
+                                        disabled={!row.clientIp && !row.deviceId}
+                                        onClick={() => openQuickBan({
+                                          mode: 'both',
+                                          ip: row.clientIp,
+                                          deviceId: row.deviceId,
+                                          nickname: row.nickname,
+                                        })}
+                                      >
+                                        一键拉黑
+                                      </Button>
                                     ),
                                   },
                                 ]}
@@ -1419,7 +1582,7 @@ function AdminPage() {
                         aria-label="封禁类型"
                         options={[
                           { value: 'ip', label: 'IP' },
-                          { value: 'device', label: 'deviceId' },
+                          { value: 'device', label: '设备' },
                         ]}
                         onChange={setBanType}
                       />
@@ -1433,7 +1596,7 @@ function AdminPage() {
                       <Input
                         value={banValue}
                         onChange={(e) => setBanValue(e.target.value)}
-                        placeholder={banType === 'ip' ? '例如 1.2.3.4' : '客户端 deviceId'}
+                        placeholder={banType === 'ip' ? '例如 1.2.3.4' : '客户端设备 ID'}
                         style={{ fontFamily: 'monospace' }}
                       />
                     </Form.Item>
@@ -1467,8 +1630,8 @@ function AdminPage() {
                 <Alert type="success" showIcon message={banHint} style={{ marginBottom: 8 }} />
               )}
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                封禁后无法进房 / 建房。可从「房间管理」展开成员或建房人一行键填入。
-                建房限流为每 IP/设备 5 分钟 1 次；若持续按节奏刷房或同名堆积，系统会自动拉黑（来源显示为「自动」）。
+                封禁后无法进房 / 建房。可在「房间管理」展开成员后直接封禁或一键拉黑（IP+设备）。
+                建房限流与自动拉黑阈值可在「系统设置 → 房间」调整。
               </Typography.Text>
             </Card>
             <Card
@@ -1674,23 +1837,53 @@ function AdminPage() {
 
       case 'audit':
         return (
-          <Card title={`操作审计（${auditTotal}，Redis 持久化）`}>
-            <Table
-              rowKey={(entry, idx) => `${entry.at}-${entry.action}-${idx}`}
-              size="small"
-              loading={auditLoading}
-              columns={auditColumns}
-              dataSource={auditItems}
-              pagination={{
-                current: auditPage,
-                pageSize: AUDIT_PAGE_SIZE,
-                total: auditTotal,
-                onChange: setAuditPage,
-                showTotal: (total) => `共 ${total} 条`,
-                showSizeChanger: false,
-              }}
-              locale={{ emptyText: '暂无操作记录' }}
-            />
+          <Card title="操作审计">
+            <Space direction="vertical" size={12} style={{ width: '100%' }}>
+              <Space wrap size={8} style={{ width: '100%' }}>
+                <Input.Search
+                  placeholder="搜索 IP、房间、用户、原因…"
+                  allowClear
+                  value={auditKeyword}
+                  onChange={(e) => setAuditKeyword(e.target.value)}
+                  onSearch={(value) => {
+                    const next = value.trim();
+                    setAuditKeyword(next);
+                    setAuditKeywordApplied(next);
+                    setAuditPage(1);
+                  }}
+                  style={{ width: 260, maxWidth: '100%' }}
+                />
+                <Select
+                  allowClear
+                  placeholder="类型"
+                  value={auditAction}
+                  options={AUDIT_ACTION_OPTIONS}
+                  onChange={(value) => {
+                    setAuditAction(value || undefined);
+                    setAuditPage(1);
+                  }}
+                  style={{ width: 180 }}
+                  showSearch
+                  optionFilterProp="label"
+                />
+              </Space>
+              <Table
+                rowKey={(entry, idx) => `${entry.at}-${entry.action}-${idx}`}
+                size="small"
+                loading={auditLoading}
+                columns={auditColumns}
+                dataSource={auditItems}
+                pagination={{
+                  current: auditPage,
+                  pageSize: AUDIT_PAGE_SIZE,
+                  total: auditTotal,
+                  onChange: setAuditPage,
+                  showTotal: (total) => `共 ${total} 条`,
+                  showSizeChanger: false,
+                }}
+                locale={{ emptyText: '暂无操作记录' }}
+              />
+            </Space>
           </Card>
         );
 
@@ -1995,6 +2188,58 @@ function AdminPage() {
             onChange={(e) => setRejectPermanentReason(e.target.value)}
             placeholder="请填写拒绝原因（必填）"
             maxLength={200}
+            rows={3}
+            showCount
+          />
+        </Space>
+      </Modal>
+
+      <Modal
+        title={quickBanDraft?.mode === 'both' ? '一键拉黑' : '确认封禁'}
+        open={Boolean(quickBanDraft)}
+        onCancel={() => {
+          if (quickBanSaving) return;
+          setQuickBanDraft(null);
+          setQuickBanReason('');
+        }}
+        onOk={() => void submitQuickBan()}
+        okText={quickBanDraft?.mode === 'both' ? '拉黑 IP 和设备' : '确认封禁'}
+        okButtonProps={{ danger: true, loading: quickBanSaving }}
+        cancelText="取消"
+        cancelButtonProps={{ disabled: quickBanSaving }}
+        destroyOnClose
+      >
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+            {quickBanDraft?.nickname ? `成员「${quickBanDraft.nickname}」· ` : ''}
+            {quickBanDraft?.mode === 'both'
+              ? '将同时封禁其 IP 与设备，无法进房 / 建房。'
+              : `将封禁该${quickBanDraft?.type === 'ip' ? ' IP' : '设备'}，无法进房 / 建房。`}
+          </Typography.Text>
+          {quickBanDraft?.mode === 'both' ? (
+            <div style={{ display: 'grid', gap: 4 }}>
+              <Typography.Text style={{ fontSize: 12 }}>
+                IP：{quickBanDraft.ip ? <Typography.Text code>{quickBanDraft.ip}</Typography.Text> : '—'}
+              </Typography.Text>
+              <Typography.Text style={{ fontSize: 12 }}>
+                设备：{quickBanDraft.deviceId
+                  ? <Typography.Text code>{quickBanDraft.deviceId}</Typography.Text>
+                  : '—'}
+              </Typography.Text>
+            </div>
+          ) : (
+            <Typography.Text style={{ fontSize: 12 }}>
+              {quickBanDraft?.type === 'ip' ? 'IP' : '设备'}：
+              <Typography.Text code>
+                {quickBanDraft?.type === 'ip' ? quickBanDraft.ip : quickBanDraft?.deviceId}
+              </Typography.Text>
+            </Typography.Text>
+          )}
+          <Input.TextArea
+            value={quickBanReason}
+            onChange={(e) => setQuickBanReason(e.target.value)}
+            placeholder="封禁原因（可选）"
+            maxLength={120}
             rows={3}
             showCount
           />

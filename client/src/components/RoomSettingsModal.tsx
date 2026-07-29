@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Crown, Minus, Plus, Sparkles, ShieldCheck, X } from 'lucide-react';
+import { Crown, Minus, Plus, Sparkles, ShieldCheck, Trash2, X } from 'lucide-react';
 import { NETEASE_FM_MODE_OPTIONS, getFmModeLabel, normalizeFmMode, FM_MODE_OFF, DEFAULT_FM_MODE } from '../api/music/fmMode';
 import type { BannedSong, ForbiddenWord, RoomUser } from '../types';
 import type { DislikeSkipMode } from '../lib/dislikeSkip';
@@ -31,7 +31,7 @@ const FORBIDDEN_WORD_MAX_LEN = 20;
 const COOLDOWN_OPTIONS = [0, 10, 30, 60, 120] as const;
 const QUEUE_LIMIT_OPTIONS = [50, 100, 200] as const;
 
-type SettingsTab = 'fm' | 'member' | 'transfer' | 'identity' | 'announcement' | 'chat' | 'songRequest' | 'permanent';
+type SettingsTab = 'fm' | 'member' | 'room' | 'announcement' | 'chat' | 'songRequest';
 
 export interface SongRequestSettings {
   enabled: boolean;
@@ -98,6 +98,7 @@ interface Props {
   users?: RoomUser[];
   myUserId?: string | null;
   transferSaving?: boolean;
+  destroySaving?: boolean;
   roomId?: string;
   protectedFromDestroy?: boolean;
   permanentApplication?: {
@@ -120,6 +121,7 @@ interface Props {
   onSaveJoinNotice: (settings: { enabled: boolean; cooldownMinutes: number }) => void;
   onSaveSongRequest: (settings: SongRequestSettings) => void;
   onTransferOwner?: (userId: string) => void | Promise<void>;
+  onDestroyRoom?: () => void | Promise<void>;
   onApplyPermanent?: (note?: string) => void | Promise<void>;
   onCancelPermanent?: () => void | Promise<void>;
 }
@@ -260,6 +262,7 @@ export default function RoomSettingsModal({
   users = [],
   myUserId = null,
   transferSaving = false,
+  destroySaving = false,
   roomId,
   protectedFromDestroy = false,
   permanentApplication = null,
@@ -277,6 +280,7 @@ export default function RoomSettingsModal({
   onSaveJoinNotice,
   onSaveSongRequest,
   onTransferOwner,
+  onDestroyRoom,
   onApplyPermanent,
   onCancelPermanent,
 }: Props) {
@@ -290,6 +294,7 @@ export default function RoomSettingsModal({
   const [showDefaultForbiddenWords, setShowDefaultForbiddenWords] = useState(false);
   const [transferTargetId, setTransferTargetId] = useState<string | null>(null);
   const [confirmTransfer, setConfirmTransfer] = useState(false);
+  const [confirmDestroy, setConfirmDestroy] = useState(false);
   const [permanentNote, setPermanentNote] = useState('');
   const [linuxdoEnabled, setLinuxdoEnabled] = useState(identityLinuxdoEnabled);
   const [linuxdoBound, setLinuxdoBound] = useState<LinuxdoBinding | null>(identityLinuxdoBound);
@@ -325,8 +330,7 @@ export default function RoomSettingsModal({
     const items: { id: SettingsTab; label: string }[] = [];
     if (isOwner) {
       items.push({ id: 'fm', label: '漫游' });
-      items.push({ id: 'permanent', label: '常驻' });
-      items.push({ id: 'transfer', label: '转让' });
+      items.push({ id: 'room', label: '房主' });
     }
     if (canModerate) {
       items.push({ id: 'member', label: '贵宾' });
@@ -334,8 +338,9 @@ export default function RoomSettingsModal({
       items.push({ id: 'chat', label: '聊天' });
       items.push({ id: 'songRequest', label: '点歌' });
     }
-    if (linuxdoEnabled || githubEnabled) {
-      items.push({ id: 'identity', label: '身份' });
+    // 非房主仅用于找回身份
+    if (!isOwner && (linuxdoEnabled || githubEnabled)) {
+      items.push({ id: 'room', label: '身份' });
     }
     return items;
   }, [isOwner, canModerate, linuxdoEnabled, githubEnabled]);
@@ -357,16 +362,17 @@ export default function RoomSettingsModal({
     appliedSongRequestRef.current = songRequest;
     setTransferTargetId(null);
     setConfirmTransfer(false);
+    setConfirmDestroy(false);
     setPermanentNote('');
     const initialTabs: SettingsTab[] = [];
     if (isOwner) {
-      initialTabs.push('fm', 'permanent', 'transfer');
+      initialTabs.push('fm', 'room');
     }
     if (canModerate) {
       initialTabs.push('member', 'announcement', 'chat', 'songRequest');
     }
-    if (identityLinuxdoEnabled || identityGithubEnabled) {
-      initialTabs.push('identity');
+    if (!isOwner && (identityLinuxdoEnabled || identityGithubEnabled)) {
+      initialTabs.push('room');
     }
     setActiveTab(initialTabs[0] ?? 'announcement');
   }, [
@@ -385,6 +391,7 @@ export default function RoomSettingsModal({
   useEffect(() => {
     if (!open) {
       setConfirmTransfer(false);
+      setConfirmDestroy(false);
       return;
     }
     if (transferTargetId && !transferCandidates.some((user) => user.id === transferTargetId)) {
@@ -508,7 +515,7 @@ export default function RoomSettingsModal({
       >
         <div className="flex flex-shrink-0 items-center justify-between border-b border-white/10 px-5 py-4">
           <h2 className="text-base font-semibold text-white">
-            {!isOwner && activeTab === 'identity' ? '找回身份' : '房间设置'}
+            {!isOwner && activeTab === 'room' ? '找回身份' : '房间设置'}
           </h2>
           <button
             type="button"
@@ -583,64 +590,257 @@ export default function RoomSettingsModal({
             </section>
           )}
 
-          {activeTab === 'permanent' && isOwner && (
-            <section>
-              <div className="mb-2 flex items-center gap-2">
-                <ShieldCheck className="h-4 w-4 text-emerald-400" />
-                <h3 className="text-sm font-medium text-white">申请常驻</h3>
-              </div>
-              <p className="mb-3 text-xs text-netease-muted">
-                常驻房间在无人时也不会被自动销毁。提交后由管理员审核，通过或拒绝都会弹窗通知你。
-              </p>
-
-              {protectedFromDestroy ? (
-                <div className="rounded-xl border border-emerald-400/20 bg-emerald-400/10 px-3 py-3">
-                  <p className="text-sm font-medium text-emerald-300">当前已是常驻房间</p>
-                  <p className="mt-1 text-xs text-white/50">空房也会保留，无需再次申请。</p>
-                </div>
-              ) : permanentApplication?.status === 'pending' ? (
-                <div className="space-y-3">
-                  <div className="rounded-xl border border-amber-400/20 bg-amber-400/10 px-3 py-3">
-                    <p className="text-sm font-medium text-amber-300">审核中</p>
-                    <p className="mt-1 text-xs text-white/50">
-                      已提交申请，请耐心等待管理员处理。
-                      {permanentApplication.appliedAt
-                        ? `（${new Date(permanentApplication.appliedAt).toLocaleString()}）`
-                        : ''}
-                    </p>
+          {activeTab === 'room' && (
+            <div className="space-y-6">
+              {isOwner && (
+                <section>
+                  <div className="mb-2 flex items-center gap-2">
+                    <ShieldCheck className="h-4 w-4 text-emerald-400" />
+                    <h3 className="text-sm font-medium text-white">申请常驻</h3>
                   </div>
-                  <button
-                    type="button"
-                    disabled={permanentSaving || !onCancelPermanent}
-                    onClick={() => void onCancelPermanent?.()}
-                    className="w-full rounded-xl border border-white/10 bg-white/[0.03] py-2.5 text-sm text-white/80 transition-colors hover:bg-white/[0.06] disabled:opacity-50"
-                  >
-                    {permanentSaving ? '处理中…' : '撤销申请'}
-                  </button>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <label className="block">
-                    <span className="mb-1.5 block text-xs text-netease-muted">申请说明（可选）</span>
-                    <textarea
-                      value={permanentNote}
-                      onChange={(e) => setPermanentNote(e.target.value.slice(0, 120))}
-                      rows={3}
-                      placeholder="例如：长期听歌房间，希望保留设置与队列"
-                      className="w-full resize-none rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white outline-none placeholder:text-white/25 focus:border-white/20"
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    disabled={permanentSaving || !onApplyPermanent}
-                    onClick={() => void onApplyPermanent?.(permanentNote.trim())}
-                    className="w-full rounded-xl bg-netease-red py-2.5 text-sm font-medium text-white transition-colors hover:bg-netease-red/90 disabled:opacity-50"
-                  >
-                    {permanentSaving ? '提交中…' : '提交常驻申请'}
-                  </button>
-                </div>
+                  <p className="mb-3 text-xs text-netease-muted">
+                    常驻房间在无人时也不会被自动销毁。提交后由管理员审核，通过或拒绝都会弹窗通知你。
+                  </p>
+
+                  {protectedFromDestroy ? (
+                    <div className="rounded-xl border border-emerald-400/20 bg-emerald-400/10 px-3 py-3">
+                      <p className="text-sm font-medium text-emerald-300">当前已是常驻房间</p>
+                      <p className="mt-1 text-xs text-white/50">空房也会保留，无需再次申请。</p>
+                    </div>
+                  ) : permanentApplication?.status === 'pending' ? (
+                    <div className="space-y-3">
+                      <div className="rounded-xl border border-amber-400/20 bg-amber-400/10 px-3 py-3">
+                        <p className="text-sm font-medium text-amber-300">审核中</p>
+                        <p className="mt-1 text-xs text-white/50">
+                          已提交申请，请耐心等待管理员处理。
+                          {permanentApplication.appliedAt
+                            ? `（${new Date(permanentApplication.appliedAt).toLocaleString()}）`
+                            : ''}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={permanentSaving || !onCancelPermanent}
+                        onClick={() => void onCancelPermanent?.()}
+                        className="w-full rounded-xl border border-white/10 bg-white/[0.03] py-2.5 text-sm text-white/80 transition-colors hover:bg-white/[0.06] disabled:opacity-50"
+                      >
+                        {permanentSaving ? '处理中…' : '撤销申请'}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs text-netease-muted">申请说明（可选）</span>
+                        <textarea
+                          value={permanentNote}
+                          onChange={(e) => setPermanentNote(e.target.value.slice(0, 120))}
+                          rows={3}
+                          placeholder="例如：长期听歌房间，希望保留设置与队列"
+                          className="w-full resize-none rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white outline-none placeholder:text-white/25 focus:border-white/20"
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        disabled={permanentSaving || !onApplyPermanent}
+                        onClick={() => void onApplyPermanent?.(permanentNote.trim())}
+                        className="w-full rounded-xl bg-netease-red py-2.5 text-sm font-medium text-white transition-colors hover:bg-netease-red/90 disabled:opacity-50"
+                      >
+                        {permanentSaving ? '提交中…' : '提交常驻申请'}
+                      </button>
+                    </div>
+                  )}
+                </section>
               )}
-            </section>
+
+              {isOwner && (
+                <section>
+                  <div className="mb-2 flex items-center gap-2">
+                    <Crown className="h-4 w-4 text-amber-400" />
+                    <h3 className="text-sm font-medium text-white">转让房主</h3>
+                  </div>
+                  <p className="mb-3 text-xs text-netease-muted">
+                    将房间创建者身份转让给在线成员。转让后对方成为房主，你将变为管理员（名额未满时）。
+                  </p>
+                  {transferCandidates.length === 0 ? (
+                    <p className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-netease-muted">
+                      当前没有可转让的在线成员
+                    </p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {transferCandidates.map((user) => {
+                        const selected = transferTargetId === user.id;
+                        return (
+                          <button
+                            key={user.id}
+                            type="button"
+                            disabled={transferSaving}
+                            onClick={() => setTransferTargetId(user.id)}
+                            className={`flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-left transition-colors disabled:opacity-50 ${
+                              selected
+                                ? 'border-amber-400/30 bg-amber-400/[0.08]'
+                                : 'border-transparent bg-white/[0.03] hover:bg-white/[0.06]'
+                            }`}
+                          >
+                            <span className={`text-sm font-medium ${selected ? 'text-white' : 'text-white/90'}`}>
+                              {user.nickname}
+                            </span>
+                            {selected && (
+                              <span className="text-[10px] text-amber-300">已选择</span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <div className="mt-4 flex justify-end">
+                    <button
+                      type="button"
+                      disabled={!selectedTransferUser || transferSaving || !onTransferOwner}
+                      onClick={() => setConfirmTransfer(true)}
+                      className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-medium text-black transition-colors hover:bg-amber-400 disabled:opacity-50"
+                    >
+                      {transferSaving ? '转让中…' : '转让房主'}
+                    </button>
+                  </div>
+                </section>
+              )}
+
+              {(linuxdoEnabled || githubEnabled) && (
+                <section className="space-y-3">
+                  <h3 className="text-sm font-medium text-white">身份绑定</h3>
+                  {isOwner ? (
+                    <>
+                      <p className="text-xs text-netease-muted">
+                        绑定后换设备可用同一账号找回房主身份。
+                      </p>
+                      <div className="space-y-2">
+                        {linuxdoEnabled && (
+                          <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5">
+                            <span className="w-16 flex-shrink-0 text-xs text-white/50">Linux.do</span>
+                            {linuxdoBound ? (
+                              <>
+                                <span className="min-w-0 flex-1 truncate text-sm text-white">
+                                  {linuxdoBound.username || linuxdoBound.linuxdoId}
+                                </span>
+                                <button
+                                  type="button"
+                                  disabled={linuxdoUnbinding}
+                                  onClick={async () => {
+                                    setLinuxdoUnbinding(true);
+                                    const result = await unbindLinuxdo();
+                                    setLinuxdoUnbinding(false);
+                                    if (result.success) setLinuxdoBound(null);
+                                  }}
+                                  className="flex-shrink-0 rounded-lg px-2.5 py-1 text-xs text-red-300 transition-colors hover:bg-red-500/10 disabled:opacity-50"
+                                >
+                                  {linuxdoUnbinding ? '…' : '解绑'}
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                type="button"
+                                disabled={!roomId}
+                                onClick={() => roomId && startLinuxdoBind(roomId, window.location.pathname)}
+                                className="ml-auto flex-shrink-0 rounded-lg bg-amber-500 px-3 py-1 text-xs font-medium text-black transition-colors hover:bg-amber-400 disabled:opacity-50"
+                              >
+                                绑定
+                              </button>
+                            )}
+                          </div>
+                        )}
+                        {githubEnabled && (
+                          <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5">
+                            <span className="w-16 flex-shrink-0 text-xs text-white/50">GitHub</span>
+                            {githubBound ? (
+                              <>
+                                <span className="min-w-0 flex-1 truncate text-sm text-white">
+                                  {githubBound.username || githubBound.githubId}
+                                </span>
+                                <button
+                                  type="button"
+                                  disabled={githubUnbinding}
+                                  onClick={async () => {
+                                    setGithubUnbinding(true);
+                                    const result = await unbindGithub();
+                                    setGithubUnbinding(false);
+                                    if (result.success) setGithubBound(null);
+                                  }}
+                                  className="flex-shrink-0 rounded-lg px-2.5 py-1 text-xs text-red-300 transition-colors hover:bg-red-500/10 disabled:opacity-50"
+                                >
+                                  {githubUnbinding ? '…' : '解绑'}
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                type="button"
+                                disabled={!roomId}
+                                onClick={() => roomId && startGithubBind(roomId, window.location.pathname)}
+                                className="ml-auto flex-shrink-0 rounded-lg bg-amber-500 px-3 py-1 text-xs font-medium text-black transition-colors hover:bg-amber-400 disabled:opacity-50"
+                              >
+                                绑定
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-xs leading-relaxed text-netease-muted">
+                        换设备或清除 Cookie 后，可用当初绑定的账号找回房主身份。
+                      </p>
+                      <div className="space-y-2">
+                        {linuxdoEnabled && (
+                          <button
+                            type="button"
+                            onClick={() => startLinuxdoRecover(window.location.pathname)}
+                            className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white transition-colors hover:bg-white/[0.06]"
+                          >
+                            Linux.do 找回
+                          </button>
+                        )}
+                        {githubEnabled && (
+                          <button
+                            type="button"
+                            onClick={() => startGithubRecover(window.location.pathname)}
+                            className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white transition-colors hover:bg-white/[0.06]"
+                          >
+                            GitHub 找回
+                          </button>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </section>
+              )}
+
+              {isOwner && (
+                <section>
+                  <div className="mb-2 flex items-center gap-2">
+                    <Trash2 className="h-4 w-4 text-red-400" />
+                    <h3 className="text-sm font-medium text-white">解散房间</h3>
+                  </div>
+                  <p className="mb-3 text-xs text-netease-muted">
+                    立即解散本房间：在线成员会被移出，队列与聊天记录不再保留。此操作不可撤销。
+                  </p>
+                  {protectedFromDestroy && (
+                    <p className="mb-3 rounded-xl border border-amber-400/20 bg-amber-400/[0.08] px-3 py-2.5 text-xs text-amber-200/90">
+                      当前为常驻房间，解散后将同时取消常驻保护。
+                    </p>
+                  )}
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      disabled={destroySaving || !onDestroyRoom}
+                      onClick={() => setConfirmDestroy(true)}
+                      className="rounded-xl bg-red-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-400 disabled:opacity-50"
+                    >
+                      {destroySaving ? '解散中…' : '解散房间'}
+                    </button>
+                  </div>
+                </section>
+              )}
+            </div>
           )}
 
           {activeTab === 'member' && canModerate && (
@@ -662,167 +862,6 @@ export default function RoomSettingsModal({
                   {memberTierCount > 0 ? `已设置 ${memberTierCount} 人` : '未设置'}
                 </span>
               </button>
-            </section>
-          )}
-
-          {activeTab === 'transfer' && isOwner && (
-            <section>
-              <div className="mb-2 flex items-center gap-2">
-                <Crown className="h-4 w-4 text-amber-400" />
-                <h3 className="text-sm font-medium text-white">转让房主</h3>
-              </div>
-              <p className="mb-3 text-xs text-netease-muted">
-                将房间创建者身份转让给在线成员。转让后对方成为房主，你将变为管理员（名额未满时）。
-              </p>
-              {transferCandidates.length === 0 ? (
-                <p className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-netease-muted">
-                  当前没有可转让的在线成员
-                </p>
-              ) : (
-                <div className="space-y-1.5">
-                  {transferCandidates.map((user) => {
-                    const selected = transferTargetId === user.id;
-                    return (
-                      <button
-                        key={user.id}
-                        type="button"
-                        disabled={transferSaving}
-                        onClick={() => setTransferTargetId(user.id)}
-                        className={`flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-left transition-colors disabled:opacity-50 ${
-                          selected
-                            ? 'border-amber-400/30 bg-amber-400/[0.08]'
-                            : 'border-transparent bg-white/[0.03] hover:bg-white/[0.06]'
-                        }`}
-                      >
-                        <span className={`text-sm font-medium ${selected ? 'text-white' : 'text-white/90'}`}>
-                          {user.nickname}
-                        </span>
-                        {selected && (
-                          <span className="text-[10px] text-amber-300">已选择</span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-              <div className="mt-4 flex justify-end">
-                <button
-                  type="button"
-                  disabled={!selectedTransferUser || transferSaving || !onTransferOwner}
-                  onClick={() => setConfirmTransfer(true)}
-                  className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-medium text-black transition-colors hover:bg-amber-400 disabled:opacity-50"
-                >
-                  {transferSaving ? '转让中…' : '转让房主'}
-                </button>
-              </div>
-            </section>
-          )}
-
-          {activeTab === 'identity' && (
-            <section className="space-y-3">
-              {isOwner ? (
-                <>
-                  <p className="text-xs text-netease-muted">
-                    绑定后换设备可用同一账号找回房主身份。
-                  </p>
-                  <div className="space-y-2">
-                    {linuxdoEnabled && (
-                      <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5">
-                        <span className="w-16 flex-shrink-0 text-xs text-white/50">Linux.do</span>
-                        {linuxdoBound ? (
-                          <>
-                            <span className="min-w-0 flex-1 truncate text-sm text-white">
-                              {linuxdoBound.username || linuxdoBound.linuxdoId}
-                            </span>
-                            <button
-                              type="button"
-                              disabled={linuxdoUnbinding}
-                              onClick={async () => {
-                                setLinuxdoUnbinding(true);
-                                const result = await unbindLinuxdo();
-                                setLinuxdoUnbinding(false);
-                                if (result.success) setLinuxdoBound(null);
-                              }}
-                              className="flex-shrink-0 rounded-lg px-2.5 py-1 text-xs text-red-300 transition-colors hover:bg-red-500/10 disabled:opacity-50"
-                            >
-                              {linuxdoUnbinding ? '…' : '解绑'}
-                            </button>
-                          </>
-                        ) : (
-                          <button
-                            type="button"
-                            disabled={!roomId}
-                            onClick={() => roomId && startLinuxdoBind(roomId, window.location.pathname)}
-                            className="ml-auto flex-shrink-0 rounded-lg bg-amber-500 px-3 py-1 text-xs font-medium text-black transition-colors hover:bg-amber-400 disabled:opacity-50"
-                          >
-                            绑定
-                          </button>
-                        )}
-                      </div>
-                    )}
-                    {githubEnabled && (
-                      <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5">
-                        <span className="w-16 flex-shrink-0 text-xs text-white/50">GitHub</span>
-                        {githubBound ? (
-                          <>
-                            <span className="min-w-0 flex-1 truncate text-sm text-white">
-                              {githubBound.username || githubBound.githubId}
-                            </span>
-                            <button
-                              type="button"
-                              disabled={githubUnbinding}
-                              onClick={async () => {
-                                setGithubUnbinding(true);
-                                const result = await unbindGithub();
-                                setGithubUnbinding(false);
-                                if (result.success) setGithubBound(null);
-                              }}
-                              className="flex-shrink-0 rounded-lg px-2.5 py-1 text-xs text-red-300 transition-colors hover:bg-red-500/10 disabled:opacity-50"
-                            >
-                              {githubUnbinding ? '…' : '解绑'}
-                            </button>
-                          </>
-                        ) : (
-                          <button
-                            type="button"
-                            disabled={!roomId}
-                            onClick={() => roomId && startGithubBind(roomId, window.location.pathname)}
-                            className="ml-auto flex-shrink-0 rounded-lg bg-amber-500 px-3 py-1 text-xs font-medium text-black transition-colors hover:bg-amber-400 disabled:opacity-50"
-                          >
-                            绑定
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </>
-              ) : (
-                <>
-                  <p className="text-xs leading-relaxed text-netease-muted">
-                    换设备或清除 Cookie 后，可用当初绑定的账号找回房主身份。
-                  </p>
-                  <div className="space-y-2">
-                    {linuxdoEnabled && (
-                      <button
-                        type="button"
-                        onClick={() => startLinuxdoRecover(window.location.pathname)}
-                        className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white transition-colors hover:bg-white/[0.06]"
-                      >
-                        Linux.do 找回
-                      </button>
-                    )}
-                    {githubEnabled && (
-                      <button
-                        type="button"
-                        onClick={() => startGithubRecover(window.location.pathname)}
-                        className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white transition-colors hover:bg-white/[0.06]"
-                      >
-                        GitHub 找回
-                      </button>
-                    )}
-                  </div>
-                </>
-              )}
             </section>
           )}
 
@@ -1335,6 +1374,32 @@ export default function RoomSettingsModal({
             if (!selectedTransferUser || !onTransferOwner) return;
             void Promise.resolve(onTransferOwner(selectedTransferUser.id)).finally(() => {
               setConfirmTransfer(false);
+            });
+          }}
+        />
+      )}
+      {confirmDestroy && (
+        <ConfirmModal
+          title="确认解散房间"
+          message={(
+            <>
+              确定解散当前房间？在线成员将被移出，房间内容无法恢复。
+              {protectedFromDestroy ? (
+                <>
+                  <br />
+                  该房为常驻房间，解散后常驻保护一并取消。
+                </>
+              ) : null}
+            </>
+          )}
+          confirmLabel="确认解散"
+          confirmVariant="danger"
+          loading={destroySaving}
+          onCancel={() => setConfirmDestroy(false)}
+          onConfirm={() => {
+            if (!onDestroyRoom) return;
+            void Promise.resolve(onDestroyRoom()).finally(() => {
+              setConfirmDestroy(false);
             });
           }}
         />

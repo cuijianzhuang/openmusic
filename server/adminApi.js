@@ -187,7 +187,8 @@ function clearAdminSessionCookie(res) {
   res.append('Set-Cookie', `${ADMIN_COOKIE}=; ${adminCookieFlags(0, res.req)}`);
 }
 
-function audit(action, detail = {}, ip = '') {
+/** 写入管理端「操作审计」+ 控制台；建房/进房拦截等防护事件也可调用 */
+export function appendAdminAudit(action, detail = {}, ip = '') {
   const entry = {
     at: Date.now(),
     action,
@@ -214,25 +215,60 @@ function audit(action, detail = {}, ip = '') {
     });
 }
 
-async function listAuditLogPage({ offset = 0, limit = 20 } = {}) {
-  const pageSize = Math.min(Math.max(1, Number(limit) || 20), 100);
+function audit(action, detail = {}, ip = '') {
+  appendAdminAudit(action, detail, ip);
+}
+
+async function listAuditLogPage({ offset = 0, limit = 10, q = '', action = '' } = {}) {
+  const pageSize = Math.min(Math.max(1, Number(limit) || 10), 100);
   const start = Math.max(0, Number(offset) || 0);
+  const keyword = String(q || '').trim().toLowerCase();
+  const actionFilter = String(action || '').trim();
   const client = getRedisClient();
   if (!client) return { items: [], total: 0, offset: start, limit: pageSize };
   try {
-    const total = await client.lLen(ADMIN_AUDIT_KEY);
-    if (start >= total) {
-      return { items: [], total, offset: start, limit: pageSize };
-    }
-    const end = Math.min(start + pageSize - 1, total - 1);
-    const rows = await client.lRange(ADMIN_AUDIT_KEY, start, end);
-    const items = rows.map((raw) => {
+    const rows = await client.lRange(ADMIN_AUDIT_KEY, 0, AUDIT_MAX - 1);
+    const all = rows.map((raw) => {
       try {
         return JSON.parse(raw);
       } catch {
         return null;
       }
     }).filter(Boolean);
+
+    const filtered = all.filter((entry) => {
+      if (actionFilter && entry.action !== actionFilter) return false;
+      if (!keyword) return true;
+      const haystack = [
+        entry.action,
+        entry.ip,
+        entry.username,
+        entry.linuxdoUsername,
+        entry.githubUsername,
+        entry.roomId,
+        entry.name,
+        entry.value,
+        entry.banType,
+        entry.banId,
+        entry.reason,
+        entry.path,
+        entry.url,
+        entry.reportId,
+        entry.error,
+        entry.trigger,
+        entry.deviceId,
+        entry.userId,
+        entry.via,
+        entry.source,
+      ]
+        .filter((v) => v != null && v !== '')
+        .map((v) => String(v).toLowerCase())
+        .join(' ');
+      return haystack.includes(keyword);
+    });
+
+    const total = filtered.length;
+    const items = filtered.slice(start, start + pageSize);
     return { items, total, offset: start, limit: pageSize };
   } catch (err) {
     console.error('admin-audit Redis 读取失败:', err?.message || err);
@@ -707,8 +743,15 @@ export function mountAdminApi(app, { io, socketToRoom, socketToUserId, getClient
 
   app.get('/api/admin/audit', requireAdmin, async (req, res) => {
     const page = Math.max(1, Number.parseInt(String(req.query.page || '1'), 10) || 1);
-    const pageSize = Math.min(100, Math.max(1, Number.parseInt(String(req.query.pageSize || '20'), 10) || 20));
-    const result = await listAuditLogPage({ offset: (page - 1) * pageSize, limit: pageSize });
+    const pageSize = Math.min(100, Math.max(1, Number.parseInt(String(req.query.pageSize || '10'), 10) || 10));
+    const q = String(req.query.q || '').trim().slice(0, 80);
+    const action = String(req.query.action || '').trim().slice(0, 64);
+    const result = await listAuditLogPage({
+      offset: (page - 1) * pageSize,
+      limit: pageSize,
+      q,
+      action,
+    });
     res.json({
       items: result.items,
       total: result.total,

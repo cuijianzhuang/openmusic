@@ -1741,6 +1741,28 @@ export function createRoom({ name, password, creatorId, creatorDeviceId, creator
   return serializeRoom(room);
 }
 
+function roomOwnedBy({ room, creatorId, creatorDeviceId }) {
+  const uid = sanitizeCreatorId(creatorId);
+  const did = sanitizeCreatorId(creatorDeviceId);
+  if (!uid && !did) return false;
+  const matchUser = uid && room.creatorId === uid;
+  const matchDid = did && room.creatorDeviceId === did;
+  return Boolean(matchUser || matchDid);
+}
+
+/**
+ * 统计该身份当前仍存在的自建房间数（含有人/有曲的房间；不含常驻保护房）。
+ */
+export function countOwnedRooms({ creatorId, creatorDeviceId } = {}) {
+  let count = 0;
+  for (const room of rooms.values()) {
+    if (protectedRoomIds.has(room.id)) continue;
+    if (!roomOwnedBy({ room, creatorId, creatorDeviceId })) continue;
+    count += 1;
+  }
+  return count;
+}
+
 /**
  * 查找该身份已创建、仍空闲（无人/无曲/无队列）的房间。
  * 用于堵住「只建不进、反复刷房号」：有空房则复用，不再新建。
@@ -1756,9 +1778,7 @@ export function findIdleOwnedRoom({ creatorId, creatorDeviceId } = {}) {
     if (protectedRoomIds.has(room.id)) continue;
     if (room.users.size > 0) continue;
     if (room.current || room.isPlaying || room.queue.length > 0) continue;
-    const matchUser = uid && room.creatorId === uid;
-    const matchDid = did && room.creatorDeviceId === did;
-    if (!matchUser && !matchDid) continue;
+    if (!roomOwnedBy({ room, creatorId: uid, creatorDeviceId: did })) continue;
     if (!best || (Number(room.createdAt) || 0) > (Number(best.createdAt) || 0)) {
       best = room;
     }
@@ -2118,6 +2138,29 @@ export function adminDestroyRoom(roomId) {
   void deleteRoomChatImages(id).catch((err) => console.error(`删除房间 ${id} 聊天图片失败:`, err));
   void deleteRoomFromStorage(id).catch((err) => console.error(`删除房间 ${id} 存储失败:`, err));
   return { success: true, name };
+}
+
+/**
+ * 房主手动解散鉴权
+ */
+export function assertOwnerCanDestroyRoom(roomId, actorId, connectionId) {
+  const id = String(roomId || "").toUpperCase();
+  const room = rooms.get(id);
+  if (!room) return { ok: false, error: "房间不存在" };
+
+  const uid = sanitizeCreatorId(actorId);
+  if (!uid) return { ok: false, error: "会话无效，请刷新后重试" };
+  if (!connectionId) return { ok: false, error: "会话无效，请刷新后重试" };
+
+  const denied = requireCreator(room, uid, connectionId);
+  if (denied) return { ok: false, error: denied.error || "仅房主可解散房间" };
+
+  const user = room.users.get(uid);
+  if (!isEligibleOwner(user)) {
+    return { ok: false, error: "仅房主可解散房间" };
+  }
+
+  return { ok: true, roomId: id, name: room.name };
 }
 
 /**

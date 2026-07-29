@@ -50,8 +50,16 @@ export interface AdminAuditEntry {
   linuxdoUsername?: string;
   githubUsername?: string;
   approved?: boolean;
+  id?: string;
   reason?: string;
   recoverable?: boolean;
+  deviceId?: string;
+  userId?: string;
+  retryAfterSec?: number;
+  ownedCount?: number;
+  maxOwnedRooms?: number;
+  source?: string;
+  trigger?: string;
 }
 
 export interface SiteAnnouncementConfig {
@@ -64,6 +72,16 @@ export interface SiteAnnouncementConfig {
 export interface RuntimeConfig {
   roomEmptyTtlMs: number;
   roomRestartGraceMs?: number;
+  /** 建房冷却（毫秒）；0 = 关闭 */
+  roomCreateCooldownMs: number;
+  /** 同一身份最多自建房数；0 = 不限制 */
+  roomCreateMaxOwned: number;
+  /** 无身份时 IP 宽松冷却（毫秒）；0 = 关闭 */
+  roomCreateIpLooseCooldownMs: number;
+  /** 是否启用疑似自动建房自动封禁 */
+  roomCreateAutoBanEnabled: boolean;
+  /** 自动建房检测打分阈值 */
+  roomCreateAutoBanScore: number;
   linuxdoClientId: string;
   linuxdoClientSecret: string;
   linuxdoRedirectUri: string;

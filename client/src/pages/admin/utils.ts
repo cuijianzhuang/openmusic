@@ -78,10 +78,14 @@ export function formatAuditAction(entry: AdminAuditEntry) {
       return '解绑 GitHub 账号';
     case 'set_credentials':
       return `修改管理员账号密码${entry.username ? `（${entry.username}）` : ''}`;
+    case 'set_credentials_fail':
+      return '修改管理员账号密码失败';
     case 'set_entry_path':
       return `更新登录地址 ${entry.path || ''}`;
     case 'set_runtime_config':
       return '更新运行配置';
+    case 'reset_music_api_circuit':
+      return `重置音源熔断 ${entry.id || ''}`;
     case 'set_announcement':
       return `更新站点公告（${entry.enabled ? '启用' : '停用'}）`;
     case 'set_room_protection':
@@ -104,6 +108,36 @@ export function formatAuditAction(entry: AdminAuditEntry) {
       return `封禁 ${entry.banType || ''} ${entry.value || ''}${typeof entry.kicked === 'number' ? ` · 踢出 ${entry.kicked}` : ''}`;
     case 'site_ban_remove':
       return `解除封禁 ${entry.banId || ''}`;
+    case 'room_create_blocked': {
+      const reasonMap: Record<string, string> = {
+        site_ban: '站点封禁',
+        cooldown: '建房冷却',
+        max_owned_rooms: '房间数上限',
+      };
+      const label = reasonMap[String(entry.reason || '')] || entry.reason || '未知';
+      const extra =
+        entry.reason === 'cooldown' && entry.retryAfterSec
+          ? ` · ${entry.retryAfterSec}s`
+          : entry.reason === 'max_owned_rooms' && entry.ownedCount != null
+            ? ` · ${entry.ownedCount}/${entry.maxOwnedRooms ?? 2}`
+            : '';
+      return `拦截建房（${label}${extra}）`;
+    }
+    case 'room_create_auto_ban':
+      return `自动封禁建房滥用 ${entry.banType || ''} ${entry.value || ''}${
+        entry.reason ? `：${entry.reason}` : ''
+      }${typeof entry.kicked === 'number' ? ` · 踢出 ${entry.kicked}` : ''}`;
+    case 'join_blocked':
+      return `拦截进房（${entry.reason === 'site_ban' ? '站点封禁' : entry.reason || '未知'}）${
+        entry.roomId ? ` ${entry.roomId}` : ''
+      }`;
+    case 'session_blocked': {
+      const reasonMap: Record<string, string> = {
+        bootstrap_rate_limit: '会话限流',
+        new_session_rate_limit: '新会话限流',
+      };
+      return `拦截会话（${reasonMap[String(entry.reason || '')] || entry.reason || '未知'}）`;
+    }
     case 'error_report_update':
       return `处理错误上报 ${entry.reportId || ''}${entry.status ? ` → ${entry.status}` : ''}`;
     case 'error_report_delete':
@@ -112,6 +146,12 @@ export function formatAuditAction(entry: AdminAuditEntry) {
       return `解散房间 ${entry.roomId || ''}${entry.name ? `（${entry.name}）` : ''}${
         typeof entry.kicked === 'number' ? ` · 踢出 ${entry.kicked}` : ''
       }`;
+    case 'owner_destroy_room':
+      return `房主解散房间 ${entry.roomId || ''}${entry.name ? `（${entry.name}）` : ''}${
+        typeof entry.kicked === 'number' ? ` · 踢出 ${entry.kicked}` : ''
+      }`;
+    case 'owner_destroy_room_denied':
+      return `拒绝房主解散 ${entry.roomId || ''}${entry.error ? `：${entry.error}` : ''}`;
     case 'destroy_room_fail':
       return `解散失败 ${entry.roomId || ''}${entry.error ? `：${entry.error}` : ''}`;
     default:

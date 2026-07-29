@@ -15,7 +15,7 @@ import {
 } from './metingUpstream.js';
 import { fetchCustomMusicApi, hasCustomMusicApi } from './customMusicApi.js';
 import { mountWechatFileHelperProxy } from './wechatFileHelperProxy.js';
-import { mountAdminApi } from './adminApi.js';
+import { mountAdminApi, appendAdminAudit } from './adminApi.js';
 import { initAdminCredentials } from './adminCredentials.js';
 import { isSetupRequired, mountSetupApi } from './setupApi.js';
 import { buildRobotsTxt, buildSitemapXml, resolveSiteOrigin } from './seoFiles.js';
@@ -50,6 +50,7 @@ import {
   listRoomsForAdmin,
   findIdleOwnedRoom,
   reuseIdleOwnedRoom,
+  countOwnedRooms,
   listRoomIds,
   flushAllPendingRoomPersists,
   verifyRoomPassword,
@@ -94,6 +95,8 @@ import {
   setPlaying,
   seekTo,
   getRoomInternal,
+  adminDestroyRoom,
+  assertOwnerCanDestroyRoom,
   buildPlaybackState,
   buildQueueSnapshot,
   setSharedPlaybackMedia,
@@ -535,6 +538,7 @@ const limitJoinPasswordFail = createRateLimiter({ windowMs: 60_000, max: 8 });
 const limitProxyRequest = createRateLimiter({ windowMs: 60_000, max: 120 });
 const limitSocketAction = createRateLimiter({ windowMs: 60_000, max: 90 });
 const limitSocketChat = createRateLimiter({ windowMs: 60_000, max: 30 });
+const limitOwnerDestroyRoom = createRateLimiter({ windowMs: 60_000, max: 3 });
 const limitErrorReport = createRateLimiter({ windowMs: 10 * 60_000, max: 5 });
 const limitSessionBootstrap = createRateLimiter({ windowMs: 60_000, max: 60 });
 const limitNewSessionBootstrap = createRateLimiter({ windowMs: 60_000, max: 12 });
@@ -1311,6 +1315,9 @@ function proxyLimitKey(kind, req) {
 app.post('/api/session/bootstrap', async (req, res) => {
   const requestIp = getRequestIp(req);
   if (!limitSessionBootstrap(`session:${requestIp}`)) {
+    appendAdminAudit('session_blocked', {
+      reason: 'bootstrap_rate_limit',
+    }, requestIp);
     return res.status(500).json({ error: '系统开小差了，请稍后再试' });
   }
   const cookieDeviceId = resolveDeviceIdFromCookieHeader(req.headers?.cookie || '');
@@ -1345,6 +1352,9 @@ app.post('/api/session/bootstrap', async (req, res) => {
   }
 
   if (!limitNewSessionBootstrap(`session-new:${requestIp}`)) {
+    appendAdminAudit('session_blocked', {
+      reason: 'new_session_rate_limit',
+    }, requestIp);
     return res.status(500).json({ error: '系统开小差了，请稍后再试' });
   }
   const userId = createServerClientId();
@@ -1632,10 +1642,10 @@ app.post('/api/rooms', async (req, res) => {
   const createIp = getRequestIp(req);
   const createDeviceId = resolveDeviceIdFromCookieHeader(req.headers?.cookie || '');
 
-  const enforceAutoBans = (bans) => {
+  const enforceAutoBans = (bans, { userId, trigger } = {}) => {
     if (!Array.isArray(bans) || bans.length === 0) return;
     for (const ban of bans) {
-      kickConnectionsMatchingBan(ban, {
+      const { kicked } = kickConnectionsMatchingBan(ban, {
         io,
         socketToRoom,
         socketToUserId,
@@ -1645,10 +1655,24 @@ app.post('/api/rooms', async (req, res) => {
         prepareRoomBroadcast,
         roomUpdateForViewer,
       });
+      appendAdminAudit('room_create_auto_ban', {
+        banType: ban.type,
+        value: ban.value,
+        reason: ban.reason || '',
+        source: ban.source || 'auto',
+        trigger: trigger || '',
+        userId: userId || '',
+        deviceId: createDeviceId || '',
+        kicked: typeof kicked === 'number' ? kicked : 0,
+      }, createIp);
     }
   };
 
   if (isSiteBanned({ ip: createIp, deviceId: createDeviceId })) {
+    appendAdminAudit('room_create_blocked', {
+      reason: 'site_ban',
+      deviceId: createDeviceId || '',
+    }, createIp);
     // 不暴露封禁
     return res.status(500).json({ error: '系统开小差了，请稍后再试' });
   }
@@ -1677,7 +1701,7 @@ app.post('/api/rooms', async (req, res) => {
         reused: true,
         listRoomsForGuard: listRoomsForAdmin,
       });
-      enforceAutoBans(bans);
+      enforceAutoBans(bans, { userId: identity.userId, trigger: 'reuse' });
     } catch (err) {
       console.error('room-create auto-ban failed:', err?.message || err);
     }
@@ -1690,14 +1714,39 @@ app.post('/api/rooms', async (req, res) => {
     userId: identity.userId,
   });
   if (!cooldown.allowed) {
+    appendAdminAudit('room_create_blocked', {
+      reason: 'cooldown',
+      userId: identity.userId,
+      deviceId: createDeviceId || '',
+      retryAfterSec: cooldown.retryAfterSec || 0,
+    }, createIp);
     const { bans } = await evaluateRoomCreateRejectAutoBan({
       ip: createIp,
       deviceId: createDeviceId,
       userId: identity.userId,
       listRoomsForGuard: listRoomsForAdmin,
     });
-    enforceAutoBans(bans);
+    enforceAutoBans(bans, { userId: identity.userId, trigger: 'cooldown_reject' });
     return res.status(500).json({ error: '系统开小差了，请稍后再试' });
+  }
+
+  // 每人最多同时保留 N 个自建房（runtimeConfig.roomCreateMaxOwned；0 = 不限制）
+  const maxOwned = Number(getRuntimeConfig().roomCreateMaxOwned) || 0;
+  const ownedCount = countOwnedRooms({
+    creatorId: identity.userId,
+    creatorDeviceId: createDeviceId,
+  });
+  if (maxOwned > 0 && ownedCount >= maxOwned) {
+    appendAdminAudit('room_create_blocked', {
+      reason: 'max_owned_rooms',
+      userId: identity.userId,
+      deviceId: createDeviceId || '',
+      ownedCount,
+      maxOwnedRooms: maxOwned,
+    }, createIp);
+    return res.status(400).json({
+      error: `最多同时创建 ${maxOwned} 个房间，请先解散或等空房自动回收后再试`,
+    });
   }
 
   const room = createRoom({
@@ -1717,7 +1766,7 @@ app.post('/api/rooms', async (req, res) => {
       roomId: room.id,
       listRoomsForGuard: listRoomsForAdmin,
     });
-    enforceAutoBans(bans);
+    enforceAutoBans(bans, { userId: identity.userId, trigger: 'create' });
   } catch (err) {
     console.error('room-create auto-ban failed:', err?.message || err);
   }
@@ -2351,6 +2400,14 @@ io.on('connection', (socket) => {
     const joinProbeIp = getClientIp(socket);
     const siteBan = isSiteBanned({ ip: joinProbeIp, deviceId });
     if (siteBan) {
+      appendAdminAudit('join_blocked', {
+        reason: 'site_ban',
+        roomId: id,
+        userId,
+        deviceId: deviceId || '',
+        banType: siteBan.type || '',
+        value: siteBan.value || '',
+      }, joinProbeIp);
       // 不暴露封禁，对外表现成临时失败
       callback?.({ success: false, error: '系统开小差了，请稍后再试' });
       return;
@@ -3083,6 +3140,91 @@ io.on('connection', (socket) => {
     broadcastRoomUpdate(roomId);
     emitSystemChat(roomId, result.systemMessage);
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId), message: result.message });
+  });
+
+  socket.on('destroy_room', (_payload, callback) => {
+    // 故意忽略客户端 payload（不可信）：房间仅以本连接已加入的 room 为准
+    if (rejectReadOnly(socket, callback)) return;
+
+    const roomId = socketToRoom.get(socket.id);
+    const actorId = getSocketUserId(socket);
+    const clientIp = getClientIp(socket);
+    const deny = (error, detail = {}) => {
+      appendAdminAudit('owner_destroy_room_denied', {
+        roomId: roomId || '',
+        userId: actorId || '',
+        error,
+        ...detail,
+      }, clientIp);
+      callback?.({ success: false, error });
+    };
+
+    // 三重限流：连接 / 用户 / IP，任一触顶即拒
+    if (
+      !limitOwnerDestroyRoom(`destroy:sid:${socket.id}`)
+      || (actorId && !limitOwnerDestroyRoom(`destroy:uid:${actorId}`))
+      || (clientIp && !limitOwnerDestroyRoom(`destroy:ip:${clientIp}`))
+    ) {
+      deny('操作过于频繁，请稍后再试', { reason: 'rate_limit' });
+      return;
+    }
+
+    if (!roomId) {
+      deny('未加入房间');
+      return;
+    }
+    if (!actorId) {
+      deny('会话无效，请刷新后重试', { reason: 'no_actor' });
+      return;
+    }
+
+    // Cookie 会话必须与进房绑定的 userId 一致，防止仅污染 socket 映射提权
+    const cookieIdentity = resolveIdentityFromCookies(socket.handshake?.headers?.cookie || '');
+    if (!cookieIdentity?.userId || cookieIdentity.userId !== actorId) {
+      deny('会话无效，请刷新后重试', { reason: 'cookie_mismatch' });
+      return;
+    }
+
+    // 房主身份 + 本连接属于房主（与转让房主等同级）
+    const auth = assertOwnerCanDestroyRoom(roomId, actorId, socket.id);
+    if (!auth.ok) {
+      deny(auth.error || '仅房主可解散房间', { reason: 'not_owner' });
+      return;
+    }
+
+    // 再读一次映射，防止鉴权与执行之间被换房
+    if (socketToRoom.get(socket.id) !== auth.roomId || getSocketUserId(socket) !== actorId) {
+      deny('会话已变更，请重试', { reason: 'session_race' });
+      return;
+    }
+
+    const sidsToKick = [];
+    for (const [sid, rid] of socketToRoom.entries()) {
+      if (rid === auth.roomId) sidsToKick.push(sid);
+    }
+
+    const result = adminDestroyRoom(auth.roomId);
+    if (!result.success) {
+      deny(result.error || '解散失败', { reason: 'destroy_failed' });
+      return;
+    }
+
+    for (const sid of sidsToKick) {
+      const s = io.sockets.sockets.get(sid);
+      socketToRoom.delete(sid);
+      socketToUserId.delete(sid);
+      s?.leave(auth.roomId);
+      s?.emit('kicked', { message: '房主已解散房间' });
+    }
+
+    appendAdminAudit('owner_destroy_room', {
+      roomId: auth.roomId,
+      name: result.name || auth.name || '',
+      userId: actorId,
+      kicked: sidsToKick.length,
+    }, clientIp);
+
+    callback?.({ success: true, message: '房间已解散' });
   });
 
   socket.on('set_room_admin', ({ userId: targetUserId, admin }, callback) => {

@@ -1,17 +1,26 @@
 /**
  * 建房限流 + 疑似自动建房检测。
- * - 硬限流：同一设备 / 用户 每 5 分钟最多创建 1 次（不含 IP，避免公司 NAT 误伤）
+ * - 硬限流：同一设备 / 用户 冷却期内最多创建 1 次（时长见 runtimeConfig.roomCreateCooldownMs）
  * - 空闲自建房复用（见 index.js findIdleOwnedRoom）堵住刷房号
  * - 软检测：按节奏、同名、空房堆积等打分，超阈值自动全站封禁（可含 IP）
  */
 
 import { addSiteBan, isSiteBanned } from './siteBan.js';
+import { getRuntimeConfig } from './runtimeConfig.js';
 
-const CREATE_COOLDOWN_MS = 5 * 60 * 1000;
 const HISTORY_TTL_MS = 2 * 60 * 60 * 1000;
 const MAX_HISTORY_PER_KEY = 40;
 const MAX_KEYS = 8_000;
-const AUTO_BAN_SCORE = 55;
+
+function getGuardSettings() {
+  const cfg = getRuntimeConfig();
+  return {
+    cooldownMs: Number(cfg.roomCreateCooldownMs) || 0,
+    ipLooseCooldownMs: Number(cfg.roomCreateIpLooseCooldownMs) || 0,
+    autoBanEnabled: cfg.roomCreateAutoBanEnabled !== false,
+    autoBanScore: Number(cfg.roomCreateAutoBanScore) || 55,
+  };
+}
 
 /** @type {Map<string, number>} key -> nextAllowedAt */
 const cooldownUntil = new Map();
@@ -96,10 +105,13 @@ function banTargets({ ip, deviceId }) {
 export function checkRoomCreateCooldown({ ip, deviceId, userId } = {}) {
   const now = Date.now();
   sweep(now);
+  const { cooldownMs, ipLooseCooldownMs } = getGuardSettings();
+  if (cooldownMs <= 0 && ipLooseCooldownMs <= 0) return { allowed: true };
+
   const keys = cooldownKeys({ deviceId, userId });
   if (keys.length === 0) {
-    // 无设备/用户标识时退化为按 IP 宽松限流（防裸刷），阈值单独更大
-    if (ip) {
+    // 无设备/用户标识时退化为按 IP 宽松限流（防裸刷）
+    if (ip && ipLooseCooldownMs > 0) {
       const ipKey = `ip-loose:${ip}`;
       const until = cooldownUntil.get(ipKey) || 0;
       if (until > now) {
@@ -114,6 +126,8 @@ export function checkRoomCreateCooldown({ ip, deviceId, userId } = {}) {
     }
     return { allowed: true };
   }
+
+  if (cooldownMs <= 0) return { allowed: true };
 
   let blockedUntil = 0;
   for (const key of keys) {
@@ -137,15 +151,17 @@ export function checkRoomCreateCooldown({ ip, deviceId, userId } = {}) {
 }
 
 function markCooldown({ ip, deviceId, userId }, now) {
-  const until = now + CREATE_COOLDOWN_MS;
+  const { cooldownMs, ipLooseCooldownMs } = getGuardSettings();
   const keys = cooldownKeys({ deviceId, userId });
   if (keys.length > 0) {
+    if (cooldownMs <= 0) return;
+    const until = now + cooldownMs;
     for (const key of keys) {
       rememberMapEntry(cooldownUntil, key, until, MAX_KEYS);
     }
-  } else if (ip) {
+  } else if (ip && ipLooseCooldownMs > 0) {
     // 无 did/uid：IP 用更短冷却，降低 NAT 误伤面
-    rememberMapEntry(cooldownUntil, `ip-loose:${ip}`, now + 60_000, MAX_KEYS);
+    rememberMapEntry(cooldownUntil, `ip-loose:${ip}`, now + ipLooseCooldownMs, MAX_KEYS);
   }
 }
 
@@ -191,7 +207,7 @@ function mergeRejects(keys) {
 /**
  * 打分：越高越像脚本。
  */
-function scoreAutomation(events, rejects, emptyOwnedRooms) {
+function scoreAutomation(events, rejects, emptyOwnedRooms, cooldownMs) {
   const now = Date.now();
   const recent1h = events.filter((e) => now - e.at <= 60 * 60 * 1000);
   const recent2h = events.filter((e) => now - e.at <= 2 * 60 * 60 * 1000);
@@ -247,7 +263,8 @@ function scoreAutomation(events, rejects, emptyOwnedRooms) {
     const m = mean(gaps);
     const sd = stddev(gaps);
     const cv = m > 0 ? sd / m : 1;
-    const nearCooldown = Math.abs(m - CREATE_COOLDOWN_MS) <= 90_000;
+    const baseCooldown = cooldownMs > 0 ? cooldownMs : 5 * 60 * 1000;
+    const nearCooldown = Math.abs(m - baseCooldown) <= 90_000;
     if (nearCooldown && cv <= 0.28) {
       score += 40;
       reasons.push('创建间隔高度规律');
@@ -296,12 +313,15 @@ function countEmptyOwnedRooms({ ip, deviceId, userId }, listRoomsFn) {
 }
 
 async function maybeAutoBanKeys({ ip, deviceId, userId, listRoomsForGuard }) {
+  const { autoBanEnabled, autoBanScore, cooldownMs } = getGuardSettings();
+  if (!autoBanEnabled) return [];
+
   const emptyOwnedRooms = countEmptyOwnedRooms({ ip, deviceId, userId }, listRoomsForGuard);
   const relatedKeys = historyKeys({ ip, deviceId, userId });
   const events = mergeEvents(relatedKeys);
   const rejects = mergeRejects(relatedKeys);
-  const { score, reasons } = scoreAutomation(events, rejects, emptyOwnedRooms);
-  if (score < AUTO_BAN_SCORE || reasons.length === 0) return [];
+  const { score, reasons } = scoreAutomation(events, rejects, emptyOwnedRooms, cooldownMs);
+  if (score < autoBanScore || reasons.length === 0) return [];
 
   const reason = `疑似自动建房：${reasons.join('；')}`.slice(0, 120);
   const bans = [];
