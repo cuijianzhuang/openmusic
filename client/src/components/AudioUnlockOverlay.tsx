@@ -12,10 +12,11 @@ interface Props {
 export default function AudioUnlockOverlay({ tvMode = false }: Props) {
   const needsAudioUnlock = useAudioStore((s) => s.needsAudioUnlock);
   const retryPlayback = useAudioStore((s) => s.retryPlayback);
-  const room = useRoomStore((s) => s.room);
+  // 只关心"当前是否有正在播放的歌"，房间其它无关变化不该让这个 overlay 跟着重渲染。
+  const hasCurrentSong = useRoomStore((s) => Boolean(s.room?.current));
   const handlingRef = useRef(false);
 
-  if (!needsAudioUnlock || !room?.current || !shouldShowUnlockOverlay()) return null;
+  if (!needsAudioUnlock || !hasCurrentSong || !shouldShowUnlockOverlay()) return null;
 
   const handleUnlock = () => {
     if (handlingRef.current) return;

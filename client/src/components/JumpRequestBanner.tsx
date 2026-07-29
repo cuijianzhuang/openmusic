@@ -1,5 +1,6 @@
 import { useCallback, useRef } from 'react';
 import { Check, X } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import { useRoomStore } from '../stores/roomStore';
 import { useSocket } from '../hooks/useSocket';
 
@@ -12,7 +13,12 @@ function removeSkipRequestLocally(requestId: string) {
 }
 
 export default function JumpRequestBanner() {
-  const room = useRoomStore((s) => s.room);
+  // 只订阅 skipRequests，不订阅整个 room 对象——房间任何无关变化（成员上下线/地理位置更新等）
+  // 都会让 room 换新引用，这个组件却只关心切歌申请列表，避免被那些无关变化拖着一起重渲染。
+  const { hasRoom, skipRequests } = useRoomStore(useShallow((s) => ({
+    hasRoom: Boolean(s.room),
+    skipRequests: s.room?.skipRequests ?? [],
+  })));
   const canControlPlayback = useRoomStore((s) => s.canControlPlayback);
   const { approveSkip, rejectSkip } = useSocket();
   const pendingIdsRef = useRef(new Set<string>());
@@ -39,9 +45,7 @@ export default function JumpRequestBanner() {
     }
   }, [rejectSkip]);
 
-  if (!room || !canControlPlayback) return null;
-
-  const skipRequests = room.skipRequests ?? [];
+  if (!hasRoom || !canControlPlayback) return null;
   if (skipRequests.length === 0) return null;
 
   return (

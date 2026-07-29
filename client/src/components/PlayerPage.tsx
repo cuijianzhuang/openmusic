@@ -4,6 +4,7 @@ import {
   ChevronDown, Play, Pause, SkipForward, Loader2, Tv, Check,
 } from 'lucide-react';
 import { useParams } from 'react-router-dom';
+import { useShallow } from 'zustand/react/shallow';
 import { copyToClipboard } from '../lib/copyToClipboard';
 import { useRoomStore } from '../stores/roomStore';
 import { useAudioStore } from '../stores/audioStore';
@@ -25,7 +26,6 @@ import FavoriteButton from './FavoriteButton';
 import PlayModeButton from './PlayModeButton';
 import AmbientCoverLayers from './AmbientCoverLayers';
 import { updateMediaSessionPlaybackState } from '../lib/mediaSession';
-import { canPauseInRoom, canSeekInRoom } from '../lib/roomPermissions';
 
 
 
@@ -42,11 +42,22 @@ export default memo(function PlayerPage({ onClose }: Props) {
   const { roomId } = useParams();
   const [tvCopied, setTvCopied] = useState(false);
 
-  const room = useRoomStore((s) => s.room);
+  // 只订阅这个页面实际用到的字段，避免房间其它无关变化（成员上下线等）导致整页重渲染。
+  const {
+    current, isPlaying, hasPendingSkip, roomId: currentRoomId,
+    memberSeekEnabled, memberPauseEnabled,
+  } = useRoomStore(useShallow((s) => ({
+    current: s.room?.current,
+    isPlaying: s.room?.isPlaying ?? false,
+    hasPendingSkip: s.room?.skipRequests?.some((r) => r.requestedBy === s.mySocketId) ?? false,
+    roomId: s.room?.id,
+    memberSeekEnabled: s.room?.memberSeekEnabled,
+    memberPauseEnabled: s.room?.memberPauseEnabled,
+  })));
 
   const canControlPlayback = useRoomStore((s) => s.canControlPlayback);
-  const canSeek = canSeekInRoom(room, canControlPlayback);
-  const canPause = canPauseInRoom(room, canControlPlayback);
+  const canSeek = canControlPlayback || Boolean(memberSeekEnabled);
+  const canPause = canControlPlayback || Boolean(memberPauseEnabled);
   const trackLoading = useAudioStore((s) => s.trackLoading);
   const setTrackLoading = useAudioStore((s) => s.setTrackLoading);
   const seekPlayback = useAudioStore((s) => s.seekPlayback);
@@ -56,25 +67,19 @@ export default memo(function PlayerPage({ onClose }: Props) {
 
   const [skipError, setSkipError] = useState('');
   const [skipMsg, setSkipMsg] = useState('');
-  const mySocketId = useRoomStore((s) => s.mySocketId);
 
 
 
-  const current = room?.current;
   const qualityLabel = current
     ? (actualQualityByTrack[getTrackKey(current)] ?? null)
     : null;
   const lyrics = useTrackLyrics(current);
 
-  const isPlaying = room?.isPlaying ?? false;
-
-  const hasPendingSkip = room?.skipRequests?.some((r) => r.requestedBy === mySocketId) ?? false;
-
 
 
   const handlePlayPause = () => {
     const next = !isPlaying;
-    if (!next && room) {
+    if (!next) {
       localPlayback?.(false);
     }
     updateMediaSessionPlaybackState(next ? 'playing' : 'paused');
@@ -116,7 +121,7 @@ export default memo(function PlayerPage({ onClose }: Props) {
   if (!current) return null;
 
   const handleCopyTvLink = async () => {
-    const id = roomId || room?.id;
+    const id = roomId || currentRoomId;
     if (!id) return;
     const ok = await copyToClipboard(`${window.location.origin}/tv/${id}`);
     if (ok) {

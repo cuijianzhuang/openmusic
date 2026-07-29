@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import type { SearchResult } from '../types';
 import { useRoomStore } from '../stores/roomStore';
 import { useSongHistoryStore } from '../stores/songHistoryStore';
@@ -45,7 +46,13 @@ function SongRowBadgesContent({
 }
 
 function SongRowBadgesConnected({ song }: Pick<Props, 'song'>) {
-  const room = useRoomStore((s) => s.room);
+  // 只订阅 getRoomSongStatus 实际用到的 4 个字段，避免房间其它无关变化导致每行都重渲染。
+  const room = useRoomStore(useShallow((s) => s.room && {
+    current: s.room.current,
+    queue: s.room.queue,
+    id: s.room.id,
+    songHistory: s.room.songHistory,
+  }));
   const historySongs = useSongHistoryStore((s) => s.songs);
   const historyRoomId = useSongHistoryStore((s) => s.roomId);
   const historyLoaded = useSongHistoryStore((s) => s.loaded);

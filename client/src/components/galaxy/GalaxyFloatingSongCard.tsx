@@ -8,6 +8,7 @@ import { useFavorites } from '../../hooks/useFavorites';
 import { useSocket } from '../../hooks/useSocket';
 import { getClientId } from '../../lib/clientId';
 import { roomVisualFxLive } from '../../lib/roomVisualFxLive';
+import { useShallow } from 'zustand/react/shallow';
 import { useRoomStore } from '../../stores/roomStore';
 import type { QueueItem } from '../../types';
 import { getCachedGalaxyAudioBands } from './lib/galaxyAudio';
@@ -89,14 +90,18 @@ function syncVisibleShelfMatrices(meshes: THREE.Mesh[]): void {
 }
 
 export default function GalaxyFloatingSongCard() {
-  const room = useRoomStore((s) => s.room);
+  // 只订阅这个悬浮歌曲卡片实际用到的几个字段——房间成员上下线/地理位置等无关变化
+  // 不该让星河场景里的这个组件跟着重渲染（进而重新触发 three.js 网格更新）。
+  const { current, queue, memberJumpEnabled } = useRoomStore(useShallow((s) => ({
+    current: s.room?.current ?? null,
+    queue: s.room?.queue ?? [],
+    memberJumpEnabled: Boolean(s.room?.memberJumpEnabled),
+  })));
   const nickname = useRoomStore((s) => s.nickname);
   const mySocketId = useRoomStore((s) => s.mySocketId);
   const canControlPlayback = useRoomStore((s) => s.canControlPlayback);
-  const memberJumpEnabled = Boolean(room?.memberJumpEnabled);
   const { toggleFavorite, isFavorite } = useFavorites();
   const { removeSong, requestJump, toggleQueueLike, banRoomSong } = useSocket();
-  const current = room?.current ?? null;
   const currentTime = useSmoothPlaybackTime();
   const duration = useTrackDuration(current);
   const displayTime = clampPlaybackTime(currentTime, duration);
@@ -128,13 +133,12 @@ export default function GalaxyFloatingSongCard() {
   const [cardCount, setCardCount] = useState(0);
 
   const displaySongs = useMemo<DisplayQueueItem[]>(() => {
-    if (!room) return [];
     const items = [
-      ...(room.current ? [{ ...room.current, isCurrent: true }] : []),
-      ...room.queue.map((song) => ({ ...song, isCurrent: false })),
+      ...(current ? [{ ...current, isCurrent: true }] : []),
+      ...queue.map((song) => ({ ...song, isCurrent: false })),
     ];
     return items.slice(0, MAX_SHELF_ITEMS);
-  }, [room]);
+  }, [current, queue]);
 
   const displayItems = useMemo(() => {
     const myUserId = mySocketId || getClientId();

@@ -3,10 +3,12 @@ import type { RoomState, SearchResult, Song } from '../types';
 import { useSongHistoryStore } from '../stores/songHistoryStore';
 
 type SongRef = Pick<Song, 'source' | 'id'>;
+/** 这几个函数只读这 4 个字段；用 Pick 而不是整个 RoomState，方便调用方只订阅这几个字段 */
+type RoomSongStatusSource = Pick<RoomState, 'current' | 'queue' | 'id' | 'songHistory'>;
 
 /** 当前正在播放或仍在队列中 */
 export function isSongInRoomQueue(
-  room: RoomState | null | undefined,
+  room: RoomSongStatusSource | null | undefined,
   song: SongRef,
 ): boolean {
   if (!room) return false;
@@ -17,7 +19,7 @@ export function isSongInRoomQueue(
 
 /** 曾点过且已不在播放队列（已播完或已被切走） */
 export function isSongPlayedInRoom(
-  room: RoomState | null | undefined,
+  room: RoomSongStatusSource | null | undefined,
   song: SongRef,
 ): boolean {
   const key = songKey(song);
@@ -32,7 +34,7 @@ export function isSongPlayedInRoom(
 }
 
 export function getRoomSongStatus(
-  room: RoomState | null | undefined,
+  room: RoomSongStatusSource | null | undefined,
   song: SearchResult | SongRef,
 ): { inQueue: boolean; played: boolean } {
   const inQueue = isSongInRoomQueue(room, song);
