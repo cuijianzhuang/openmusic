@@ -286,7 +286,7 @@ export default function Room() {
     noindex: true,
   });
 
-  const { joinRoom, addSong, leaveRoom, listFavorites, setFavorite, importFavorites, renameRoomName, setRoomLock, setRoomFmMode, setRoomAnnouncement, setRoomCustomCover, setChatHistoryVisibleOnJoin, setChatShowAvatars, setRoomJoinNotice, setSongRequestEnabled, unbanRoomSong, addRoomForbiddenWord, removeRoomForbiddenWord, setRoomMemberTier, removeRoomMemberTier, setRoomMemberSettings, loadSongHistory, transferOwner, destroyRoom, applyRoomPermanent, cancelRoomPermanent, clearQueue } = useSocket();
+  const { joinRoom, addSong, leaveRoom, listFavorites, setFavorite, importFavorites, renameRoomName, setRoomLock, setRoomFmMode, setRoomAnnouncement, setRoomCustomCover, setChatHistoryVisibleOnJoin, setChatShowAvatars, setRoomJoinNotice, setRoomMaxAdmins, setSongRequestEnabled, unbanRoomSong, addRoomForbiddenWord, removeRoomForbiddenWord, setRoomMemberTier, removeRoomMemberTier, setRoomMemberSettings, loadSongHistory, transferOwner, destroyRoom, applyRoomPermanent, cancelRoomPermanent, clearQueue, createMusicAccountQr, checkMusicAccountQr, bindMusicAccount, listMusicAccounts, setMusicAccountShared, unbindMusicAccount } = useSocket();
   const { applyFavorites } = useFavorites();
   const { queueKeys, playedKeys } = useRoomSongKeySets();
 
@@ -383,6 +383,7 @@ export default function Room() {
   const [chatHistorySaving, setChatHistorySaving] = useState(false);
   const [chatAvatarsSaving, setChatAvatarsSaving] = useState(false);
   const [joinNoticeSaving, setJoinNoticeSaving] = useState(false);
+  const [maxAdminsSaving, setMaxAdminsSaving] = useState(false);
   const [forbiddenWordSaving, setForbiddenWordSaving] = useState(false);
   const lastSongRequestAtRef = useRef(0);
   const playlistSearchScrollRef = useRef<HTMLDivElement>(null);
@@ -1464,6 +1465,17 @@ export default function Room() {
     }
   }, [joinNoticeSaving, setRoomJoinNotice, showToast]);
 
+  const handleSaveMaxAdmins = useCallback(async (next: number) => {
+    if (maxAdminsSaving) return;
+    setMaxAdminsSaving(true);
+    try {
+      const res = await setRoomMaxAdmins(next);
+      if (!res.success) showToast(res.error || '保存失败');
+    } finally {
+      setMaxAdminsSaving(false);
+    }
+  }, [maxAdminsSaving, setRoomMaxAdmins, showToast]);
+
   const handleSaveSongRequestSettings = useCallback(async (settings: SongRequestSettings) => {
     if (songRequestSaving) return;
     setSongRequestSaving(true);
@@ -1838,6 +1850,13 @@ export default function Room() {
     }
   }, [pureMode, immersiveMode, setImmersiveModeEnabled]);
 
+  // 手机端不提供纯净模式入口；若本地残留开启状态则自动关掉
+  useEffect(() => {
+    if (!isMobileDevice() || !pureMode) return;
+    setPureModeEnabled(false);
+    clearPureModeDisguise(roomPageTitle);
+  }, [pureMode, setPureModeEnabled, roomPageTitle]);
+
   useEffect(() => {
     if (pureMode) {
       applyPureModeDisguise();
@@ -1998,6 +2017,9 @@ export default function Room() {
 
 
   const searchableCount = sources.filter((s) => s.supportsSearch).length;
+  const searchableSourceIds = sources
+    .filter((s) => s.supportsSearch)
+    .map((s) => s.id);
   const qqImportEnabled = sources.some((s) => s.id === 'tencent' && s.supportsSearch);
   const queueCount = (room.current ? 1 : 0) + room.queue.length;
   const canClearQueue = isOwner && room.queue.length > 0;
@@ -2395,7 +2417,11 @@ export default function Room() {
             <PlaylistChannelFilter value={playlistChannelFilter} onChange={handlePlaylistChannelChange} />
           )}
           {!searching && searchableCount > 0 && !isCuratedDetailView && activeSearchMode === 'song' && (
-            <SearchFilterSelect value={searchFilterMode} onChange={handleSearchFilterChange} />
+            <SearchFilterSelect
+              value={searchFilterMode}
+              onChange={handleSearchFilterChange}
+              searchableSourceIds={searchableSourceIds}
+            />
           )}
           {showSongListResults && renderBulkAddPageButton('px-2.5 py-1.5')}
           <button
@@ -2585,6 +2611,13 @@ export default function Room() {
         identityGithubEnabled={identityProviders.githubEnabled}
         identityLinuxdoBound={identityProviders.linuxdoBound}
         identityGithubBound={identityProviders.githubBound}
+        musicAccounts={room?.musicAccounts ?? { netease: null, tencent: null }}
+        onMusicAccountCreateQr={createMusicAccountQr}
+        onMusicAccountCheckQr={checkMusicAccountQr}
+        onMusicAccountBind={bindMusicAccount}
+        onMusicAccountRefresh={listMusicAccounts}
+        onMusicAccountSetShared={setMusicAccountShared}
+        onMusicAccountUnbind={unbindMusicAccount}
         onClose={() => setSettingsOpen(false)}
         onSaveFmMode={handleSaveFmMode}
         onOpenMemberModal={handleOpenMemberModalFromSettings}
@@ -2597,6 +2630,9 @@ export default function Room() {
         onDestroyRoom={handleDestroyRoom}
         onApplyPermanent={handleApplyPermanent}
         onCancelPermanent={handleCancelPermanent}
+        maxAdmins={room?.maxAdmins ?? 5}
+        maxAdminsSaving={maxAdminsSaving}
+        onSaveMaxAdmins={handleSaveMaxAdmins}
       />
       </Suspense>
 
@@ -2861,6 +2897,7 @@ export default function Room() {
 
               <RoomThemeColorPicker />
 
+              {!isMobileDevice() && (
               <Tooltip side="bottom" content={pureMode ? '退出纯净模式（电脑端右侧滑入聊天）' : '纯净模式：隐藏动效与热榜，保留搜索与播放队列；标签页低调伪装'}>
                 <button
                   type="button"
@@ -2878,6 +2915,7 @@ export default function Room() {
                   <span className="hidden sm:inline">{pureMode ? '纯净中' : '纯净模式'}</span>
                 </button>
               </Tooltip>
+              )}
 
               {showImmersiveEntry ? (
                 <Tooltip side="bottom" content={immersiveMode ? '退出沉浸模式' : '沉浸模式：全屏视觉，边缘滑出点歌/队列/聊天'}>
@@ -3098,7 +3136,13 @@ export default function Room() {
                   <PlaylistChannelFilter value={playlistChannelFilter} onChange={handlePlaylistChannelChange} />
                 )}
                 {!searching && searchableCount > 0 && !isCuratedDetailView && (
-                  activeSearchMode === 'song' && <SearchFilterSelect value={searchFilterMode} onChange={handleSearchFilterChange} />
+                  activeSearchMode === 'song' && (
+                    <SearchFilterSelect
+                      value={searchFilterMode}
+                      onChange={handleSearchFilterChange}
+                      searchableSourceIds={searchableSourceIds}
+                    />
+                  )
                 )}
                 {showSongListResults && renderBulkAddPageButton('px-2.5 py-1.5')}
                 <button

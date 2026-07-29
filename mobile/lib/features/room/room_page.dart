@@ -63,6 +63,9 @@ class _RoomPageState extends ConsumerState<RoomPage> {
             password: widget.password,
           );
       if (!mounted) return;
+      // 对齐网页：进房后同步本地头像
+      await ref.read(roomSessionProvider.notifier).syncLocalAvatar();
+      if (!mounted) return;
       setState(() => _joined = true);
       await _maybeShowAnnouncement();
     } catch (e) {
@@ -233,7 +236,8 @@ class _RoomPageState extends ConsumerState<RoomPage> {
               ],
             ),
           ),
-          const MiniPlayerBar(),
+          // 聊天页不显示底部歌曲栏，避免挤占输入区。
+          if (tab != 2) const MiniPlayerBar(),
         ],
       ),
       bottomNavigationBar: NavigationBar(

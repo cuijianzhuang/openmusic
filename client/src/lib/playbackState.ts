@@ -128,6 +128,21 @@ export function optimisticSeekPosition(
   return state;
 }
 
+/** 本地点暂停/播放：立刻改缓存状态，避免 forceCorrection 仍按 playing 把音频拉起来 */
+export function optimisticSetPlaying(
+  roomId: string,
+  trackId: string,
+  isPlaying: boolean,
+  positionSec: number,
+): PlaybackState {
+  const version = clientState.localVersion;
+  const now = Date.now();
+  const pos = Math.max(0, Number(positionSec) || 0);
+  const state = playbackStateFromRoom(roomId, trackId, isPlaying, pos, version);
+  applyPlaybackState(state, { receivedAt: now, committedAt: now });
+  return state;
+}
+
 export function playbackStateFromRoom(
   roomId: string,
   trackId: string,

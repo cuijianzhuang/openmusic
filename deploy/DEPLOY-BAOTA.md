@@ -21,6 +21,15 @@ services:
   meting:
     image: w3126197382/meting-api:latest
     restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # 管理后台：http://<IP>:3000/admin （仅首次无数据时用下列账号初始化）
+      ADMIN_PATH: admin
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD: admin123
+    volumes:
+      - ./data/meting:/app/data
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000"]
       interval: 15s
@@ -56,7 +65,7 @@ volumes:
 
 ```bash
 # 创建目录并准备持久化文件
-mkdir -p /www/openmusic/data/downloads
+mkdir -p /www/openmusic/data/downloads /www/openmusic/data/meting
 cd /www/openmusic
 touch data/.env data/runtimeConfig.json data/adminConfig.json data/setup.lock
 echo '{}' > data/runtimeConfig.json

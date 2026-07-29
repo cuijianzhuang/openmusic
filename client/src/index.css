@@ -846,6 +846,8 @@ body {
   --member-glow-outer: 0.28;
   --member-glow-inset: 0.14;
   --member-glow-inner-mix: 10%;
+  contain: layout style paint;
+  will-change: transform;
 }
 
 .member-queue-inner {
@@ -857,9 +859,8 @@ body {
 .member-queue-compact {
   border-width: 1.5px;
   box-shadow:
-    inset 0 0 8px 1px color-mix(in srgb, var(--member-border-color) calc(var(--member-glow-inset) * 100%), transparent),
-    inset 0 0 14px 2px color-mix(in srgb, var(--member-border-color) var(--member-glow-inner-mix), transparent),
-    0 0 5px color-mix(in srgb, var(--member-border-color) calc(var(--member-glow-outer) * 100%), transparent);
+    inset 0 0 10px 1px color-mix(in srgb, var(--member-border-color) 14%, transparent),
+    0 0 4px color-mix(in srgb, var(--member-border-color) 25%, transparent);
 }
 
 .member-frame-preview {

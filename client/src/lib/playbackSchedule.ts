@@ -41,6 +41,14 @@ function syncRoomPlaybackFromState(state: PlaybackState) {
   });
 }
 
+/** 用户已乐观暂停时，丢弃仍标记 playing 的过期 pending，避免缓冲完成后误续播 */
+function shouldDropPendingAgainstOptimisticPause(state: PlaybackState): boolean {
+  const room = useRoomStore.getState().room;
+  if (!room || room.id !== state.roomId) return false;
+  if (room.isPlaying) return false;
+  return state.status === 'playing';
+}
+
 function isAudioReadyForSnapshot(trackId: string): boolean {
   const audio = getSharedAudio();
   if (!audio.src) return false;
@@ -95,6 +103,15 @@ export function commitPlaybackState(
 /** 应用服务端播放状态；audio 未 ready 时先入队，避免 currentTime=0 跳秒 */
 export function schedulePlaybackState(state: PlaybackState): void {
   const receivedAt = Date.now();
+  if (shouldDropPendingAgainstOptimisticPause(state)) {
+    debugLog('playback_state_drop_optimistic_pause', debugLine({
+      version: state.version,
+      trackId: state.trackId,
+      positionSec: Number(state.positionSec.toFixed(3)),
+      receivedAt,
+    }));
+    return;
+  }
   if (!isAudioReadyForSnapshot(state.trackId)) {
     queueSnapshot(state, receivedAt);
     debugLog('playback_state_queued', debugLine({
@@ -115,6 +132,10 @@ export function schedulePlaybackState(state: PlaybackState): void {
 export function flushPendingPlaybackSnapshot(): boolean {
   if (!pendingSnapshot) return false;
   const { state, receivedAt } = pendingSnapshot;
+  if (shouldDropPendingAgainstOptimisticPause(state)) {
+    pendingSnapshot = null;
+    return false;
+  }
   if (!isAudioReadyForSnapshot(state.trackId)) return false;
   pendingSnapshot = null;
   const committedAt = Date.now();

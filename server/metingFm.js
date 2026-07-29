@@ -1,5 +1,6 @@
 import { formatMetingFetchError } from './metingFetch.js';
 import { fetchMetingApi, runWithMetingRequestContext } from './metingUpstream.js';
+import { fetchEphemeralFmSong } from './metingAdmin.js';
 
 export const DEFAULT_FM_MODE = 'DEFAULT';
 
@@ -83,20 +84,44 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** 网易云私人漫游（Meting type=fm） */
-export async function fetchMetingFmSong(fmMode = DEFAULT_FM_MODE) {
+/**
+ * 网易云私人漫游。
+ * - 传入 ephemeralCookie（无 VIP 本地账号）：走 Meting /admin/fm，不入库
+ * - 否则走 type=fm；有 roomId 时 VIP 房间账号优先，否则用 Meting 原有 Cookie 池
+ */
+export async function fetchMetingFmSong(fmMode = DEFAULT_FM_MODE, options = {}) {
   if (normalizeFmMode(fmMode) === FM_MODE_OFF) return null;
   if (Date.now() < fmFailureCooldownUntil) return null;
+
+  const roomId = String(options.roomId || '').trim();
+  const roomName = String(options.roomName || '私人漫游');
+  const ephemeralCookie = String(options.ephemeralCookie || '').trim();
+  const mode = normalizeFmMode(fmMode);
+  const modeId = mode === 'DEFAULT' ? '' : mode;
 
   for (let i = 0; i < MAX_FM_RETRIES; i += 1) {
     if (i > 0) await sleep(FM_RETRY_BACKOFF_MS * i);
     try {
+      if (ephemeralCookie) {
+        const result = await fetchEphemeralFmSong(ephemeralCookie, modeId);
+        if (!result.ok) {
+          console.error('Ephemeral FM error:', result.error);
+          continue;
+        }
+        const song = normalizeFmSong(result.data);
+        if (song) {
+          fmFailureCooldownUntil = 0;
+          return song;
+        }
+        continue;
+      }
+
       const response = await runWithMetingRequestContext(
         {
           userId: '',
           userNickname: '系统',
-          roomId: '',
-          roomName: '私人漫游',
+          roomId,
+          roomName,
         },
         () => fetchMetingApi(buildFmQuery(fmMode), {}, 12000),
       );

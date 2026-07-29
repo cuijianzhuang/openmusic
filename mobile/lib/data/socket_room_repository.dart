@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:openmusic/core/socket_client.dart';
+import 'package:openmusic/data/local_cache.dart';
 import 'package:openmusic/domain/models.dart';
 
 class RoomSessionState {
@@ -122,6 +123,13 @@ class RoomSessionNotifier extends StateNotifier<RoomSessionState> {
   void _onPlayback(dynamic data) {
     if (data is! Map) return;
     final pb = PlaybackState.fromJson(Map<String, dynamic>.from(data));
+    final prev = state.playback;
+    // Drop stale snapshots so an older "playing" cannot undo a newer pause.
+    if (prev != null &&
+        prev.roomId == pb.roomId &&
+        pb.version < prev.version) {
+      return;
+    }
     final room = state.room;
     // Server toggle_play only emits playback_state (not room_update). Mirror web
     // syncRoomPlaybackFromState so UI + nudge see the real play/pause flag.
@@ -369,13 +377,21 @@ class RoomSessionNotifier extends StateNotifier<RoomSessionState> {
     if (room == null) return;
     final now = DateTime.now().millisecondsSinceEpoch;
     final pb = state.playback;
-    final pos = pb?.estimatedPosition() ?? room.currentTime;
+    // Freeze at receive-anchor while still marked playing; do not keep extrapolating.
+    final pos = () {
+      if (pb == null) return room.currentTime;
+      if (pb.isPlaying) return pb.estimatedPosition();
+      if (pb.positionSec >= 0) return pb.positionSec;
+      return pb.currentTime;
+    }();
     final trackId = room.current?.queueId ?? pb?.trackId ?? '';
+    // Bump local version so a delayed older "playing" snapshot cannot undo pause.
+    final nextVersion = (pb?.version ?? 0) + 1;
     state = state.copyWith(
       room: room.copyWith(isPlaying: play, currentTime: pos),
       playback: PlaybackState(
         roomId: room.id,
-        version: pb?.version ?? 0,
+        version: nextVersion,
         trackId: trackId,
         status: play ? 'playing' : 'paused',
         positionSec: pos,
@@ -400,11 +416,13 @@ class RoomSessionNotifier extends StateNotifier<RoomSessionState> {
     final pb = state.playback;
     final playing = pb?.isPlaying ?? room.isPlaying;
     final trackId = room.current?.queueId ?? pb?.trackId ?? '';
+    // Bump so a delayed pre-seek snapshot cannot yank the scrubber back.
+    final nextVersion = (pb?.version ?? 0) + 1;
     state = state.copyWith(
       room: room.copyWith(currentTime: pos),
       playback: PlaybackState(
         roomId: room.id,
-        version: pb?.version ?? 0,
+        version: nextVersion,
         trackId: trackId,
         status: playing ? 'playing' : 'paused',
         positionSec: pos,
@@ -481,13 +499,26 @@ class RoomSessionNotifier extends StateNotifier<RoomSessionState> {
   }
 
   Future<Map<String, dynamic>> setUserAvatar(String avatarUrl) async {
-    final res = await OmSocket.emitAck('set_user_avatar', {'avatar_url': avatarUrl.trim()});
-    if (res['success'] == true && res['room'] is Map) {
-      state = state.copyWith(
-        room: RoomState.fromJson(Map<String, dynamic>.from(res['room'] as Map)),
-      );
+    final trimmed = avatarUrl.trim();
+    final res = await OmSocket.emitAck('set_user_avatar', {'avatar_url': trimmed});
+    if (res['success'] == true) {
+      await LocalCache.setAvatarUrl(trimmed);
+      if (res['room'] is Map) {
+        state = state.copyWith(
+          room: RoomState.fromJson(Map<String, dynamic>.from(res['room'] as Map)),
+        );
+      }
     }
     return res;
+  }
+
+  /// 进房/重连后把本机缓存头像同步到房间（对齐网页端 localStorage）。
+  Future<void> syncLocalAvatar() async {
+    final local = (await LocalCache.getAvatarUrl()).trim();
+    if (local.isEmpty || state.room == null) return;
+    try {
+      await setUserAvatar(local);
+    } catch (_) {}
   }
 
   Future<Map<String, dynamic>> setChatMute({
@@ -642,16 +673,6 @@ class RoomSessionNotifier extends StateNotifier<RoomSessionState> {
 
   Future<Map<String, dynamic>> setRoomPlayMode(String mode) async {
     return OmSocket.emitAck('set_room_play_mode', {'mode': mode});
-  }
-
-  Future<Map<String, dynamic>> setRoomAudioQuality(
-    String netease,
-    String tencent,
-  ) async {
-    return OmSocket.emitAck('set_room_audio_quality', {
-      'netease': netease,
-      'tencent': tencent,
-    });
   }
 
   Future<Map<String, dynamic>> setSongRequestEnabled(

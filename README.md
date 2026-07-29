@@ -53,11 +53,13 @@
 ```bash
 # 下载 compose 文件，直接拉镜像运行（无需克隆源码）
 curl -O https://raw.githubusercontent.com/qq01-hub/openmusic/main/docker-compose.full.yml
-mkdir -p data/downloads && touch data/.env data/setup.lock && echo '{}' > data/runtimeConfig.json && echo '{}' > data/adminConfig.json
+mkdir -p data/downloads data/meting && touch data/.env data/setup.lock && echo '{}' > data/runtimeConfig.json && echo '{}' > data/adminConfig.json
 docker compose -f docker-compose.full.yml up -d
 ```
 
 打开 `http://<IP>:4000`，Redis 和 Meting 已自动配好，填个站点域名就完事。向导完成后自动重启。
+
+Meting 管理后台：`http://<IP>:3000/admin`，默认 `admin` / `admin123`。
 
 > 不需要内置 Meting？改用 `docker-compose.yml`。宝塔用户见 [宝塔部署](deploy/DEPLOY-BAOTA.md)。
 > 更新：`docker compose pull && docker compose up -d`

@@ -195,7 +195,8 @@ export default function OverviewDashboard({
     },
     {
       title: '操作',
-      width: 200,
+      width: 220,
+      fixed: 'right' as const,
       render: (_, up) => (
         <Space size="small">
           <Button
@@ -214,7 +215,7 @@ export default function OverviewDashboard({
             loading={upstreamBusyUrl === up.url}
             onClick={() => onToggleDisabled(up)}
           >
-            {up.disabled ? '启用' : '临时禁用'}
+            {up.disabled ? '启 用' : '临时禁用'}
           </Button>
         </Space>
       ),
@@ -481,7 +482,8 @@ export default function OverviewDashboard({
             size="middle"
             columns={upstreamColumns}
             dataSource={upstreams}
-            pagination={false}
+            pagination={upstreams.length > 10 ? { pageSize: 10, showSizeChanger: false } : false}
+            scroll={{ x: 700 }}
             expandable={{
               expandedRowRender: (up) => {
                 const errors = up.recentErrors?.length

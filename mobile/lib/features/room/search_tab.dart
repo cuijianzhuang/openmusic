@@ -29,6 +29,7 @@ class _SearchTabState extends ConsumerState<SearchTab> {
   var _filter = 'smart';
   var _playlistChannel = 'all';
   var _importProgressText = '';
+  List<String> _searchableSources = const ['netease', 'tencent'];
   List<Song> _results = [];
   List<Song> _hot = [];
   List<Map<String, dynamic>> _hotRadios = [];
@@ -40,6 +41,18 @@ class _SearchTabState extends ConsumerState<SearchTab> {
     super.initState();
     _loadHot();
     _loadHotRadios();
+    _loadSources();
+  }
+
+  Future<void> _loadSources() async {
+    final ids = await MusicApi.searchableSourceIds();
+    if (!mounted) return;
+    setState(() {
+      _searchableSources = ids.isEmpty ? const ['netease', 'tencent'] : ids;
+      if (_filter != 'smart' && !_searchableSources.contains(_filter)) {
+        _filter = 'smart';
+      }
+    });
   }
 
   @override
@@ -79,7 +92,11 @@ class _SearchTabState extends ConsumerState<SearchTab> {
         final list = await MusicApi.searchDjRadios(q);
         if (mounted) setState(() => _radioResults = list);
       } else {
-        final list = await MusicApi.searchAll(q, filter: _filter);
+        final list = await MusicApi.searchAll(
+          q,
+          filter: _filter,
+          searchableSources: _searchableSources,
+        );
         if (mounted) setState(() => _results = list);
       }
     } catch (e) {
@@ -319,11 +336,11 @@ class _SearchTabState extends ConsumerState<SearchTab> {
           child: Row(
             children: [
               if (_mode == 'song')
-                for (final f in const [
+                for (final f in [
                   ('smart', '智能去重'),
                   ('netease', '红点'),
                   ('tencent', '绿点'),
-                  ('kugou', '蓝点'),
+                  if (_searchableSources.contains('kugou')) ('kugou', '蓝点'),
                 ])
                   Padding(
                     padding: const EdgeInsets.only(right: 8),

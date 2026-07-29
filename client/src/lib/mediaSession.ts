@@ -150,10 +150,13 @@ export function updateMediaSessionMetadata(
   });
 }
 
-export function updateMediaSessionPlaybackState(state: MediaSessionPlaybackState): void {
+export function updateMediaSessionPlaybackState(
+  state: MediaSessionPlaybackState,
+  options?: { force?: boolean },
+): void {
   const session = getMediaSession();
   if (!session) return;
-  if (lastPlaybackState === state) return;
+  if (!options?.force && lastPlaybackState === state) return;
   lastPlaybackState = state;
   try {
     session.playbackState = state;

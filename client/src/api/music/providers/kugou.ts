@@ -78,9 +78,9 @@ export const kugouProvider: MusicProvider = {
   name: '蓝点',
   shortName: '蓝点',
   color: '#2688ee',
-  supportsSearch: true,
+  supportsSearch: false,
   supportsIdLookup: false,
-  description: '通过迟言 API 搜索',
+  description: '需在管理后台配置酷狗自定义接口',
   async search(keyword) {
     if (!keyword.trim()) return [];
     const params = new URLSearchParams({ q: keyword.trim(), num: '30' });

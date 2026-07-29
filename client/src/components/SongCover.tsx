@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { getCoverUrl } from '../api/music';
 import { getCoverPixelSize, getFallbackCoverUrl, type CoverSize } from '../lib/coverUrl';
 import { useSignedApiUrl } from '../lib/signedApiUrl';
@@ -17,7 +17,7 @@ function coverIdentity(song: Pick<Song, 'id' | 'source' | 'pic'>): string {
 
 type LoadStage = 'primary' | 'proxy' | 'failed';
 
-export default function SongCover({
+export default memo(function SongCover({
   song,
   size = 'thumb',
   className = '',
@@ -63,4 +63,4 @@ export default function SongCover({
       }}
     />
   );
-}
+})

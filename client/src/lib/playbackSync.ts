@@ -2,6 +2,7 @@ import type { QueueItem } from '../types';
 import { snapSmoothPlaybackTime } from '../hooks/useSmoothPlaybackTime';
 import { resolveTrackDurationSeconds } from '../hooks/useTrackDuration';
 import { useAudioStore } from '../stores/audioStore';
+import { useRoomStore } from '../stores/roomStore';
 import { getClientPlaybackState, getPlaybackTime, type ClientPlaybackState } from './playbackState';
 import { isAudioBuffering } from './audioBuffering';
 import { shouldSkipRoutineSync as shouldSkipByBufferingState } from './syncStateMachine';
@@ -372,7 +373,9 @@ async function applyCorrectionSync(
 
   const target = resolveTargetTime(audio, options);
   const trackId = state?.trackId || options.song.queueId;
-  const isPlaying = state?.status === 'playing';
+  const roomPlaying = useRoomStore.getState().room?.isPlaying === true;
+  // 房间已乐观暂停时，禁止按旧 playing 缓存把音频拉起来
+  const isPlaying = state?.status === 'playing' && roomPlaying;
 
   if (!isPlaying) {
     lockPlaybackRate(audio);
@@ -448,7 +451,8 @@ async function applyMandatorySync(
   }
   const target = resolveTargetTime(audio, options);
   const trackId = state?.trackId || options.song.queueId;
-  const isPlaying = state?.status === 'playing';
+  const roomPlaying = useRoomStore.getState().room?.isPlaying === true;
+  const isPlaying = state?.status === 'playing' && roomPlaying;
 
   if (!isPlaying) {
     lockPlaybackRate(audio);
@@ -515,7 +519,8 @@ export async function applyFollowerSync(
   }
 
   const state = getClientPlaybackState();
-  const isPlaying = state?.status === 'playing';
+  const roomPlaying = useRoomStore.getState().room?.isPlaying === true;
+  const isPlaying = state?.status === 'playing' && roomPlaying;
   const target = resolveTargetTime(audio, options);
 
   if (!isPlaying) {

@@ -153,6 +153,26 @@ export interface SkipRequest {
   requestedAt: number;
 }
 
+/** 房主扫码绑定的音源账号公开信息 */
+export interface RoomMusicAccount {
+  cookieId: string;
+  platform: 'netease' | 'tencent';
+  shared: boolean;
+  hasVip: boolean;
+  /** vip=写入 Meting 用于搜索/播放；fm=仅本房间网易漫游（不入 Meting） */
+  usage?: 'vip' | 'fm';
+  nickname: string;
+  avatarUrl: string;
+  userId: string;
+  isValid: boolean;
+  updatedAt: number;
+}
+
+export interface RoomMusicAccounts {
+  netease: RoomMusicAccount | null;
+  tencent: RoomMusicAccount | null;
+}
+
 export interface RoomState {
   id: string;
   name: string;
@@ -165,8 +185,10 @@ export interface RoomState {
   ownerId: string | null;
   /** 房间初创房主（可通过转让变更；唯一显示「房主」） */
   creatorId?: string | null;
-  /** 管理员（最多 5 人，仅房主指定的正式管理） */
+  /** 管理员（房主可设人数上限，默认 5） */
   adminIds?: string[];
+  /** 正式管理员人数上限 */
+  maxAdmins?: number;
   /** 临时自动提升管理（仅播放权，不含管理敏感字段） */
   autoPromotedAdminIds?: string[];
   /** 曾进房用户的最近昵称（用于离线管理员展示） */
@@ -201,6 +223,8 @@ export interface RoomState {
   neteaseFmMode?: string;
   /** 漫游关闭前的模式，重新开启时恢复 */
   fmModeBeforeOff?: string;
+  /** 房主扫码绑定的音源账号（公开信息；Cookie 在 Meting） */
+  musicAccounts?: RoomMusicAccounts;
   /** 公告是否开启 */
   announcementEnabled?: boolean;
   /** 公告内容 */

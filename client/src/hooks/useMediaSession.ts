@@ -82,10 +82,26 @@ export function useMediaSession({
 
     installBackgroundPlaybackGuards();
 
+    let pendingPauseTimer: number | null = null;
+
+    const softResumeOnly = () => {
+      updateMediaSessionPlaybackState('playing', { force: true });
+      useAudioStore.getState().softResumeLocalAudio?.();
+      void syncNativePlaybackState({ playing: true });
+    };
+
+    const cancelPendingPause = () => {
+      if (pendingPauseTimer != null) {
+        window.clearTimeout(pendingPauseTimer);
+        pendingPauseTimer = null;
+      }
+    };
+
     const handlePlay = () => {
       const { room, canControlPlayback } = useRoomStore.getState();
       if (!room?.current) return;
       if (!resolveSystemMediaControlFlags(room, canControlPlayback).playBound) return;
+      cancelPendingPause();
       const { localPlayback } = useAudioStore.getState();
       if (!room.isPlaying) {
         updateMediaSessionPlaybackState('playing');
@@ -96,24 +112,56 @@ export function useMediaSession({
       }
     };
 
-    const handlePause = () => {
+    const applyPauseOrMute = () => {
       const { room, canControlPlayback } = useRoomStore.getState();
       if (!room?.current) return;
-      if (!resolveSystemMediaControlFlags(room, canControlPlayback).playBound) return;
-      const { localPlayback } = useAudioStore.getState();
+
+      const hasPausePermission = resolveSystemMediaControlFlags(room, canControlPlayback).playBound;
+
+      if (!hasPausePermission) {
+        const store = useAudioStore.getState();
+        const vol = store.volume;
+        if (vol > 0) {
+          try { localStorage.setItem('openmusic:volume-before-mute', String(vol)); } catch { /* ignore */ }
+          store.setVolume(0);
+        } else {
+          let prev = 1;
+          try { prev = Number(localStorage.getItem('openmusic:volume-before-mute')) || 1; } catch { /* ignore */ }
+          store.setVolume(Math.max(0.05, prev));
+        }
+        softResumeOnly();
+        return;
+      }
 
       if (shouldIgnoreBackgroundRoomPause() && room.isPlaying) {
-        updateMediaSessionPlaybackState('playing');
-        if (!document.hidden) {
-          localPlayback?.(true);
-        }
-        void syncNativePlaybackState({ playing: true });
+        softResumeOnly();
         return;
       }
 
       updateMediaSessionPlaybackState('paused');
-      localPlayback?.(false);
+      useAudioStore.getState().localPlayback?.(false);
       void controlsRef.current.togglePlay(false);
+    };
+
+    const handlePause = () => {
+      const { room } = useRoomStore.getState();
+      if (!room?.current) return;
+      // Windows 关媒体卡片有时先 pause 再 stop：短延迟，若收到 stop 则取消，避免进度条卡顿
+      cancelPendingPause();
+      pendingPauseTimer = window.setTimeout(() => {
+        pendingPauseTimer = null;
+        applyPauseOrMute();
+      }, 120);
+    };
+
+    const handleStop = () => {
+      // 关闭系统媒体卡片：取消误触发的 pause，只软续播，不改房态/进度
+      cancelPendingPause();
+      const room = useRoomStore.getState().room;
+      if (!room?.current) return;
+      if (room.isPlaying) {
+        softResumeOnly();
+      }
     };
 
     const handleNext = () => {
@@ -173,7 +221,7 @@ export function useMediaSession({
       if (webSessionOk) {
         bindMediaSessionActions({
           play: hasTrack && playBound ? handlePlay : undefined,
-          pause: hasTrack && playBound ? handlePause : undefined,
+          pause: hasTrack ? handlePause : undefined,
           nexttrack: hasTrack && nextBound ? handleNext : undefined,
           previoustrack: hasTrack && prevBound ? handlePrevious : undefined,
           seekbackward: hasTrack && canSeek
@@ -196,21 +244,7 @@ export function useMediaSession({
               controlsRef.current.seekTo(Math.max(0, details.seekTime));
             }
             : undefined,
-          stop: hasTrack && playBound
-            ? () => {
-                const room = useRoomStore.getState().room;
-                if (shouldIgnoreBackgroundRoomPause() && room?.isPlaying) {
-                  updateMediaSessionPlaybackState('playing');
-                  if (!document.hidden) {
-                    useAudioStore.getState().localPlayback?.(true);
-                  }
-                  void syncNativePlaybackState({ playing: true });
-                  return;
-                }
-                useAudioStore.getState().localPlayback?.(false);
-                void controlsRef.current.togglePlay(false);
-              }
-            : undefined,
+          stop: hasTrack ? handleStop : undefined,
         });
       }
     };
@@ -330,6 +364,7 @@ export function useMediaSession({
     const timer = window.setInterval(syncPosition, POSITION_UPDATE_MS);
 
     return () => {
+      cancelPendingPause();
       unsubRoom();
       unsubAudio();
       window.clearInterval(timer);

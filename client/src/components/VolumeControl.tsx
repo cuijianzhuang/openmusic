@@ -20,6 +20,8 @@ function trackWidthClass(heightClass: string): string {
   return 'w-20';
 }
 
+const MUTE_PREV_VOLUME_KEY = 'openmusic:volume-before-mute';
+
 export default function VolumeControl({
   className = '',
   iconClassName = 'w-4 h-4',
@@ -31,6 +33,17 @@ export default function VolumeControl({
   const setVolume = useAudioStore((s) => s.setVolume);
   const [expanded, setExpanded] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+
+  const toggleMute = () => {
+    if (volume > 0) {
+      try { localStorage.setItem(MUTE_PREV_VOLUME_KEY, String(volume)); } catch {}
+      setVolume(0);
+    } else {
+      let prev = 1;
+      try { prev = Number(localStorage.getItem(MUTE_PREV_VOLUME_KEY)) || 1; } catch {}
+      setVolume(Math.max(0.05, prev));
+    }
+  };
 
   useEffect(() => {
     applyAllAudioVolume(volume);
@@ -72,10 +85,11 @@ export default function VolumeControl({
   if (compact) {
     return (
       <div ref={rootRef} className={`relative flex items-center ${className}`}>
-        <Tooltip content="音量">
+        <Tooltip content="音量（双击静音）">
           <button
             type="button"
             onClick={() => setExpanded((v) => !v)}
+            onDoubleClick={(e) => { e.preventDefault(); toggleMute(); }}
             className={`flex items-center justify-center transition-colors ${buttonClassName}`}
             aria-label="音量"
             aria-expanded={expanded}
@@ -95,7 +109,14 @@ export default function VolumeControl({
   return (
     <div className={`flex flex-col items-center gap-1.5 ${className}`}>
       {slider}
-      <Icon className={`${iconClassName} text-white/50 flex-shrink-0`} aria-hidden />
+      <button
+        type="button"
+        onClick={toggleMute}
+        className="flex items-center justify-center"
+        aria-label={volume <= 0 ? '取消静音' : '静音'}
+      >
+        <Icon className={`${iconClassName} text-white/50 flex-shrink-0 hover:text-white transition-colors`} />
+      </button>
     </div>
   );
 }

@@ -1,5 +1,8 @@
 # 全量版：OpenMusic + Redis + Meting-API，一条命令部署
 # 用法：docker compose -f docker-compose.full.yml up -d
+#
+# Meting 管理后台：http://<IP>:3000/admin
+# 默认账号见下方 ADMIN_USERNAME / ADMIN_PASSWORD（仅首次无数据时生效）
 
 services:
   redis:
@@ -17,6 +20,14 @@ services:
   meting:
     image: w3126197382/meting-api:latest
     restart: unless-stopped
+    ports:
+      - "${METING_PORT:-3000}:3000"
+    environment:
+      ADMIN_PATH: ${METING_ADMIN_PATH:-admin}
+      ADMIN_USERNAME: ${METING_ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${METING_ADMIN_PASSWORD:-admin123}
+    volumes:
+      - ./data/meting:/app/data
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000"]
       interval: 15s

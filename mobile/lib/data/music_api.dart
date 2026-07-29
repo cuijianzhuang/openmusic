@@ -5,6 +5,24 @@ import 'package:openmusic/core/session.dart';
 import 'package:openmusic/data/user_audio_quality.dart';
 import 'package:openmusic/domain/models.dart';
 
+class MusicSourceMeta {
+  const MusicSourceMeta({
+    required this.id,
+    required this.name,
+    required this.supportsSearch,
+  });
+
+  final String id;
+  final String name;
+  final bool supportsSearch;
+
+  factory MusicSourceMeta.fromJson(Map<String, dynamic> j) => MusicSourceMeta(
+        id: '${j['id'] ?? ''}',
+        name: '${j['name'] ?? j['shortName'] ?? j['id'] ?? ''}',
+        supportsSearch: j['supportsSearch'] == true,
+      );
+}
+
 class MusicApi {
   static String _extractIdFromApiUrl(String url) {
     try {
@@ -15,12 +33,18 @@ class MusicApi {
     }
   }
 
-  static Future<List<Song>> searchAll(String keyword, {String filter = 'smart'}) async {
+  static Future<List<Song>> searchAll(
+    String keyword, {
+    String filter = 'smart',
+    List<String>? searchableSources,
+  }) async {
     if (keyword.trim().isEmpty) return [];
     await SessionBootstrap.require();
     final sources = filter == 'smart'
-        ? ['netease', 'tencent', 'kugou']
+        ? (searchableSources ?? await searchableSourceIds())
         : [filter];
+
+    if (sources.isEmpty) return [];
 
     if (filter != 'smart') {
       return _searchSource(sources.first, keyword);
@@ -36,6 +60,39 @@ class MusicApi {
     );
     return _interleave(results);
   }
+
+  /// Platforms that currently support search (`/api/music/sources`).
+  static Future<List<String>> searchableSourceIds() async {
+    final sources = await getAvailableSources();
+    // Only expose platforms the server marked searchable (蓝点 absent unless configured).
+    return sources
+        .where((s) => s.supportsSearch)
+        .map((s) => s.id)
+        .where((id) => id == 'netease' || id == 'tencent' || id == 'kugou')
+        .toList(growable: false);
+  }
+
+  static Future<List<MusicSourceMeta>> getAvailableSources() async {
+    try {
+      await SessionBootstrap.require();
+      final res = await OmHttp.get<dynamic>('/api/music/sources');
+      final data = res.data;
+      if (data is! List) return _fallbackSources;
+      final parsed = data
+          .whereType<Map>()
+          .map((e) => MusicSourceMeta.fromJson(Map<String, dynamic>.from(e)))
+          .where((s) => s.id.isNotEmpty)
+          .toList();
+      return parsed.isEmpty ? _fallbackSources : parsed;
+    } catch (_) {
+      return _fallbackSources;
+    }
+  }
+
+  static const _fallbackSources = [
+    MusicSourceMeta(id: 'netease', name: '红点', supportsSearch: true),
+    MusicSourceMeta(id: 'tencent', name: '绿点', supportsSearch: true),
+  ];
 
   /// Cover URL aligned with web `getCoverUrl` / meting `type=pic` fallback.
   static String? songCoverUrl(Song song) {

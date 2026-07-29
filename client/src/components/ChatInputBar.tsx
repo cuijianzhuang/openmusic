@@ -273,6 +273,12 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
     if (queryChanged) setMentionIndex(0);
   }, [canControlPlayback, mentionNicknames, mySocketId, roomMeta.users]);
 
+  const focusEditor = useCallback((editor?: HTMLElement | null) => {
+    const el = editor ?? inputRef.current;
+    // 移动端禁止 focus 默认滚页，否则输入/回复框会被底部迷你播放器挡住
+    el?.focus({ preventScroll: isMobileLayout });
+  }, [isMobileLayout]);
+
   const insertPlainText = useCallback((value: string) => {
     const editor = inputRef.current;
     if (!editor) {
@@ -280,10 +286,10 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
       setShowMentionPicker(false);
       return;
     }
-    editor.focus();
+    focusEditor(editor);
     document.execCommand('insertText', false, value);
     syncEditorState();
-  }, [syncEditorState]);
+  }, [focusEditor, syncEditorState]);
 
   const setEditorPlainText = useCallback((value: string) => {
     const editor = inputRef.current;
@@ -294,7 +300,7 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
     editor.textContent = value;
     syncEditorState();
     requestAnimationFrame(() => {
-      editor.focus();
+      focusEditor(editor);
       const selection = window.getSelection();
       const range = document.createRange();
       range.selectNodeContents(editor);
@@ -465,7 +471,7 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
   const deleteTextBeforeCursor = (count: number) => {
     const editor = inputRef.current;
     if (!editor || count <= 0) return;
-    editor.focus();
+    focusEditor(editor);
     for (let i = 0; i < count; i += 1) {
       document.execCommand('delete', false, 'Backward');
     }
@@ -485,7 +491,7 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
     setMentionQuery('');
     mentionQueryRef.current = '';
     setMentionIndex(0);
-    requestAnimationFrame(() => inputRef.current?.focus());
+    requestAnimationFrame(() => focusEditor());
   };
 
   const insertEmoji = (face: QFaceItem) => {
@@ -497,7 +503,7 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
     }
     if (serializeEditorElement(editor).length - getSelectedTextLength(editor) + token.length > MAX_CHAT_LENGTH) {
       setError(`消息最多 ${MAX_CHAT_LENGTH} 字`);
-      editor.focus();
+      focusEditor(editor);
       setShowMentionPicker(false);
       return;
     }
@@ -522,7 +528,7 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
       range.setStartAfter(img);
       range.collapse(true);
       requestAnimationFrame(() => {
-        editor.focus();
+        focusEditor(editor);
         selection?.removeAllRanges();
         selection?.addRange(range);
         syncEditorState();
@@ -551,8 +557,8 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
 
   useImperativeHandle(ref, () => ({
     applyReplyMention,
-    focus: () => inputRef.current?.focus(),
-  }), [applyReplyMention]);
+    focus: () => focusEditor(),
+  }), [applyReplyMention, focusEditor]);
 
   const renderEmojiTabBar = () => (
     <div className="mb-1.5 flex flex-shrink-0 items-center justify-between px-1">

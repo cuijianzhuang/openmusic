@@ -2,10 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Crown, Minus, Plus, Sparkles, ShieldCheck, Trash2, X } from 'lucide-react';
 import { NETEASE_FM_MODE_OPTIONS, getFmModeLabel, normalizeFmMode, FM_MODE_OFF, DEFAULT_FM_MODE } from '../api/music/fmMode';
-import type { BannedSong, ForbiddenWord, RoomUser } from '../types';
+import type { BannedSong, ForbiddenWord, RoomUser, RoomMusicAccounts } from '../types';
 import type { DislikeSkipMode } from '../lib/dislikeSkip';
 import SourceBadge from './SourceBadge';
 import ConfirmModal from './ConfirmModal';
+import RoomMusicAccountPanel from './RoomMusicAccountPanel';
 import {
   fetchLinuxdoStatus,
   startLinuxdoBind,
@@ -31,7 +32,10 @@ const FORBIDDEN_WORD_MAX_LEN = 20;
 const COOLDOWN_OPTIONS = [0, 10, 30, 60, 120] as const;
 const QUEUE_LIMIT_OPTIONS = [50, 100, 200] as const;
 
-type SettingsTab = 'fm' | 'member' | 'room' | 'announcement' | 'chat' | 'songRequest';
+type SettingsTab = 'fm' | 'account' | 'member' | 'room' | 'announcement' | 'chat' | 'songRequest';
+
+/** 扫码绑定音源会员账号：暂时隐藏前端入口 */
+const MUSIC_ACCOUNT_TAB_ENABLED = false;
 
 export interface SongRequestSettings {
   enabled: boolean;
@@ -112,6 +116,17 @@ interface Props {
   identityGithubEnabled?: boolean;
   identityLinuxdoBound?: LinuxdoBinding | null;
   identityGithubBound?: GithubBinding | null;
+  musicAccounts?: RoomMusicAccounts;
+  onMusicAccountCreateQr?: (platform: 'netease' | 'tencent') => Promise<{ success: boolean; error?: string; data?: Record<string, unknown> }>;
+  onMusicAccountCheckQr?: (payload: Record<string, unknown>) => Promise<{ success: boolean; error?: string; data?: Record<string, unknown> }>;
+  onMusicAccountBind?: (payload: {
+    platform: 'netease' | 'tencent';
+    cookie: string;
+    shared?: boolean;
+  }) => Promise<{ success: boolean; error?: string; message?: string }>;
+  onMusicAccountRefresh?: () => Promise<{ success: boolean; error?: string; data?: RoomMusicAccounts }>;
+  onMusicAccountSetShared?: (platform: 'netease' | 'tencent', shared: boolean) => Promise<{ success: boolean; error?: string }>;
+  onMusicAccountUnbind?: (platform: 'netease' | 'tencent') => Promise<{ success: boolean; error?: string }>;
   onClose: () => void;
   onSaveFmMode: (mode: string) => void;
   onOpenMemberModal: () => void;
@@ -124,6 +139,9 @@ interface Props {
   onDestroyRoom?: () => void | Promise<void>;
   onApplyPermanent?: (note?: string) => void | Promise<void>;
   onCancelPermanent?: () => void | Promise<void>;
+  maxAdmins?: number;
+  maxAdminsSaving?: boolean;
+  onSaveMaxAdmins?: (maxAdmins: number) => void | Promise<void>;
 }
 
 function clampInt(value: number, min: number, max: number) {
@@ -271,6 +289,13 @@ export default function RoomSettingsModal({
   identityGithubEnabled = false,
   identityLinuxdoBound = null,
   identityGithubBound = null,
+  musicAccounts = { netease: null, tencent: null },
+  onMusicAccountCreateQr,
+  onMusicAccountCheckQr,
+  onMusicAccountBind,
+  onMusicAccountRefresh,
+  onMusicAccountSetShared,
+  onMusicAccountUnbind,
   onClose,
   onSaveFmMode,
   onOpenMemberModal,
@@ -283,6 +308,9 @@ export default function RoomSettingsModal({
   onDestroyRoom,
   onApplyPermanent,
   onCancelPermanent,
+  maxAdmins = 5,
+  maxAdminsSaving = false,
+  onSaveMaxAdmins,
 }: Props) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('announcement');
   const [draftAnnouncementEnabled, setDraftAnnouncementEnabled] = useState(announcementEnabled);
@@ -296,6 +324,7 @@ export default function RoomSettingsModal({
   const [confirmTransfer, setConfirmTransfer] = useState(false);
   const [confirmDestroy, setConfirmDestroy] = useState(false);
   const [permanentNote, setPermanentNote] = useState('');
+  const [draftMaxAdmins, setDraftMaxAdmins] = useState(maxAdmins);
   const [linuxdoEnabled, setLinuxdoEnabled] = useState(identityLinuxdoEnabled);
   const [linuxdoBound, setLinuxdoBound] = useState<LinuxdoBinding | null>(identityLinuxdoBound);
   const [linuxdoUnbinding, setLinuxdoUnbinding] = useState(false);
@@ -330,6 +359,9 @@ export default function RoomSettingsModal({
     const items: { id: SettingsTab; label: string }[] = [];
     if (isOwner) {
       items.push({ id: 'fm', label: '漫游' });
+      if (MUSIC_ACCOUNT_TAB_ENABLED) {
+        items.push({ id: 'account', label: '账号' });
+      }
       items.push({ id: 'room', label: '房主' });
     }
     if (canModerate) {
@@ -364,9 +396,10 @@ export default function RoomSettingsModal({
     setConfirmTransfer(false);
     setConfirmDestroy(false);
     setPermanentNote('');
+    setDraftMaxAdmins(maxAdmins);
     const initialTabs: SettingsTab[] = [];
     if (isOwner) {
-      initialTabs.push('fm', 'room');
+      initialTabs.push('fm', ...(MUSIC_ACCOUNT_TAB_ENABLED ? (['account'] as SettingsTab[]) : []), 'room');
     }
     if (canModerate) {
       initialTabs.push('member', 'announcement', 'chat', 'songRequest');
@@ -386,6 +419,7 @@ export default function RoomSettingsModal({
     canModerate,
     identityLinuxdoEnabled,
     identityGithubEnabled,
+    maxAdmins,
   ]);
 
   useEffect(() => {
@@ -590,8 +624,50 @@ export default function RoomSettingsModal({
             </section>
           )}
 
+          {MUSIC_ACCOUNT_TAB_ENABLED && activeTab === 'account' && isOwner && onMusicAccountCreateQr && onMusicAccountCheckQr && onMusicAccountBind && onMusicAccountRefresh && onMusicAccountSetShared && onMusicAccountUnbind && (
+            <RoomMusicAccountPanel
+              accounts={musicAccounts}
+              onCreateQr={onMusicAccountCreateQr}
+              onCheckQr={onMusicAccountCheckQr}
+              onBind={onMusicAccountBind}
+              onRefresh={onMusicAccountRefresh}
+              onSetShared={onMusicAccountSetShared}
+              onUnbind={onMusicAccountUnbind}
+            />
+          )}
+
           {activeTab === 'room' && (
             <div className="space-y-6">
+              {isOwner && (
+                <section>
+                  <div className="mb-2 flex items-center gap-2">
+                    <ShieldCheck className="h-4 w-4 text-sky-400" />
+                    <h3 className="text-sm font-medium text-white">管理员人数</h3>
+                  </div>
+                  <p className="mb-3 text-xs text-netease-muted">
+                    设置本房间可任命的正式管理员上限，默认 5 人
+                  </p>
+                  <NumberStepper
+                    value={draftMaxAdmins}
+                    min={1}
+                    max={20}
+                    disabled={maxAdminsSaving}
+                    suffix="人"
+                    onChange={setDraftMaxAdmins}
+                  />
+                  {draftMaxAdmins !== maxAdmins && (
+                    <button
+                      type="button"
+                      disabled={maxAdminsSaving || !onSaveMaxAdmins}
+                      onClick={() => void onSaveMaxAdmins?.(draftMaxAdmins)}
+                      className="mt-3 w-full rounded-xl bg-netease-red py-2.5 text-sm font-medium text-white transition-colors hover:bg-netease-red/90 disabled:opacity-50"
+                    >
+                      {maxAdminsSaving ? '保存中…' : '保存人数上限'}
+                    </button>
+                  )}
+                </section>
+              )}
+
               {isOwner && (
                 <section>
                   <div className="mb-2 flex items-center gap-2">

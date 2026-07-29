@@ -342,6 +342,44 @@ function normalizeRoomAudioQuality(input) {
   };
 }
 
+function normalizeMusicAccountEntry(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const cookieId = String(raw.cookieId || raw.id || "").trim();
+  if (!cookieId && !raw.hasVip && raw.usage !== "fm") return null;
+  const hasVip = Boolean(raw.hasVip);
+  const id = cookieId || (hasVip ? "" : `local-fm-${raw.platform || "netease"}`);
+  if (!id) return null;
+  return {
+    cookieId: id,
+    platform: raw.platform === "tencent" ? "tencent" : "netease",
+    shared: hasVip ? Boolean(raw.shared) : false,
+    hasVip,
+    usage: hasVip ? "vip" : "fm",
+    nickname: String(raw.nickname || "").slice(0, 64),
+    avatarUrl: String(raw.avatarUrl || "").slice(0, 512),
+    userId: String(raw.userId || "").slice(0, 64),
+    isValid: raw.isValid !== false,
+    updatedAt: Number(raw.updatedAt) || 0,
+  };
+}
+
+export function normalizeMusicAccounts(input) {
+  const src = input && typeof input === "object" ? input : {};
+  return {
+    netease: normalizeMusicAccountEntry(src.netease),
+    tencent: normalizeMusicAccountEntry(src.tencent),
+  };
+}
+
+/** 无 VIP 网易 Cookie 仅存服务端，不进房间广播 */
+function normalizeMusicAccountSecrets(input) {
+  const src = input && typeof input === "object" ? input : {};
+  const netease = String(src.netease || "").trim();
+  return {
+    netease: netease || null,
+  };
+}
+
 const rooms = new Map();
 const ensurePlaybackInflight = new Map();
 
@@ -550,11 +588,14 @@ function snapshotRoomForStorage(room) {
     nextRandom: serializeSongMeta(room.nextRandom),
     adminIds: Array.from(room.adminIds || []),
     autoPromotedAdminIds: Array.from(room.autoPromotedAdminIds || []),
+    maxAdmins: getRoomMaxAdmins(room),
     userNicknames: Object.fromEntries(room.userNicknames || []),
     userAvatarUrls: Object.fromEntries(room.userAvatarUrls || []),
     audioQuality: room.audioQuality ?? { netease: "jyeffect", tencent: "lossless" },
     neteaseFmMode: normalizeFmMode(room.neteaseFmMode),
     fmModeBeforeOff: normalizeFmMode(room.fmModeBeforeOff),
+    musicAccounts: normalizeMusicAccounts(room.musicAccounts),
+    musicAccountSecrets: normalizeMusicAccountSecrets(room.musicAccountSecrets),
     playMode: normalizePlayMode(room.playMode),
     announcementEnabled: Boolean(room.announcementEnabled),
     announcementText: String(room.announcementText || "").slice(0, MAX_ANNOUNCEMENT_LENGTH),
@@ -619,12 +660,15 @@ function restoreRoomFromStorage(data) {
   room.mutedUserIds = new Set(data.mutedUserIds || []);
   room.adminIds = new Set(Array.isArray(data.adminIds) ? data.adminIds : []);
   room.autoPromotedAdminIds = new Set(Array.isArray(data.autoPromotedAdminIds) ? data.autoPromotedAdminIds : []);
+  room.maxAdmins = normalizeMaxAdmins(data.maxAdmins);
   room.userNicknames = new Map(Object.entries(data.userNicknames || {}));
   room.userAvatarUrls = new Map(Object.entries(data.userAvatarUrls || {}));
   room.audioQuality = normalizeRoomAudioQuality(data.audioQuality);
   room.neteaseFmMode = normalizeFmMode(data.neteaseFmMode);
   const fmModeBeforeOff = normalizeFmMode(data.fmModeBeforeOff);
   room.fmModeBeforeOff = fmModeBeforeOff === FM_MODE_OFF ? DEFAULT_FM_MODE : fmModeBeforeOff;
+  room.musicAccounts = normalizeMusicAccounts(data.musicAccounts);
+  room.musicAccountSecrets = normalizeMusicAccountSecrets(data.musicAccountSecrets);
   room.playMode = normalizePlayMode(data.playMode);
   room.announcementEnabled = Boolean(data.announcementEnabled);
   room.announcementText = String(data.announcementText || "").slice(0, MAX_ANNOUNCEMENT_LENGTH);
@@ -976,6 +1020,8 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
     autoAdvancePromise: null,
     adminIds: new Set(),
     autoPromotedAdminIds: new Set(),
+    /** 房主可设的正式管理员人数上限，默认 5 */
+    maxAdmins: MAX_ADMINS_DEFAULT,
     userNicknames: new Map(),
     userAvatarUrls: new Map(),
     audioQuality: {
@@ -984,6 +1030,10 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
     },
     neteaseFmMode: DEFAULT_FM_MODE,
     fmModeBeforeOff: DEFAULT_FM_MODE,
+    /** 房主扫码绑定的音源账号公开信息（VIP 在 Meting；无 VIP 仅本地漫游） */
+    musicAccounts: { netease: null, tencent: null },
+    /** 无 VIP 网易 Cookie（不广播、不上传 Meting） */
+    musicAccountSecrets: { netease: null },
     playMode: DEFAULT_PLAY_MODE,
     announcementEnabled: false,
     announcementText: "",
@@ -1035,7 +1085,19 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
   };
 }
 
-const MAX_ADMINS = 5;
+const MAX_ADMINS_DEFAULT = 5;
+const MAX_ADMINS_MIN = 1;
+const MAX_ADMINS_MAX = 20;
+
+function normalizeMaxAdmins(value) {
+  const n = Math.floor(Number(value));
+  if (!Number.isFinite(n)) return MAX_ADMINS_DEFAULT;
+  return Math.min(MAX_ADMINS_MAX, Math.max(MAX_ADMINS_MIN, n));
+}
+
+function getRoomMaxAdmins(room) {
+  return normalizeMaxAdmins(room?.maxAdmins ?? MAX_ADMINS_DEFAULT);
+}
 
 function getNextOwnerId(room) {
   return (
@@ -2194,14 +2256,18 @@ export function assertOwnerCanDestroyRoom(roomId, actorId, connectionId) {
  * 管理后台：向所有活跃房间广播持久化系统通知（落盘进聊天历史，样式同撤回提示行）。
  * @returns {{ success: boolean, error?: string, roomCount?: number, deliveries?: Array<{ roomId: string, message: object, toast: object }> }}
  */
-export function broadcastAdminSystemMessage(text) {
+export function broadcastAdminSystemMessage(text, { roomIds } = {}) {
   const content = String(text || "")
     .trim()
     .slice(0, 300);
   if (!content) return { success: false, error: "广播内容不能为空" };
 
+  const targetRooms = roomIds?.length
+    ? roomIds.map((id) => rooms.get(String(id).toUpperCase())).filter(Boolean)
+    : Array.from(rooms.values());
+
   const deliveries = [];
-  for (const room of rooms.values()) {
+  for (const room of targetRooms) {
     const message = {
       id: generateId(),
       userId: "system",
@@ -2529,7 +2595,9 @@ export function setRoomAdmin(roomId, actorId, targetUserId, admin = true, connec
     if (isAppointedAdmin(room, targetId)) {
       return { room: serializeRoom(room) };
     }
-    if (appointedCount >= MAX_ADMINS) return { error: `管理员最多 ${MAX_ADMINS} 人` };
+    if (appointedCount >= getRoomMaxAdmins(room)) {
+      return { error: `管理员最多 ${getRoomMaxAdmins(room)} 人` };
+    }
     admins.add(targetId);
     auto.delete(targetId);
   } else {
@@ -2573,16 +2641,59 @@ export function setRoomFmMode(roomId, actorId, mode, connectionId = null) {
   return { room: serializeRoom(room) };
 }
 
-export function setRoomAudioQuality(roomId, actorId, quality = {}, connectionId = null) {
-  const room = rooms.get(roomId);
+/** 更新房间音源账号公开缓存（VIP Cookie 在 Meting；无 VIP Cookie 在 musicAccountSecrets） */
+export function setRoomMusicAccountsCache(roomId, accounts) {
+  const room = rooms.get(String(roomId || "").toUpperCase());
   if (!room) return { error: "房间不存在" };
-  if (!isOwnerConnection(room, actorId, connectionId)) return { error: "仅房主可调整音质" };
+  const next = normalizeMusicAccounts(accounts);
+  // 刷新 VIP 列表时保留本地无 VIP 漫游账号元数据
+  const prev = normalizeMusicAccounts(room.musicAccounts);
+  if (prev.netease?.usage === "fm" && !next.netease) {
+    next.netease = prev.netease;
+  }
+  room.musicAccounts = next;
+  persistRoom(room);
+  return { room: serializeRoom(room) };
+}
 
-  const current = normalizeRoomAudioQuality(room.audioQuality);
-  room.audioQuality = normalizeRoomAudioQuality({
-    netease: quality.netease ?? current.netease,
-    tencent: quality.tencent ?? current.tencent,
-  });
+export function patchRoomMusicAccountCache(roomId, platform, account, options = {}) {
+  const room = rooms.get(String(roomId || "").toUpperCase());
+  if (!room) return { error: "房间不存在" };
+  const plat = platform === "tencent" ? "tencent" : "netease";
+  const next = normalizeMusicAccounts(room.musicAccounts);
+  next[plat] = normalizeMusicAccountEntry(account);
+  room.musicAccounts = next;
+
+  const secrets = normalizeMusicAccountSecrets(room.musicAccountSecrets);
+  if (plat === "netease") {
+    if (options.localCookie) {
+      secrets.netease = String(options.localCookie).trim() || null;
+    } else if (account?.hasVip || account == null) {
+      // VIP 绑定或解绑：清掉本地无 VIP Cookie
+      secrets.netease = null;
+    }
+  }
+  room.musicAccountSecrets = secrets;
+  persistRoom(room);
+  return { room: serializeRoom(room) };
+}
+
+export function getRoomNeteaseFmCookie(roomId) {
+  const room = rooms.get(String(roomId || "").toUpperCase());
+  if (!room) return null;
+  const secret = normalizeMusicAccountSecrets(room.musicAccountSecrets).netease;
+  if (!secret) return null;
+  const meta = normalizeMusicAccounts(room.musicAccounts).netease;
+  if (meta && meta.hasVip) return null;
+  return secret;
+}
+
+export function clearRoomMusicAccountSecret(roomId, platform = "netease") {
+  const room = rooms.get(String(roomId || "").toUpperCase());
+  if (!room) return { error: "房间不存在" };
+  const secrets = normalizeMusicAccountSecrets(room.musicAccountSecrets);
+  if (platform === "netease" || platform === "all") secrets.netease = null;
+  room.musicAccountSecrets = secrets;
   persistRoom(room);
   return { room: serializeRoom(room) };
 }
@@ -2653,6 +2764,17 @@ export function setRoomMemberSettings(roomId, actorId, settings = {}, connection
   });
   persistRoom(room);
   return { room: serializeRoom(room) };
+}
+
+export function setRoomMaxAdmins(roomId, actorId, maxAdmins, connectionId = null) {
+  const room = rooms.get(roomId);
+  if (!room) return { error: "房间不存在" };
+  if (!isCreatorConnection(room, actorId, connectionId)) {
+    return { error: "仅房主可设置管理员人数" };
+  }
+  room.maxAdmins = normalizeMaxAdmins(maxAdmins);
+  persistRoom(room);
+  return { room: serializeRoom(room), maxAdmins: room.maxAdmins };
 }
 
 export function setRoomJoinNotice(roomId, actorId, settings = {}, connectionId = null) {
@@ -3287,7 +3409,7 @@ export function transferOwner(roomId, actorId, targetUserId, connectionId = null
   if (actorId && actorId !== targetId) {
     auto.delete(actorId);
     const appointedCount = getAppointedAdminIds(room).filter((id) => id !== actorId).length;
-    if (appointedCount < MAX_ADMINS) {
+    if (appointedCount < getRoomMaxAdmins(room)) {
       admins.add(actorId);
     } else {
       admins.delete(actorId);
@@ -3702,7 +3824,12 @@ function clearNextRandom(room) {
 // }
 
 async function fetchRandomForRoom(room) {
-  return fetchMetingFmSong(room.neteaseFmMode || DEFAULT_FM_MODE);
+  const ephemeralCookie = getRoomNeteaseFmCookie(room.id);
+  return fetchMetingFmSong(room.neteaseFmMode || DEFAULT_FM_MODE, {
+    roomId: ephemeralCookie ? '' : room.id,
+    roomName: room.name || room.id,
+    ephemeralCookie: ephemeralCookie || '',
+  });
 }
 
 async function ensureNextRandom(room) {
@@ -4859,6 +4986,7 @@ function serializeRoom(room, options = {}) {
     ownerId: room.ownerId,
     creatorId: room.creatorId ?? null,
     adminIds: getOrderedAdminIds(room),
+    maxAdmins: getRoomMaxAdmins(room),
     autoPromotedAdminIds: getOrderedAutoPromotedAdminIds(room),
     userNicknames: viewerCanModerate ? serializeUserNicknamesForViewer(room) : undefined,
     userAvatarUrls: serializeUserAvatarUrlsForViewer(room),
@@ -4876,6 +5004,7 @@ function serializeRoom(room, options = {}) {
     audioQuality: normalizeRoomAudioQuality(room.audioQuality),
     neteaseFmMode: normalizeFmMode(room.neteaseFmMode),
     fmModeBeforeOff: normalizeFmMode(room.fmModeBeforeOff),
+    musicAccounts: normalizeMusicAccounts(room.musicAccounts),
     playMode: normalizePlayMode(room.playMode),
     announcementEnabled: Boolean(room.announcementEnabled),
     announcementText: String(room.announcementText || "").slice(0, MAX_ANNOUNCEMENT_LENGTH),
@@ -4930,6 +5059,7 @@ export function prepareRoomBroadcast(roomId) {
     ownerId: room.ownerId,
     creatorId: room.creatorId ?? null,
     adminIds: getOrderedAdminIds(room),
+    maxAdmins: getRoomMaxAdmins(room),
     autoPromotedAdminIds: getOrderedAutoPromotedAdminIds(room),
     userAvatarUrls: serializeUserAvatarUrlsForViewer(room),
     queue: room.queue.map(serializeQueueItemForRoom).filter(Boolean),
@@ -4945,6 +5075,7 @@ export function prepareRoomBroadcast(roomId) {
     audioQuality: normalizeRoomAudioQuality(room.audioQuality),
     neteaseFmMode: normalizeFmMode(room.neteaseFmMode),
     fmModeBeforeOff: normalizeFmMode(room.fmModeBeforeOff),
+    musicAccounts: normalizeMusicAccounts(room.musicAccounts),
     playMode: normalizePlayMode(room.playMode),
     announcementEnabled: Boolean(room.announcementEnabled),
     announcementText: String(room.announcementText || "").slice(0, MAX_ANNOUNCEMENT_LENGTH),
@@ -5016,6 +5147,7 @@ export function prepareRoomPresence(roomId) {
       ownerId: room.ownerId,
       creatorId: room.creatorId ?? null,
       adminIds: getOrderedAdminIds(room),
+      maxAdmins: getRoomMaxAdmins(room),
       autoPromotedAdminIds: getOrderedAutoPromotedAdminIds(room),
       userAvatarUrls: serializeUserAvatarUrlsForViewer(room),
       users: Array.from(room.users.values()).map((user) => serializeUser(user, { includeLocation: false, roomAvatarUrls: room.userAvatarUrls })),

@@ -196,6 +196,7 @@ function AdminPage() {
   const [annSaving, setAnnSaving] = useState(false);
   const [annHint, setAnnHint] = useState('');
   const [broadcastText, setBroadcastText] = useState('');
+  const [broadcastRoomIds, setBroadcastRoomIds] = useState<string[]>([]);
   const [broadcasting, setBroadcasting] = useState(false);
   const [broadcastHint, setBroadcastHint] = useState('');
   const [bans, setBans] = useState<SiteBanEntry[]>([]);
@@ -565,9 +566,13 @@ function AdminPage() {
     try {
       const res = await adminFetch<{ roomCount: number }>('/api/admin/broadcast', {
         method: 'POST',
-        body: JSON.stringify({ text: broadcastText.trim() }),
+        body: JSON.stringify({
+          text: broadcastText.trim(),
+          ...(broadcastRoomIds.length > 0 ? { roomIds: broadcastRoomIds } : {}),
+        }),
       });
       setBroadcastText('');
+      setBroadcastRoomIds([]);
       const hint = `已发送到 ${res.roomCount} 个房间`;
       setBroadcastHint(hint);
       message.success(hint);
@@ -1727,7 +1732,7 @@ function AdminPage() {
                 {annHint && <Typography.Text type="success" style={{ display: 'block', marginTop: 8 }}>{annHint}</Typography.Text>}
               </Form>
             </Card>
-            <Card title="全局广播">
+            <Card title="广播">
               <Form layout="vertical">
                 <Form.Item label="广播内容">
                   <Input.TextArea
@@ -1738,9 +1743,24 @@ function AdminPage() {
                     placeholder="维护 / 活动预告"
                   />
                 </Form.Item>
+                <Form.Item label="发送范围">
+                  <Select
+                    mode="multiple"
+                    allowClear
+                    placeholder="全部房间（留空 = 全站广播）"
+                    value={broadcastRoomIds}
+                    onChange={(v) => setBroadcastRoomIds(v)}
+                    options={rooms.map((r) => ({ label: `${r.name} (${r.id})`, value: r.id }))}
+                    filterOption={(input, option) =>
+                      String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                    }
+                    style={{ width: '100%' }}
+                    maxTagCount="responsive"
+                  />
+                </Form.Item>
                 <Space wrap style={{ justifyContent: 'space-between', width: '100%' }}>
                   <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    写入聊天并弹窗提示
+                    {broadcastRoomIds.length > 0 ? `发送到 ${broadcastRoomIds.length} 个房间` : '全站广播'}
                   </Typography.Text>
                   <Button
                     type="primary"

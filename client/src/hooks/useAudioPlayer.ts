@@ -68,7 +68,7 @@ import {
 } from '../lib/playbackQualityLock';
 import { waitForAudioMinimumReady } from '../lib/audioReady';
 import { applyFollowerSync, applyVisibilityResume, applyPostBufferSync, isEndedWhileServerPlaying } from '../lib/playbackSync';
-import { getClientPlaybackState, getPlaybackTime, optimisticSeekPosition } from '../lib/playbackState';
+import { getClientPlaybackState, getPlaybackTime, optimisticSeekPosition, optimisticSetPlaying } from '../lib/playbackState';
 import { attachAudioBufferingListeners, isAudioBuffering, setAudioBufferEndHandler } from '../lib/audioBuffering';
 import { flushPendingPlaybackSnapshot } from '../lib/playbackSchedule';
 import { isSongPreviewSuppressingRoom, stopSongPreview } from '../lib/songPreviewPlayer';
@@ -304,6 +304,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
   const setMediaDuration = useAudioStore((s) => s.setMediaDuration);
   const setSeekPlayback = useAudioStore((s) => s.setSeekPlayback);
   const setLocalPlayback = useAudioStore((s) => s.setLocalPlayback);
+  const setSoftResumeLocalAudio = useAudioStore((s) => s.setSoftResumeLocalAudio);
   const setNeedsAudioUnlock = useAudioStore((s) => s.setNeedsAudioUnlock);
   const needsAudioUnlock = useAudioStore((s) => s.needsAudioUnlock);
   const setRetryPlayback = useAudioStore((s) => s.setRetryPlayback);
@@ -317,6 +318,8 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
   const lastTrackReloadNonceRef = useRef(0);
   const [loadRetryNonce, setLoadRetryNonce] = useState(0);
   const skippingRef = useRef(false);
+  /** 本端主动 pause 时抑制 pause 事件里的自动续播 */
+  const intentionalLocalPauseRef = useRef(false);
   const justSkippedRef = useRef(false);
   const prevQueueIdRef = useRef<string | null>(null);
   const tempRetries = useRef(0);
@@ -663,7 +666,15 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
 
       audio.addEventListener('pause', () => {
         // 仅对抗息屏瞬间的系统挂起；锁屏控件主动暂停不在此窗口内
-        if (!isLikelySystemMediaSuspend()) return;
+        if (intentionalLocalPauseRef.current) return;
+        if (isLikelySystemMediaSuspend()) {
+          const live = useRoomStore.getState();
+          if (!live.room?.isPlaying || !live.room.current) return;
+          if (!isAudioBoundToQueue(audio, live.room.current.queueId)) return;
+          void audio.play().catch(() => {});
+          return;
+        }
+        // 系统关掉媒体卡片时可能直接 pause 元素，房间仍在播 → 静默续上，不碰进度条
         const live = useRoomStore.getState();
         if (!live.room?.isPlaying || !live.room.current) return;
         if (!isAudioBoundToQueue(audio, live.room.current.queueId)) return;
@@ -1319,11 +1330,42 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     const live = useRoomStore.getState().room;
     const audio = controller.audio;
     if (!isPlaying) {
+      intentionalLocalPauseRef.current = true;
       audio.pause();
-      if (live) useRoomStore.getState().setRoom({ ...live, isPlaying: false });
+      // pause 事件同步触发后再清，避免被自动续播顶掉
+      queueMicrotask(() => {
+        intentionalLocalPauseRef.current = false;
+      });
+      if (live?.current) {
+        const pos = Number.isFinite(audio.currentTime) && audio.currentTime > 0
+          ? audio.currentTime
+          : (live.currentTime || 0);
+        optimisticSetPlaying(live.id, live.current.queueId, false, pos);
+        useRoomStore.getState().setRoom({ ...live, isPlaying: false, currentTime: pos });
+        snapSmoothPlaybackTime(pos);
+      } else if (live) {
+        useRoomStore.getState().setRoom({ ...live, isPlaying: false });
+      }
       return;
     }
+    if (live?.current) {
+      const pos = Number.isFinite(audio.currentTime) && audio.currentTime > 0
+        ? audio.currentTime
+        : (live.currentTime || 0);
+      optimisticSetPlaying(live.id, live.current.queueId, true, pos);
+      useRoomStore.getState().setRoom({ ...live, isPlaying: true, currentTime: pos });
+    }
     useAudioStore.getState().retryPlayback?.(true);
+  }, [controller]);
+
+  const handleSoftResumeLocalAudio = useCallback(() => {
+    const live = useRoomStore.getState().room;
+    const audio = controller.audio;
+    if (!live?.isPlaying || !live.current) return;
+    if (!isAudioBoundToQueue(audio, live.current.queueId)) return;
+    if (!audio.src || audio.ended) return;
+    if (!audio.paused) return;
+    void audio.play().catch(() => {});
   }, [controller]);
 
   const handleSeek = useCallback((time: number) => {
@@ -1364,6 +1406,11 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     setLocalPlayback(handleLocalPlayback);
     return () => setLocalPlayback(null);
   }, [handleLocalPlayback, setLocalPlayback]);
+
+  useEffect(() => {
+    setSoftResumeLocalAudio(handleSoftResumeLocalAudio);
+    return () => setSoftResumeLocalAudio(null);
+  }, [handleSoftResumeLocalAudio, setSoftResumeLocalAudio]);
 
   useEffect(() => {
     setRetryPlayback(retryPlayback);

@@ -1,17 +1,21 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, memo } from 'react';
 import { Music } from 'lucide-react';
 import { useRoomStore } from '../stores/roomStore';
 import { useSocket } from '../hooks/useSocket';
 import { FixedSizeList, type ListChildComponentProps } from 'react-window';
 import QueueRow, { QUEUE_ITEM_SIZE, QUEUE_ROW_GAP, QUEUE_ROW_HEIGHT } from './queue/QueueRow';
-import type { RoomMemberTier, QueueItem } from '../types';
+import type { RoomMemberTier, QueueItem, MusicSource } from '../types';
 import { resolveDislikeSkipThreshold } from '../lib/dislikeSkip';
+import { useSourceErrorRevision } from '../hooks/useSongSourceError';
+import { isTrackSourceError, isTrackCrossSource, getTrackCrossSourceFrom } from '../lib/songPreloadCache';
 
 const VISIBLE_ROWS = 3;
 const LIST_HEIGHT = VISIBLE_ROWS * QUEUE_ROW_HEIGHT + (VISIBLE_ROWS - 1) * QUEUE_ROW_GAP;
-const VIRTUAL_THRESHOLD = 8;
+const VIRTUAL_THRESHOLD = 5;
 
 type QueueRowSong = QueueItem & { isCurrent: boolean };
+
+type SourceStatus = { error: boolean; cross: boolean; crossFrom?: MusicSource };
 
 type RowData = {
   songs: QueueRowSong[];
@@ -24,6 +28,7 @@ type RowData = {
   canReorder: boolean;
   likeRaisesOrder: boolean;
   dragOverQueueId: string | null;
+  sourceStatusMap: Map<string, SourceStatus>;
   currentRef: React.RefObject<HTMLDivElement | null>;
   onLike: (queueId: string) => void;
   onDislike: () => void;
@@ -36,42 +41,68 @@ type RowData = {
   onDragEnd: () => void;
 };
 
-function VirtualQueueRow({ index, style, data }: ListChildComponentProps<RowData>) {
+const VirtualQueueRow = memo(function VirtualQueueRow({ index, style, data }: ListChildComponentProps<RowData>) {
   const song = data.songs[index];
   if (!song) return null;
   const memberTier = song.requestedById ? data.memberTiers?.[song.requestedById] : undefined;
+  const ss = data.sourceStatusMap.get(song.queueId);
   return (
-    <div style={{ ...style, height: QUEUE_ITEM_SIZE, paddingBottom: QUEUE_ROW_GAP }}>
-      <QueueRow
-        song={song}
-        index={index}
-        memberTier={memberTier}
-        mySocketId={data.mySocketId}
-        nickname={data.nickname}
-        canControlPlayback={data.canControlPlayback}
-        memberJumpEnabled={data.memberJumpEnabled}
-        dislikeSkipThreshold={data.dislikeSkipThreshold}
-        canReorder={data.canReorder}
-        likeRaisesOrder={data.likeRaisesOrder}
-        isDragOver={Boolean(
-          data.dragOverQueueId
-          && data.dragOverQueueId === song.queueId
-          && !song.isCurrent
-        )}
-        rowRef={song.isCurrent ? data.currentRef : undefined}
-        onLike={data.onLike}
-        onDislike={song.isCurrent ? data.onDislike : undefined}
-        onJump={data.onJump}
-        onRemove={data.onRemove}
-        onBan={data.onBan}
-        onDragStart={data.onDragStart}
-        onDragOver={data.onDragOver}
-        onDrop={data.onDrop}
-        onDragEnd={data.onDragEnd}
-      />
+    <div style={style}>
+      <div style={{ height: QUEUE_ITEM_SIZE, paddingBottom: QUEUE_ROW_GAP }}>
+        <QueueRow
+          song={song}
+          index={index}
+          memberTier={memberTier}
+          mySocketId={data.mySocketId}
+          nickname={data.nickname}
+          canControlPlayback={data.canControlPlayback}
+          memberJumpEnabled={data.memberJumpEnabled}
+          dislikeSkipThreshold={data.dislikeSkipThreshold}
+          canReorder={data.canReorder}
+          likeRaisesOrder={data.likeRaisesOrder}
+          isDragOver={Boolean(
+            data.dragOverQueueId
+            && data.dragOverQueueId === song.queueId
+            && !song.isCurrent
+          )}
+          rowRef={song.isCurrent ? data.currentRef : undefined}
+          onLike={data.onLike}
+          onDislike={song.isCurrent ? data.onDislike : undefined}
+          onJump={data.onJump}
+          onRemove={data.onRemove}
+          onBan={data.onBan}
+          onDragStart={data.onDragStart}
+          onDragOver={data.onDragOver}
+          onDrop={data.onDrop}
+          onDragEnd={data.onDragEnd}
+          hasSourceError={ss?.error}
+          hasCrossSource={ss?.cross}
+          crossSourceFrom={ss?.crossFrom}
+        />
+      </div>
     </div>
   );
-}
+}, (prev, next) => {
+  if (prev.index !== next.index) return false;
+  const prevSong = prev.data.songs[prev.index];
+  const nextSong = next.data.songs[next.index];
+  if (prevSong !== nextSong) return false;
+  if (prev.data.dragOverQueueId !== next.data.dragOverQueueId) {
+    const qid = nextSong?.queueId;
+    if (prev.data.dragOverQueueId === qid || next.data.dragOverQueueId === qid) return false;
+  }
+  if (prev.data.canControlPlayback !== next.data.canControlPlayback) return false;
+  if (prev.data.memberTiers !== next.data.memberTiers) return false;
+  if (prev.data.sourceStatusMap !== next.data.sourceStatusMap) {
+    const qid = nextSong?.queueId;
+    if (qid) {
+      const ps = prev.data.sourceStatusMap.get(qid);
+      const ns = next.data.sourceStatusMap.get(qid);
+      if (ps !== ns && (ps?.error !== ns?.error || ps?.cross !== ns?.cross)) return false;
+    }
+  }
+  return true;
+});
 
 interface Props {
   fillHeight?: boolean;
@@ -87,7 +118,8 @@ export default function QueuePanel({ fillHeight = false }: Props) {
   const canControlPlayback = useRoomStore((s) => s.canControlPlayback);
   const memberJumpEnabled = useRoomStore((s) => Boolean(s.room?.memberJumpEnabled));
   const dislikeSkipThreshold = useRoomStore((s) => resolveDislikeSkipThreshold(s.room));
-  const likeRaisesOrder = useRoomStore((s) => !(s.room?.queue || []).some((song) => Number.isFinite(song.manualOrder)));
+  const hasManualOrder = useRoomStore((s) => (s.room?.queue || []).some((song) => Number.isFinite(song.manualOrder)));
+  const likeRaisesOrder = !hasManualOrder;
   const { removeSong, requestJump, reorderQueue, toggleQueueLike, toggleCurrentDislike, banRoomSong } = useSocket();
   const [jumpMsg, setJumpMsg] = useState('');
   const [dragFromId, setDragFromId] = useState<string | null>(null);
@@ -98,6 +130,9 @@ export default function QueuePanel({ fillHeight = false }: Props) {
   const [virtualListHeight, setVirtualListHeight] = useState(LIST_HEIGHT);
   const dragFromIdRef = useRef<string | null>(null);
 
+  // Single subscription for source error/cross-source changes at the panel level
+  useSourceErrorRevision();
+
   const allSongs = useMemo<QueueRowSong[]>(() => {
     return [
       ...(currentSong ? [{ ...currentSong, isCurrent: true }] : []),
@@ -105,20 +140,33 @@ export default function QueuePanel({ fillHeight = false }: Props) {
     ];
   }, [queue, currentSong]);
 
+  const sourceStatusMap = useMemo(() => {
+    const map = new Map<string, SourceStatus>();
+    for (const song of allSongs) {
+      const error = isTrackSourceError(song);
+      const cross = isTrackCrossSource(song);
+      if (error || cross) {
+        map.set(song.queueId, { error, cross, crossFrom: cross ? getTrackCrossSourceFrom(song) : undefined });
+      }
+    }
+    return map;
+  }, [allSongs]);
+
   const currentKey = currentSong?.queueId || '';
   const useVirtualList = allSongs.length >= VIRTUAL_THRESHOLD;
   const prevCurrentKeyRef = useRef(currentKey);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!fillHeight || !useVirtualList) return;
     const container = listContainerRef.current;
     if (!container) return;
+    const h = Math.floor(container.clientHeight);
+    if (h > 0) setVirtualListHeight(h);
     const ro = new ResizeObserver((entries) => {
       const next = Math.floor(entries[0]?.contentRect.height ?? 0);
       if (next > 0) setVirtualListHeight(next);
     });
     ro.observe(container);
-    setVirtualListHeight(Math.floor(container.clientHeight));
     return () => ro.disconnect();
   }, [fillHeight, useVirtualList]);
 
@@ -196,10 +244,33 @@ export default function QueuePanel({ fillHeight = false }: Props) {
     setDragOverQueueId((prev) => (prev === queueId ? prev : queueId));
   }, []);
 
+  const autoScrollRef = useRef<number>(0);
+
   const handleDragEnd = useCallback(() => {
     dragFromIdRef.current = null;
     setDragFromId(null);
     setDragOverQueueId(null);
+    cancelAnimationFrame(autoScrollRef.current);
+  }, []);
+
+  const handleContainerDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const container = listContainerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    const edgeZone = 50;
+    const scrollEl = container.querySelector('[style*="overflow"]') as HTMLElement | null;
+    if (!scrollEl) return;
+
+    cancelAnimationFrame(autoScrollRef.current);
+    if (y < edgeZone) {
+      const speed = Math.max(2, (edgeZone - y) * 0.3);
+      autoScrollRef.current = requestAnimationFrame(() => { scrollEl.scrollTop -= speed; });
+    } else if (y > rect.height - edgeZone) {
+      const speed = Math.max(2, (y - (rect.height - edgeZone)) * 0.3);
+      autoScrollRef.current = requestAnimationFrame(() => { scrollEl.scrollTop += speed; });
+    }
   }, []);
 
   const handleDrop = useCallback(async (targetQueueId: string) => {
@@ -237,6 +308,7 @@ export default function QueuePanel({ fillHeight = false }: Props) {
     canReorder: canControlPlayback,
     likeRaisesOrder,
     dragOverQueueId,
+    sourceStatusMap,
     currentRef,
     onLike: handleLike,
     onDislike: handleDislike,
@@ -257,6 +329,7 @@ export default function QueuePanel({ fillHeight = false }: Props) {
     dislikeSkipThreshold,
     likeRaisesOrder,
     dragOverQueueId,
+    sourceStatusMap,
     handleLike,
     handleDislike,
     handleJumpRequest,
@@ -284,32 +357,38 @@ export default function QueuePanel({ fillHeight = false }: Props) {
     );
   }
 
-  const renderPlainRows = () => allSongs.map((song, i) => (
-    <QueueRow
-      key={song.queueId || `current-${song.id}`}
-      song={song}
-      index={i}
-      memberTier={song.requestedById ? memberTiers?.[song.requestedById] : undefined}
-      mySocketId={mySocketId}
-      nickname={nickname}
-      canControlPlayback={canControlPlayback}
-      memberJumpEnabled={memberJumpEnabled}
-      dislikeSkipThreshold={dislikeSkipThreshold}
-      canReorder={canControlPlayback}
-      likeRaisesOrder={likeRaisesOrder}
-      isDragOver={Boolean(dragOverQueueId && dragOverQueueId === song.queueId && dragFromId !== song.queueId)}
-      rowRef={song.isCurrent ? currentRef : undefined}
-      onLike={handleLike}
-      onDislike={song.isCurrent ? handleDislike : undefined}
-      onJump={handleJumpRequest}
-      onRemove={removeSong}
-      onBan={handleBanSong}
-      onDragStart={handleDragStart}
-      onDragOver={handleDragOver}
-      onDrop={handleDrop}
-      onDragEnd={handleDragEnd}
-    />
-  ));
+  const renderPlainRows = () => allSongs.map((song, i) => {
+    const ss = sourceStatusMap.get(song.queueId);
+    return (
+      <QueueRow
+        key={song.queueId || `current-${song.id}`}
+        song={song}
+        index={i}
+        memberTier={song.requestedById ? memberTiers?.[song.requestedById] : undefined}
+        mySocketId={mySocketId}
+        nickname={nickname}
+        canControlPlayback={canControlPlayback}
+        memberJumpEnabled={memberJumpEnabled}
+        dislikeSkipThreshold={dislikeSkipThreshold}
+        canReorder={canControlPlayback}
+        likeRaisesOrder={likeRaisesOrder}
+        isDragOver={Boolean(dragOverQueueId && dragOverQueueId === song.queueId && dragFromId !== song.queueId)}
+        rowRef={song.isCurrent ? currentRef : undefined}
+        onLike={handleLike}
+        onDislike={song.isCurrent ? handleDislike : undefined}
+        onJump={handleJumpRequest}
+        onRemove={removeSong}
+        onBan={handleBanSong}
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+        onDragEnd={handleDragEnd}
+        hasSourceError={ss?.error}
+        hasCrossSource={ss?.cross}
+        crossSourceFrom={ss?.crossFrom}
+      />
+    );
+  });
 
   return (
     <div className={`flex flex-col ${fillHeight ? 'h-full min-h-0' : ''}`}>
@@ -322,6 +401,7 @@ export default function QueuePanel({ fillHeight = false }: Props) {
           ref={listContainerRef}
           className={`pr-0.5 ${fillHeight ? 'flex-1 min-h-0' : ''}`}
           style={fillHeight ? undefined : { height: LIST_HEIGHT }}
+          onDragOver={handleContainerDragOver}
         >
           <FixedSizeList
             ref={listRef}
@@ -331,7 +411,7 @@ export default function QueuePanel({ fillHeight = false }: Props) {
             itemSize={QUEUE_ITEM_SIZE}
             itemData={rowData}
             itemKey={(index, data) => data.songs[index]?.queueId ?? index}
-            overscanCount={4}
+            overscanCount={3}
           >
             {VirtualQueueRow}
           </FixedSizeList>

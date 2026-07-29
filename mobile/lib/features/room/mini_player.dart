@@ -23,7 +23,7 @@ class MiniPlayerBar extends ConsumerWidget {
     if (room == null || current == null) return const SizedBox.shrink();
 
     final roles = session.rolesOrNull!;
-    final pos = ref.watch(playerPositionProvider).valueOrNull ?? Duration.zero;
+    final pos = ref.watch(playerPositionProvider);
     final durSec = current.duration ?? session.playback?.durationSec ?? 0;
     final progress = durSec > 0 ? (pos.inMilliseconds / 1000) / durSec : 0.0;
     final pendingSkip =

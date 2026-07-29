@@ -47,6 +47,7 @@ class PlayerPage extends ConsumerStatefulWidget {
 class _PlayerPageState extends ConsumerState<PlayerPage> {
   String? _lrc;
   String? _lrcTrack;
+  var _lrcLoading = false;
   final Set<String> _favoriteKeys = {};
   var _favoritesLoaded = false;
   Duration? _dragProgress;
@@ -85,10 +86,18 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
 
   Future<void> _ensureLyrics(QueueItem current) async {
     if (_lrcTrack == current.queueId) return;
-    _lrcTrack = current.queueId;
-    setState(() => _lrc = null);
+    final trackId = current.queueId;
+    _lrcTrack = trackId;
+    setState(() {
+      _lrc = null;
+      _lrcLoading = true;
+    });
     final l = await MusicApi.getLyrics(current);
-    if (mounted && _lrcTrack == current.queueId) setState(() => _lrc = l);
+    if (!mounted || _lrcTrack != trackId) return;
+    setState(() {
+      _lrc = l;
+      _lrcLoading = false;
+    });
   }
 
   @override
@@ -105,8 +114,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     }
 
     final roles = session.rolesOrNull!;
-    final pos = ref.watch(playerPositionProvider).valueOrNull ?? Duration.zero;
-    final playerDur = ref.watch(playerDurationProvider).valueOrNull;
+    final pos = ref.watch(playerPositionProvider);
+    final playerDur = ref.watch(playerDurationProvider);
     final metaDurSec = current.duration ?? session.playback?.durationSec ?? 0.0;
     final metaSec = metaDurSec > 10000 ? metaDurSec / 1000.0 : metaDurSec;
     // Ignore zero/invalid just_audio duration so ProgressBar doesn't show -0:01.
@@ -128,6 +137,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     final sync = ref.read(playbackSyncProvider);
     final localPlaying = openMusicAudioHandler?.player.playing ?? false;
     final effectivePlaying = session.playback?.isPlaying ?? room.isPlaying;
+    final lyricsLoading = _lrcLoading || _lrcTrack != current.queueId;
 
     return Scaffold(
       backgroundColor: OmTheme.bg,
@@ -210,7 +220,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                       child: OmLyricPanel(
-                        lrc: _lrc,
+                        lrc: lyricsLoading ? null : _lrc,
+                        loading: lyricsLoading,
+                        isPlaying: effectivePlaying,
                         position: _dragProgress ?? pos,
                         onSeek: !canSeek(room, roles)
                             ? null
@@ -240,8 +252,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                       setState(() => _dragProgress = null);
                       return;
                     }
-                    setState(() => _dragProgress = null);
+                    // Seek (hold + optimistic) first so scrubber never flashes to stale stream value.
                     sync.seekLocalAndRemote(d);
+                    setState(() => _dragProgress = null);
                   },
                   onCyclePlayMode: () async {
                     if (!roles.canControlPlayback) {

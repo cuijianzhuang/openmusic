@@ -202,7 +202,6 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
   const rowHeightsRef = useRef(new Map<string, number>());
   const prevMessageCountRef = useRef(0);
   const prependAnchorRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
-  const bottomAnchorRef = useRef<HTMLDivElement | null>(null);
   const initialScrollDoneRef = useRef(false);
   const allowLoadOlderRef = useRef(false);
   const [showLoadOlderHint, setShowLoadOlderHint] = useState(false);
@@ -232,11 +231,8 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
       }
       return;
     }
-    const anchor = bottomAnchorRef.current;
-    if (anchor) {
-      anchor.scrollIntoView({ block: 'end', behavior });
-      return;
-    }
+    // 只滚聊天列表容器，避免 scrollIntoView 带动外层页面，
+    // 移动端会把输入区顶到固定迷你播放器下面被挡住。
     const el = chatScrollRoot;
     if (!el) return;
     el.scrollTo({ top: el.scrollHeight, behavior });
@@ -668,7 +664,7 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
           onContentResize={handleStickyContentResize}
         />
       ))}
-      <div ref={bottomAnchorRef} className="h-px w-full shrink-0" aria-hidden />
+      <div className="h-px w-full shrink-0" aria-hidden />
     </div>
   );
 

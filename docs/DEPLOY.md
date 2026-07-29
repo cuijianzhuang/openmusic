@@ -11,7 +11,7 @@
 curl -O https://raw.githubusercontent.com/qq01-hub/openmusic/main/docker-compose.full.yml
 
 # 准备持久化目录
-mkdir -p data/downloads
+mkdir -p data/downloads data/meting
 touch data/.env data/setup.lock
 echo '{}' > data/runtimeConfig.json
 echo '{}' > data/adminConfig.json
@@ -21,6 +21,8 @@ docker compose -f docker-compose.full.yml up -d
 ```
 
 打开 `http://<IP>:4000`，Redis / Meting 已自动填好，只需填站点域名。完成后自动重启。
+
+Meting 管理后台：`http://<IP>:3000/admin`，默认账号 `admin` / `admin123`（可用环境变量 `METING_ADMIN_USERNAME` / `METING_ADMIN_PASSWORD` 覆盖，仅首次无数据时生效）。
 
 > 不需要内置 Meting？下载 `docker-compose.yml` 代替。
 > 更新：`docker compose pull && docker compose up -d`

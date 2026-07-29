@@ -179,6 +179,7 @@ export function isRoomStateEquivalent(a: RoomState, b: RoomState): boolean {
     && a.ownerId === b.ownerId
     && a.creatorId === b.creatorId
     && stringArraysEqual(a.adminIds, b.adminIds)
+    && a.maxAdmins === b.maxAdmins
     && stringArraysEqual(a.autoPromotedAdminIds, b.autoPromotedAdminIds)
     && recordShallowEqual(a.userNicknames, b.userNicknames)
     && a.ownerConnectionId === b.ownerConnectionId

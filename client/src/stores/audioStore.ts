@@ -28,6 +28,9 @@ interface AudioStore {
   setSeekPlayback: (fn: ((time: number) => void) | null) => void;
   localPlayback: ((isPlaying: boolean) => void) | null;
   setLocalPlayback: (fn: ((isPlaying: boolean) => void) | null) => void;
+  /** 仅续播 audio，不改房间乐观态/进度（用于系统媒体卡片关闭误暂停） */
+  softResumeLocalAudio: (() => void) | null;
+  setSoftResumeLocalAudio: (fn: (() => void) | null) => void;
   needsAudioUnlock: boolean;
   setNeedsAudioUnlock: (needs: boolean) => void;
   retryPlayback: ((fromUserGesture?: boolean) => Promise<void>) | null;
@@ -60,6 +63,8 @@ export const useAudioStore = create<AudioStore>((set) => ({
   setSeekPlayback: (seekPlayback) => set({ seekPlayback }),
   localPlayback: null,
   setLocalPlayback: (localPlayback) => set({ localPlayback }),
+  softResumeLocalAudio: null,
+  setSoftResumeLocalAudio: (softResumeLocalAudio) => set({ softResumeLocalAudio }),
   needsAudioUnlock: false,
   setNeedsAudioUnlock: (needsAudioUnlock) => set({ needsAudioUnlock }),
   retryPlayback: null,

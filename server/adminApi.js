@@ -1051,7 +1051,8 @@ export function mountAdminApi(app, { io, socketToRoom, socketToUserId, getClient
 
   app.post('/api/admin/broadcast', requireAdminOrigin, requireAdmin, requireAdminSetupComplete, (req, res) => {
     const ip = getClientIp?.(req) || req.ip || '';
-    const result = broadcastAdminSystemMessage(req.body?.text);
+    const roomIds = Array.isArray(req.body?.roomIds) ? req.body.roomIds : undefined;
+    const result = broadcastAdminSystemMessage(req.body?.text, { roomIds });
     if (!result.success) return res.status(400).json({ error: result.error });
 
     for (const delivery of result.deliveries || []) {

@@ -79,6 +79,31 @@ export default function ChatPanel({ className = '' }: { className?: string }) {
     messageListRef.current?.stickToBottom();
   }, []);
 
+  const ensureComposerAboveMiniPlayer = useCallback(() => {
+    if (!isMobileLayout) return;
+    const panel = chatPanelRef.current;
+    if (!panel) return;
+    // 与 Room.tsx / MiniPlayer：fixed bottom + h-[4.75rem] + safe-area
+    const rem = Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+    const probe = document.createElement('div');
+    probe.style.cssText = 'position:fixed;visibility:hidden;pointer-events:none;height:env(safe-area-inset-bottom,0px)';
+    document.body.appendChild(probe);
+    const safeBottom = probe.getBoundingClientRect().height;
+    probe.remove();
+    const limit = window.innerHeight - 4.75 * rem - safeBottom - 8;
+    const overflow = panel.getBoundingClientRect().bottom - limit;
+    if (overflow <= 1) return;
+    let node: HTMLElement | null = panel.parentElement;
+    while (node && node !== document.body) {
+      const { overflowY } = getComputedStyle(node);
+      if (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay') {
+        node.scrollTop += overflow;
+        return;
+      }
+      node = node.parentElement;
+    }
+  }, [isMobileLayout]);
+
   const handleReply = useCallback((msg: ChatMessage) => {
     setReplyTo({
       id: msg.id,
@@ -90,12 +115,15 @@ export default function ChatPanel({ className = '' }: { className?: string }) {
       asSticker: Boolean(msg.asSticker || (msg.imageKey && msg.imageKey.startsWith('local-sticker:'))),
     });
     const isSelf = msg.userId === mySocketId || msg.nickname === nickname;
-    if (!isSelf) {
-      inputBarRef.current?.applyReplyMention(msg.nickname);
-      return;
-    }
-    requestAnimationFrame(() => inputBarRef.current?.focus());
-  }, [mySocketId, nickname]);
+    requestAnimationFrame(() => {
+      ensureComposerAboveMiniPlayer();
+      if (!isSelf) {
+        inputBarRef.current?.applyReplyMention(msg.nickname);
+        return;
+      }
+      inputBarRef.current?.focus();
+    });
+  }, [ensureComposerAboveMiniPlayer, mySocketId, nickname]);
 
   const handleMentionUser = useCallback((user: RoomUser) => {
     inputBarRef.current?.applyReplyMention(user.nickname);

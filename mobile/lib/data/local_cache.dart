@@ -6,6 +6,7 @@ class LocalCache {
   LocalCache._();
 
   static const _nickKey = 'sjb_nickname';
+  static const _avatarKey = 'avatar_url';
   static const _recentRoomsKey = 'om_recent_rooms';
   static const _searchHistoryKey = 'om_search_history';
 
@@ -16,6 +17,19 @@ class LocalCache {
 
   static Future<void> setNickname(String value) async {
     await (await _prefs).setString(_nickKey, value.trim());
+  }
+
+  static Future<String> getAvatarUrl() async =>
+      (await _prefs).getString(_avatarKey) ?? '';
+
+  static Future<void> setAvatarUrl(String value) async {
+    final prefs = await _prefs;
+    final next = value.trim();
+    if (next.isEmpty) {
+      await prefs.remove(_avatarKey);
+      return;
+    }
+    await prefs.setString(_avatarKey, next);
   }
 
   static Future<List<String>> getRecentRoomIds() async =>

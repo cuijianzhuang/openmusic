@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -39,6 +40,8 @@ class _MentionOption {
 
 enum _MentionKind { all, user }
 
+enum _EmojiPanelTab { qq, pack, mine }
+
 class _PendingChatImage {
   const _PendingChatImage({
     required this.localPath,
@@ -56,11 +59,15 @@ class _ChatTabState extends ConsumerState<ChatTab> {
   final _focus = FocusNode();
   final _scroll = ScrollController();
   var _showEmoji = false;
+  var _emojiTab = _EmojiPanelTab.qq;
   var _showMentionPicker = false;
   var _mentionQuery = '';
   var _mentionIndex = 0;
   var _followTail = true;
   var _lastMessageCount = 0;
+  var _loadingOlderInFlight = false;
+  double? _pendingPrependAnchorPixels;
+  double? _pendingPrependAnchorMax;
   ChatReplyRef? _replyTo;
   List<QFaceItem> _faces = QFaceCatalog.popular();
   final ImagePicker _imagePicker = ImagePicker();
@@ -98,6 +105,52 @@ class _ChatTabState extends ConsumerState<ChatTab> {
     if (nextFollowTail != _followTail) {
       setState(() => _followTail = nextFollowTail);
     }
+    // Pull / drag to top → load older history (no button).
+    if (_scroll.position.pixels <= 64) {
+      unawaited(_loadOlderFromScroll());
+    }
+  }
+
+  Future<void> _loadOlderFromScroll() async {
+    final session = ref.read(roomSessionProvider);
+    if (!session.hasMoreOlder || session.loadingOlder || _loadingOlderInFlight) {
+      return;
+    }
+    final messages = session.messages;
+    if (messages.isEmpty || !_scroll.hasClients) return;
+
+    _loadingOlderInFlight = true;
+    _followTail = false;
+    _pendingPrependAnchorPixels = _scroll.position.pixels;
+    _pendingPrependAnchorMax = _scroll.position.maxScrollExtent;
+    final first = messages.first;
+    try {
+      await ref.read(roomSessionProvider.notifier).loadChatHistory(
+            before: first.timestamp,
+            beforeId: first.id,
+          );
+    } catch (e) {
+      _pendingPrependAnchorPixels = null;
+      _pendingPrependAnchorMax = null;
+      if (mounted) omSnack(context, '$e');
+    } finally {
+      _loadingOlderInFlight = false;
+    }
+  }
+
+  void _restoreScrollAfterPrepend() {
+    final anchorPixels = _pendingPrependAnchorPixels;
+    final anchorMax = _pendingPrependAnchorMax;
+    _pendingPrependAnchorPixels = null;
+    _pendingPrependAnchorMax = null;
+    if (anchorPixels == null || anchorMax == null) return;
+    if (!_scroll.hasClients) return;
+    final afterMax = _scroll.position.maxScrollExtent;
+    final delta = afterMax - anchorMax;
+    if (delta <= 0) return;
+    _scroll.jumpTo(
+      (anchorPixels + delta).clamp(0.0, afterMax),
+    );
   }
 
   void _maybeScrollToBottom({bool force = false}) {
@@ -238,24 +291,14 @@ class _ChatTabState extends ConsumerState<ChatTab> {
     }
   }
 
-  Future<void> _openStickerSearch() async {
-    final room = ref.read(roomSessionProvider).room;
-    if (room == null) return;
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _StickerSearchSheet(roomId: room.id),
-    );
-  }
-
-  Future<void> _openMyStickers() async {
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => const _MyStickerSheet(),
-    );
+  void _toggleEmojiPanel() {
+    setState(() {
+      _showEmoji = !_showEmoji;
+      if (_showEmoji) {
+        _showMentionPicker = false;
+        _focus.unfocus();
+      }
+    });
   }
 
   void _insertFace(QFaceItem face) {
@@ -318,21 +361,6 @@ class _ChatTabState extends ConsumerState<ChatTab> {
       backgroundColor: Colors.transparent,
       builder: (_) => const _ChatMuteSheet(),
     );
-  }
-
-  Future<void> _loadOlder() async {
-    final session = ref.read(roomSessionProvider);
-    final messages = session.messages;
-    if (messages.isEmpty) return;
-    final first = messages.first;
-    try {
-      await ref.read(roomSessionProvider.notifier).loadChatHistory(
-            before: first.timestamp,
-            beforeId: first.id,
-          );
-    } catch (e) {
-      if (mounted) omSnack(context, '$e');
-    }
   }
 
   void _startReply(ChatMessage message) {
@@ -477,8 +505,16 @@ class _ChatTabState extends ConsumerState<ChatTab> {
         : const <_MentionOption>[];
 
     if (messages.length != _lastMessageCount) {
+      final grew = messages.length > _lastMessageCount;
+      final restoringPrepend = _pendingPrependAnchorPixels != null;
       _lastMessageCount = messages.length;
-      WidgetsBinding.instance.addPostFrameCallback((_) => _maybeScrollToBottom());
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (restoringPrepend && grew) {
+          _restoreScrollAfterPrepend();
+          return;
+        }
+        _maybeScrollToBottom();
+      });
     }
 
     return Column(
@@ -514,22 +550,36 @@ class _ChatTabState extends ConsumerState<ChatTab> {
                 )
               : ListView.builder(
                   controller: _scroll,
-                  physics: const BouncingScrollPhysics(),
+                  physics: const BouncingScrollPhysics(
+                    parent: AlwaysScrollableScrollPhysics(),
+                  ),
                   padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
-                  itemCount: messages.length + (hasMoreOlder ? 1 : 0),
+                  itemCount: messages.length + ((hasMoreOlder || loadingOlder) ? 1 : 0),
                   itemBuilder: (context, i) {
-                    if (hasMoreOlder && i == 0) {
+                    if ((hasMoreOlder || loadingOlder) && i == 0) {
                       return Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
+                        padding: const EdgeInsets.only(bottom: 10, top: 4),
                         child: Center(
-                          child: OutlinedButton(
-                            onPressed: loadingOlder ? null : _loadOlder,
-                            child: Text(loadingOlder ? '加载中…' : '加载更早消息'),
-                          ),
+                          child: loadingOlder
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: OmTheme.textHint,
+                                  ),
+                                )
+                              : const Text(
+                                  '下拉加载更早消息',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: OmTheme.textHint,
+                                  ),
+                                ),
                         ),
                       );
                     }
-                    final index = hasMoreOlder ? i - 1 : i;
+                    final index = (hasMoreOlder || loadingOlder) ? i - 1 : i;
                     final m = messages[index];
                     final isSystem = m.kind == 'system' || m.kind == 'notice';
                     if (m.kind == 'welcome') {
@@ -541,10 +591,8 @@ class _ChatTabState extends ConsumerState<ChatTab> {
                       );
                     }
                     final isMe = myId != null && m.userId == myId;
-                    final showName = !isMe &&
-                        (index == 0 ||
-                            messages[index - 1].userId != m.userId ||
-                            _isSystem(messages[index - 1]));
+                    // 与网页端一致：每条消息都显示昵称（含自己）
+                    const showName = true;
                     final stillInRoom = room?.users.any((u) => u.id == m.userId) == true;
                     final isOwner = room?.creatorId == m.userId;
                     final isAdmin = room != null &&
@@ -557,7 +605,7 @@ class _ChatTabState extends ConsumerState<ChatTab> {
                       myUserId: myId,
                       isMe: isMe,
                       showName: showName,
-                      showAvatar: room?.chatShowAvatars == true,
+                      showAvatar: true,
                       avatarUrl: room?.avatarUrlFor(m.userId),
                       nicknames: nicknames,
                       memberTier: room?.memberTiers[m.userId] ?? m.memberTier,
@@ -703,13 +751,8 @@ class _ChatTabState extends ConsumerState<ChatTab> {
                   ),
                 ),
               IconButton(
-                tooltip: 'QQ 表情',
-                onPressed: muted
-                    ? null
-                    : () => setState(() {
-                          _showEmoji = !_showEmoji;
-                          if (_showEmoji) _showMentionPicker = false;
-                        }),
+                tooltip: '表情',
+                onPressed: muted ? null : _toggleEmojiPanel,
                 icon: Icon(
                   _showEmoji ? Icons.keyboard_alt_outlined : Icons.emoji_emotions_outlined,
                   color: muted
@@ -726,23 +769,6 @@ class _ChatTabState extends ConsumerState<ChatTab> {
                     color: muted || _uploadingImage ? OmTheme.textHint : OmTheme.textSecondary,
                   ),
                 ),
-              if (_stickerSearchEnabled)
-                IconButton(
-                  tooltip: '贴纸搜索',
-                  onPressed: muted ? null : _openStickerSearch,
-                  icon: Icon(
-                    Icons.gif_box_outlined,
-                    color: muted ? OmTheme.textHint : OmTheme.textSecondary,
-                  ),
-                ),
-              IconButton(
-                tooltip: '我的表情',
-                onPressed: muted ? null : _openMyStickers,
-                icon: Icon(
-                  Icons.collections_outlined,
-                  color: muted ? OmTheme.textHint : OmTheme.textSecondary,
-                ),
-              ),
               Expanded(
                 child: Container(
                   constraints: const BoxConstraints(minHeight: 40),
@@ -812,51 +838,205 @@ class _ChatTabState extends ConsumerState<ChatTab> {
           ),
         ),
         if (_showEmoji && !muted)
-          Container(
-            height: 200,
-            color: OmTheme.card,
-            child: GridView.builder(
-              padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
-              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                maxCrossAxisExtent: 44,
-                mainAxisSpacing: 6,
-                crossAxisSpacing: 6,
-                childAspectRatio: 1,
-              ),
-              itemCount: _faces.length,
-              itemBuilder: (context, i) {
-                final face = _faces[i];
-                return InkWell(
-                  borderRadius: BorderRadius.circular(8),
-                  onTap: () => _insertFace(face),
-                  onLongPress: () => _send(face.token),
-                  child: Center(
-                    child: SizedBox(
-                      width: 32,
-                      height: 32,
-                      child: Image.network(
-                        face.url,
-                        fit: BoxFit.contain,
-                        errorBuilder: (_, __, ___) => Text(
-                          face.text.replaceFirst('/', ''),
-                          style: const TextStyle(fontSize: 9, color: OmTheme.textHint),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
+          _EmojiPanel(
+            tab: _emojiTab,
+            stickerSearchEnabled: _stickerSearchEnabled,
+            faces: _faces,
+            onTabChanged: (tab) => setState(() => _emojiTab = tab),
+            onInsertFace: _insertFace,
+            onSendFaceToken: (token) => _send(token),
           ),
       ],
     );
   }
+}
 
-  bool _isSystem(ChatMessage m) =>
-      m.kind == 'system' || m.kind == 'welcome' || m.kind == 'notice' || m.kind == 'recall';
+class _EmojiPanel extends StatelessWidget {
+  const _EmojiPanel({
+    required this.tab,
+    required this.stickerSearchEnabled,
+    required this.faces,
+    required this.onTabChanged,
+    required this.onInsertFace,
+    required this.onSendFaceToken,
+  });
+
+  final _EmojiPanelTab tab;
+  final bool stickerSearchEnabled;
+  final List<QFaceItem> faces;
+  final ValueChanged<_EmojiPanelTab> onTabChanged;
+  final ValueChanged<QFaceItem> onInsertFace;
+  final ValueChanged<String> onSendFaceToken;
+
+  @override
+  Widget build(BuildContext context) {
+    final effectiveTab =
+        (!stickerSearchEnabled && tab == _EmojiPanelTab.pack) ? _EmojiPanelTab.qq : tab;
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+    final pages = <Widget>[
+      _QqFaceGrid(
+        faces: faces,
+        onInsertFace: onInsertFace,
+        onSendFaceToken: onSendFaceToken,
+      ),
+      if (stickerSearchEnabled) const _StickerSearchPanel(),
+      _MyStickerPanel(active: effectiveTab == _EmojiPanelTab.mine),
+    ];
+    final pageIndex = switch (effectiveTab) {
+      _EmojiPanelTab.qq => 0,
+      _EmojiPanelTab.pack => stickerSearchEnabled ? 1 : 0,
+      _EmojiPanelTab.mine => stickerSearchEnabled ? 2 : 1,
+    };
+
+    return Container(
+      height: 288 + bottomInset,
+      decoration: const BoxDecoration(
+        color: OmTheme.card,
+        border: Border(top: BorderSide(color: OmTheme.divider, width: 0.5)),
+      ),
+      child: Column(
+        children: [
+          Expanded(
+            child: IndexedStack(
+              index: pageIndex,
+              children: pages,
+            ),
+          ),
+          Container(
+            padding: EdgeInsets.fromLTRB(8, 4, 8, 4 + bottomInset),
+            decoration: BoxDecoration(
+              color: OmTheme.elevated.withValues(alpha: 0.55),
+              border: const Border(top: BorderSide(color: OmTheme.divider, width: 0.5)),
+            ),
+            child: Row(
+              children: [
+                _EmojiTabButton(
+                  selected: effectiveTab == _EmojiPanelTab.qq,
+                  icon: Icons.emoji_emotions_outlined,
+                  label: 'QQ',
+                  onTap: () => onTabChanged(_EmojiPanelTab.qq),
+                ),
+                if (stickerSearchEnabled)
+                  _EmojiTabButton(
+                    selected: effectiveTab == _EmojiPanelTab.pack,
+                    icon: Icons.auto_awesome_mosaic_outlined,
+                    label: '表情包',
+                    onTap: () => onTabChanged(_EmojiPanelTab.pack),
+                  ),
+                _EmojiTabButton(
+                  selected: effectiveTab == _EmojiPanelTab.mine,
+                  icon: Icons.favorite_border_rounded,
+                  label: '我的',
+                  onTap: () => onTabChanged(_EmojiPanelTab.mine),
+                ),
+                const Spacer(),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EmojiTabButton extends StatelessWidget {
+  const _EmojiTabButton({
+    required this.selected,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final bool selected;
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = selected ? OmTheme.red : OmTheme.textHint;
+    return Padding(
+      padding: const EdgeInsets.only(right: 4),
+      child: Material(
+        color: selected ? OmTheme.red.withValues(alpha: 0.12) : Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: SizedBox(
+            width: 64,
+            height: 48,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, size: 20, color: color),
+                const SizedBox(height: 2),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    color: color,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _QqFaceGrid extends StatelessWidget {
+  const _QqFaceGrid({
+    required this.faces,
+    required this.onInsertFace,
+    required this.onSendFaceToken,
+  });
+
+  final List<QFaceItem> faces;
+  final ValueChanged<QFaceItem> onInsertFace;
+  final ValueChanged<String> onSendFaceToken;
+
+  @override
+  Widget build(BuildContext context) {
+    return GridView.builder(
+      padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
+      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: 44,
+        mainAxisSpacing: 6,
+        crossAxisSpacing: 6,
+        childAspectRatio: 1,
+      ),
+      itemCount: faces.length,
+      itemBuilder: (context, i) {
+        final face = faces[i];
+        return InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: () => onInsertFace(face),
+          onLongPress: () => onSendFaceToken(face.token),
+          child: Center(
+            child: SizedBox(
+              width: 32,
+              height: 32,
+              child: Image.network(
+                face.url,
+                fit: BoxFit.contain,
+                errorBuilder: (_, __, ___) => Text(
+                  face.text.replaceFirst('/', ''),
+                  style: const TextStyle(fontSize: 9, color: OmTheme.textHint),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
 }
 
 class _MentionPicker extends StatelessWidget {
@@ -1201,7 +1381,7 @@ class _ChatBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final maxW = MediaQuery.of(context).size.width * (showAvatar && !isMe ? 0.68 : 0.72);
+    final maxW = MediaQuery.of(context).size.width * (showAvatar ? 0.66 : 0.72);
     final timeLabel = _formatTimestamp(message.timestamp);
     final style = TextStyle(
       fontSize: 14,
@@ -1347,39 +1527,74 @@ class _ChatBubble extends StatelessWidget {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Flexible(
-                  child: Wrap(
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    spacing: 6,
-                    runSpacing: 4,
-                    children: [
-                      GestureDetector(
-                        onTap: onMention,
-                        child: Text(
+                if (!isMe) ...[
+                  Flexible(
+                    child: Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 6,
+                      runSpacing: 4,
+                      children: [
+                        GestureDetector(
+                          onTap: onMention,
+                          child: Text(
+                            message.nickname,
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: onMention != null
+                                  ? const Color(0xFF7DD3FC)
+                                  : OmTheme.textHint,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        if (isOwner) const _RolePill(label: '房主', color: Color(0xFFFBBF24)),
+                        if (!isOwner && isAdmin)
+                          const _RolePill(label: '管理', color: Color(0xFF7DD3FC)),
+                        if (memberTier != null) MemberTierBadge(tier: memberTier!, compact: true),
+                      ],
+                    ),
+                  ),
+                  if (timeLabel.isNotEmpty) ...[
+                    const SizedBox(width: 6),
+                    Text(
+                      timeLabel,
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: Colors.white.withValues(alpha: 0.35),
+                      ),
+                    ),
+                  ],
+                ] else ...[
+                  if (timeLabel.isNotEmpty) ...[
+                    Text(
+                      timeLabel,
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: Colors.white.withValues(alpha: 0.35),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                  ],
+                  Flexible(
+                    child: Wrap(
+                      alignment: WrapAlignment.end,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 6,
+                      runSpacing: 4,
+                      children: [
+                        if (memberTier != null) MemberTierBadge(tier: memberTier!, compact: true),
+                        if (!isOwner && isAdmin)
+                          const _RolePill(label: '管理', color: Color(0xFF7DD3FC)),
+                        if (isOwner) const _RolePill(label: '房主', color: Color(0xFFFBBF24)),
+                        Text(
                           message.nickname,
-                          style: TextStyle(
+                          style: const TextStyle(
                             fontSize: 11,
-                            color: onMention != null
-                                ? const Color(0xFF7DD3FC)
-                                : OmTheme.textHint,
+                            color: Color(0xFFFCA5A5),
                             fontWeight: FontWeight.w600,
                           ),
                         ),
-                      ),
-                      if (isOwner) const _RolePill(label: '房主', color: Color(0xFFFBBF24)),
-                      if (!isOwner && isAdmin)
-                        const _RolePill(label: '管理', color: Color(0xFF7DD3FC)),
-                      if (memberTier != null) MemberTierBadge(tier: memberTier!, compact: true),
-                    ],
-                  ),
-                ),
-                if (timeLabel.isNotEmpty) ...[
-                  const SizedBox(width: 6),
-                  Text(
-                    timeLabel,
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: Colors.white.withValues(alpha: 0.35),
+                      ],
                     ),
                   ),
                 ],
@@ -1388,17 +1603,26 @@ class _ChatBubble extends StatelessWidget {
           )
         : null;
 
+    final avatar = showAvatar
+        ? GestureDetector(
+            onTap: onMention,
+            child: _Avatar(
+              name: message.nickname,
+              url: avatarUrl,
+              isMe: isMe,
+              isOwner: isOwner,
+            ),
+          )
+        : null;
+
     return Padding(
-      padding: EdgeInsets.only(bottom: showName ? 14 : 6, top: showName ? 4 : 0),
+      padding: const EdgeInsets.only(bottom: 14, top: 4),
       child: Row(
         mainAxisAlignment: isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
-        crossAxisAlignment: CrossAxisAlignment.end,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (!isMe && showAvatar) ...[
-            GestureDetector(
-              onTap: onMention,
-              child: _Avatar(name: message.nickname, url: avatarUrl),
-            ),
+          if (!isMe && avatar != null) ...[
+            avatar,
             const SizedBox(width: 8),
           ],
           Flexible(
@@ -1409,21 +1633,13 @@ class _ChatBubble extends StatelessWidget {
                 bubble,
                 if (reactionWrap != null) reactionWrap,
                 if (stickerSave != null) stickerSave,
-                if (isMe && timeLabel.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4, right: 2),
-                    child: Text(
-                      timeLabel,
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: Colors.white.withValues(alpha: 0.35),
-                      ),
-                    ),
-                  ),
               ],
             ),
           ),
-          if (isMe) const SizedBox(width: 4),
+          if (isMe && avatar != null) ...[
+            const SizedBox(width: 8),
+            avatar,
+          ],
         ],
       ),
     );
@@ -1448,18 +1664,46 @@ String _replyPreview(ChatReplyRef reply) {
 }
 
 class _Avatar extends StatelessWidget {
-  const _Avatar({required this.name, this.url});
+  const _Avatar({
+    required this.name,
+    this.url,
+    this.isMe = false,
+    this.isOwner = false,
+  });
   final String name;
   final String? url;
+  final bool isMe;
+  final bool isOwner;
 
   @override
   Widget build(BuildContext context) {
     final letter = name.isNotEmpty ? name.substring(0, 1).toUpperCase() : '?';
+    final Color fill;
+    if (isOwner) {
+      fill = const Color(0xFFF59E0B);
+    } else if (isMe) {
+      fill = OmTheme.red;
+    } else {
+      fill = OmTheme.elevated;
+    }
     final fallback = Container(
-      width: 34,
-      height: 34,
-      decoration: const BoxDecoration(
-        color: OmTheme.elevated,
+      width: 36,
+      height: 36,
+      decoration: BoxDecoration(
+        gradient: isOwner
+            ? const LinearGradient(
+                colors: [Color(0xFFF59E0B), Color(0xFFEA580C)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              )
+            : isMe
+                ? LinearGradient(
+                    colors: [OmTheme.red, OmTheme.red.withValues(alpha: 0.72)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  )
+                : null,
+        color: (!isOwner && !isMe) ? fill : null,
         shape: BoxShape.circle,
       ),
       alignment: Alignment.center,
@@ -1467,8 +1711,8 @@ class _Avatar extends StatelessWidget {
         letter,
         style: const TextStyle(
           fontSize: 14,
-          fontWeight: FontWeight.w600,
-          color: OmTheme.textSecondary,
+          fontWeight: FontWeight.w700,
+          color: Colors.white,
         ),
       ),
     );
@@ -1477,11 +1721,11 @@ class _Avatar extends StatelessWidget {
 
     return ClipOval(
       child: SizedBox(
-        width: 34,
-        height: 34,
+        width: 36,
+        height: 36,
         child: OmCoverImage(
           url: url,
-          sizePx: 68,
+          sizePx: 72,
           fit: BoxFit.cover,
           fallback: fallback,
         ),
@@ -1518,16 +1762,14 @@ class _RolePill extends StatelessWidget {
   }
 }
 
-class _StickerSearchSheet extends ConsumerStatefulWidget {
-  const _StickerSearchSheet({required this.roomId});
-
-  final String roomId;
+class _StickerSearchPanel extends ConsumerStatefulWidget {
+  const _StickerSearchPanel();
 
   @override
-  ConsumerState<_StickerSearchSheet> createState() => _StickerSearchSheetState();
+  ConsumerState<_StickerSearchPanel> createState() => _StickerSearchPanelState();
 }
 
-class _StickerSearchSheetState extends ConsumerState<_StickerSearchSheet> {
+class _StickerSearchPanelState extends ConsumerState<_StickerSearchPanel> {
   final _ctrl = TextEditingController();
   var _loading = false;
   var _sending = false;
@@ -1544,7 +1786,7 @@ class _StickerSearchSheetState extends ConsumerState<_StickerSearchSheet> {
   Future<void> _search([int page = 1]) async {
     final words = _ctrl.text.trim();
     if (words.isEmpty) {
-      if (mounted) omSnack(context, '请输入贴纸关键词');
+      if (mounted) omSnack(context, '请输入表情包关键词');
       return;
     }
     setState(() => _loading = true);
@@ -1565,6 +1807,7 @@ class _StickerSearchSheetState extends ConsumerState<_StickerSearchSheet> {
   }
 
   Future<void> _sendSticker(String imageUrl) async {
+    if (_sending) return;
     setState(() => _sending = true);
     final res = await ref.read(roomSessionProvider.notifier).sendChat(
           '',
@@ -1573,110 +1816,118 @@ class _StickerSearchSheetState extends ConsumerState<_StickerSearchSheet> {
         );
     if (!mounted) return;
     setState(() => _sending = false);
-    if (res['success'] == true) {
-      Navigator.pop(context);
-      return;
+    if (res['success'] != true) {
+      omSnack(context, '${res['error'] ?? '发送失败'}');
     }
-    omSnack(context, '${res['error'] ?? '发送失败'}');
   }
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: Container(
-        height: MediaQuery.of(context).size.height * 0.72,
-        decoration: const BoxDecoration(
-          color: OmTheme.card,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
-        ),
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-        child: Column(
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _ctrl,
-                    decoration: const InputDecoration(
-                      hintText: '搜索贴纸，例如：猫猫、晚安、打工',
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _ctrl,
+                  style: const TextStyle(fontSize: 13, color: OmTheme.textPrimary),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    hintText: '搜索表情包，例如：猫猫、晚安',
+                    hintStyle: const TextStyle(fontSize: 13, color: OmTheme.textHint),
+                    filled: true,
+                    fillColor: OmTheme.elevated,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide.none,
                     ),
-                    onSubmitted: (_) => _search(),
                   ),
+                  onSubmitted: (_) => _search(),
                 ),
-                const SizedBox(width: 10),
-                FilledButton(
-                  onPressed: _loading || _sending ? null : _search,
-                  child: const Text('搜索'),
+              ),
+              const SizedBox(width: 8),
+              FilledButton(
+                onPressed: _loading || _sending ? null : () => _search(),
+                style: FilledButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
                 ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Expanded(
-              child: _loading
-                  ? const Center(child: CircularProgressIndicator())
-                  : _images.isEmpty
-                      ? const Center(
-                          child: Text(
-                            '输入关键词搜索贴纸',
-                            style: TextStyle(color: OmTheme.textHint),
-                          ),
-                        )
-                      : GridView.builder(
-                          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 3,
-                            mainAxisSpacing: 10,
-                            crossAxisSpacing: 10,
-                            childAspectRatio: 1,
-                          ),
-                          itemCount: _images.length,
-                          itemBuilder: (context, index) {
-                            final image = _images[index];
-                            return InkWell(
-                              onTap: _sending ? null : () => _sendSticker(image),
-                              borderRadius: BorderRadius.circular(12),
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(12),
-                                child: OmCoverImage(
-                                  url: image,
-                                  sizePx: 320,
-                                  fit: BoxFit.cover,
-                                  fallback: Container(
-                                    color: OmTheme.elevated,
-                                    alignment: Alignment.center,
-                                    child: const Icon(
-                                      Icons.broken_image_outlined,
-                                      color: OmTheme.textHint,
-                                    ),
+                child: const Text('搜索'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
+                : _images.isEmpty
+                    ? const Center(
+                        child: Text(
+                          '输入关键词搜索表情包',
+                          style: TextStyle(fontSize: 12, color: OmTheme.textHint),
+                        ),
+                      )
+                    : GridView.builder(
+                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 4,
+                          mainAxisSpacing: 8,
+                          crossAxisSpacing: 8,
+                          childAspectRatio: 1,
+                        ),
+                        itemCount: _images.length,
+                        itemBuilder: (context, index) {
+                          final image = _images[index];
+                          return InkWell(
+                            onTap: _sending ? null : () => _sendSticker(image),
+                            borderRadius: BorderRadius.circular(10),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(10),
+                              child: OmCoverImage(
+                                url: image,
+                                sizePx: 240,
+                                fit: BoxFit.cover,
+                                fallback: Container(
+                                  color: OmTheme.elevated,
+                                  alignment: Alignment.center,
+                                  child: const Icon(
+                                    Icons.broken_image_outlined,
+                                    color: OmTheme.textHint,
                                   ),
                                 ),
                               ),
-                            );
-                          },
-                        ),
-            ),
-            if (_images.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              Row(
+                            ),
+                          );
+                        },
+                      ),
+          ),
+          if (_images.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Row(
                 children: [
-                  OutlinedButton(
+                  TextButton(
                     onPressed: _loading || _page <= 1 ? null : () => _search(_page - 1),
-                    child: const Text('上一页'),
+                    child: const Text('上一页', style: TextStyle(fontSize: 12)),
                   ),
-                  const Spacer(),
-                  Text(
-                    '$_page / $_maxPage',
-                    style: const TextStyle(color: OmTheme.textHint),
+                  Expanded(
+                    child: Text(
+                      '$_page / $_maxPage',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 11, color: OmTheme.textHint),
+                    ),
                   ),
-                  const Spacer(),
-                  OutlinedButton(
-                    onPressed: _loading || _page >= _maxPage ? null : () => _search(_page + 1),
-                    child: const Text('下一页'),
+                  TextButton(
+                    onPressed:
+                        _loading || _page >= _maxPage ? null : () => _search(_page + 1),
+                    child: const Text('下一页', style: TextStyle(fontSize: 12)),
                   ),
                 ],
               ),
-            ],
-          ],
-        ),
+            ),
+        ],
       ),
     );
   }
@@ -1741,14 +1992,16 @@ class _SaveStickerButtonState extends State<_SaveStickerButton> {
   }
 }
 
-class _MyStickerSheet extends ConsumerStatefulWidget {
-  const _MyStickerSheet();
+class _MyStickerPanel extends ConsumerStatefulWidget {
+  const _MyStickerPanel({this.active = false});
+
+  final bool active;
 
   @override
-  ConsumerState<_MyStickerSheet> createState() => _MyStickerSheetState();
+  ConsumerState<_MyStickerPanel> createState() => _MyStickerPanelState();
 }
 
-class _MyStickerSheetState extends ConsumerState<_MyStickerSheet> {
+class _MyStickerPanelState extends ConsumerState<_MyStickerPanel> {
   var _loading = true;
   var _sending = false;
   String? _deletingId;
@@ -1758,6 +2011,14 @@ class _MyStickerSheetState extends ConsumerState<_MyStickerSheet> {
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant _MyStickerPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.active && !oldWidget.active) {
+      _load();
+    }
   }
 
   Future<void> _load() async {
@@ -1787,11 +2048,9 @@ class _MyStickerSheetState extends ConsumerState<_MyStickerSheet> {
         );
     if (!mounted) return;
     setState(() => _sending = false);
-    if (res['success'] == true) {
-      Navigator.pop(context);
-      return;
+    if (res['success'] != true) {
+      omSnack(context, '${res['error'] ?? '发送失败'}');
     }
-    omSnack(context, '${res['error'] ?? '发送失败'}');
   }
 
   Future<void> _deleteSticker(UserSticker sticker) async {
@@ -1812,89 +2071,89 @@ class _MyStickerSheetState extends ConsumerState<_MyStickerSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: Container(
-        height: MediaQuery.of(context).size.height * 0.62,
-        decoration: const BoxDecoration(
-          color: OmTheme.card,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+    }
+    if (_stickers.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.symmetric(horizontal: 24),
+          child: Text(
+            '还没有收藏的表情包\n可在聊天图片上点「保存表情」',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 12, color: OmTheme.textHint, height: 1.5),
+          ),
         ),
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-        child: _loading
-            ? const Center(child: CircularProgressIndicator())
-            : _stickers.isEmpty
-                ? const Center(
-                    child: Text('还没有保存的表情包', style: TextStyle(color: OmTheme.textHint)),
-                  )
-                : GridView.builder(
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 4,
-                      mainAxisSpacing: 10,
-                      crossAxisSpacing: 10,
-                      childAspectRatio: 1,
-                    ),
-                    itemCount: _stickers.length,
-                    itemBuilder: (context, index) {
-                      final sticker = _stickers[index];
-                      final deleting = _deletingId == sticker.id;
-                      return Stack(
-                        children: [
-                          Positioned.fill(
-                            child: InkWell(
-                              onTap: _sending || deleting ? null : () => _sendSticker(sticker),
-                              borderRadius: BorderRadius.circular(12),
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(12),
-                                child: Image.file(
-                                  File(sticker.path),
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (_, __, ___) => Container(
-                                    color: OmTheme.elevated,
-                                    alignment: Alignment.center,
-                                    child: const Icon(
-                                      Icons.broken_image_outlined,
-                                      color: OmTheme.textHint,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                          Positioned(
-                            top: 4,
-                            right: 4,
-                            child: GestureDetector(
-                              onTap: deleting ? null : () => _deleteSticker(sticker),
-                              child: Container(
-                                width: 24,
-                                height: 24,
-                                decoration: BoxDecoration(
-                                  color: Colors.black.withValues(alpha: 0.55),
-                                  shape: BoxShape.circle,
-                                ),
-                                alignment: Alignment.center,
-                                child: deleting
-                                    ? const SizedBox(
-                                        width: 12,
-                                        height: 12,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                                        ),
-                                      )
-                                    : const Icon(
-                                        Icons.delete_outline_rounded,
-                                        size: 14,
-                                        color: Colors.white,
-                                      ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      );
-                    },
-                  ),
+      );
+    }
+    return GridView.builder(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 4,
+        mainAxisSpacing: 8,
+        crossAxisSpacing: 8,
+        childAspectRatio: 1,
       ),
+      itemCount: _stickers.length,
+      itemBuilder: (context, index) {
+        final sticker = _stickers[index];
+        final deleting = _deletingId == sticker.id;
+        return Stack(
+          children: [
+            Positioned.fill(
+              child: InkWell(
+                onTap: _sending || deleting ? null : () => _sendSticker(sticker),
+                borderRadius: BorderRadius.circular(10),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: Image.file(
+                    File(sticker.path),
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => Container(
+                      color: OmTheme.elevated,
+                      alignment: Alignment.center,
+                      child: const Icon(
+                        Icons.broken_image_outlined,
+                        color: OmTheme.textHint,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              top: 2,
+              right: 2,
+              child: GestureDetector(
+                onTap: deleting ? null : () => _deleteSticker(sticker),
+                child: Container(
+                  width: 22,
+                  height: 22,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.55),
+                    shape: BoxShape.circle,
+                  ),
+                  alignment: Alignment.center,
+                  child: deleting
+                      ? const SizedBox(
+                          width: 10,
+                          height: 10,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                          ),
+                        )
+                      : const Icon(
+                          Icons.close_rounded,
+                          size: 13,
+                          color: Colors.white,
+                        ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }

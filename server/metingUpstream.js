@@ -20,6 +20,25 @@ export function getMetingRequestContext() {
   return metingRequestContext.getStore() || {};
 }
 
+/** 避免与 roomManager 循环依赖：由 index 启动时注册 */
+let resolveRoomInternal = null;
+export function registerMetingRoomResolver(fn) {
+  resolveRoomInternal = typeof fn === 'function' ? fn : null;
+}
+
+/** 房间绑了「VIP 且未共享」时，走定制 /admin/openmusic */
+function roomNeedsScopedProxy(roomId, server) {
+  if (!resolveRoomInternal || !roomId) return false;
+  try {
+    const room = resolveRoomInternal(String(roomId).trim().toUpperCase());
+    const plat = server === 'tencent' ? 'tencent' : 'netease';
+    const acc = room?.musicAccounts?.[plat];
+    return Boolean(acc?.hasVip && !acc.shared);
+  } catch {
+    return false;
+  }
+}
+
 let upstreams = [];
 let upstreamSignature = '';
 
@@ -156,12 +175,43 @@ export function setMetingUpstreamDisabled(url, disabled) {
   return { success: true, upstream: getMetingUpstreamStatus().find((u) => u.url === upstream.base) };
 }
 
-function buildUpstreamUrl(upstream, query) {
+function buildUpstreamRequest(upstream, query) {
   const params = new URLSearchParams(query);
+  // 公共 /api 的 auth 查询参数（兼容旧镜像）；定制接口改走 Bearer
+  const ctx = getMetingRequestContext();
+  const roomId = String(ctx.roomId || query?.roomId || '').trim();
+  const server = String(query?.server || 'netease');
+  const scoped = roomNeedsScopedProxy(roomId, server);
+
+  if (scoped) {
+    params.delete('auth');
+    if (roomId) params.set('roomId', roomId);
+    const headers = {};
+    if (upstream.auth) {
+      headers.Authorization = `Bearer ${upstream.auth}`;
+    }
+    return {
+      url: `${upstream.base}/admin/openmusic?${params.toString()}`,
+      headers,
+      scoped: true,
+    };
+  }
+
+  // 公共 API：不带 roomId，只用全站 Cookie 池
+  params.delete('roomId');
+  params.delete('room_id');
   if (upstream.auth && !params.has('auth')) {
     params.set('auth', upstream.auth);
   }
-  return `${upstream.base}/api?${params.toString()}`;
+  return {
+    url: `${upstream.base}/api?${params.toString()}`,
+    headers: {},
+    scoped: false,
+  };
+}
+
+function buildUpstreamUrl(upstream, query) {
+  return buildUpstreamRequest(upstream, query).url;
 }
 
 // 轮询起点每次前移；冷却中的上游排到最后兜底（全部故障时仍会尝试）；禁用的完全跳过
@@ -181,9 +231,17 @@ function orderedUpstreams() {
 
 async function requestUpstream(upstream, query, options, timeoutMs) {
   let lastError;
+  const built = buildUpstreamRequest(upstream, query);
+  const mergedOptions = {
+    ...options,
+    headers: {
+      ...(options?.headers || {}),
+      ...built.headers,
+    },
+  };
   for (let attempt = 0; attempt < UPSTREAM_ATTEMPTS; attempt += 1) {
     try {
-      const response = await fetchMeting(buildUpstreamUrl(upstream, query), options, timeoutMs);
+      const response = await fetchMeting(built.url, mergedOptions, timeoutMs);
       // 网络抖动和 5xx 快速重试一次；4xx 多为鉴权/参数问题，直接交给切换逻辑。
       if (response.status >= 500 && attempt + 1 < UPSTREAM_ATTEMPTS) continue;
       return response;

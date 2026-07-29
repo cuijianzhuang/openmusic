@@ -45,6 +45,8 @@ let socketConnectRequested = false;
 
 const SOCKET_ACK_TIMEOUT_MS = 8000;
 const SOCKET_IMAGE_ACK_TIMEOUT_MS = 20000;
+/** 扫码走 Meting 上游，创建/校验/绑定可能较慢 */
+const SOCKET_MUSIC_ACCOUNT_ACK_TIMEOUT_MS = 50000;
 
 type JoinSession = {
   roomId: string;
@@ -1230,6 +1232,89 @@ export function useSocket() {
     });
   }, []);
 
+  const createMusicAccountQr = useCallback((platform: 'netease' | 'tencent') => {
+    return emitWithAck<{ success: boolean; error?: string; data?: Record<string, unknown> }>(
+      'music_account_qr_create',
+      { platform },
+      { success: false, error: '生成二维码超时，请重试' },
+      SOCKET_MUSIC_ACCOUNT_ACK_TIMEOUT_MS,
+    );
+  }, []);
+
+  const checkMusicAccountQr = useCallback((payload: Record<string, unknown>) => {
+    return emitWithAck<{ success: boolean; error?: string; data?: Record<string, unknown> }>(
+      'music_account_qr_check',
+      payload,
+      { success: false, error: '连接超时，请重试' },
+      SOCKET_MUSIC_ACCOUNT_ACK_TIMEOUT_MS,
+    );
+  }, []);
+
+  const bindMusicAccount = useCallback((payload: {
+    platform: 'netease' | 'tencent';
+    cookie: string;
+    shared?: boolean;
+  }) => {
+    return emitWithAck<{
+      success: boolean;
+      error?: string;
+      account?: import('../types').RoomMusicAccount;
+      message?: string;
+      room?: RoomState;
+    }>(
+      'music_account_bind',
+      payload,
+      { success: false, error: '绑定超时，请重试' },
+      SOCKET_MUSIC_ACCOUNT_ACK_TIMEOUT_MS,
+    ).then((res) => {
+      if (res.success && res.room) applyRoomSnapshot(res.room);
+      return res;
+    });
+  }, []);
+
+  const listMusicAccounts = useCallback(() => {
+    return emitWithAck<{
+      success: boolean;
+      error?: string;
+      data?: import('../types').RoomMusicAccounts;
+      room?: RoomState;
+    }>(
+      'music_account_list',
+      {},
+      { success: false, error: '连接超时，请重试' },
+    ).then((res) => {
+      if (res.success && res.room) applyRoomSnapshot(res.room);
+      return res;
+    });
+  }, []);
+
+  const setMusicAccountShared = useCallback((platform: 'netease' | 'tencent', shared: boolean) => {
+    return emitWithAck<{
+      success: boolean;
+      error?: string;
+      account?: import('../types').RoomMusicAccount;
+      room?: RoomState;
+    }>(
+      'music_account_set_shared',
+      { platform, shared },
+      { success: false, error: '连接超时，请重试' },
+    ).then((res) => {
+      if (res.success && res.room) applyRoomSnapshot(res.room);
+      return res;
+    });
+  }, []);
+
+  const unbindMusicAccount = useCallback((platform: 'netease' | 'tencent') => {
+    return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
+      'music_account_unbind',
+      { platform },
+      { success: false, error: '连接超时，请重试' },
+    ).then((res) => {
+      if (res.success && res.room) applyRoomSnapshot(res.room);
+      return res;
+    });
+  }, []);
+
   const setRoomPlayMode = useCallback((mode: string): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
     return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
       'set_room_play_mode',
@@ -1302,6 +1387,19 @@ export function useSocket() {
     return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
       'set_room_join_notice',
       options,
+      { success: false, error: '连接超时，请重试' },
+    ).then((res) => {
+      if (res.success && res.room) {
+        applyRoomSnapshot(res.room);
+      }
+      return res;
+    });
+  }, []);
+
+  const setRoomMaxAdmins = useCallback((maxAdmins: number): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
+    return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
+      'set_room_max_admins',
+      { maxAdmins },
       { success: false, error: '连接超时，请重试' },
     ).then((res) => {
       if (res.success && res.room) {
@@ -1389,19 +1487,6 @@ export function useSocket() {
     return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
       'remove_room_forbidden_word',
       { word },
-      { success: false, error: '连接超时，请重试' },
-    ).then((res) => {
-      if (res.success && res.room) {
-        applyRoomSnapshot(res.room);
-      }
-      return res;
-    });
-  }, []);
-
-  const setRoomAudioQuality = useCallback((quality: { netease: string; tencent: string }): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
-    return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
-      'set_room_audio_quality',
-      quality,
       { success: false, error: '连接超时，请重试' },
     ).then((res) => {
       if (res.success && res.room) {
@@ -1591,6 +1676,13 @@ export function useSocket() {
 
     setRoomFmMode,
 
+    createMusicAccountQr,
+    checkMusicAccountQr,
+    bindMusicAccount,
+    listMusicAccounts,
+    setMusicAccountShared,
+    unbindMusicAccount,
+
     setRoomPlayMode,
 
     setRoomAnnouncement,
@@ -1602,6 +1694,7 @@ export function useSocket() {
     setChatShowAvatars,
 
     setRoomJoinNotice,
+    setRoomMaxAdmins,
 
     setSongRequestEnabled,
 
@@ -1612,8 +1705,6 @@ export function useSocket() {
     addRoomForbiddenWord,
 
     removeRoomForbiddenWord,
-
-    setRoomAudioQuality,
 
     setRoomMemberTier,
 

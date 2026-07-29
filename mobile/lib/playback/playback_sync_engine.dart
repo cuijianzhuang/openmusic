@@ -39,9 +39,11 @@ class PlaybackSyncEngine {
   Duration? _localSeekHoldPos;
   /// Suppress auto softPlay / remote transport while user toggle settles.
   DateTime? _userTransportHoldUntil;
+  String? _lastUiTrackId;
   static const remoteSeekThresholdSec = 1.25;
   static const localSeekHold = Duration(milliseconds: 4500);
   static const userTransportHold = Duration(milliseconds: 3000);
+  static const pauseSeekHold = Duration(milliseconds: 4500);
 
   void dispose() {
     _sub?.close();
@@ -50,6 +52,9 @@ class PlaybackSyncEngine {
   }
 
   RoomSessionNotifier get _session => _ref.read(roomSessionProvider.notifier);
+
+  /// Currently loaded queue item id (null while switching sources).
+  String? get loadedTrackId => _loadedTrackId;
 
   Future<void> _boot() async {
     await initOpenMusicAudioService();
@@ -73,6 +78,19 @@ class PlaybackSyncEngine {
     });
   }
 
+  /// Room + playback must both agree before auto softPlay (avoids pause races).
+  bool _roomWantsPlay(RoomSessionState session) {
+    final room = session.room;
+    if (room == null) return false;
+    final pb = session.playback;
+    if (pb != null &&
+        (room.current == null || room.current!.queueId == pb.trackId)) {
+      // Prefer playback snapshot; still require room flag so optimistic pause wins.
+      return pb.isPlaying && room.isPlaying;
+    }
+    return room.isPlaying;
+  }
+
   /// Retry softPlay while room is playing but local audio is idle (web autoplay).
   Future<void> _nudgePlayIfNeeded() async {
     final handler = openMusicAudioHandler;
@@ -83,7 +101,7 @@ class PlaybackSyncEngine {
         DateTime.now().isBefore(_userTransportHoldUntil!)) {
       return;
     }
-    final shouldPlay = session.playback?.isPlaying ?? room.isPlaying;
+    final shouldPlay = _roomWantsPlay(session);
     if (!shouldPlay || handler.player.playing) {
       _playNudgeFails = 0;
       return;
@@ -144,11 +162,22 @@ class PlaybackSyncEngine {
     );
 
     final current = room.current;
-    final shouldPlay = next.playback?.isPlaying ?? room.isPlaying;
+    final trackChanged =
+        current?.queueId != null && current!.queueId != _lastUiTrackId;
+    if (trackChanged) {
+      _clearLocalHolds();
+      // Drop old decoder binding immediately so UI clock resets before load finishes.
+      _loadedTrackId = null;
+      _loadedUrl = null;
+      _lastUiTrackId = current.queueId;
+      _bumpUiClock();
+    }
+
+    final shouldPlay = _roomWantsPlay(next);
     await handler.setMetadataFromSong(current, playing: shouldPlay);
 
     final pb = next.playback;
-    if (pb != null && pb.version != _lastAppliedVersion) {
+    if (pb != null && pb.version > _lastAppliedVersion) {
       await _applyPlaybackState(pb, room, roles);
       _lastAppliedVersion = pb.version;
     } else if (current != null) {
@@ -158,6 +187,16 @@ class PlaybackSyncEngine {
         await _syncTransport(shouldPlay);
       }
     }
+  }
+
+  void _clearLocalHolds() {
+    _localSeekHoldUntil = null;
+    _localSeekHoldPos = null;
+    _userTransportHoldUntil = null;
+  }
+
+  void _bumpUiClock() {
+    _ref.read(playerUiClockGenProvider.notifier).state++;
   }
 
   Future<void> _syncTransport(bool shouldPlay) async {
@@ -198,13 +237,22 @@ class PlaybackSyncEngine {
         DateTime.now().isBefore(_userTransportHoldUntil!);
 
     // Never yank the scrubber back while the user is dragging / just sought.
-    if (!holdingLocalSeek) {
+    if (holdingLocalSeek) {
+      final heldSec = (_localSeekHoldPos?.inMilliseconds ?? 0) / 1000.0;
+      // Server caught up to our seek — release the pin.
+      if ((target - heldSec).abs() <= remoteSeekThresholdSec) {
+        _localSeekHoldUntil = null;
+        _localSeekHoldPos = null;
+        _bumpUiClock();
+      }
+    } else {
       final drift = (target - local).abs();
       if (drift > remoteSeekThresholdSec) {
         try {
           await handler.softSeek(
             Duration(milliseconds: (target * 1000).round().clamp(0, 1 << 30)),
           );
+          _bumpUiClock();
         } catch (e) {
           debugPrint('softSeek failed: $e');
         }
@@ -212,7 +260,8 @@ class PlaybackSyncEngine {
     }
 
     if (!holdingUserTransport) {
-      await _syncTransport(pb.isPlaying);
+      final session = _ref.read(roomSessionProvider);
+      await _syncTransport(_roomWantsPlay(session));
     }
   }
 
@@ -257,7 +306,6 @@ class PlaybackSyncEngine {
       final playUrl = await resolvePlaybackAudioUrl(url);
       if (playUrl.isEmpty) return;
 
-      final wasPlaying = _ref.read(roomSessionProvider).room?.isPlaying ?? false;
       final pb = _ref.read(roomSessionProvider).playback;
       Duration? initial;
       if (pb != null && pb.trackId == song.queueId) {
@@ -295,8 +343,14 @@ class PlaybackSyncEngine {
       _loadedTrackId = song.queueId;
       _loadedUrl = playUrl;
 
-      if (wasPlaying) {
+      // Re-read after await — user may have paused while the source was loading.
+      final live = _ref.read(roomSessionProvider);
+      if (_roomWantsPlay(live) &&
+          (_userTransportHoldUntil == null ||
+              DateTime.now().isAfter(_userTransportHoldUntil!))) {
         await _syncTransport(true);
+      } else if (!_roomWantsPlay(live) && handler.player.playing) {
+        await _syncTransport(false);
       }
 
       if (roles.isPlaybackLeader && url.isNotEmpty) {
@@ -337,7 +391,10 @@ class PlaybackSyncEngine {
       case MediaControlAction.play:
       case MediaControlAction.pause:
         if (canPause(room, roles)) {
-          unawaited(_session.togglePlay(action == MediaControlAction.play));
+          // Same optimistic+hold path as in-app button (avoid bare toggle_play races).
+          unawaited(
+            togglePlayLocalAndRemote(action == MediaControlAction.play),
+          );
         }
       case MediaControlAction.skipToNext:
         if (roles.canControlPlayback) {
@@ -359,18 +416,31 @@ class PlaybackSyncEngine {
     final fallbackSec = session.playback?.estimatedPosition() ?? room.currentTime;
     holdSeekPreview(clamped);
     _session.applyOptimisticSeek(clamped.inMilliseconds / 1000.0);
+    _bumpUiClock();
     // Local seek first; network in background so scrubber never waits.
     unawaited(() async {
       try {
         await openMusicAudioHandler?.softSeek(clamped);
+        _bumpUiClock();
       } catch (_) {}
     }());
     unawaited(() async {
       final res = await _session.seek(clamped.inMilliseconds / 1000.0);
-      if (res['success'] == true) return;
+      if (res['success'] == true) {
+        // Refresh pin briefly until playback_state / local decoder settle.
+        holdSeekPreview(clamped);
+        _bumpUiClock();
+        return;
+      }
+      // Empty ACK: keep optimistic pin, wait for playback_state.
+      if (!res.containsKey('success')) {
+        debugPrint('seek ambiguous ack: $res');
+        return;
+      }
       _localSeekHoldUntil = null;
       _localSeekHoldPos = null;
       _session.applyOptimisticSeek(fallbackSec);
+      _bumpUiClock();
       try {
         await openMusicAudioHandler?.softSeek(
           Duration(milliseconds: (fallbackSec * 1000).round().clamp(0, 1 << 30)),
@@ -385,6 +455,7 @@ class PlaybackSyncEngine {
     final clamped = position < Duration.zero ? Duration.zero : position;
     _localSeekHoldPos = clamped;
     _localSeekHoldUntil = DateTime.now().add(localSeekHold);
+    _bumpUiClock();
   }
 
   /// UI clock may prefer this right after a user seek.
@@ -394,6 +465,65 @@ class PlaybackSyncEngine {
       return null;
     }
     return _localSeekHoldPos;
+  }
+
+  /// Synchronous scrubber clock — safe to read on every rebuild.
+  Duration readUiPosition() {
+    final held = localSeekHoldPosition;
+    if (held != null) return held;
+
+    final session = _ref.read(roomSessionProvider);
+    final handler = openMusicAudioHandler;
+    final pb = session.playback;
+    final room = session.room;
+    final currentId = room?.current?.queueId;
+    if (currentId == null) {
+      return handler?.player.position ?? Duration.zero;
+    }
+
+    final localBoundToCurrent =
+        _loadedTrackId == currentId && !_loadInFlight;
+    final roomPlaying = room?.isPlaying == true && (pb?.isPlaying ?? true);
+
+    if (localBoundToCurrent && handler != null && handler.player.playing) {
+      final local = handler.player.position;
+      if (pb != null && roomPlaying && pb.trackId == currentId) {
+        final remoteMs = (pb.estimatedPosition() * 1000).round();
+        if (local.inMilliseconds < 500 && remoteMs > 2000) {
+          return Duration(milliseconds: remoteMs.clamp(0, 86400000));
+        }
+      }
+      return local;
+    }
+
+    // Track changed / still loading: never show previous song's decoder clock.
+    if (!localBoundToCurrent) {
+      if (pb != null && pb.trackId == currentId) {
+        final sec = pb.estimatedPosition();
+        return Duration(milliseconds: (sec * 1000).round().clamp(0, 86400000));
+      }
+      // Stale playback from previous track — do not keep old progress on the new song.
+      if (pb != null && pb.trackId.isNotEmpty && pb.trackId != currentId) {
+        return Duration.zero;
+      }
+      final roomSec = room?.currentTime ?? 0;
+      return Duration(milliseconds: (roomSec * 1000).round().clamp(0, 86400000));
+    }
+
+    if (!roomPlaying && handler != null && handler.player.position > Duration.zero) {
+      return handler.player.position;
+    }
+
+    if (pb != null && pb.trackId == currentId) {
+      final sec = pb.estimatedPosition();
+      return Duration(milliseconds: (sec * 1000).round().clamp(0, 86400000));
+    }
+    if (room != null) {
+      return Duration(
+        milliseconds: (room.currentTime * 1000).round().clamp(0, 86400000),
+      );
+    }
+    return handler?.player.position ?? Duration.zero;
   }
 
   Future<void> togglePlayLocalAndRemote(bool play) async {
@@ -411,11 +541,14 @@ class PlaybackSyncEngine {
 
     _userTransportHoldUntil = DateTime.now().add(userTransportHold);
     if (!play && localMs > 0) {
-      holdSeekPreview(Duration(milliseconds: localMs));
+      // Pin scrubber briefly so room clock cannot jump ahead while paused.
+      _localSeekHoldPos = Duration(milliseconds: localMs);
+      _localSeekHoldUntil = DateTime.now().add(pauseSeekHold);
     }
 
     // 1) Optimistic UI — button flips immediately.
     _session.applyOptimisticPlaying(play);
+    _bumpUiClock();
 
     // 2) Local audio without blocking the tap handler on network.
     try {
@@ -447,10 +580,22 @@ class PlaybackSyncEngine {
       debugPrint('toggle local play failed: $e');
     }
 
-    // 3) Server ack in background — rollback only on failure.
+    // 3) Server ack in background — rollback only on explicit rejection.
     unawaited(() async {
-      final res = await _session.togglePlay(play);
-      if (res['success'] != true) {
+      try {
+        final res = await _session.togglePlay(play);
+        if (res['success'] == true) {
+          // Keep hold briefly so late load/nudge cannot undo before snapshot lands.
+          _userTransportHoldUntil = DateTime.now().add(
+            const Duration(milliseconds: 1500),
+          );
+          return;
+        }
+        // Empty / ambiguous ACK: do not roll back — wait for playback_state.
+        if (!res.containsKey('success')) {
+          debugPrint('toggle_play ambiguous ack: $res');
+          return;
+        }
         _session.applyOptimisticPlaying(!play);
         try {
           if (play) {
@@ -460,7 +605,12 @@ class PlaybackSyncEngine {
           }
         } catch (_) {}
         _userTransportHoldUntil = null;
+        _localSeekHoldUntil = null;
+        _localSeekHoldPos = null;
         debugPrint('toggle_play rejected: ${res['error']}');
+      } catch (e) {
+        // Timeout/network: server may still have applied — do not auto-resume.
+        debugPrint('toggle_play error: $e');
       }
     }());
   }
@@ -501,70 +651,47 @@ final playbackSyncProvider = Provider<PlaybackSyncEngine>((ref) {
   return engine;
 });
 
+/// Bumped on seek / track change so scrubber rebuilds immediately (not next 200ms tick).
+final playerUiClockGenProvider = StateProvider<int>((ref) => 0);
+
+final _playerUiTickProvider = StreamProvider<int>((ref) {
+  return Stream<int>.periodic(const Duration(milliseconds: 200), (i) => i);
+});
+
 /// UI clock: prefer local just_audio when playing; else room estimatedPosition.
-final playerPositionProvider = StreamProvider<Duration>((ref) {
+final playerPositionProvider = Provider<Duration>((ref) {
   ref.watch(playbackSyncProvider);
-  // Re-subscribe when room / playback identity changes.
+  ref.watch(playerUiClockGenProvider);
+  ref.watch(_playerUiTickProvider);
   ref.watch(roomSessionProvider.select((s) => s.room?.current?.queueId));
   ref.watch(roomSessionProvider.select((s) => s.playback?.version));
   ref.watch(roomSessionProvider.select((s) => s.room?.isPlaying));
-
-  return Stream<Duration>.periodic(const Duration(milliseconds: 200), (_) {
-    final engine = ref.read(playbackSyncProvider);
-    final held = engine.localSeekHoldPosition;
-    if (held != null) return held;
-
-    final session = ref.read(roomSessionProvider);
-    final handler = openMusicAudioHandler;
-    final pb = session.playback;
-    final room = session.room;
-    final currentId = room?.current?.queueId;
-    final roomPlaying = room?.isPlaying == true || pb?.isPlaying == true;
-
-    // Local just_audio only when it is actually advancing.
-    if (handler != null && handler.player.playing) {
-      final local = handler.player.position;
-      // If room clock is far ahead and local stuck at ~0, prefer room (failed decode).
-      if (pb != null &&
-          roomPlaying &&
-          (currentId == null || currentId == pb.trackId)) {
-        final remoteMs = (pb.estimatedPosition() * 1000).round();
-        if (local.inMilliseconds < 500 && remoteMs > 2000) {
-          return Duration(milliseconds: remoteMs.clamp(0, 86400000));
-        }
-      }
-      return local;
-    }
-
-    if (pb != null && (currentId == null || currentId == pb.trackId)) {
-      final sec = pb.estimatedPosition();
-      return Duration(milliseconds: (sec * 1000).round().clamp(0, 86400000));
-    }
-    if (room != null && room.current != null) {
-      return Duration(
-        milliseconds: (room.currentTime * 1000).round().clamp(0, 86400000),
-      );
-    }
-    return handler?.player.position ?? Duration.zero;
-  });
+  return ref.read(playbackSyncProvider).readUiPosition();
 });
 
-final playerDurationProvider = StreamProvider<Duration?>((ref) {
+final playerDurationProvider = Provider<Duration?>((ref) {
   ref.watch(playbackSyncProvider);
+  ref.watch(playerUiClockGenProvider);
+  ref.watch(_playerUiTickProvider);
   ref.watch(roomSessionProvider.select((s) => s.room?.current?.queueId));
   ref.watch(roomSessionProvider.select((s) => s.playback?.durationSec));
   ref.watch(roomSessionProvider.select((s) => s.room?.current?.duration));
 
-  return Stream<Duration?>.periodic(const Duration(milliseconds: 500), (_) {
-    final handler = openMusicAudioHandler;
-    final local = handler?.player.duration;
-    if (local != null && local > Duration.zero) return local;
-    final session = ref.read(roomSessionProvider);
-    final raw = session.playback?.durationSec ?? session.room?.current?.duration;
-    if (raw != null && raw > 0) {
-      final sec = raw > 10000 ? raw / 1000.0 : raw;
-      return Duration(milliseconds: (sec * 1000).round());
-    }
-    return null;
-  });
+  final handler = openMusicAudioHandler;
+  final session = ref.read(roomSessionProvider);
+  final currentId = session.room?.current?.queueId;
+  final engine = ref.read(playbackSyncProvider);
+  // Only trust decoder duration once the loaded source matches current track.
+  final local = handler?.player.duration;
+  final localBound = currentId != null &&
+      engine.loadedTrackId == currentId &&
+      local != null &&
+      local > Duration.zero;
+  if (localBound) return local;
+  final raw = session.playback?.durationSec ?? session.room?.current?.duration;
+  if (raw != null && raw > 0) {
+    final sec = raw > 10000 ? raw / 1000.0 : raw;
+    return Duration(milliseconds: (sec * 1000).round());
+  }
+  return null;
 });

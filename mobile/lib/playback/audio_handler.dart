@@ -117,14 +117,21 @@ class OpenMusicAudioHandler extends BaseAudioHandler with SeekHandler {
   @override
   Future<void> play() async {
     if (!playBound) return;
-    onMediaAction?.call(MediaControlAction.play);
+    // Prefer room sync path; softPlay alone would skip optimistic hold.
+    if (onMediaAction != null) {
+      onMediaAction!(MediaControlAction.play);
+      return;
+    }
     await _player.play();
   }
 
   @override
   Future<void> pause() async {
     if (!playBound) return;
-    onMediaAction?.call(MediaControlAction.pause);
+    if (onMediaAction != null) {
+      onMediaAction!(MediaControlAction.pause);
+      return;
+    }
     await _player.pause();
   }
 

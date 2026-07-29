@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:openmusic/app/theme.dart';
 import 'package:openmusic/data/music_api.dart';
 import 'package:openmusic/features/room/playlist_import_helper.dart';
+import 'package:openmusic/features/room/room_widgets.dart';
 
 Future<void> showPlaylistImportSheet(BuildContext context, WidgetRef ref) {
   return showModalBottomSheet(
     context: context,
     isScrollControlled: true,
+    backgroundColor: OmTheme.card,
     builder: (ctx) => const _PlaylistImportBody(),
   );
 }
@@ -24,6 +27,12 @@ class _PlaylistImportBodyState extends ConsumerState<_PlaylistImportBody> {
   var _platform = 'netease';
   var _progressText = '';
   List<Map<String, dynamic>> _radios = [];
+
+  /// 服务端 playlistImport 仅支持红点 / 绿点，不提供酷狗歌单导入。
+  static const _platforms = [
+    ('netease', '红点'),
+    ('tencent', '绿点'),
+  ];
 
   @override
   void initState() {
@@ -108,28 +117,31 @@ class _PlaylistImportBodyState extends ConsumerState<_PlaylistImportBody> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text('导入歌单 / 电台', style: Theme.of(context).textTheme.titleMedium),
+          Text(
+            '导入歌单 / 电台',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: OmTheme.textPrimary,
+                ),
+          ),
           const SizedBox(height: 12),
           Wrap(
             spacing: 8,
             children: [
-              for (final p in const [
-                ('netease', '网易'),
-                ('tencent', 'QQ'),
-                ('kugou', '酷狗'),
-              ])
-                ChoiceChip(
-                  label: Text(p.$2),
+              for (final p in _platforms)
+                OmFilterChip(
+                  label: p.$2,
                   selected: _platform == p.$1,
-                  onSelected: (_) => setState(() => _platform = p.$1),
+                  onTap: () => setState(() => _platform = p.$1),
                 ),
             ],
           ),
           const SizedBox(height: 12),
           TextField(
             controller: _ctrl,
+            style: const TextStyle(color: OmTheme.textPrimary),
             decoration: const InputDecoration(
               labelText: '歌单 ID 或链接中的数字 ID',
+              labelStyle: TextStyle(color: OmTheme.textSecondary),
             ),
           ),
           const SizedBox(height: 12),
@@ -141,14 +153,19 @@ class _PlaylistImportBodyState extends ConsumerState<_PlaylistImportBody> {
             const SizedBox(height: 8),
             Text(
               _progressText,
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(color: Colors.white70),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: OmTheme.textSecondary,
+                  ),
             ),
           ],
           if (_radios.isNotEmpty) ...[
             const SizedBox(height: 16),
-            Text('推荐电台', style: Theme.of(context).textTheme.titleSmall),
+            Text(
+              '推荐电台',
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    color: OmTheme.textPrimary,
+                  ),
+            ),
             SizedBox(
               height: 120,
               child: ListView.builder(
@@ -160,7 +177,13 @@ class _PlaylistImportBodyState extends ConsumerState<_PlaylistImportBody> {
                   return Padding(
                     padding: const EdgeInsets.only(right: 8, top: 8),
                     child: ActionChip(
-                      label: Text(name, overflow: TextOverflow.ellipsis),
+                      label: Text(
+                        name,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: OmTheme.textPrimary),
+                      ),
+                      backgroundColor: OmTheme.elevated,
+                      side: BorderSide.none,
                       onPressed: () {
                         _ctrl.text = '${r['id'] ?? ''}';
                         setState(() => _platform = 'netease');

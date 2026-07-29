@@ -12,8 +12,17 @@ import {
   getMetingUpstreamStatus,
   startMetingHealthProbe,
   runWithMetingRequestContext,
+  registerMetingRoomResolver,
 } from './metingUpstream.js';
 import { fetchCustomMusicApi, hasCustomMusicApi } from './customMusicApi.js';
+import {
+  createMusicQrSession,
+  checkMusicQrSession,
+  bindRoomMusicAccount,
+  fetchRoomMusicAccounts,
+  setRoomMusicAccountShared,
+  unbindRoomMusicAccount,
+} from './metingAdmin.js';
 import { mountWechatFileHelperProxy } from './wechatFileHelperProxy.js';
 import { mountAdminApi, appendAdminAudit } from './adminApi.js';
 import { initAdminCredentials } from './adminCredentials.js';
@@ -64,17 +73,19 @@ import {
   setUserAvatar,
   renameRoom,
   setRoomLock,
-  setRoomAudioQuality,
   setRoomMemberTier,
   removeRoomMemberTier,
   setRoomMemberSettings,
   postMemberWelcomeMessage,
   setRoomJoinNotice,
+  setRoomMaxAdmins,
   postJoinNoticeMessage,
   shouldMuteJoinAnnouncements,
   wasKnownRoomUser,
   setRoomFmMode,
   setRoomPlayMode,
+  setRoomMusicAccountsCache,
+  patchRoomMusicAccountCache,
   setRoomAnnouncement,
   setRoomCustomCover,
   setChatHistoryVisibleOnJoin,
@@ -979,18 +990,19 @@ app.get('/api/music/sources', (_req, res) => {
       supportsSearch: true,
       supportsIdLookup: false,
     },
-    {
+  ];
+  // 蓝点仅在管理后台「自定义接口」勾选酷狗且启用搜索时下发，客户端据此隐藏入口
+  if (hasCustomMusicApi('kugou', 'search')) {
+    sources.push({
       id: 'kugou',
       name: '蓝点',
       shortName: '蓝点',
       color: '#2688ee',
-      supportsSearch: hasCustomMusicApi('kugou', 'search'),
+      supportsSearch: true,
       supportsIdLookup: false,
-      description: hasCustomMusicApi('kugou', 'search')
-        ? '通过自定义接口搜索'
-        : '请配置酷狗搜索接口',
-    },
-  ];
+      description: '通过自定义接口搜索',
+    });
+  }
   res.json(sources);
 });
 
@@ -2789,6 +2801,175 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
+  /** 房主：创建网易/QQ 扫码会话（Cookie 最终写入 Meting） */
+  socket.on('music_account_qr_create', async ({ platform } = {}, callback) => {
+    if (rejectReadOnly(socket, callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, 'music_account_qr_create', callback)) return;
+    const roomId = socketToRoom.get(socket.id);
+    if (!roomId) {
+      callback?.({ success: false, error: '未加入房间' });
+      return;
+    }
+    const room = getRoomInternal(roomId);
+    if (!room || room.creatorId !== getSocketUserId(socket)) {
+      callback?.({ success: false, error: '仅房主可绑定音源账号' });
+      return;
+    }
+    const result = await createMusicQrSession(platform);
+    if (!result.ok) {
+      callback?.({ success: false, error: result.error });
+      return;
+    }
+    callback?.({ success: true, data: result.data });
+  });
+
+  socket.on('music_account_qr_check', async (payload = {}, callback) => {
+    if (rejectReadOnly(socket, callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, 'music_account_qr_check', callback)) return;
+    const roomId = socketToRoom.get(socket.id);
+    if (!roomId) {
+      callback?.({ success: false, error: '未加入房间' });
+      return;
+    }
+    const room = getRoomInternal(roomId);
+    if (!room || room.creatorId !== getSocketUserId(socket)) {
+      callback?.({ success: false, error: '仅房主可绑定音源账号' });
+      return;
+    }
+    const result = await checkMusicQrSession(payload);
+    if (!result.ok) {
+      callback?.({ success: false, error: result.error });
+      return;
+    }
+    callback?.({ success: true, data: result.data });
+  });
+
+  /** 扫码成功后绑定：VIP→Meting；无 VIP 网易→仅本地漫游 */
+  socket.on('music_account_bind', async ({ platform, cookie, shared } = {}, callback) => {
+    if (rejectReadOnly(socket, callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, 'music_account_bind', callback)) return;
+    const roomId = socketToRoom.get(socket.id);
+    if (!roomId) {
+      callback?.({ success: false, error: '未加入房间' });
+      return;
+    }
+    const room = getRoomInternal(roomId);
+    if (!room || room.creatorId !== getSocketUserId(socket)) {
+      callback?.({ success: false, error: '仅房主可绑定音源账号' });
+      return;
+    }
+    const result = await bindRoomMusicAccount({
+      roomId,
+      platform,
+      cookie,
+      shared: Boolean(shared),
+      note: `房间 ${roomId}`,
+    });
+    if (!result.ok) {
+      callback?.({ success: false, error: result.error });
+      return;
+    }
+    const plat = platform === 'tencent' ? 'tencent' : 'netease';
+    patchRoomMusicAccountCache(roomId, plat, result.data, {
+      localCookie: result.localOnly ? result.cookie : null,
+    });
+    broadcastRoomUpdate(roomId);
+    callback?.({
+      success: true,
+      account: result.data,
+      message: result.message,
+      room: getViewerRoomPayload(socket, roomId),
+    });
+  });
+
+  socket.on('music_account_list', async (_payload, callback) => {
+    if (rejectRateLimited(socket, limitSocketAction, 'music_account_list', callback)) return;
+    const roomId = socketToRoom.get(socket.id);
+    if (!roomId) {
+      callback?.({ success: false, error: '未加入房间' });
+      return;
+    }
+    const room = getRoomInternal(roomId);
+    if (!room || room.creatorId !== getSocketUserId(socket)) {
+      callback?.({ success: false, error: '仅房主可查看音源账号' });
+      return;
+    }
+    const localAccounts = room.musicAccounts || { netease: null, tencent: null };
+    const result = await fetchRoomMusicAccounts(roomId);
+    if (!result.ok) {
+      callback?.({ success: true, data: localAccounts });
+      return;
+    }
+    // Meting VIP 账号 + 本地无 VIP 漫游账号合并
+    const merged = {
+      netease: result.data.netease || (localAccounts.netease?.usage === 'fm' ? localAccounts.netease : null),
+      tencent: result.data.tencent || null,
+    };
+    setRoomMusicAccountsCache(roomId, merged);
+    broadcastRoomUpdate(roomId);
+    callback?.({ success: true, data: merged, room: getViewerRoomPayload(socket, roomId) });
+  });
+
+  socket.on('music_account_set_shared', async ({ platform, shared } = {}, callback) => {
+    if (rejectReadOnly(socket, callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, 'music_account_set_shared', callback)) return;
+    const roomId = socketToRoom.get(socket.id);
+    if (!roomId) {
+      callback?.({ success: false, error: '未加入房间' });
+      return;
+    }
+    const room = getRoomInternal(roomId);
+    if (!room || room.creatorId !== getSocketUserId(socket)) {
+      callback?.({ success: false, error: '仅房主可设置共享' });
+      return;
+    }
+    const plat = platform === 'tencent' ? 'tencent' : 'netease';
+    const current = room.musicAccounts?.[plat];
+    if (current && !current.hasVip) {
+      callback?.({ success: false, error: '无 VIP 账号仅用于漫游，不能写入共享 Cookie 池' });
+      return;
+    }
+    const result = await setRoomMusicAccountShared(roomId, platform, Boolean(shared));
+    if (!result.ok) {
+      callback?.({ success: false, error: result.error });
+      return;
+    }
+    patchRoomMusicAccountCache(roomId, plat, result.data);
+    broadcastRoomUpdate(roomId);
+    callback?.({
+      success: true,
+      account: result.data,
+      room: getViewerRoomPayload(socket, roomId),
+    });
+  });
+
+  socket.on('music_account_unbind', async ({ platform } = {}, callback) => {
+    if (rejectReadOnly(socket, callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, 'music_account_unbind', callback)) return;
+    const roomId = socketToRoom.get(socket.id);
+    if (!roomId) {
+      callback?.({ success: false, error: '未加入房间' });
+      return;
+    }
+    const room = getRoomInternal(roomId);
+    if (!room || room.creatorId !== getSocketUserId(socket)) {
+      callback?.({ success: false, error: '仅房主可解绑音源账号' });
+      return;
+    }
+    const plat = platform === 'tencent' ? 'tencent' : 'netease';
+    const current = room.musicAccounts?.[plat];
+    if (current?.hasVip || plat === 'tencent') {
+      const result = await unbindRoomMusicAccount(roomId, platform);
+      if (!result.ok) {
+        callback?.({ success: false, error: result.error });
+        return;
+      }
+    }
+    patchRoomMusicAccountCache(roomId, plat, null, { localCookie: null });
+    broadcastRoomUpdate(roomId);
+    callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
+  });
+
   socket.on('set_room_play_mode', ({ mode }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
     if (rejectRateLimited(socket, limitSocketAction, 'set_room_play_mode', callback)) return;
@@ -2924,6 +3105,26 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
+  socket.on('set_room_max_admins', ({ maxAdmins } = {}, callback) => {
+    if (rejectReadOnly(socket, callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, 'set_room_max_admins', callback)) return;
+
+    const roomId = socketToRoom.get(socket.id);
+    if (!roomId) {
+      callback?.({ success: false, error: '未加入房间' });
+      return;
+    }
+
+    const result = setRoomMaxAdmins(roomId, getSocketUserId(socket), maxAdmins, socket.id);
+    if (result.error) {
+      callback?.({ success: false, error: result.error });
+      return;
+    }
+
+    broadcastRoomUpdate(roomId);
+    callback?.({ success: true, room: getViewerRoomPayload(socket, roomId), maxAdmins: result.maxAdmins });
+  });
+
   socket.on('set_room_song_request', ({ enabled, minStaySec, maxPerUser, cooldownSec, queueMaxLength, memberJumpEnabled, memberSeekEnabled, memberPauseEnabled, systemMediaPlayBound, systemMediaSkipBound, dislikeSkipMode, dislikeSkipThreshold, dislikeSkipPercent, clearSongsOnLeaveEnabled, clearSongsOnLeaveDelaySec }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
     if (rejectRateLimited(socket, limitSocketAction, 'set_room_song_request', callback)) return;
@@ -3031,26 +3232,6 @@ io.on('connection', (socket) => {
     }
 
     const result = removeRoomForbiddenWord(roomId, getSocketUserId(socket), word, socket.id);
-    if (result.error) {
-      callback?.({ success: false, error: result.error });
-      return;
-    }
-
-    broadcastRoomUpdate(roomId);
-    callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
-  });
-
-  socket.on('set_room_audio_quality', ({ netease, tencent }, callback) => {
-    if (rejectReadOnly(socket, callback)) return;
-    if (rejectRateLimited(socket, limitSocketAction, 'set_room_audio_quality', callback)) return;
-
-    const roomId = socketToRoom.get(socket.id);
-    if (!roomId) {
-      callback?.({ success: false, error: '未加入房间' });
-      return;
-    }
-
-    const result = setRoomAudioQuality(roomId, getSocketUserId(socket), { netease, tencent }, socket.id);
     if (result.error) {
       callback?.({ success: false, error: result.error });
       return;
@@ -3964,6 +4145,7 @@ setInterval(() => {
   void checkAutoAdvance();
 }, AUTO_ADVANCE_INTERVAL_MS);
 
+registerMetingRoomResolver(getRoomInternal);
 await initRooms();
 
 const setupRequired = isSetupRequired();

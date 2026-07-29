@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:openmusic/data/avatar_image.dart';
 import 'package:openmusic/data/local_cache.dart';
 import 'package:openmusic/data/identity_auth.dart';
 import 'package:openmusic/app/theme.dart';
@@ -11,6 +13,7 @@ import 'package:openmusic/features/lobby/lobby_page.dart';
 import 'package:openmusic/features/room/identity_auth_page.dart';
 import 'package:openmusic/features/room/member_tier_ui.dart';
 import 'package:openmusic/features/room/users_sheet.dart';
+import 'package:openmusic/widgets/om_cover_image.dart';
 import 'package:openmusic/widgets/om_dialog.dart';
 
 Future<void> showRoomSettingsSheet(BuildContext context, WidgetRef ref) {
@@ -108,96 +111,21 @@ class _SettingsBody extends ConsumerWidget {
     }
   }
 
-  Future<void> _showRoomQualitySheet(
+  Future<void> _showAvatarSettingsSheet(
     BuildContext context,
-    WidgetRef ref,
-    RoomAudioQuality? roomQuality,
-  ) async {
-    final svipEnabled = await QualityCapabilities.refresh();
-    if (!context.mounted) return;
-    var draft = normalizeUserAudioQuality(roomQuality, svipEnabled: svipEnabled);
-    final neteaseOpts = qualityOptionsForSource('netease', svipEnabled: svipEnabled);
-    final tencentOpts = qualityOptionsForSource('tencent', svipEnabled: svipEnabled);
-    final ok = await OmDialog.showSheet<bool>(
-      context,
-      title: '房间统一音质',
-      subtitle: '影响整个房间后续解析到的播放音质。',
-      child: StatefulBuilder(
-        builder: (context, setLocal) => Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const _SheetLabel('红点音质'),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final option in neteaseOpts)
-                  _ChoicePill(
-                    label: option.label,
-                    selected: draft.netease == option.value,
-                    onTap: () => setLocal(
-                      () => draft = RoomAudioQuality(
-                        netease: option.value,
-                        tencent: draft.tencent,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 18),
-            const _SheetLabel('绿点音质'),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final option in tencentOpts)
-                  _ChoicePill(
-                    label: option.label,
-                    selected: draft.tencent == option.value,
-                    onTap: () => setLocal(
-                      () => draft = RoomAudioQuality(
-                        netease: draft.netease,
-                        tencent: option.value,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ],
-        ),
+    WidgetRef ref, {
+    required String currentUrl,
+    required String nickname,
+  }) {
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _AvatarSettingsSheet(
+        initialUrl: currentUrl,
+        nickname: nickname,
       ),
-      actions: [
-        Row(
-          children: [
-            Expanded(
-              child: OutlinedButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('取消'),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: FilledButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('保存'),
-              ),
-            ),
-          ],
-        ),
-      ],
     );
-    if (ok == true) {
-      final res = await ref.read(roomSessionProvider.notifier).setRoomAudioQuality(
-            draft.netease,
-            draft.tencent,
-          );
-      if (res['success'] != true && context.mounted) {
-        omSnack(context, '${res['error'] ?? '设置失败'}');
-      }
-    }
   }
 
   Future<void> _showMemberSettingsSheet(
@@ -388,51 +316,16 @@ class _SettingsBody extends ConsumerWidget {
                         ),
                         _SettingsTile(
                           icon: Icons.account_circle_outlined,
-                          title: '我的头像 URL',
+                          title: '我的头像',
                           value: room.avatarUrlFor(session.mySocketId ?? '')?.isNotEmpty == true
                               ? '已设置'
                               : '未设置',
-                          onTap: () async {
-                            final ctrl = TextEditingController(
-                              text: room.avatarUrlFor(session.mySocketId ?? '') ?? '',
-                            );
-                            final saved = await OmDialog.showSheet<String>(
-                              context,
-                              title: '设置头像 URL',
-                              subtitle: '填图片 URL，留空则清除当前头像。',
-                              child: OmField(
-                                controller: ctrl,
-                                hint: 'https://example.com/avatar.png',
-                              ),
-                              actions: [
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: OutlinedButton(
-                                        onPressed: () => Navigator.pop(context),
-                                        child: const Text('取消'),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      child: FilledButton(
-                                        onPressed: () => Navigator.pop(
-                                          context,
-                                          ctrl.text.trim(),
-                                        ),
-                                        child: const Text('保存'),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            );
-                            if (saved == null) return;
-                            final res = await notifier.setUserAvatar(saved);
-                            if (res['success'] != true && context.mounted) {
-                              omSnack(context, '${res['error'] ?? '设置失败'}');
-                            }
-                          },
+                          onTap: () => _showAvatarSettingsSheet(
+                            context,
+                            ref,
+                            currentUrl: room.avatarUrlFor(session.mySocketId ?? '') ?? '',
+                            nickname: currentUser()?.nickname ?? '我',
+                          ),
                         ),
                       ],
                     ),
@@ -940,16 +833,6 @@ class _SettingsBody extends ConsumerWidget {
                               onTap: () => _showUserQualitySheet(context, room.audioQuality),
                             );
                           },
-                        ),
-                        _SettingsTile(
-                          icon: Icons.tune_rounded,
-                          title: '房间统一音质',
-                          value: room.audioQuality == null
-                              ? '跟随各自设置'
-                              : getAudioQualitySummary(room.audioQuality!),
-                          onTap: !roles.isOwner
-                              ? null
-                              : () => _showRoomQualitySheet(context, ref, room.audioQuality),
                         ),
                         _SettingsTile(
                           icon: Icons.north_rounded,
@@ -1885,6 +1768,277 @@ class _MemberSettingsSheetState extends ConsumerState<_MemberSettingsSheet> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AvatarSettingsSheet extends ConsumerStatefulWidget {
+  const _AvatarSettingsSheet({
+    required this.initialUrl,
+    required this.nickname,
+  });
+
+  final String initialUrl;
+  final String nickname;
+
+  @override
+  ConsumerState<_AvatarSettingsSheet> createState() => _AvatarSettingsSheetState();
+}
+
+class _AvatarSettingsSheetState extends ConsumerState<_AvatarSettingsSheet> {
+  late String _draft;
+  var _saving = false;
+  var _picking = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _draft = widget.initialUrl.trim();
+  }
+
+  Future<void> _pick(ImageSource source) async {
+    if (_picking || _saving) return;
+    setState(() {
+      _picking = true;
+      _error = null;
+    });
+    try {
+      final dataUrl = await pickAvatarDataUrl(source: source);
+      if (!mounted || dataUrl == null) return;
+      setState(() => _draft = dataUrl);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = '$e');
+    } finally {
+      if (mounted) setState(() => _picking = false);
+    }
+  }
+
+  Future<void> _editUrl() async {
+    final ctrl = TextEditingController(text: _draft.startsWith('http') ? _draft : '');
+    final next = await OmDialog.showSheet<String>(
+      context,
+      title: '使用图片链接',
+      subtitle: '也可粘贴 https 图片地址；留空表示清除。',
+      child: OmField(
+        controller: ctrl,
+        hint: 'https://example.com/avatar.png',
+      ),
+      actions: [
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('取消'),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: FilledButton(
+                onPressed: () => Navigator.pop(context, ctrl.text.trim()),
+                child: const Text('应用'),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+    if (next == null || !mounted) return;
+    if (next.isNotEmpty && !isSupportedAvatarDataUrl(next)) {
+      setState(() => _error = '仅支持 JPG/PNG 或 http(s) 链接');
+      return;
+    }
+    setState(() {
+      _draft = next;
+      _error = null;
+    });
+  }
+
+  Future<void> _save() async {
+    if (_saving) return;
+    final next = _draft.trim();
+    if (next.isNotEmpty && !isSupportedAvatarDataUrl(next)) {
+      setState(() => _error = '头像格式无效或过大');
+      return;
+    }
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    final res = await ref.read(roomSessionProvider.notifier).setUserAvatar(next);
+    if (!mounted) return;
+    setState(() => _saving = false);
+    if (res['success'] == true) {
+      Navigator.pop(context);
+      return;
+    }
+    setState(() => _error = '${res['error'] ?? '保存失败'}');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final letter = widget.nickname.isNotEmpty
+        ? widget.nickname.substring(0, 1).toUpperCase()
+        : '?';
+    final fallback = Container(
+      width: 96,
+      height: 96,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [OmTheme.red, OmTheme.red.withValues(alpha: 0.7)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        shape: BoxShape.circle,
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        letter,
+        style: const TextStyle(
+          fontSize: 36,
+          fontWeight: FontWeight.w700,
+          color: Colors.white,
+        ),
+      ),
+    );
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+        decoration: BoxDecoration(
+          color: OmTheme.card,
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 36,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: 12),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(99),
+              ),
+            ),
+            const Text(
+              '设置头像',
+              style: TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+                color: OmTheme.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              '像 QQ 一样从相册或拍照选择，也会同步到聊天室。',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12, color: OmTheme.textHint),
+            ),
+            const SizedBox(height: 18),
+            GestureDetector(
+              onTap: _picking ? null : () => _pick(ImageSource.gallery),
+              child: Stack(
+                alignment: Alignment.bottomRight,
+                children: [
+                  ClipOval(
+                    child: SizedBox(
+                      width: 96,
+                      height: 96,
+                      child: _draft.isEmpty
+                          ? fallback
+                          : OmCoverImage(
+                              url: _draft,
+                              sizePx: 192,
+                              fit: BoxFit.cover,
+                              fallback: fallback,
+                            ),
+                    ),
+                  ),
+                  Container(
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      color: OmTheme.red,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: OmTheme.card, width: 2),
+                    ),
+                    child: Icon(
+                      _picking ? Icons.hourglass_top_rounded : Icons.camera_alt_rounded,
+                      size: 14,
+                      color: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 18),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _picking || _saving
+                        ? null
+                        : () => _pick(ImageSource.gallery),
+                    icon: const Icon(Icons.photo_library_outlined, size: 18),
+                    label: const Text('相册'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _picking || _saving
+                        ? null
+                        : () => _pick(ImageSource.camera),
+                    icon: const Icon(Icons.photo_camera_outlined, size: 18),
+                    label: const Text('拍照'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton(
+                    onPressed: _picking || _saving ? null : _editUrl,
+                    child: const Text('使用图片链接'),
+                  ),
+                ),
+                TextButton(
+                  onPressed: _picking || _saving || _draft.isEmpty
+                      ? null
+                      : () => setState(() {
+                            _draft = '';
+                            _error = null;
+                          }),
+                  child: const Text('清除头像'),
+                ),
+              ],
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: 4),
+              Text(
+                _error!,
+                style: const TextStyle(fontSize: 12, color: Color(0xFFF87171)),
+              ),
+            ],
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: _picking || _saving ? null : _save,
+                child: Text(_saving ? '保存中...' : '保存'),
+              ),
+            ),
+          ],
         ),
       ),
     );

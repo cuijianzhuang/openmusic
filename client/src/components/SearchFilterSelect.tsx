@@ -1,29 +1,49 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Check } from 'lucide-react';
 import type { MusicSource } from '../types';
 import Tooltip from './Tooltip';
 
 export type SearchFilterMode = 'smart' | MusicSource;
 
-const OPTIONS: { value: SearchFilterMode; label: string; hint?: string }[] = [
+const BASE_OPTIONS: { value: SearchFilterMode; label: string; hint?: string }[] = [
   { value: 'smart', label: '智能去重', hint: '歌名与歌手相同视为同一首' },
   { value: 'netease', label: '红点' },
   { value: 'tencent', label: '绿点' },
   { value: 'kugou', label: '蓝点' },
 ];
 
-function getLabel(mode: SearchFilterMode): string {
-  return OPTIONS.find((o) => o.value === mode)?.label ?? '智能去重';
+function getLabel(mode: SearchFilterMode, options: typeof BASE_OPTIONS): string {
+  return options.find((o) => o.value === mode)?.label ?? '智能去重';
 }
 
 interface Props {
   value: SearchFilterMode;
   onChange: (mode: SearchFilterMode) => void;
+  /** 可搜索平台（来自 /api/music/sources）；未包含 kugou 时不显示蓝点 */
+  searchableSourceIds?: MusicSource[];
 }
 
-export default function SearchFilterSelect({ value, onChange }: Props) {
+export default function SearchFilterSelect({
+  value,
+  onChange,
+  searchableSourceIds,
+}: Props) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+
+  const options = useMemo(() => {
+    if (!searchableSourceIds) return BASE_OPTIONS;
+    const allowed = new Set(searchableSourceIds);
+    return BASE_OPTIONS.filter(
+      (opt) => opt.value === 'smart' || allowed.has(opt.value as MusicSource),
+    );
+  }, [searchableSourceIds]);
+
+  useEffect(() => {
+    if (value !== 'smart' && !options.some((o) => o.value === value)) {
+      onChange('smart');
+    }
+  }, [value, options, onChange]);
 
   useEffect(() => {
     if (!open) return;
@@ -45,10 +65,10 @@ export default function SearchFilterSelect({ value, onChange }: Props) {
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        aria-haspopup="listbox"
+        aria-hasPopup="listbox"
         className="flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] sm:text-xs text-white/80 hover:bg-white/10 hover:text-white transition-colors"
       >
-        <span className="whitespace-nowrap">{getLabel(value)}</span>
+        <span className="whitespace-nowrap">{getLabel(value, options)}</span>
         <ChevronDown className={`w-3.5 h-3.5 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
 
@@ -58,7 +78,7 @@ export default function SearchFilterSelect({ value, onChange }: Props) {
           aria-label="搜索结果筛选"
           className="absolute right-0 top-full z-50 mt-1 min-w-[9.5rem] rounded-xl border border-white/10 bg-netease-bg/95 backdrop-blur-md shadow-xl py-1 animate-fade-in"
         >
-          {OPTIONS.map((opt, i) => (
+          {options.map((opt, i) => (
             <div key={opt.value}>
               {i === 1 && <div className="my-1 border-t border-white/10" />}
               {opt.hint ? (
