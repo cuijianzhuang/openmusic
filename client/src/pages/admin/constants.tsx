@@ -13,40 +13,20 @@ import type { AdminTabId } from './types';
 export const LIST_PAGE_SIZE = 15;
 export const AUDIT_PAGE_SIZE = 10;
 
-/** 操作审计类型筛选（value = action） */
+/**
+ * 操作审计类型筛选（大类；value 为分组 key，服务端展开为多个 action）
+ * 列表文案仍按单条 action 细粒度显示
+ */
 export const AUDIT_ACTION_OPTIONS: { value: string; label: string }[] = [
-  { value: 'login_ok', label: '登录成功' },
-  { value: 'login_fail', label: '登录失败' },
-  { value: 'logout', label: '退出登录' },
-  { value: 'linuxdo_bind', label: '绑定 Linux.do' },
-  { value: 'linuxdo_unbind', label: '解绑 Linux.do' },
-  { value: 'github_bind', label: '绑定 GitHub' },
-  { value: 'github_unbind', label: '解绑 GitHub' },
-  { value: 'set_credentials', label: '修改管理员密码' },
-  { value: 'set_credentials_fail', label: '修改密码失败' },
-  { value: 'set_entry_path', label: '更新登录地址' },
-  { value: 'set_runtime_config', label: '更新运行配置' },
-  { value: 'set_announcement', label: '更新站点公告' },
-  { value: 'set_room_protection', label: '房间保活' },
-  { value: 'view_room_password', label: '查看房间密码' },
-  { value: 'review_permanent_application', label: '审核常驻申请' },
-  { value: 'meting_reset_cooldown', label: '重置上游冷却' },
-  { value: 'meting_set_disabled', label: '启用/禁用上游' },
-  { value: 'reset_music_api_circuit', label: '重置音源熔断' },
-  { value: 'broadcast', label: '全局广播' },
-  { value: 'site_ban_add', label: '添加封禁' },
-  { value: 'site_ban_remove', label: '解除封禁' },
-  { value: 'room_create_blocked', label: '拦截建房' },
-  { value: 'room_create_auto_ban', label: '自动封禁建房' },
-  { value: 'join_blocked', label: '拦截进房' },
-  { value: 'site_access_blocked', label: '拦截全站访问' },
-  { value: 'session_blocked', label: '拦截会话' },
-  { value: 'error_report_update', label: '处理错误上报' },
-  { value: 'error_report_delete', label: '删除错误上报' },
-  { value: 'destroy_room', label: '解散房间' },
-  { value: 'owner_destroy_room', label: '房主解散房间' },
-  { value: 'owner_destroy_room_denied', label: '拒绝房主解散' },
-  { value: 'destroy_room_fail', label: '解散失败' },
+  { value: 'auth', label: '登录 / 退出' },
+  { value: 'oauth', label: '账号绑定' },
+  { value: 'account', label: '账号与入口' },
+  { value: 'config', label: '系统配置' },
+  { value: 'notify', label: '公告 / 广播' },
+  { value: 'room', label: '房间管理' },
+  { value: 'ban', label: '全站封禁' },
+  { value: 'guard', label: '防护拦截' },
+  { value: 'report', label: '错误上报' },
 ];
 
 export const ADMIN_TABS: { id: AdminTabId; label: string; icon: ReactNode }[] = [

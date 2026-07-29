@@ -132,7 +132,7 @@ export function formatAuditAction(entry: AdminAuditEntry) {
         entry.roomId ? ` ${entry.roomId}` : ''
       }`;
     case 'site_access_blocked':
-      return `拦截全站访问（站点封禁）${entry.path ? ` ${entry.path}` : ''}`;
+      return '拦截全站访问（站点封禁）';
     case 'session_blocked': {
       const reasonMap: Record<string, string> = {
         bootstrap_rate_limit: '会话限流',

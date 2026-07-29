@@ -1,5 +1,6 @@
 import { buildApiSignHeaders, canonicalApiQuery, needsApiSign } from '../lib/apiSign';
 import { ensureSessionBootstrap } from '../lib/sessionBootstrap';
+import { detectSiteAccessBlockResponse, isSiteAccessBlocked, markSiteAccessBlocked } from '../lib/siteAccessGate';
 
 const DEFAULT_TIMEOUT_MS = 10000;
 
@@ -36,6 +37,13 @@ export async function fetchWithTimeout(
   init: RequestInit = {},
   timeoutMs = DEFAULT_TIMEOUT_MS,
 ): Promise<Response> {
+  if (isSiteAccessBlocked()) {
+    return new Response(JSON.stringify({ error: '系统开小差了，请稍后再试' }), {
+      status: 503,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
 
@@ -51,6 +59,13 @@ export async function fetchWithTimeout(
   const method = (init.method || 'GET').toUpperCase();
   if (needsApiSign(url, method) && sameOriginApi) {
     await ensureSessionBootstrap();
+    if (isSiteAccessBlocked()) {
+      window.clearTimeout(timer);
+      return new Response(JSON.stringify({ error: '系统开小差了，请稍后再试' }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
     const parsed = new URL(url, window.location.origin);
     const body = typeof init.body === 'string' ? init.body : '';
     const signHeaders = await buildApiSignHeaders(
@@ -63,7 +78,11 @@ export async function fetchWithTimeout(
   }
 
   try {
-    return await fetch(input, { ...initFinal, signal: controller.signal });
+    const res = await fetch(input, { ...initFinal, signal: controller.signal });
+    if (sameOriginApi && detectSiteAccessBlockResponse(res)) {
+      markSiteAccessBlocked();
+    }
+    return res;
   } finally {
     window.clearTimeout(timer);
   }

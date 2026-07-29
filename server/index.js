@@ -328,38 +328,6 @@ app.use(express.json({
   },
 }));
 
-/** 全站封禁审计节流：同一 IP/设备 15 分钟内同类拦截只记一条，避免刷爆审计 */
-const SITE_BAN_AUDIT_THROTTLE_MS = 15 * 60 * 1000;
-/** @type {Map<string, number>} */
-const siteBanAuditAt = new Map();
-let siteBanAuditSweepAt = 0;
-
-function noteSiteBanAudit(action, detail = {}, ip = '') {
-  const now = Date.now();
-  if (now - siteBanAuditSweepAt > 60_000) {
-    siteBanAuditSweepAt = now;
-    for (const [k, at] of siteBanAuditAt) {
-      if (now - at > SITE_BAN_AUDIT_THROTTLE_MS) siteBanAuditAt.delete(k);
-    }
-  }
-  const key = [
-    action,
-    ip || '',
-    detail.deviceId || '',
-    detail.banType || '',
-    detail.value || '',
-  ].join('|');
-  const last = siteBanAuditAt.get(key) || 0;
-  if (now - last < SITE_BAN_AUDIT_THROTTLE_MS) return false;
-  siteBanAuditAt.set(key, now);
-  if (siteBanAuditAt.size > 8_000) {
-    const oldest = siteBanAuditAt.keys().next().value;
-    if (oldest !== undefined) siteBanAuditAt.delete(oldest);
-  }
-  appendAdminAudit(action, detail, ip);
-  return true;
-}
-
 function isExemptFromSiteBan(reqPath = '') {
   const p = String(reqPath || '');
   if (p.startsWith('/api/admin')) return true;
@@ -381,14 +349,8 @@ function resolveSiteBanFromRequest(req) {
   return { ban, ip, deviceId };
 }
 
-function sendSiteBannedResponse(req, res, { ban, ip, deviceId }) {
-  noteSiteBanAudit('site_access_blocked', {
-    reason: 'site_ban',
-    banType: ban?.type || '',
-    value: ban?.value || '',
-    deviceId: deviceId || '',
-    path: String(req.path || '').slice(0, 80),
-  }, ip);
+function sendSiteBannedResponse(req, res) {
+  // 站点封禁拦截不写审计：被封用户会高频重试，日志无运维价值且易刷爆
   const wantsHtml = String(req.headers.accept || '').includes('text/html')
     || !String(req.path || '').startsWith('/api/');
   if (wantsHtml) {
@@ -408,9 +370,9 @@ p{opacity:.75;font-size:15px}
 /** 全站封禁：首页 / API / SPA 一律拦截（管理后台入口除外） */
 app.use((req, res, next) => {
   if (isExemptFromSiteBan(req.path)) return next();
-  const { ban, ip, deviceId } = resolveSiteBanFromRequest(req);
+  const { ban } = resolveSiteBanFromRequest(req);
   if (!ban) return next();
-  sendSiteBannedResponse(req, res, { ban, ip, deviceId });
+  sendSiteBannedResponse(req, res);
 });
 
 mountSetupApi(app);
@@ -1755,11 +1717,7 @@ app.post('/api/rooms', async (req, res) => {
   };
 
   if (isSiteBanned({ ip: createIp, deviceId: createDeviceId })) {
-    noteSiteBanAudit('room_create_blocked', {
-      reason: 'site_ban',
-      deviceId: createDeviceId || '',
-    }, createIp);
-    // 不暴露封禁
+    // 不暴露封禁；拦截本身不写审计（高频重试无价值）
     return res.status(503).json({ error: '系统开小差了，请稍后再试' });
   }
 
@@ -2445,13 +2403,6 @@ io.on('connection', (socket) => {
     const deviceId = resolveDeviceIdFromCookieHeader(socket.handshake?.headers?.cookie || '');
     const siteBan = isSiteBanned({ ip: joinProbeIp, deviceId });
     if (siteBan) {
-      noteSiteBanAudit('site_access_blocked', {
-        reason: 'site_ban',
-        banType: siteBan.type || '',
-        value: siteBan.value || '',
-        deviceId: deviceId || '',
-        path: 'socket',
-      }, joinProbeIp);
       socket.emit('kicked', { message: '系统开小差了，请稍后再试', stopReconnect: true });
       socket.disconnect(true);
       return;
@@ -2495,14 +2446,6 @@ io.on('connection', (socket) => {
     const joinProbeIp = getClientIp(socket);
     const siteBan = isSiteBanned({ ip: joinProbeIp, deviceId });
     if (siteBan) {
-      noteSiteBanAudit('join_blocked', {
-        reason: 'site_ban',
-        roomId: id,
-        userId,
-        deviceId: deviceId || '',
-        banType: siteBan.type || '',
-        value: siteBan.value || '',
-      }, joinProbeIp);
       callback?.({ success: false, error: '系统开小差了，请稍后再试' });
       socket.emit('kicked', { message: '系统开小差了，请稍后再试', stopReconnect: true });
       socket.disconnect(true);

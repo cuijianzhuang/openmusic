@@ -219,11 +219,45 @@ function audit(action, detail = {}, ip = '') {
   appendAdminAudit(action, detail, ip);
 }
 
+/** 审计筛选大类 → 具体 action（与前端 AUDIT_ACTION_OPTIONS 对应） */
+const AUDIT_ACTION_GROUPS = {
+  auth: ['login_ok', 'login_fail', 'logout'],
+  oauth: ['linuxdo_bind', 'linuxdo_unbind', 'github_bind', 'github_unbind'],
+  account: ['set_credentials', 'set_credentials_fail', 'set_entry_path'],
+  config: [
+    'set_runtime_config',
+    'reset_music_api_circuit',
+    'meting_reset_cooldown',
+    'meting_set_disabled',
+  ],
+  notify: ['set_announcement', 'broadcast'],
+  room: [
+    'set_room_protection',
+    'view_room_password',
+    'review_permanent_application',
+    'destroy_room',
+    'destroy_room_fail',
+    'owner_destroy_room',
+    'owner_destroy_room_denied',
+  ],
+  ban: ['site_ban_add', 'site_ban_remove', 'room_create_auto_ban'],
+  guard: ['room_create_blocked', 'session_blocked'],
+  report: ['error_report_update', 'error_report_delete'],
+};
+
+function resolveAuditActionFilter(action = '') {
+  const key = String(action || '').trim();
+  if (!key) return null;
+  const group = AUDIT_ACTION_GROUPS[key];
+  if (group) return new Set(group);
+  return new Set([key]);
+}
+
 async function listAuditLogPage({ offset = 0, limit = 10, q = '', action = '' } = {}) {
   const pageSize = Math.min(Math.max(1, Number(limit) || 10), 100);
   const start = Math.max(0, Number(offset) || 0);
   const keyword = String(q || '').trim().toLowerCase();
-  const actionFilter = String(action || '').trim();
+  const actionSet = resolveAuditActionFilter(action);
   const client = getRedisClient();
   if (!client) return { items: [], total: 0, offset: start, limit: pageSize };
   try {
@@ -237,7 +271,7 @@ async function listAuditLogPage({ offset = 0, limit = 10, q = '', action = '' } 
     }).filter(Boolean);
 
     const filtered = all.filter((entry) => {
-      if (actionFilter && entry.action !== actionFilter) return false;
+      if (actionSet && !actionSet.has(entry.action)) return false;
       if (!keyword) return true;
       const haystack = [
         entry.action,

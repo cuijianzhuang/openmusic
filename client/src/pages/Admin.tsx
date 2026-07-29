@@ -1862,7 +1862,7 @@ function AdminPage() {
                     setAuditAction(value || undefined);
                     setAuditPage(1);
                   }}
-                  style={{ width: 180 }}
+                  style={{ width: 140 }}
                   showSearch
                   optionFilterProp="label"
                 />

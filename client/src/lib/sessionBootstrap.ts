@@ -3,10 +3,12 @@ import { rememberClientId } from './clientId';
 import { getDeviceId } from './deviceId';
 import { setApiSignKey } from './apiSign';
 import { applySiteFeatures } from '../stores/siteFeaturesStore';
+import { detectSiteAccessBlockResponse, isSiteAccessBlocked, markSiteAccessBlocked } from './siteAccessGate';
 
 let bootstrapPromise: Promise<string | null> | null = null;
 
 async function requestSessionBootstrap(): Promise<string | null> {
+  if (isSiteAccessBlocked()) return null;
   const res = await fetchWithTimeout(
     '/api/session/bootstrap',
     {
@@ -16,6 +18,10 @@ async function requestSessionBootstrap(): Promise<string | null> {
     },
     8000,
   );
+  if (detectSiteAccessBlockResponse(res)) {
+    markSiteAccessBlocked();
+    return null;
+  }
   if (!res.ok) return null;
   const data = (await res.json()) as {
     clientId?: string;
@@ -31,13 +37,16 @@ async function requestSessionBootstrap(): Promise<string | null> {
 
 /** 通过 HttpOnly Cookie 建立会话，不在 WebSocket 中传递身份令牌 */
 export function ensureSessionBootstrap(force = false): Promise<string | null> {
+  if (isSiteAccessBlocked()) return Promise.resolve(null);
   if (force) bootstrapPromise = null;
   if (!bootstrapPromise) {
     bootstrapPromise = (async () => {
       for (let attempt = 0; attempt < 3; attempt += 1) {
+        if (isSiteAccessBlocked()) return null;
         try {
           const clientId = await requestSessionBootstrap();
           if (clientId) return clientId;
+          if (isSiteAccessBlocked()) return null;
         } catch {
           // retry
         }
@@ -53,18 +62,25 @@ export function ensureSessionBootstrap(force = false): Promise<string | null> {
 
 /** bootstrap 必须成功，否则抛出错误 */
 export async function requireSessionBootstrap(force = false): Promise<string> {
+  if (isSiteAccessBlocked()) {
+    throw new Error('系统开小差了，请稍后再试');
+  }
   let clientId = await ensureSessionBootstrap(force);
   if (!clientId) {
+    if (isSiteAccessBlocked()) {
+      throw new Error('系统开小差了，请稍后再试');
+    }
     resetSessionBootstrap();
     clientId = await ensureSessionBootstrap(true);
   }
   if (!clientId) {
-    throw new Error('会话未就绪，请刷新页面后重试');
+    throw new Error(isSiteAccessBlocked() ? '系统开小差了，请稍后再试' : '会话未就绪，请刷新页面后重试');
   }
   return clientId;
 }
 
 export function resetSessionBootstrap(): void {
+  if (isSiteAccessBlocked()) return;
   bootstrapPromise = null;
   setApiSignKey(null);
 }
