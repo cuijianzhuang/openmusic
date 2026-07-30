@@ -2,5 +2,5 @@
   "notes": [
     "优化定时器，试图修复浏览器后台节流导致的切歌异常"
   ],
-  "forcePrompt": true
+  "forcePrompt": false
 }

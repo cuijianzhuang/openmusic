@@ -43,11 +43,77 @@ function artistRelevanceBonus(keyword: string, artist: string): number {
   return 0;
 }
 
+/** 歌名是否与关键词强匹配（不含弱公共子串，用于判断「是不是在搜歌手」） */
+function titleStronglyMatchesKeyword(keyword: string, name: string): boolean {
+  const kw = normalizeRelevanceText(keyword);
+  const n = normalizeRelevanceText(name);
+  if (!kw || !n) return false;
+  if (n === kw || n.includes(kw) || n.startsWith(kw)) return true;
+  if (kw.includes(n) && n.length >= 2) return true;
+  if (kw.startsWith(n) && n.length >= 2) return true;
+  return false;
+}
+
+/**
+ * 前两首歌名都匹配不到关键词 → 视为搜歌手。
+ * 仅看列表最前面的样本（上游/合并后的前排），避免误伤歌名搜索。
+ */
+export function shouldPreferArtistMatch(
+  songs: Array<Pick<SearchResult, 'name'>>,
+  keyword: string,
+): boolean {
+  const kw = normalizeRelevanceText(keyword);
+  if (!kw || songs.length === 0) return false;
+  const sample = songs.slice(0, 2);
+  return sample.every((song) => !titleStronglyMatchesKeyword(kw, song.name));
+}
+
+function scoreNameRelevance(kw: string, name: string): number {
+  if (!name) return 0;
+  if (name === kw) return 1000;
+  if (name.startsWith(kw)) return 880;
+  if (kw.startsWith(name) && name.length >= 2) return 820;
+  if (name.includes(kw)) return 760;
+  if (kw.includes(name) && name.length >= 2) return 700;
+  const overlap = longestCommonSubstringLength(kw, name);
+  const coverage = overlap / kw.length;
+  if (overlap >= 2 && (coverage >= 0.4 || overlap >= 4)) {
+    return Math.round(280 + coverage * 420 + overlap * 8);
+  }
+  return 0;
+}
+
+function scoreArtistPrimary(kw: string, artist: string): number {
+  if (!artist) return 0;
+  if (artist === kw) return 1000;
+  if (artist.includes(kw)) return 920;
+  if (kw.includes(artist) && artist.length >= 2) return 860;
+  const overlap = longestCommonSubstringLength(kw, artist);
+  const coverage = overlap / kw.length;
+  if (overlap >= 2 && (coverage >= 0.5 || overlap >= 3)) {
+    return Math.round(620 + coverage * 200 + overlap * 6);
+  }
+  return 0;
+}
+
+function titleBonusForArtistMode(kw: string, name: string): number {
+  if (!name) return 0;
+  if (name === kw) return 80;
+  if (name.includes(kw) || (kw.includes(name) && name.length >= 2)) return 40;
+  const overlap = longestCommonSubstringLength(kw, name);
+  if (overlap >= 2) return Math.min(30, overlap * 5);
+  return 0;
+}
+
 /**
  * 通用搜索相关度（所有歌曲共用）：
- * 歌名精确 > 前缀/包含 > 公共子串覆盖；歌手命中仅作加分，或歌名无关时的兜底。
+ * 默认歌名优先；preferArtist 时歌手命中压过歌名，用于「前两首不像歌名搜索」的启发式。
  */
-export function scoreTitleRelevance(keyword: string, song: Pick<SearchResult, 'name' | 'artist'>): number {
+export function scoreTitleRelevance(
+  keyword: string,
+  song: Pick<SearchResult, 'name' | 'artist'>,
+  options: { preferArtist?: boolean } = {},
+): number {
   const kw = normalizeRelevanceText(keyword);
   if (!kw) return 0;
 
@@ -55,27 +121,16 @@ export function scoreTitleRelevance(keyword: string, song: Pick<SearchResult, 'n
   const artist = normalizeRelevanceText(song.artist);
   if (!name && !artist) return 0;
 
-  let nameScore = 0;
-  if (name) {
-    if (name === kw) {
-      nameScore = 1000;
-    } else if (name.startsWith(kw)) {
-      nameScore = 880;
-    } else if (kw.startsWith(name) && name.length >= 2) {
-      nameScore = 820;
-    } else if (name.includes(kw)) {
-      nameScore = 760;
-    } else if (kw.includes(name) && name.length >= 2) {
-      nameScore = 700;
-    } else {
-      const overlap = longestCommonSubstringLength(kw, name);
-      const coverage = overlap / kw.length;
-      if (overlap >= 2 && (coverage >= 0.4 || overlap >= 4)) {
-        nameScore = Math.round(280 + coverage * 420 + overlap * 8);
-      }
+  if (options.preferArtist) {
+    const artistScore = scoreArtistPrimary(kw, artist);
+    if (artistScore > 0) {
+      return artistScore + titleBonusForArtistMode(kw, name);
     }
+    // 无歌手命中：保留弱歌名分但压低，避免噪声抢前排
+    return Math.min(scoreNameRelevance(kw, name), 200);
   }
 
+  const nameScore = scoreNameRelevance(kw, name);
   if (nameScore > 0) {
     return nameScore + artistRelevanceBonus(kw, artist);
   }
@@ -95,8 +150,14 @@ export function rankSearchResultsByKeyword(songs: SearchResult[], keyword: strin
   const trimmed = keyword.trim();
   if (!trimmed || songs.length <= 1) return songs;
 
+  const preferArtist = shouldPreferArtistMatch(songs, trimmed);
+
   return songs
-    .map((song, index) => ({ song, index, score: scoreTitleRelevance(trimmed, song) }))
+    .map((song, index) => ({
+      song,
+      index,
+      score: scoreTitleRelevance(trimmed, song, { preferArtist }),
+    }))
     .sort((a, b) => b.score - a.score || a.index - b.index)
     .map((item) => item.song);
 }
