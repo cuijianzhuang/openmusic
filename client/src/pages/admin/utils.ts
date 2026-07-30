@@ -94,6 +94,14 @@ export function formatAuditAction(entry: AdminAuditEntry) {
       return `查看房间密码 ${entry.roomId || ''}${
         entry.recoverable === false ? '（明文不可恢复）' : ''
       }`;
+    case 'rename_room_user':
+      return `修改房间昵称 ${entry.roomId || ''}${entry.previousNickname ? ` · ${entry.previousNickname}` : ''}${
+        entry.nickname ? ` -> ${entry.nickname}` : ''
+      }`;
+    case 'reset_room_user_nickname':
+      return `违规重置昵称 ${entry.roomId || ''}${entry.previousNickname ? ` · ${entry.previousNickname}` : ''}${
+        entry.nickname ? ` -> ${entry.nickname}` : ''
+      }`;
     case 'review_permanent_application':
       return `${entry.approved ? '通过' : '拒绝'}常驻申请 ${entry.roomId || ''}${
         entry.reason ? `：${entry.reason}` : ''

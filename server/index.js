@@ -2053,6 +2053,7 @@ const socketToUserId = new Map();
   socketToUserId,
   getClientIp: (req) => getClientIpFromHeaders(req.headers, req.socket?.remoteAddress || ''),
   allowedOrigins: ALLOWED_ORIGINS,
+  broadcastRoomUpdate,
 }));
 
 function isPrivateHostname(hostname) {

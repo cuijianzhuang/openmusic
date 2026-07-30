@@ -4,6 +4,8 @@ import {
   listRoomsForAdminDetailed,
   getRoomPasswordForAdmin,
   adminDestroyRoom,
+  adminRenameRoomUser,
+  adminResetRoomUserNickname,
   isRedisEnabled,
   setRoomProtectedFromDestroy,
   reviewRoomPermanentApplication,
@@ -282,6 +284,8 @@ const AUDIT_ACTION_GROUPS = {
   room: [
     'set_room_protection',
     'view_room_password',
+    'rename_room_user',
+    'reset_room_user_nickname',
     'review_permanent_application',
     'destroy_room',
     'destroy_room_fail',
@@ -560,7 +564,14 @@ function emitPermanentDecisionToUser(io, socketToUserId, notice) {
   return delivered;
 }
 
-export function mountAdminApi(app, { io, socketToRoom, socketToUserId, getClientIp, allowedOrigins = null }) {
+export function mountAdminApi(app, {
+  io,
+  socketToRoom,
+  socketToUserId,
+  getClientIp,
+  allowedOrigins = null,
+  broadcastRoomUpdate = null,
+}) {
   const requireAdminOrigin = createRequireAdminOrigin(allowedOrigins);
 
   // 校验当前前端路径是否为管理入口（不返回真实路径，避免泄露）
@@ -1008,6 +1019,63 @@ export function mountAdminApi(app, { io, socketToRoom, socketToUserId, getClient
       enabled: result.protectedFromDestroy,
     }, ip);
     res.json(result);
+  });
+
+  app.put('/api/admin/rooms/:id/users/:userId/nickname', requireAdminOrigin, requireAdmin, requireAdminSetupComplete, (req, res) => {
+    const roomId = String(req.params.id || '').toUpperCase();
+    const userId = String(req.params.userId || '').trim();
+    const ip = getClientIp?.(req) || req.ip || '';
+    const result = adminRenameRoomUser(roomId, userId, req.body?.nickname);
+    if (!result.success) {
+      return res.status(result.error === '房间不存在' || result.error === '用户不存在' ? 404 : 400).json({ error: result.error });
+    }
+    if (typeof broadcastRoomUpdate === 'function') broadcastRoomUpdate(roomId, { immediate: true });
+    audit('rename_room_user', {
+      roomId,
+      userId,
+      previousNickname: result.previousNickname,
+      nickname: result.nickname,
+    }, ip);
+    res.json({
+      success: true,
+      room: result.room,
+      previousNickname: result.previousNickname,
+      nickname: result.nickname,
+    });
+  });
+
+  app.post('/api/admin/rooms/:id/users/:userId/violation-reset', requireAdminOrigin, requireAdmin, requireAdminSetupComplete, (req, res) => {
+    const roomId = String(req.params.id || '').toUpperCase();
+    const userId = String(req.params.userId || '').trim();
+    const ip = getClientIp?.(req) || req.ip || '';
+    const result = adminResetRoomUserNickname(roomId, userId);
+    if (!result.success) {
+      return res.status(result.error === '房间不存在' || result.error === '用户不存在' ? 404 : 400).json({ error: result.error });
+    }
+
+    const noticeText = `「${result.previousNickname || '该用户'}」名称违规，已被系统重置。`;
+    const notice = broadcastAdminSystemMessage(noticeText, { roomIds: [roomId] });
+    if (typeof broadcastRoomUpdate === 'function') broadcastRoomUpdate(roomId, { immediate: true });
+    if (notice.success) {
+      for (const delivery of notice.deliveries || []) {
+        io.to(delivery.roomId).emit('chat_message', delivery.message);
+        io.to(delivery.roomId).emit('chat_message', delivery.toast);
+      }
+    }
+    audit('reset_room_user_nickname', {
+      roomId,
+      userId,
+      previousNickname: result.previousNickname,
+      nickname: result.nickname,
+      delivered: notice.success ? notice.roomCount : 0,
+    }, ip);
+    res.json({
+      success: true,
+      room: result.room,
+      previousNickname: result.previousNickname,
+      nickname: result.nickname,
+      notified: notice.success,
+    });
   });
 
   app.post('/api/admin/rooms/:id/permanent-application', requireAdminOrigin, requireAdmin, requireAdminSetupComplete, async (req, res) => {

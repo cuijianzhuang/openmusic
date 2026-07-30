@@ -6,6 +6,7 @@ import {
   CloseOutlined,
   CopyOutlined,
   DeleteOutlined,
+  EditOutlined,
   EyeInvisibleOutlined,
   EyeOutlined,
   LogoutOutlined,
@@ -13,6 +14,7 @@ import {
   ReloadOutlined,
   RightOutlined,
   SafetyCertificateOutlined,
+  StopOutlined,
   SyncOutlined,
 } from '@ant-design/icons';
 import {
@@ -237,6 +239,15 @@ function AdminPage() {
   /** 按需揭示的房间明文密码（不进列表接口） */
   const [revealedPasswords, setRevealedPasswords] = useState<Record<string, string | null>>({});
   const [revealingPasswordId, setRevealingPasswordId] = useState<string | null>(null);
+  const [editingNicknameTarget, setEditingNicknameTarget] = useState<{
+    roomId: string;
+    userId: string;
+    currentNickname: string;
+    roomName: string;
+  } | null>(null);
+  const [editingNicknameDraft, setEditingNicknameDraft] = useState('');
+  const [nicknameSaving, setNicknameSaving] = useState(false);
+  const [violatingUserKey, setViolatingUserKey] = useState<string | null>(null);
   const [bansPage, setBansPage] = useState(1);
   const [reportsPage, setReportsPage] = useState(1);
   const [refreshing, setRefreshing] = useState(false);
@@ -468,6 +479,60 @@ function AdminPage() {
       setRevealingPasswordId(null);
     }
   }, [message]);
+
+  const openNicknameEditor = useCallback((room: AdminRoom, userId: string, currentNickname: string) => {
+    setEditingNicknameTarget({
+      roomId: room.id,
+      userId,
+      currentNickname,
+      roomName: room.name,
+    });
+    setEditingNicknameDraft(currentNickname);
+  }, []);
+
+  const submitNicknameEdit = useCallback(async () => {
+    if (!editingNicknameTarget || nicknameSaving) return;
+    const nickname = editingNicknameDraft.trim();
+    if (!nickname) {
+      message.warning('请输入昵称');
+      return;
+    }
+    setNicknameSaving(true);
+    try {
+      const res = await adminFetch<{ nickname: string }>(
+        `/api/admin/rooms/${editingNicknameTarget.roomId}/users/${editingNicknameTarget.userId}/nickname`,
+        {
+          method: 'PUT',
+          body: JSON.stringify({ nickname }),
+        },
+      );
+      message.success(`昵称已修改为「${res.nickname}」`);
+      setEditingNicknameTarget(null);
+      setEditingNicknameDraft('');
+      await refresh({ force: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '修改昵称失败');
+    } finally {
+      setNicknameSaving(false);
+    }
+  }, [editingNicknameDraft, editingNicknameTarget, message, nicknameSaving, refresh]);
+
+  const markUserViolation = useCallback(async (room: AdminRoom, userId: string, nickname: string) => {
+    const actionKey = `${room.id}:${userId}`;
+    setViolatingUserKey(actionKey);
+    try {
+      const res = await adminFetch<{ nickname: string }>(
+        `/api/admin/rooms/${room.id}/users/${userId}/violation-reset`,
+        { method: 'POST' },
+      );
+      message.success(`已将「${nickname}」重置为「${res.nickname}」`);
+      await refresh({ force: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '违规重置失败');
+    } finally {
+      setViolatingUserKey(null);
+    }
+  }, [message, refresh]);
 
   const toggleRoomProtection = useCallback(async (room: AdminRoom) => {
     setProtectingId(room.id);
@@ -847,30 +912,81 @@ function AdminPage() {
     if (roomsPage > maxPage) setRoomsPage(maxPage);
   }, [filteredRooms.length, roomsPage, roomsPageSize]);
 
+  const renderRoomUserActions = useCallback((
+    room: AdminRoom,
+    user: { id: string; userId?: string; nickname: string; clientIp?: string; deviceId?: string },
+  ) => {
+    const targetUserId = user.userId || user.id;
+    const actionKey = `${room.id}:${targetUserId}`;
+    const canRename = Boolean(targetUserId);
+    return (
+      <Space size={6} wrap>
+        <Button
+          size="small"
+          icon={<EditOutlined />}
+          disabled={!canRename}
+          onClick={() => openNicknameEditor(room, targetUserId, user.nickname)}
+        >
+          改名
+        </Button>
+        <Popconfirm
+          title="确认按违规处理？"
+          description="会自动重置该用户昵称，并向房间发送系统通知。"
+          okText="确认"
+          cancelText="取消"
+          disabled={!canRename}
+          okButtonProps={{ danger: true, loading: violatingUserKey === actionKey }}
+          onConfirm={() => markUserViolation(room, targetUserId, user.nickname)}
+        >
+          <Button
+            size="small"
+            danger
+            icon={<StopOutlined />}
+            disabled={!canRename}
+            loading={violatingUserKey === actionKey}
+          >
+            违规
+          </Button>
+        </Popconfirm>
+        <Button
+          size="small"
+          danger
+          disabled={!user.clientIp && !user.deviceId}
+          onClick={() => openQuickBan({
+            mode: 'both',
+            ip: user.clientIp,
+            deviceId: user.deviceId,
+            nickname: user.nickname,
+          })}
+        >
+          一键拉黑
+        </Button>
+      </Space>
+    );
+  }, [markUserViolation, openNicknameEditor, openQuickBan, violatingUserKey]);
+
   const roomColumns: ColumnsType<AdminRoom> = [
     {
       title: '房间',
-      width: 210,
+      width: 280,
       ellipsis: true,
       render: (_, room) => (
         <div style={{ minWidth: 0, lineHeight: 1.35 }}>
-          <Typography.Text strong ellipsis style={{ display: 'block', maxWidth: 190 }}>
+          <Typography.Text strong ellipsis style={{ display: 'block', maxWidth: 260 }}>
             {room.name}
           </Typography.Text>
-          <Space size={6} wrap style={{ marginTop: 2 }}>
-            <Typography.Text type="secondary" code style={{ fontSize: 11 }}>
-              {room.id}
+          <Typography.Text type="secondary" code style={{ display: 'block', fontSize: 11, marginTop: 2 }}>
+            {room.id}
+          </Typography.Text>
+          {room.ownerNickname || room.creatorNickname ? (
+            <Typography.Text type="secondary" style={{ display: 'block', fontSize: 11, marginTop: 2 }}>
+              房主/建房人：{room.ownerNickname || room.creatorNickname}
             </Typography.Text>
-            {room.ownerNickname || room.creatorNickname ? (
-              <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-                {room.ownerNickname || room.creatorNickname}
-              </Typography.Text>
-            ) : room.creatorIp || room.creatorDeviceId ? (
-              <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-                建房人
-              </Typography.Text>
-            ) : null}
-          </Space>
+          ) : room.creatorIp || room.creatorDeviceId ? (
+            <Typography.Text type="secondary" style={{ display: 'block', fontSize: 11, marginTop: 2 }}>
+              已记录建房人信息
+            </Typography.Text>
+          ) : null}
         </div>
       ),
     },
@@ -935,7 +1051,7 @@ function AdminPage() {
     },
     {
       title: '最后进房',
-      width: 110,
+      width: 132,
       sorter: (a, b) => (a.lastJoinedAt || 0) - (b.lastJoinedAt || 0),
       defaultSortOrder: undefined,
       render: (_, room) => {
@@ -974,8 +1090,7 @@ function AdminPage() {
     },
     {
       title: '操作',
-      width: 200,
-      fixed: 'right',
+      width: 188,
       render: (_, room) => {
         const pending = room.permanentApplication?.status === 'pending';
         const busy = protectingId === room.id || permanentReviewingId === room.id;
@@ -1244,7 +1359,7 @@ function AdminPage() {
                 size="middle"
                 columns={roomColumns}
                 dataSource={filteredRooms}
-                scroll={{ x: 900 }}
+                scroll={{ x: 820 }}
                 rowClassName={(room) => (
                   room.permanentApplication?.status === 'pending' ? 'admin-room-row-pending' : ''
                 )}
@@ -1349,35 +1464,25 @@ function AdminPage() {
                             pagination={false}
                             rowKey="id"
                             dataSource={room.users}
+                            scroll={{ x: 820 }}
                             columns={[
                               {
                                 title: '昵称',
-                                dataIndex: 'nickname',
-                                width: 120,
-                                ellipsis: true,
+                                width: 180,
+                                render: (_, u) => (
+                                  <Typography.Text ellipsis style={{ maxWidth: 160 }}>
+                                    {u.nickname}
+                                  </Typography.Text>
+                                ),
                               },
                               {
                                 title: 'IP',
-                                width: 200,
+                                width: 180,
                                 render: (_, u) => (
                                   u.clientIp ? (
-                                    <Space size={6} wrap>
-                                      <Typography.Text code copyable={{ text: u.clientIp }}>
-                                        {u.clientIp}
-                                      </Typography.Text>
-                                      <Button
-                                        size="small"
-                                        onClick={() => openQuickBan({
-                                          mode: 'single',
-                                          type: 'ip',
-                                          ip: u.clientIp,
-                                          deviceId: u.deviceId,
-                                          nickname: u.nickname,
-                                        })}
-                                      >
-                                        封禁
-                                      </Button>
-                                    </Space>
+                                    <Typography.Text code copyable={{ text: u.clientIp }}>
+                                      {u.clientIp}
+                                    </Typography.Text>
                                   ) : (
                                     <Typography.Text type="secondary">—</Typography.Text>
                                   )
@@ -1385,30 +1490,17 @@ function AdminPage() {
                               },
                               {
                                 title: '设备 ID',
+                                width: 240,
                                 render: (_, u) => (
                                   u.deviceId ? (
-                                    <Space size={6} wrap>
-                                      <Typography.Text
-                                        code
-                                        copyable={{ text: u.deviceId }}
-                                        ellipsis
-                                        style={{ maxWidth: 220 }}
-                                      >
-                                        {u.deviceId}
-                                      </Typography.Text>
-                                      <Button
-                                        size="small"
-                                        onClick={() => openQuickBan({
-                                          mode: 'single',
-                                          type: 'device',
-                                          ip: u.clientIp,
-                                          deviceId: u.deviceId,
-                                          nickname: u.nickname,
-                                        })}
-                                      >
-                                        封禁
-                                      </Button>
-                                    </Space>
+                                    <Typography.Text
+                                      code
+                                      copyable={{ text: u.deviceId }}
+                                      ellipsis
+                                      style={{ maxWidth: 220 }}
+                                    >
+                                      {u.deviceId}
+                                    </Typography.Text>
                                   ) : (
                                     <Typography.Text type="secondary">—</Typography.Text>
                                   )
@@ -1416,23 +1508,8 @@ function AdminPage() {
                               },
                               {
                                 title: '操作',
-                                width: 100,
-                                fixed: 'right' as const,
-                                render: (_, u) => (
-                                  <Button
-                                    size="small"
-                                    danger
-                                    disabled={!u.clientIp && !u.deviceId}
-                                    onClick={() => openQuickBan({
-                                      mode: 'both',
-                                      ip: u.clientIp,
-                                      deviceId: u.deviceId,
-                                      nickname: u.nickname,
-                                    })}
-                                  >
-                                    一键拉黑
-                                  </Button>
-                                ),
+                                width: 220,
+                                render: (_, u) => renderRoomUserActions(room, u),
                               },
                             ]}
                           />
@@ -1456,12 +1533,16 @@ function AdminPage() {
                                   deviceId: room.creatorDeviceId || '',
                                   userId: room.creatorId || '',
                                 }]}
+                                scroll={{ x: 920 }}
                                 columns={[
                                   {
                                     title: '昵称',
-                                    width: 120,
-                                    ellipsis: true,
-                                    render: (_, row) => row.nickname || '—',
+                                    width: 180,
+                                    render: (_, row) => (
+                                      <Typography.Text ellipsis style={{ maxWidth: 160 }}>
+                                        {row.nickname || '—'}
+                                      </Typography.Text>
+                                    ),
                                   },
                                   {
                                     title: '用户 ID',
@@ -1479,26 +1560,12 @@ function AdminPage() {
                                   },
                                   {
                                     title: 'IP',
-                                    width: 200,
+                                    width: 180,
                                     render: (_, row) => (
                                       row.clientIp ? (
-                                        <Space size={6} wrap>
-                                          <Typography.Text code copyable={{ text: row.clientIp }}>
-                                            {row.clientIp}
-                                          </Typography.Text>
-                                          <Button
-                                            size="small"
-                                            onClick={() => openQuickBan({
-                                              mode: 'single',
-                                              type: 'ip',
-                                              ip: row.clientIp,
-                                              deviceId: row.deviceId,
-                                              nickname: row.nickname,
-                                            })}
-                                          >
-                                            封禁
-                                          </Button>
-                                        </Space>
+                                        <Typography.Text code copyable={{ text: row.clientIp }}>
+                                          {row.clientIp}
+                                        </Typography.Text>
                                       ) : (
                                         <Typography.Text type="secondary">—</Typography.Text>
                                       )
@@ -1506,30 +1573,17 @@ function AdminPage() {
                                   },
                                   {
                                     title: '设备 ID',
+                                    width: 240,
                                     render: (_, row) => (
                                       row.deviceId ? (
-                                        <Space size={6} wrap>
-                                          <Typography.Text
-                                            code
-                                            copyable={{ text: row.deviceId }}
-                                            ellipsis
-                                            style={{ maxWidth: 220 }}
-                                          >
-                                            {row.deviceId}
-                                          </Typography.Text>
-                                          <Button
-                                            size="small"
-                                            onClick={() => openQuickBan({
-                                              mode: 'single',
-                                              type: 'device',
-                                              ip: row.clientIp,
-                                              deviceId: row.deviceId,
-                                              nickname: row.nickname,
-                                            })}
-                                          >
-                                            封禁
-                                          </Button>
-                                        </Space>
+                                        <Typography.Text
+                                          code
+                                          copyable={{ text: row.deviceId }}
+                                          ellipsis
+                                          style={{ maxWidth: 220 }}
+                                        >
+                                          {row.deviceId}
+                                        </Typography.Text>
                                       ) : (
                                         <Typography.Text type="secondary">—</Typography.Text>
                                       )
@@ -1537,22 +1591,8 @@ function AdminPage() {
                                   },
                                   {
                                     title: '操作',
-                                    width: 100,
-                                    render: (_, row) => (
-                                      <Button
-                                        size="small"
-                                        danger
-                                        disabled={!row.clientIp && !row.deviceId}
-                                        onClick={() => openQuickBan({
-                                          mode: 'both',
-                                          ip: row.clientIp,
-                                          deviceId: row.deviceId,
-                                          nickname: row.nickname,
-                                        })}
-                                      >
-                                        一键拉黑
-                                      </Button>
-                                    ),
+                                    width: 220,
+                                    render: (_, row) => renderRoomUserActions(room, row),
                                   },
                                 ]}
                               />
@@ -2197,6 +2237,36 @@ function AdminPage() {
             )}
           </Space>
         )}
+      </Modal>
+
+      <Modal
+        title="修改用户昵称"
+        open={Boolean(editingNicknameTarget)}
+        onCancel={() => {
+          if (nicknameSaving) return;
+          setEditingNicknameTarget(null);
+          setEditingNicknameDraft('');
+        }}
+        onOk={() => void submitNicknameEdit()}
+        okText="保存"
+        okButtonProps={{ loading: nicknameSaving, disabled: !editingNicknameDraft.trim() }}
+        cancelText="取消"
+        cancelButtonProps={{ disabled: nicknameSaving }}
+        destroyOnClose
+      >
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+            房间「{editingNicknameTarget?.roomName}」中的用户昵称会立即同步到当前房间。
+          </Typography.Text>
+          <Input
+            value={editingNicknameDraft}
+            onChange={(e) => setEditingNicknameDraft(e.target.value)}
+            maxLength={20}
+            placeholder="请输入新昵称"
+            autoFocus
+            onPressEnter={() => void submitNicknameEdit()}
+          />
+        </Space>
       </Modal>
 
       <Modal

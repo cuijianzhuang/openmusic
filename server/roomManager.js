@@ -1760,6 +1760,15 @@ function getDefaultNickname(room) {
   return `听众${Date.now().toString(36).slice(-4)}`;
 }
 
+function getRandomNickname(room, userId = null) {
+  for (let i = 0; i < 24; i += 1) {
+    const seed = Math.random().toString(36).slice(2, 6);
+    const nickname = ensureUniqueNickname(room, userId, `听众${seed}`);
+    if (nickname) return nickname;
+  }
+  return ensureUniqueNickname(room, userId, getDefaultNickname(room));
+}
+
 function getOwnerConnectionId(room) {
   const owner = room.ownerId ? room.users.get(room.ownerId) : null;
   return owner?.connectionIds?.values().next().value || owner?.connectionId || null;
@@ -3251,6 +3260,33 @@ export function removeRoomForbiddenWord(roomId, actorId, word, connectionId = nu
   return { room: serializeRoom(room) };
 }
 
+function applyNicknameToRoomState(room, userId, nextNickname) {
+  const user = room.users.get(userId);
+  if (user) user.nickname = nextNickname;
+  rememberUserNickname(room, userId, nextNickname);
+  updateRequesterNickname(room.current, userId, nextNickname);
+  room.queue.forEach((item) => updateRequesterNickname(item, userId, nextNickname));
+  room.jumpRequests.forEach((request) => {
+    if (request.requestedBy === userId) request.nickname = nextNickname;
+  });
+  room.skipRequests.forEach((request) => {
+    if (request.requestedBy === userId) request.nickname = nextNickname;
+  });
+  room.messages.forEach((message) => {
+    if (message.userId === userId) {
+      message.userId = userId;
+      message.nickname = nextNickname;
+    }
+    if (message.reactions) {
+      for (const users of Object.values(message.reactions)) {
+        for (const entry of users) {
+          if (entry.userId === userId) entry.nickname = nextNickname;
+        }
+      }
+    }
+  });
+}
+
 export function renameUser(roomId, socketId, nickname) {
   const room = rooms.get(roomId);
   if (!room) return { error: "房间不存在" };
@@ -3261,32 +3297,55 @@ export function renameUser(roomId, socketId, nickname) {
   const nextNickname = ensureUniqueNickname(room, socketId, nickname);
   if (!nextNickname) return { error: "昵称不能为空" };
 
-  user.nickname = nextNickname;
-  rememberUserNickname(room, socketId, nextNickname);
-  updateRequesterNickname(room.current, socketId, nextNickname);
-  room.queue.forEach((item) => updateRequesterNickname(item, socketId, nextNickname));
-  room.jumpRequests.forEach((request) => {
-    if (request.requestedBy === socketId) request.nickname = nextNickname;
-  });
-  room.skipRequests.forEach((request) => {
-    if (request.requestedBy === socketId) request.nickname = nextNickname;
-  });
-  room.messages.forEach((message) => {
-    if (message.userId === socketId) {
-      message.userId = socketId;
-      message.nickname = nextNickname;
-    }
-    if (message.reactions) {
-      for (const users of Object.values(message.reactions)) {
-        for (const entry of users) {
-          if (entry.userId === socketId) entry.nickname = nextNickname;
-        }
-      }
-    }
-  });
-
+  applyNicknameToRoomState(room, socketId, nextNickname);
   persistRoom(room);
   return { room: serializeRoom(room) };
+}
+
+export function adminRenameRoomUser(roomId, userId, nickname) {
+  const id = String(roomId || "").toUpperCase();
+  const uid = sanitizeCreatorId(userId);
+  const room = rooms.get(id);
+  if (!room) return { success: false, error: "房间不存在" };
+  if (!uid) return { success: false, error: "用户不存在" };
+  if (!room.users.has(uid) && !room.userNicknames?.has(uid)) {
+    return { success: false, error: "用户不存在" };
+  }
+
+  const previousNickname = room.users.get(uid)?.nickname || room.userNicknames?.get(uid) || "";
+  const nextNickname = ensureUniqueNickname(room, uid, nickname);
+  if (!nextNickname) return { success: false, error: "昵称不能为空" };
+
+  applyNicknameToRoomState(room, uid, nextNickname);
+  persistRoom(room);
+  return {
+    success: true,
+    room: serializeRoom(room),
+    previousNickname,
+    nickname: nextNickname,
+  };
+}
+
+export function adminResetRoomUserNickname(roomId, userId) {
+  const id = String(roomId || "").toUpperCase();
+  const uid = sanitizeCreatorId(userId);
+  const room = rooms.get(id);
+  if (!room) return { success: false, error: "房间不存在" };
+  if (!uid) return { success: false, error: "用户不存在" };
+  if (!room.users.has(uid) && !room.userNicknames?.has(uid)) {
+    return { success: false, error: "用户不存在" };
+  }
+
+  const previousNickname = room.users.get(uid)?.nickname || room.userNicknames?.get(uid) || "";
+  const nickname = getRandomNickname(room, uid);
+  applyNicknameToRoomState(room, uid, nickname);
+  persistRoom(room);
+  return {
+    success: true,
+    room: serializeRoom(room),
+    previousNickname,
+    nickname,
+  };
 }
 
 export function setUserAvatar(roomId, socketId, avatarUrl) {

@@ -56,6 +56,8 @@ export interface AdminAuditEntry {
   recoverable?: boolean;
   deviceId?: string;
   userId?: string;
+  nickname?: string;
+  previousNickname?: string;
   retryAfterSec?: number;
   ownedCount?: number;
   maxOwnedRooms?: number;
