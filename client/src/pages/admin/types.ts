@@ -79,10 +79,6 @@ export interface RuntimeConfig {
   roomCreateMaxOwned: number;
   /** 无身份时 IP 宽松冷却（毫秒）；0 = 关闭 */
   roomCreateIpLooseCooldownMs: number;
-  /** 是否启用疑似自动建房自动封禁 */
-  roomCreateAutoBanEnabled: boolean;
-  /** 自动建房检测打分阈值 */
-  roomCreateAutoBanScore: number;
   linuxdoClientId: string;
   linuxdoClientSecret: string;
   linuxdoRedirectUri: string;
@@ -195,7 +191,7 @@ export interface SiteBanEntry {
   type: 'ip' | 'device';
   value: string;
   reason: string;
-  source?: 'manual' | 'auto';
+  source?: 'manual';
   at: number;
 }
 

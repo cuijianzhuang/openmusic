@@ -62,10 +62,6 @@ function envDefaults() {
     roomCreateMaxOwned: 2,
     /** 无设备/用户标识时按 IP 的宽松冷却（毫秒）；0 = 关闭 */
     roomCreateIpLooseCooldownMs: 60 * 1000,
-    /** 疑似自动建房时是否自动全站封禁（默认关闭，避免共享出口误伤） */
-    roomCreateAutoBanEnabled: false,
-    /** 自动建房检测打分阈值（越高越难触发） */
-    roomCreateAutoBanScore: 85,
     // Linux.do OAuth2（房主身份绑定 / 后台登录）：全部留空表示未配置、功能自动关闭。
     // 需要先在 https://connect.linux.do 注册应用拿到 client_id / secret / 回调地址，
     // 并向 Linux.do 核实真实的授权 / 令牌 / 用户信息接口地址后再填写，不要照抄示例值。
@@ -242,7 +238,6 @@ function normalize(config) {
   const roomCreateCooldownMs = Number(config.roomCreateCooldownMs);
   const roomCreateMaxOwned = Number(config.roomCreateMaxOwned);
   const roomCreateIpLooseCooldownMs = Number(config.roomCreateIpLooseCooldownMs);
-  const roomCreateAutoBanScore = Number(config.roomCreateAutoBanScore);
   let musicApis = [];
   try {
     musicApis = normalizeMusicApis(config.musicApis);
@@ -265,15 +260,6 @@ function normalize(config) {
     roomCreateIpLooseCooldownMs: Number.isFinite(roomCreateIpLooseCooldownMs)
       ? Math.max(0, Math.min(Math.round(roomCreateIpLooseCooldownMs), 60 * 60 * 1000))
       : 60 * 1000,
-    roomCreateAutoBanEnabled: !(
-      config.roomCreateAutoBanEnabled === false
-      || config.roomCreateAutoBanEnabled === 0
-      || String(config.roomCreateAutoBanEnabled ?? '').trim().toLowerCase() === 'false'
-      || String(config.roomCreateAutoBanEnabled ?? '').trim() === '0'
-    ),
-    roomCreateAutoBanScore: Number.isFinite(roomCreateAutoBanScore)
-      ? Math.max(1, Math.min(Math.round(roomCreateAutoBanScore), 200))
-      : 85,
     linuxdoClientId: String(config.linuxdoClientId || '').trim(),
     linuxdoClientSecret: String(config.linuxdoClientSecret || '').trim(),
     linuxdoRedirectUri: String(config.linuxdoRedirectUri || '').trim(),
@@ -478,36 +464,4 @@ export function setRuntimeConfig(raw = {}) {
     console.error('runtime-config write error:', err?.message || err);
     return { success: false, error: '运行配置保存失败' };
   }
-}
-
-/**
- * 一次性放宽建房自动封禁：关掉自动封禁，阈值至少提到 85。
- * 已落盘的 runtimeConfig.json 会覆盖默认值，因此需要迁移写入。
- */
-export function applyCreateGuardLoosenMigration() {
-  const markerPath = path.join(__dirname, '.migration-create-guard-loosen-v1');
-  try {
-    if (fs.existsSync(markerPath)) return { applied: false, reason: 'already' };
-  } catch {
-    // ignore
-  }
-
-  const current = getRuntimeConfig();
-  const nextScore = Math.max(Number(current.roomCreateAutoBanScore) || 0, 85);
-  const result = setRuntimeConfig({
-    roomCreateAutoBanEnabled: false,
-    roomCreateAutoBanScore: nextScore,
-  });
-  if (!result.success) {
-    console.warn('建房防护放宽迁移失败:', result.error || 'unknown');
-    return { applied: false, reason: 'write_failed', error: result.error };
-  }
-
-  try {
-    fs.writeFileSync(markerPath, `${new Date().toISOString()}\n`, { encoding: 'utf8' });
-  } catch (err) {
-    console.warn('建房防护放宽迁移标记写入失败:', err?.message || err);
-  }
-  console.log(`建房防护已放宽：自动封禁关闭，阈值=${nextScore}`);
-  return { applied: true, score: nextScore };
 }

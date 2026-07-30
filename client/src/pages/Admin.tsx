@@ -23,6 +23,7 @@ import {
   Card,
   Checkbox,
   Col,
+  Collapse,
   Divider,
   Drawer,
   Form,
@@ -698,16 +699,6 @@ function AdminPage() {
     }
   }, [message, refresh]);
 
-  const clearAutoBans = useCallback(async () => {
-    try {
-      const res = await adminFetch<{ removed: number }>('/api/admin/bans/clear-auto', { method: 'POST' });
-      message.success(res.removed > 0 ? `已清除 ${res.removed} 条自动封禁` : '没有自动封禁可清');
-      await refresh({ force: true });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '清除自动封禁失败');
-    }
-  }, [message, refresh]);
-
   const openErrorReport = useCallback(async (id: string) => {
     setReportDetailLoading(true);
     try {
@@ -1055,15 +1046,6 @@ function AdminPage() {
   ];
 
   const banColumns: ColumnsType<SiteBanEntry> = [
-    {
-      title: '来源',
-      width: 88,
-      render: (_, ban) => (
-        <Tag color={ban.source === 'auto' ? 'orange' : 'default'}>
-          {ban.source === 'auto' ? '自动' : '手动'}
-        </Tag>
-      ),
-    },
     {
       title: '类型',
       width: 88,
@@ -1647,54 +1629,40 @@ function AdminPage() {
                 <Alert type="success" showIcon message={banHint} style={{ marginBottom: 8 }} />
               )}
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                封禁后无法进房 / 建房；房间成员可一键拉黑。自动封禁会出现在下方列表（来源标「自动」）。
+                封禁后无法进房 / 建房；房间成员可一键拉黑
               </Typography.Text>
-              <Alert
-                type="info"
-                showIcon
-                style={{ marginTop: 12 }}
-                message="用户反馈错误码对照"
-                description={
-                  <div style={{ display: 'grid', gap: 6, marginTop: 4 }}>
-                    {SOFT_BLOCK_CODE_HELP.map((item) => (
-                      <div key={item.code} style={{ fontSize: 12, lineHeight: 1.5 }}>
-                        <Typography.Text code copyable={{ text: item.code }}>
-                          {item.code}
-                        </Typography.Text>
-                        <Typography.Text strong style={{ margin: '0 6px' }}>
-                          {item.label}
-                        </Typography.Text>
-                        <Typography.Text type="secondary">{item.hint}</Typography.Text>
+              <Collapse
+                ghost
+                size="small"
+                style={{ marginTop: 8 }}
+                items={[
+                  {
+                    key: 'soft-block-codes',
+                    label: (
+                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                        用户反馈错误码对照
+                      </Typography.Text>
+                    ),
+                    children: (
+                      <div style={{ display: 'grid', gap: 6 }}>
+                        {SOFT_BLOCK_CODE_HELP.map((item) => (
+                          <div key={item.code} style={{ fontSize: 12, lineHeight: 1.5 }}>
+                            <Typography.Text code copyable={{ text: item.code }}>
+                              {item.code}
+                            </Typography.Text>
+                            <Typography.Text strong style={{ margin: '0 6px' }}>
+                              {item.label}
+                            </Typography.Text>
+                            <Typography.Text type="secondary">{item.hint}</Typography.Text>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                }
+                    ),
+                  },
+                ]}
               />
             </Card>
-            <Card
-              title={`封禁记录（${bans.length}）`}
-              extra={
-                <Space size={8} wrap>
-                  {bans.some((b) => b.source === 'auto') ? (
-                    <Tag color="orange">
-                      自动 {bans.filter((b) => b.source === 'auto').length}
-                    </Tag>
-                  ) : null}
-                  <Popconfirm
-                    title="清除全部自动封禁？"
-                    description="只删来源为「自动」的记录，手动封禁保留"
-                    okText="清除"
-                    cancelText="取消"
-                    disabled={!bans.some((b) => b.source === 'auto')}
-                    onConfirm={() => void clearAutoBans()}
-                  >
-                    <Button size="small" danger disabled={!bans.some((b) => b.source === 'auto')}>
-                      清除自动封禁
-                    </Button>
-                  </Popconfirm>
-                </Space>
-              }
-            >
+            <Card title={`封禁记录（${bans.length}）`}>
               <Table
                 rowKey="id"
                 size="middle"

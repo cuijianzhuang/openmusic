@@ -168,8 +168,7 @@ import { getSiteAnnouncement, initSiteAnnouncement } from './siteAnnouncement.js
 import { initSiteBans, isSiteBanned } from './siteBan.js';
 import {
   checkRoomCreateCooldown,
-  recordRoomCreateAndMaybeAutoBan,
-  evaluateRoomCreateRejectAutoBan,
+  recordRoomCreate,
 } from './roomCreateGuard.js';
 import {
   SOFT_BLOCK_CODES,
@@ -179,7 +178,7 @@ import {
 } from './softBlock.js';
 import { kickConnectionsMatchingBan } from './kickSiteBan.js';
 import { createErrorReport, listPendingSolutionsForUser, ackErrorReportSolution } from './errorReports.js';
-import { getRuntimeConfig, getPublicSiteSeo, applyCreateGuardLoosenMigration } from './runtimeConfig.js';
+import { getRuntimeConfig, getPublicSiteSeo } from './runtimeConfig.js';
 import {
   isLinuxdoConfigured,
   signLinuxdoState,
@@ -1738,32 +1737,6 @@ app.post('/api/rooms', async (req, res) => {
   const createIp = getRequestIp(req);
   const createDeviceId = resolveDeviceIdFromCookieHeader(req.headers?.cookie || '');
 
-  const enforceAutoBans = (bans, { userId, trigger } = {}) => {
-    if (!Array.isArray(bans) || bans.length === 0) return;
-    for (const ban of bans) {
-      const { kicked } = kickConnectionsMatchingBan(ban, {
-        io,
-        socketToRoom,
-        socketToUserId,
-        getClientIp: (request) => getClientIpFromHeaders(request?.headers, request?.socket?.remoteAddress || ''),
-        getRoomInternal,
-        removeUser,
-        prepareRoomBroadcast,
-        roomUpdateForViewer,
-      });
-      appendAdminAudit('room_create_auto_ban', {
-        banType: ban.type,
-        value: ban.value,
-        reason: ban.reason || '',
-        source: ban.source || 'auto',
-        trigger: trigger || '',
-        userId: userId || '',
-        deviceId: createDeviceId || '',
-        kicked: typeof kicked === 'number' ? kicked : 0,
-      }, createIp);
-    }
-  };
-
   if (isSiteBanned({ ip: createIp, deviceId: createDeviceId })) {
     // 不暴露封禁细节；拦截本身不写审计（高频重试无价值）
     const code = SOFT_BLOCK_CODES.SITE_BAN;
@@ -1780,7 +1753,7 @@ app.post('/api/rooms', async (req, res) => {
     return res.status(401).json({ error: '会话未就绪，请刷新页面后重试' });
   }
 
-  // 先复用空闲自建房，避免 5 分钟冷却把「再建一次」误拦成失败
+  // 先复用空闲自建房，避免冷却把「再建一次」误拦成失败
   const idleOwned = findIdleOwnedRoom({
     creatorId: identity.userId,
     creatorDeviceId: createDeviceId,
@@ -1791,20 +1764,11 @@ app.post('/api/rooms', async (req, res) => {
       return res.status(400).json({ error: reused.error });
     }
     const room = reused || idleOwned;
-    try {
-      const { bans } = await recordRoomCreateAndMaybeAutoBan({
-        ip: createIp,
-        deviceId: createDeviceId,
-        userId: identity.userId,
-        name: room.name,
-        roomId: room.id,
-        reused: true,
-        listRoomsForGuard: listRoomsForAdmin,
-      });
-      enforceAutoBans(bans, { userId: identity.userId, trigger: 'reuse' });
-    } catch (err) {
-      console.error('room-create auto-ban failed:', err?.message || err);
-    }
+    recordRoomCreate({
+      ip: createIp,
+      deviceId: createDeviceId,
+      userId: identity.userId,
+    });
     return res.json(room);
   }
 
@@ -1822,13 +1786,6 @@ app.post('/api/rooms', async (req, res) => {
       deviceId: createDeviceId || '',
       retryAfterSec: cooldown.retryAfterSec || 0,
     }, createIp);
-    const { bans } = await evaluateRoomCreateRejectAutoBan({
-      ip: createIp,
-      deviceId: createDeviceId,
-      userId: identity.userId,
-      listRoomsForGuard: listRoomsForAdmin,
-    });
-    enforceAutoBans(bans, { userId: identity.userId, trigger: 'cooldown_reject' });
     setSoftBlockHeaders(res, code);
     return res.status(500).json(softBlockPayload(code, {
       retryAfterSec: cooldown.retryAfterSec || 0,
@@ -1865,19 +1822,11 @@ app.post('/api/rooms', async (req, res) => {
     return res.status(400).json({ error: room.error });
   }
 
-  try {
-    const { bans } = await recordRoomCreateAndMaybeAutoBan({
-      ip: createIp,
-      deviceId: createDeviceId,
-      userId: identity.userId,
-      name: room.name,
-      roomId: room.id,
-      listRoomsForGuard: listRoomsForAdmin,
-    });
-    enforceAutoBans(bans, { userId: identity.userId, trigger: 'create' });
-  } catch (err) {
-    console.error('room-create auto-ban failed:', err?.message || err);
-  }
+  recordRoomCreate({
+    ip: createIp,
+    deviceId: createDeviceId,
+    userId: identity.userId,
+  });
 
   res.json(room);
 });
@@ -4210,7 +4159,6 @@ if (!isRedisEnabled()) {
 } else {
   await initSiteAnnouncement();
   await initSiteBans();
-  applyCreateGuardLoosenMigration();
   if (!setupRequired) {
     await initAdminCredentials();
   } else {

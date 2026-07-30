@@ -36,7 +36,7 @@ import {
   mustChangeAdminEntryPath,
 } from './adminConfig.js';
 import { getSiteAnnouncementForAdmin, setSiteAnnouncement } from './siteAnnouncement.js';
-import { listSiteBans, addSiteBan, removeSiteBan, clearAutoSiteBans } from './siteBan.js';
+import { listSiteBans, addSiteBan, removeSiteBan } from './siteBan.js';
 import { kickConnectionsMatchingBan } from './kickSiteBan.js';
 import {
   listErrorReports,
@@ -288,7 +288,7 @@ const AUDIT_ACTION_GROUPS = {
     'owner_destroy_room',
     'owner_destroy_room_denied',
   ],
-  ban: ['site_ban_add', 'site_ban_remove', 'site_ban_clear_auto', 'room_create_auto_ban'],
+  ban: ['site_ban_add', 'site_ban_remove'],
   guard: ['room_create_blocked', 'session_blocked'],
   report: ['error_report_update', 'error_report_delete'],
 };
@@ -1074,7 +1074,6 @@ export function mountAdminApi(app, { io, socketToRoom, socketToUserId, getClient
       type: req.body?.type,
       value: req.body?.value,
       reason: req.body?.reason,
-      source: 'manual',
     });
     if (!result.success) return res.status(400).json({ error: result.error });
 
@@ -1105,15 +1104,6 @@ export function mountAdminApi(app, { io, socketToRoom, socketToUserId, getClient
     if (!result.success) return res.status(404).json({ error: result.error });
     audit('site_ban_remove', { banId: req.params.id }, ip);
     res.json({ success: true });
-  });
-
-  /** 一键清除全部自动封禁（保留手动） */
-  app.post('/api/admin/bans/clear-auto', requireAdminOrigin, requireAdmin, requireAdminSetupComplete, async (req, res) => {
-    const ip = getClientIp?.(req) || req.ip || '';
-    const result = await clearAutoSiteBans();
-    if (!result.success) return res.status(500).json({ error: result.error || '清除失败' });
-    audit('site_ban_clear_auto', { removed: result.removed }, ip);
-    res.json({ success: true, removed: result.removed, bans: result.bans });
   });
 
   app.get('/api/admin/error-reports', requireAdmin, async (_req, res) => {

@@ -35,14 +35,23 @@ function mergeHeaders(
 
 function blockedSyntheticResponse(): Response {
   const code = getSiteAccessBlockCode() || SOFT_BLOCK_CODES.SITE_BAN;
-  return new Response(JSON.stringify({ error: softBlockMessage(code), code }), {
-    status: 503,
-    headers: {
-      'Content-Type': 'application/json',
-      'X-OpenMusic-Site-Blocked': '1',
-      'X-OpenMusic-Block-Code': code,
+  // 本地短路：不发网络请求。DevTools 里看起来像接口返回，实为前端冻结后的假响应。
+  return new Response(
+    JSON.stringify({
+      error: softBlockMessage(code),
+      code,
+      local: true,
+    }),
+    {
+      status: 503,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-OpenMusic-Site-Blocked': '1',
+        'X-OpenMusic-Block-Code': code,
+        'X-OpenMusic-Block-Local': '1',
+      },
     },
-  });
+  );
 }
 
 export async function fetchWithTimeout(

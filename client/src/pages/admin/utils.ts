@@ -108,8 +108,6 @@ export function formatAuditAction(entry: AdminAuditEntry) {
       return `封禁 ${entry.banType || ''} ${entry.value || ''}${typeof entry.kicked === 'number' ? ` · 踢出 ${entry.kicked}` : ''}`;
     case 'site_ban_remove':
       return `解除封禁 ${entry.banId || ''}`;
-    case 'site_ban_clear_auto':
-      return `一键清除自动封禁${typeof entry.removed === 'number' ? ` · ${entry.removed} 条` : ''}`;
     case 'room_create_blocked': {
       const reasonMap: Record<string, string> = {
         site_ban: '站点封禁',
@@ -126,10 +124,6 @@ export function formatAuditAction(entry: AdminAuditEntry) {
             : '';
       return `拦截建房（${label}${code}${extra}）`;
     }
-    case 'room_create_auto_ban':
-      return `自动封禁建房滥用 ${entry.banType || ''} ${entry.value || ''}${
-        entry.reason ? `：${entry.reason}` : ''
-      }${typeof entry.kicked === 'number' ? ` · 踢出 ${entry.kicked}` : ''}`;
     case 'join_blocked':
       return `拦截进房（${entry.reason === 'site_ban' ? '站点封禁' : entry.reason || '未知'}）${
         entry.roomId ? ` ${entry.roomId}` : ''

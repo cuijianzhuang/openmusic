@@ -6,7 +6,6 @@ dist/
 release/
 server/.env
 server/runtimeConfig.json
-server/.migration-create-guard-loosen-v1
 server/adminCredentials.json
 server/siteBans.json
 server/adminConfig.json

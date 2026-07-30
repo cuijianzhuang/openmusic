@@ -18,7 +18,7 @@ export const SOFT_BLOCK_CODES = Object.freeze({
 
 /** 管理后台对照说明 */
 export const SOFT_BLOCK_CODE_HELP = Object.freeze([
-  { code: SOFT_BLOCK_CODES.SITE_BAN, label: '全站封禁', hint: '封禁列表中的 IP/设备（自动封禁现只封设备）' },
+  { code: SOFT_BLOCK_CODES.SITE_BAN, label: '全站封禁', hint: '封禁列表中的 IP/设备（仅手动）' },
   { code: SOFT_BLOCK_CODES.SESSION_BOOTSTRAP_LIMIT, label: '会话限流', hint: '同一 IP 会话刷新过于频繁' },
   { code: SOFT_BLOCK_CODES.SESSION_NEW_LIMIT, label: '新会话限流', hint: '同一 IP 新建会话过多（共享出口易误伤）' },
   { code: SOFT_BLOCK_CODES.ROOM_CREATE_COOLDOWN, label: '建房冷却', hint: '同一设备/用户建房冷却中' },

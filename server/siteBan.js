@@ -14,7 +14,7 @@ const generateBanId = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz', 12)
 const MAX_REASON_LENGTH = 120;
 const MAX_BANS = 500;
 
-/** @type {Array<{ id: string, type: 'ip'|'device', value: string, reason: string, source: 'manual'|'auto', at: number }>} */
+/** @type {Array<{ id: string, type: 'ip'|'device', value: string, reason: string, source: 'manual', at: number }>} */
 let bans = [];
 
 function normalizeIp(raw) {
@@ -39,12 +39,14 @@ function sanitizeBanList(parsed) {
       const type = item?.type === 'device' ? 'device' : (item?.type === 'ip' ? 'ip' : '');
       const value = normalizeBanValue(type, item?.value);
       if (!type || !value) return null;
+      // 已废弃自动封禁：历史 auto 记录直接丢弃
+      if (item?.source === 'auto') return null;
       return {
         id: String(item.id || generateBanId()).slice(0, 32),
         type,
         value,
         reason: String(item.reason || '').trim().slice(0, MAX_REASON_LENGTH),
-        source: item?.source === 'auto' ? 'auto' : 'manual',
+        source: 'manual',
         at: Number(item.at) || Date.now(),
       };
     })
@@ -70,6 +72,12 @@ function deleteLegacyLocalBans() {
   }
 }
 
+async function persistBans() {
+  const client = getRedisClient();
+  if (!client) throw new Error('Redis 不可用，封禁无法保存');
+  await client.set(REDIS_KEY, JSON.stringify(bans));
+}
+
 /** 启动时从 Redis 加载；若有旧本地文件则迁入 Redis 后删除。需在 Redis 就绪后调用 */
 export async function initSiteBans() {
   const client = getRedisClient();
@@ -79,12 +87,38 @@ export async function initSiteBans() {
     return;
   }
 
+  const wipeMarkerKey = 'openmusic:site:bans:wiped_v2';
+  try {
+    const wiped = await client.get(wipeMarkerKey);
+    if (!wiped) {
+      // 误伤恢复：强制清空 Redis 封禁列表（含手动/自动残留）
+      await client.set(REDIS_KEY, '[]');
+      await client.del('openmusic:site:bans:wiped_v1').catch(() => {});
+      await client.set(wipeMarkerKey, new Date().toISOString());
+      bans = [];
+      deleteLegacyLocalBans();
+      console.log('site-ban: 已强制清空 Redis 全站封禁 openmusic:site:bans（wiped_v2）');
+      return;
+    }
+  } catch (err) {
+    console.error('site-ban 清空标记读写失败:', err?.message || err);
+  }
+
   try {
     const raw = await client.get(REDIS_KEY);
     if (raw) {
-      bans = sanitizeBanList(JSON.parse(raw));
+      const parsed = JSON.parse(raw);
+      const rawCount = Array.isArray(parsed) ? parsed.length : 0;
+      bans = sanitizeBanList(parsed);
       deleteLegacyLocalBans();
-      await clearAutoSiteBans();
+      if (rawCount !== bans.length) {
+        try {
+          await persistBans();
+          console.log(`site-ban: 已丢弃 ${rawCount - bans.length} 条历史自动封禁`);
+        } catch (persistErr) {
+          console.error('site-ban 清理自动封禁写回失败:', persistErr?.message || persistErr);
+        }
+      }
       return;
     }
   } catch (err) {
@@ -106,13 +140,6 @@ export async function initSiteBans() {
     bans = [];
     deleteLegacyLocalBans();
   }
-  await clearAutoSiteBans();
-}
-
-async function persistBans() {
-  const client = getRedisClient();
-  if (!client) throw new Error('Redis 不可用，封禁无法保存');
-  await client.set(REDIS_KEY, JSON.stringify(bans));
 }
 
 export function listSiteBans() {
@@ -129,7 +156,7 @@ export function isSiteBanned({ ip, deviceId } = {}) {
   return null;
 }
 
-export async function addSiteBan({ type, value, reason, source } = {}) {
+export async function addSiteBan({ type, value, reason } = {}) {
   const banType = type === 'device' ? 'device' : (type === 'ip' ? 'ip' : '');
   const normalized = normalizeBanValue(banType, value);
   if (!banType) return { success: false, error: '封禁类型无效（ip / device）' };
@@ -148,7 +175,7 @@ export async function addSiteBan({ type, value, reason, source } = {}) {
     type: banType,
     value: normalized,
     reason: String(reason || '').trim().slice(0, MAX_REASON_LENGTH),
-    source: source === 'auto' ? 'auto' : 'manual',
+    source: 'manual',
     at: Date.now(),
   };
   bans.unshift(entry);
@@ -174,30 +201,4 @@ export async function removeSiteBan(banId) {
     return { success: false, error: err.message || '封禁保存失败' };
   }
   return { success: true };
-}
-
-/**
- * 清除全部「自动封禁」（IP + 设备）。
- * 误伤共享出口 / 设备后用于一键恢复；手动封禁保留。
- */
-export async function clearAutoSiteBans() {
-  const before = bans;
-  const removed = before.filter((b) => b.source === 'auto');
-  if (removed.length === 0) {
-    return { success: true, removed: 0, bans: listSiteBans() };
-  }
-  bans = before.filter((b) => b.source !== 'auto');
-  try {
-    await persistBans();
-  } catch (err) {
-    bans = before;
-    return { success: false, error: err.message || '清除自动封禁失败', removed: 0 };
-  }
-  console.log(`site-ban: 已清除 ${removed.length} 条自动封禁（IP/设备）`);
-  return { success: true, removed: removed.length, bans: listSiteBans() };
-}
-
-/** @deprecated 使用 clearAutoSiteBans */
-export async function clearAutoIpSiteBans() {
-  return clearAutoSiteBans();
 }
