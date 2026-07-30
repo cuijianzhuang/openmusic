@@ -115,7 +115,6 @@ function QrBlock({
 }
 
 function PlatformCard({
-  platform,
   label,
   account,
   busy,
@@ -131,7 +130,6 @@ function PlatformCard({
   error,
   hint,
 }: {
-  platform: Platform;
   label: string;
   account: RoomMusicAccount | null;
   busy: boolean;
@@ -465,7 +463,6 @@ export default function RoomMusicAccountPanel({
       : '');
 
   const cardProps = (platform: Platform, label: string) => ({
-    platform,
     label,
     account: platform === 'netease' ? accounts.netease : accounts.tencent,
     busy,
