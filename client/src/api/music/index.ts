@@ -330,9 +330,12 @@ export async function createRoom(name?: string, password?: string): Promise<{ id
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
-    const data = (await res.json().catch(() => null)) as { error?: unknown } | null;
+    const data = (await res.json().catch(() => null)) as { error?: unknown; code?: unknown } | null;
     const message = typeof data?.error === 'string' ? data.error.trim() : '';
-    throw new Error(message || `创建房间失败（${res.status}）`);
+    const code = typeof data?.code === 'string' ? data.code.trim() : '';
+    if (message) throw new Error(message);
+    if (code) throw new Error(`系统开小差了，请稍后再试。如有疑问请联系管理员（错误码 ${code}）`);
+    throw new Error(`创建房间失败（${res.status}）`);
   }
   return res.json();
 }

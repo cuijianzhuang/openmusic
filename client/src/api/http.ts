@@ -1,6 +1,7 @@
 import { buildApiSignHeaders, canonicalApiQuery, needsApiSign } from '../lib/apiSign';
 import { ensureSessionBootstrap } from '../lib/sessionBootstrap';
-import { detectSiteAccessBlockResponse, isSiteAccessBlocked, markSiteAccessBlocked } from '../lib/siteAccessGate';
+import { detectSiteAccessBlockResponse, isSiteAccessBlocked, markSiteAccessBlocked, getSiteAccessBlockCode } from '../lib/siteAccessGate';
+import { readSoftBlockCodeFromResponse, softBlockMessage, SOFT_BLOCK_CODES } from '../lib/softBlock';
 
 const DEFAULT_TIMEOUT_MS = 10000;
 
@@ -32,16 +33,25 @@ function mergeHeaders(
   return merged;
 }
 
+function blockedSyntheticResponse(): Response {
+  const code = getSiteAccessBlockCode() || SOFT_BLOCK_CODES.SITE_BAN;
+  return new Response(JSON.stringify({ error: softBlockMessage(code), code }), {
+    status: 503,
+    headers: {
+      'Content-Type': 'application/json',
+      'X-OpenMusic-Site-Blocked': '1',
+      'X-OpenMusic-Block-Code': code,
+    },
+  });
+}
+
 export async function fetchWithTimeout(
   input: RequestInfo | URL,
   init: RequestInit = {},
   timeoutMs = DEFAULT_TIMEOUT_MS,
 ): Promise<Response> {
   if (isSiteAccessBlocked()) {
-    return new Response(JSON.stringify({ error: '系统开小差了，请稍后再试' }), {
-      status: 503,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return blockedSyntheticResponse();
   }
 
   const controller = new AbortController();
@@ -61,10 +71,7 @@ export async function fetchWithTimeout(
     await ensureSessionBootstrap();
     if (isSiteAccessBlocked()) {
       window.clearTimeout(timer);
-      return new Response(JSON.stringify({ error: '系统开小差了，请稍后再试' }), {
-        status: 503,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return blockedSyntheticResponse();
     }
     const parsed = new URL(url, window.location.origin);
     const body = typeof init.body === 'string' ? init.body : '';
@@ -80,7 +87,7 @@ export async function fetchWithTimeout(
   try {
     const res = await fetch(input, { ...initFinal, signal: controller.signal });
     if (sameOriginApi && detectSiteAccessBlockResponse(res)) {
-      markSiteAccessBlocked();
+      markSiteAccessBlocked(readSoftBlockCodeFromResponse(res) || SOFT_BLOCK_CODES.SITE_BAN);
     }
     return res;
   } finally {

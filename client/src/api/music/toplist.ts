@@ -1,10 +1,41 @@
-import type { SearchResult } from '../../types';
+import type { HotSongItem, SearchResult } from '../../types';
 import { fetchWithTimeout } from '../http';
+
+export type HotRankSource = 'netease' | 'platform';
 
 export interface NeteaseToplistResult {
   id: string;
   name: string;
   songs: SearchResult[];
+}
+
+const PLATFORM_HOT_CACHE_TTL_MS = 30_000;
+const platformHotCache = new Map<number, { data: HotSongItem[]; expires: number }>();
+const platformHotInflight = new Map<number, Promise<HotSongItem[]>>();
+
+export async function getPlatformHotSongs(limit = 30): Promise<HotSongItem[]> {
+  const now = Date.now();
+  const cached = platformHotCache.get(limit);
+  if (cached && cached.expires > now) return cached.data;
+
+  const inflight = platformHotInflight.get(limit);
+  if (inflight) return inflight;
+
+  const promise = (async () => {
+    const res = await fetchWithTimeout(`/api/music/hot?limit=${limit}`);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error((data as { error?: string }).error || '获取热榜失败');
+    }
+    const data: HotSongItem[] = await res.json();
+    platformHotCache.set(limit, { data, expires: Date.now() + PLATFORM_HOT_CACHE_TTL_MS });
+    return data;
+  })().finally(() => {
+    platformHotInflight.delete(limit);
+  });
+
+  platformHotInflight.set(limit, promise);
+  return promise;
 }
 
 const STORAGE_KEY = 'openmusic:netease-hot-toplist:v1';

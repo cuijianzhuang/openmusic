@@ -21,6 +21,7 @@ import { resizeCoverForThumb } from "./coverUrl.js";
 import { isDirectCoverUrl, resolveSongCoverUrl } from "./resolveSongCover.js";
 import { isSongPlayableOnServer } from "./songPlayableProbe.js";
 import { runWithMetingRequestContext } from "./metingUpstream.js";
+import { recordSongPlay } from "./songHotRank.js";
 import {
   applyPermanentResidence,
   cancelPermanentApplication,
@@ -3955,6 +3956,11 @@ function recycleFinishedSongToQueue(room, finishedSong) {
 
 async function playNextUnlocked(room, options = {}) {
   const { allowFetchRandom = false, finishedSong = null, forceAdvance = false } = options;
+
+  // 平台热榜：仅统计用户主动点播且真正播放完成的歌曲，随机/漫游（requestedById 为空）不计入
+  if (finishedSong && finishedSong.requestedById) {
+    recordSongPlay(finishedSong);
+  }
   room.skipRequests = [];
 
   // 单曲循环：自然播完时重播当前曲；手动切歌 forceAdvance 仍前进

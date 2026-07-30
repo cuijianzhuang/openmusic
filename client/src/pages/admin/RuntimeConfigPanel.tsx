@@ -581,15 +581,15 @@ export default function RuntimeConfigPanel({
               max={200}
               step={1}
               disabled={draft.roomCreateAutoBanEnabled === false}
-              value={draft.roomCreateAutoBanScore ?? 55}
+              value={draft.roomCreateAutoBanScore ?? 85}
               onChange={(val) => setDraft({
                 ...draft,
-                roomCreateAutoBanScore: Math.max(1, Math.min(200, Number(val) || 55)),
+                roomCreateAutoBanScore: Math.max(1, Math.min(200, Number(val) || 85)),
               })}
               aria-label="自动封禁打分阈值"
               style={{ width: 100 }}
             />
-            <Typography.Text type="secondary">自动封禁阈值（默认 55）</Typography.Text>
+            <Typography.Text type="secondary">自动封禁阈值（默认 85；只封设备不封 IP）</Typography.Text>
           </Space>
         </Space>
       </SettingsSection>

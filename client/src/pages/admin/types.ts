@@ -52,6 +52,7 @@ export interface AdminAuditEntry {
   approved?: boolean;
   id?: string;
   reason?: string;
+  code?: string;
   recoverable?: boolean;
   deviceId?: string;
   userId?: string;

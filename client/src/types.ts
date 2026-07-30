@@ -67,6 +67,12 @@ export interface SongHistoryItem extends Song {
   requestedAt: number;
 }
 
+/** 平台热榜条目（按播放完成次数排序） */
+export interface HotSongItem extends Song {
+  count: number;
+  lastPlayedAt?: number;
+}
+
 export interface BannedSong {
   source: MusicSource;
   id: string;

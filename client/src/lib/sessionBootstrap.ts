@@ -4,8 +4,19 @@ import { getDeviceId } from './deviceId';
 import { setApiSignKey } from './apiSign';
 import { applySiteFeatures } from '../stores/siteFeaturesStore';
 import { detectSiteAccessBlockResponse, isSiteAccessBlocked, markSiteAccessBlocked } from './siteAccessGate';
+import {
+  extractSoftBlockCode,
+  readSoftBlockCodeFromResponse,
+  softBlockMessage,
+  SOFT_BLOCK_CODES,
+} from './softBlock';
 
 let bootstrapPromise: Promise<string | null> | null = null;
+let lastBootstrapError = '';
+
+export function getLastBootstrapError(): string {
+  return lastBootstrapError;
+}
 
 async function requestSessionBootstrap(): Promise<string | null> {
   if (isSiteAccessBlocked()) return null;
@@ -19,10 +30,24 @@ async function requestSessionBootstrap(): Promise<string | null> {
     8000,
   );
   if (detectSiteAccessBlockResponse(res)) {
-    markSiteAccessBlocked();
+    markSiteAccessBlocked(readSoftBlockCodeFromResponse(res) || SOFT_BLOCK_CODES.SITE_BAN);
+    lastBootstrapError = softBlockMessage(SOFT_BLOCK_CODES.SITE_BAN);
     return null;
   }
-  if (!res.ok) return null;
+  if (!res.ok) {
+    const data = (await res.json().catch(() => null)) as { error?: unknown; code?: unknown } | null;
+    const code = readSoftBlockCodeFromResponse(res)
+      || extractSoftBlockCode(data)
+      || extractSoftBlockCode(typeof data?.error === 'string' ? data.error : '');
+    if (code) {
+      lastBootstrapError = softBlockMessage(code);
+    } else if (typeof data?.error === 'string' && data.error.trim()) {
+      lastBootstrapError = data.error.trim();
+    } else {
+      lastBootstrapError = '会话未就绪，请刷新页面后重试';
+    }
+    return null;
+  }
   const data = (await res.json()) as {
     clientId?: string;
     apiSignKey?: string;
@@ -32,6 +57,7 @@ async function requestSessionBootstrap(): Promise<string | null> {
   setApiSignKey(globalThis.crypto?.subtle ? data.apiSignKey : null);
   applySiteFeatures(data.features);
   if (data.clientId) rememberClientId(data.clientId);
+  lastBootstrapError = '';
   return data.clientId || null;
 }
 
@@ -63,18 +89,23 @@ export function ensureSessionBootstrap(force = false): Promise<string | null> {
 /** bootstrap 必须成功，否则抛出错误 */
 export async function requireSessionBootstrap(force = false): Promise<string> {
   if (isSiteAccessBlocked()) {
-    throw new Error('系统开小差了，请稍后再试');
+    throw new Error(softBlockMessage(SOFT_BLOCK_CODES.SITE_BAN));
   }
   let clientId = await ensureSessionBootstrap(force);
   if (!clientId) {
     if (isSiteAccessBlocked()) {
-      throw new Error('系统开小差了，请稍后再试');
+      throw new Error(softBlockMessage(SOFT_BLOCK_CODES.SITE_BAN));
     }
     resetSessionBootstrap();
     clientId = await ensureSessionBootstrap(true);
   }
   if (!clientId) {
-    throw new Error(isSiteAccessBlocked() ? '系统开小差了，请稍后再试' : '会话未就绪，请刷新页面后重试');
+    throw new Error(
+      lastBootstrapError
+        || (isSiteAccessBlocked()
+          ? softBlockMessage(SOFT_BLOCK_CODES.SITE_BAN)
+          : '会话未就绪，请刷新页面后重试'),
+    );
   }
   return clientId;
 }

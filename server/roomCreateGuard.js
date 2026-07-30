@@ -7,6 +7,7 @@
 
 import { addSiteBan, isSiteBanned } from './siteBan.js';
 import { getRuntimeConfig } from './runtimeConfig.js';
+import { SOFT_BLOCK_CODES, softBlockMessage } from './softBlock.js';
 
 const HISTORY_TTL_MS = 2 * 60 * 60 * 1000;
 const MAX_HISTORY_PER_KEY = 40;
@@ -90,17 +91,16 @@ function historyKeys({ ip, deviceId, userId }) {
   return keys;
 }
 
-/** 可写入全站封禁的目标 */
-function banTargets({ ip, deviceId }) {
+/** 可写入全站封禁的目标（自动封禁只封设备，避免公司/校园 NAT 误伤整段 IP） */
+function banTargets({ deviceId }) {
   const keys = [];
-  if (ip) keys.push({ type: 'ip', value: ip, historyKey: `ip:${ip}` });
   const did = sanitizeId(deviceId);
   if (did) keys.push({ type: 'device', value: did, historyKey: `did:${did}` });
   return keys;
 }
 
 /**
- * @returns {{ allowed: true } | { allowed: false, error: string, retryAfterSec: number }}
+ * @returns {{ allowed: true } | { allowed: false, error: string, code: string, retryAfterSec: number }}
  */
 export function checkRoomCreateCooldown({ ip, deviceId, userId } = {}) {
   const now = Date.now();
@@ -117,9 +117,11 @@ export function checkRoomCreateCooldown({ ip, deviceId, userId } = {}) {
       if (until > now) {
         pushTimed(rejectHistory, `ip:${ip}`, now);
         const retryAfterSec = Math.max(1, Math.ceil((until - now) / 1000));
+        const code = SOFT_BLOCK_CODES.ROOM_CREATE_COOLDOWN_IP;
         return {
           allowed: false,
-          error: '系统开小差了，请稍后再试',
+          error: softBlockMessage(code),
+          code,
           retryAfterSec,
         };
       }
@@ -141,9 +143,11 @@ export function checkRoomCreateCooldown({ ip, deviceId, userId } = {}) {
     }
     if (ip) pushTimed(rejectHistory, `ip:${ip}`, now);
     const retryAfterSec = Math.max(1, Math.ceil((blockedUntil - now) / 1000));
+    const code = SOFT_BLOCK_CODES.ROOM_CREATE_COOLDOWN;
     return {
       allowed: false,
-      error: '系统开小差了，请稍后再试',
+      error: softBlockMessage(code),
+      code,
       retryAfterSec,
     };
   }
@@ -325,7 +329,7 @@ async function maybeAutoBanKeys({ ip, deviceId, userId, listRoomsForGuard }) {
 
   const reason = `疑似自动建房：${reasons.join('；')}`.slice(0, 120);
   const bans = [];
-  for (const { type, value } of banTargets({ ip, deviceId })) {
+  for (const { type, value } of banTargets({ deviceId })) {
     if (!value) continue;
     if (isSiteBanned(type === 'ip' ? { ip: value } : { deviceId: value })) continue;
     const result = await addSiteBan({

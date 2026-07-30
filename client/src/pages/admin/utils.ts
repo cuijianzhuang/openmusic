@@ -115,13 +115,14 @@ export function formatAuditAction(entry: AdminAuditEntry) {
         max_owned_rooms: '房间数上限',
       };
       const label = reasonMap[String(entry.reason || '')] || entry.reason || '未知';
+      const code = typeof entry.code === 'string' && entry.code.trim() ? ` · ${entry.code.trim()}` : '';
       const extra =
         entry.reason === 'cooldown' && entry.retryAfterSec
           ? ` · ${entry.retryAfterSec}s`
           : entry.reason === 'max_owned_rooms' && entry.ownedCount != null
             ? ` · ${entry.ownedCount}/${entry.maxOwnedRooms ?? 2}`
             : '';
-      return `拦截建房（${label}${extra}）`;
+      return `拦截建房（${label}${code}${extra}）`;
     }
     case 'room_create_auto_ban':
       return `自动封禁建房滥用 ${entry.banType || ''} ${entry.value || ''}${
@@ -138,7 +139,8 @@ export function formatAuditAction(entry: AdminAuditEntry) {
         bootstrap_rate_limit: '会话限流',
         new_session_rate_limit: '新会话限流',
       };
-      return `拦截会话（${reasonMap[String(entry.reason || '')] || entry.reason || '未知'}）`;
+      const code = typeof entry.code === 'string' && entry.code.trim() ? ` · ${entry.code.trim()}` : '';
+      return `拦截会话（${reasonMap[String(entry.reason || '')] || entry.reason || '未知'}${code}）`;
     }
     case 'error_report_update':
       return `处理错误上报 ${entry.reportId || ''}${entry.status ? ` → ${entry.status}` : ''}`;

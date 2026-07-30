@@ -154,6 +154,7 @@ import {
 } from './cyapi.js';
 import { importNeteasePlaylist, importQqPlaylist, fetchNeteasePlaylistMetas } from './playlistImport.js';
 import { fetchNeteaseHotToplist } from './neteaseToplist.js';
+import { getHotSongs } from './songHotRank.js';
 import { hasRedisEnvConfig, importFavoriteSongs, listFavoriteSongs, setFavoriteSong } from './roomStorage.js';
 import {
   createChatImageUploadToken,
@@ -170,9 +171,15 @@ import {
   recordRoomCreateAndMaybeAutoBan,
   evaluateRoomCreateRejectAutoBan,
 } from './roomCreateGuard.js';
+import {
+  SOFT_BLOCK_CODES,
+  softBlockMessage,
+  softBlockPayload,
+  setSoftBlockHeaders,
+} from './softBlock.js';
 import { kickConnectionsMatchingBan } from './kickSiteBan.js';
 import { createErrorReport, listPendingSolutionsForUser, ackErrorReportSolution } from './errorReports.js';
-import { getRuntimeConfig, getPublicSiteSeo } from './runtimeConfig.js';
+import { getRuntimeConfig, getPublicSiteSeo, applyCreateGuardLoosenMigration } from './runtimeConfig.js';
 import {
   isLinuxdoConfigured,
   signLinuxdoState,
@@ -362,21 +369,27 @@ function resolveSiteBanFromRequest(req) {
 
 function sendSiteBannedResponse(req, res) {
   // 站点封禁拦截不写审计：被封用户会高频重试，日志无运维价值且易刷爆
+  const code = SOFT_BLOCK_CODES.SITE_BAN;
+  const message = softBlockMessage(code);
   const wantsHtml = String(req.headers.accept || '').includes('text/html')
     || !String(req.path || '').startsWith('/api/');
   res.setHeader('X-OpenMusic-Site-Blocked', '1');
+  setSoftBlockHeaders(res, code);
   if (wantsHtml) {
     res.status(503).type('html').send(`<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>暂时无法访问</title>
 <style>
 body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
-font-family:system-ui,sans-serif;background:#0b0d12;color:#e8eaed}
-p{opacity:.75;font-size:15px}
-</style></head><body><p>系统开小差了，请稍后再试</p></body></html>`);
+font-family:system-ui,sans-serif;background:#0b0d12;color:#e8eaed;text-align:center;padding:24px}
+p{opacity:.75;font-size:15px;margin:0 0 8px;line-height:1.6}
+code{opacity:.55;font-size:13px}
+</style></head><body>
+<p>${message}</p>
+</body></html>`);
     return;
   }
-  res.status(503).json({ error: '系统开小差了，请稍后再试' });
+  res.status(503).json(softBlockPayload(code));
 }
 
 /** 全站封禁：首页 / API / SPA 一律拦截（管理后台入口除外） */
@@ -600,8 +613,8 @@ const limitSocketAction = createRateLimiter({ windowMs: 60_000, max: 90 });
 const limitSocketChat = createRateLimiter({ windowMs: 60_000, max: 30 });
 const limitOwnerDestroyRoom = createRateLimiter({ windowMs: 60_000, max: 3 });
 const limitErrorReport = createRateLimiter({ windowMs: 10 * 60_000, max: 5 });
-const limitSessionBootstrap = createRateLimiter({ windowMs: 60_000, max: 60 });
-const limitNewSessionBootstrap = createRateLimiter({ windowMs: 60_000, max: 12 });
+const limitSessionBootstrap = createRateLimiter({ windowMs: 60_000, max: 90 });
+const limitNewSessionBootstrap = createRateLimiter({ windowMs: 60_000, max: 45 });
 const limitLinuxdoAuth = createRateLimiter({ windowMs: 60_000, max: 10 });
 const limitGithubAuth = createRateLimiter({ windowMs: 60_000, max: 10 });
 
@@ -883,6 +896,18 @@ app.get('/api/app-version', (_req, res) => {
     console.error('app-version read error:', err?.message || err);
   }
   return res.json({ buildId: 'dev', version: 'dev', notes: [], builtAt: null, forcePrompt: false });
+});
+
+app.get('/api/music/hot', async (req, res) => {
+  if (!requireSessionIdentity(req, res)) return;
+  const limit = parseInt(String(req.query.limit || ''), 10);
+  try {
+    const songs = await getHotSongs(Number.isFinite(limit) ? limit : 30);
+    res.json(songs);
+  } catch (err) {
+    console.error('Hot songs error:', err.message);
+    res.status(500).json({ error: '获取热榜失败' });
+  }
 });
 
 app.get('/api/music/toplist/netease', async (req, res) => {
@@ -1376,10 +1401,13 @@ function proxyLimitKey(kind, req) {
 app.post('/api/session/bootstrap', async (req, res) => {
   const requestIp = getRequestIp(req);
   if (!limitSessionBootstrap(`session:${requestIp}`)) {
+    const code = SOFT_BLOCK_CODES.SESSION_BOOTSTRAP_LIMIT;
     appendAdminAudit('session_blocked', {
       reason: 'bootstrap_rate_limit',
+      code,
     }, requestIp);
-    return res.status(500).json({ error: '系统开小差了，请稍后再试' });
+    setSoftBlockHeaders(res, code);
+    return res.status(500).json(softBlockPayload(code));
   }
   const cookieDeviceId = resolveDeviceIdFromCookieHeader(req.headers?.cookie || '');
   const bodyDeviceId = resolveBodyDeviceId(req);
@@ -1413,10 +1441,13 @@ app.post('/api/session/bootstrap', async (req, res) => {
   }
 
   if (!limitNewSessionBootstrap(`session-new:${requestIp}`)) {
+    const code = SOFT_BLOCK_CODES.SESSION_NEW_LIMIT;
     appendAdminAudit('session_blocked', {
       reason: 'new_session_rate_limit',
+      code,
     }, requestIp);
-    return res.status(500).json({ error: '系统开小差了，请稍后再试' });
+    setSoftBlockHeaders(res, code);
+    return res.status(500).json(softBlockPayload(code));
   }
   const userId = createServerClientId();
   const deviceId = cookieDeviceId || createServerClientId();
@@ -1730,8 +1761,10 @@ app.post('/api/rooms', async (req, res) => {
   };
 
   if (isSiteBanned({ ip: createIp, deviceId: createDeviceId })) {
-    // 不暴露封禁；拦截本身不写审计（高频重试无价值）
-    return res.status(503).json({ error: '系统开小差了，请稍后再试' });
+    // 不暴露封禁细节；拦截本身不写审计（高频重试无价值）
+    const code = SOFT_BLOCK_CODES.SITE_BAN;
+    setSoftBlockHeaders(res, code);
+    return res.status(503).json(softBlockPayload(code));
   }
 
   const name = req.body?.name;
@@ -1775,8 +1808,10 @@ app.post('/api/rooms', async (req, res) => {
     userId: identity.userId,
   });
   if (!cooldown.allowed) {
+    const code = cooldown.code || SOFT_BLOCK_CODES.ROOM_CREATE_COOLDOWN;
     appendAdminAudit('room_create_blocked', {
       reason: 'cooldown',
+      code,
       userId: identity.userId,
       deviceId: createDeviceId || '',
       retryAfterSec: cooldown.retryAfterSec || 0,
@@ -1788,7 +1823,10 @@ app.post('/api/rooms', async (req, res) => {
       listRoomsForGuard: listRoomsForAdmin,
     });
     enforceAutoBans(bans, { userId: identity.userId, trigger: 'cooldown_reject' });
-    return res.status(500).json({ error: '系统开小差了，请稍后再试' });
+    setSoftBlockHeaders(res, code);
+    return res.status(500).json(softBlockPayload(code, {
+      retryAfterSec: cooldown.retryAfterSec || 0,
+    }));
   }
 
   // 每人最多同时保留 N 个自建房（runtimeConfig.roomCreateMaxOwned；0 = 不限制）
@@ -2423,7 +2461,12 @@ io.on('connection', (socket) => {
     const deviceId = resolveDeviceIdFromCookieHeader(socket.handshake?.headers?.cookie || '');
     const siteBan = isSiteBanned({ ip: joinProbeIp, deviceId });
     if (siteBan) {
-      socket.emit('kicked', { message: '系统开小差了，请稍后再试', stopReconnect: true });
+      const code = SOFT_BLOCK_CODES.SITE_BAN;
+      socket.emit('kicked', {
+        message: softBlockMessage(code),
+        code,
+        stopReconnect: true,
+      });
       socket.disconnect(true);
       return;
     }
@@ -2466,8 +2509,10 @@ io.on('connection', (socket) => {
     const joinProbeIp = getClientIp(socket);
     const siteBan = isSiteBanned({ ip: joinProbeIp, deviceId });
     if (siteBan) {
-      callback?.({ success: false, error: '系统开小差了，请稍后再试' });
-      socket.emit('kicked', { message: '系统开小差了，请稍后再试', stopReconnect: true });
+      const code = SOFT_BLOCK_CODES.SITE_BAN;
+      const message = softBlockMessage(code);
+      callback?.({ success: false, error: message, code });
+      socket.emit('kicked', { message, code, stopReconnect: true });
       socket.disconnect(true);
       return;
     }
@@ -4159,6 +4204,7 @@ if (!isRedisEnabled()) {
 } else {
   await initSiteAnnouncement();
   await initSiteBans();
+  applyCreateGuardLoosenMigration();
   if (!setupRequired) {
     await initAdminCredentials();
   } else {

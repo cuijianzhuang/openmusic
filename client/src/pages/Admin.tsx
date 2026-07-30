@@ -71,6 +71,7 @@ import {
   formatRelativeTime,
   type AdminRoomStatusFilter,
 } from './admin/utils';
+import { SOFT_BLOCK_CODE_HELP } from '../lib/softBlock';
 
 const { Header, Sider, Content } = Layout;
 
@@ -1636,8 +1637,29 @@ function AdminPage() {
                 <Alert type="success" showIcon message={banHint} style={{ marginBottom: 8 }} />
               )}
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                封禁后无法进房 / 建房；房间成员可一键拉黑
+                封禁后无法进房 / 建房；房间成员可一键拉黑。自动封禁会出现在下方列表（来源标「自动」）。
               </Typography.Text>
+              <Alert
+                type="info"
+                showIcon
+                style={{ marginTop: 12 }}
+                message="用户反馈错误码对照"
+                description={
+                  <div style={{ display: 'grid', gap: 6, marginTop: 4 }}>
+                    {SOFT_BLOCK_CODE_HELP.map((item) => (
+                      <div key={item.code} style={{ fontSize: 12, lineHeight: 1.5 }}>
+                        <Typography.Text code copyable={{ text: item.code }}>
+                          {item.code}
+                        </Typography.Text>
+                        <Typography.Text strong style={{ margin: '0 6px' }}>
+                          {item.label}
+                        </Typography.Text>
+                        <Typography.Text type="secondary">{item.hint}</Typography.Text>
+                      </div>
+                    ))}
+                  </div>
+                }
+              />
             </Card>
             <Card
               title={`封禁记录（${bans.length}）`}

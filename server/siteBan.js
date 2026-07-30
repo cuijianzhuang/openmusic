@@ -84,6 +84,7 @@ export async function initSiteBans() {
     if (raw) {
       bans = sanitizeBanList(JSON.parse(raw));
       deleteLegacyLocalBans();
+      await clearAutoIpSiteBans();
       return;
     }
   } catch (err) {
@@ -105,6 +106,7 @@ export async function initSiteBans() {
     bans = [];
     deleteLegacyLocalBans();
   }
+  await clearAutoIpSiteBans();
 }
 
 async function persistBans() {
@@ -172,4 +174,25 @@ export async function removeSiteBan(banId) {
     return { success: false, error: err.message || '封禁保存失败' };
   }
   return { success: true };
+}
+
+/**
+ * 清除「自动封禁」产生的 IP 封禁（保留手动 IP 封禁与全部设备封禁）。
+ * 用于解除共享出口 NAT 误伤。
+ */
+export async function clearAutoIpSiteBans() {
+  const before = bans;
+  const removed = before.filter((b) => b.type === 'ip' && b.source === 'auto');
+  if (removed.length === 0) {
+    return { success: true, removed: 0, bans: listSiteBans() };
+  }
+  bans = before.filter((b) => !(b.type === 'ip' && b.source === 'auto'));
+  try {
+    await persistBans();
+  } catch (err) {
+    bans = before;
+    return { success: false, error: err.message || '清除自动 IP 封禁失败', removed: 0 };
+  }
+  console.log(`site-ban: 已清除 ${removed.length} 条自动 IP 封禁`);
+  return { success: true, removed: removed.length, bans: listSiteBans() };
 }
