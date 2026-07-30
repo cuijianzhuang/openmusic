@@ -35,6 +35,10 @@ import {
   installBackgroundPlaybackGuards,
   isLikelySystemMediaSuspend,
 } from '../lib/backgroundPlayback';
+import {
+  setBackgroundKeepaliveActive,
+} from '../lib/backgroundKeepalive';
+import { createWorkerInterval } from '../lib/workerTimer';
 import { ensureGalaxyAudioOutput } from '../components/galaxy/lib/galaxyAudio';
 import { canSeekInRoom } from '../lib/roomPermissions';
 import {
@@ -97,9 +101,14 @@ const SOURCE_ERROR_SERVER_VERIFY_AFTER = 2;
 const RESOLVE_URL_TIMEOUT_MS = 15000;
 /** 主控 loading 过久仍无结果时强制走音源异常切歌 */
 const LEADER_LOAD_STUCK_SKIP_MS = 20000;
+/** 主控长时间无法把 audio 绑到当前曲时强制切歌（无 duration 时服务端也不会自动推进） */
+const LEADER_BIND_MISMATCH_SKIP_MS = 25000;
+/** 源异常切歌提示节流，避免 watchdog 反复弹 toast */
+const SOURCE_ERROR_SKIP_TOAST_COOLDOWN_MS = 20000;
 let localRecoveryTimer: number | null = null;
 let localRecoveryQueueId: string | null = null;
 let lastLocalRecoveryToastAt = 0;
+let lastSourceErrorSkipToastAt = 0;
 
 function notifyPlaybackToast(message: string, type: 'success' | 'error' = 'error') {
   window.dispatchEvent(new CustomEvent('openmusic:visual-toast', {
@@ -495,13 +504,14 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
   const requestSkip = useCallback((options: {
     bypassThrottle?: boolean;
     reason?: 'manual' | 'source_error' | 'system';
-  } = {}) => {
-    if (skippingRef.current) return;
+  } = {}): boolean => {
+    // 早退时绝不留下 loadLock：调用方（源异常路径）可能已依赖「未启动则不占锁」
+    if (skippingRef.current) return false;
     const { isPlaybackLeader, room: live } = useRoomStore.getState();
-    if (!isPlaybackLeader) return;
+    if (!isPlaybackLeader) return false;
 
     const now = Date.now();
-    if (!options.bypassThrottle && now - lastSkipAt.current < 2000) return;
+    if (!options.bypassThrottle && now - lastSkipAt.current < 2000) return false;
     lastSkipAt.current = now;
 
     const sourceErrorSkip = options.reason === 'source_error';
@@ -557,9 +567,12 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
         unlockAfterSkipFailure();
         if (res.error) notifyPlaybackToast(res.error, 'error');
       }
+    }).catch(() => {
+      unlockAfterSkipFailure();
     }).finally(() => {
       skippingRef.current = false;
     });
+    return true;
   }, [controller, skipSong, setTrackLoading]);
 
   /**
@@ -939,9 +952,13 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     if (isTrackSourceError(current)) {
       setTrackLoading(false);
       if (useRoomStore.getState().isPlaybackLeader) {
-        // 预取已确认无源：主控核实切歌，避免全屋卡在不可播曲；刷新后也应能跳
-        loadLockRef.current = { queueId: current.queueId, gen: loadGeneration.current };
-        notifyPlaybackToast('音源异常，正在跳过…', 'error');
+        // 预取已确认无源：主控核实切歌。loadLock 仅由 requestSkip 在真正启动后写入，
+        // 避免节流/跳歌中早退时永久占锁导致「源异常不切歌」
+        const now = Date.now();
+        if (now - lastSourceErrorSkipToastAt >= SOURCE_ERROR_SKIP_TOAST_COOLDOWN_MS) {
+          lastSourceErrorSkipToastAt = now;
+          notifyPlaybackToast('音源异常，正在跳过…', 'error');
+        }
         requestSkip({ reason: 'source_error' });
         return;
       }
@@ -1181,20 +1198,94 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     return () => window.clearTimeout(timer);
   }, [trackLoading, isPlaybackLeader, room?.current?.queueId, requestSkip]);
 
-  // room.current 与 audio.src 脱节时重试 load（受 loadLock 约束，避免重复 reload 风暴）
+  // 主控：房间在播但 audio 长时间绑不上当前曲（后台切歌/源异常/无 duration）→ 强制推进
   useEffect(() => {
-    const id = window.setInterval(() => {
-      const liveRoom = useRoomStore.getState().room;
+    if (!isPlaybackLeader || !room?.isPlaying) return;
+    const queueId = room?.current?.queueId;
+    if (!queueId) return;
+    if (canSyncAudioForQueue(controller.audio, queueId)) return;
+
+    const timer = window.setTimeout(() => {
+      const live = useRoomStore.getState();
+      if (!live.isPlaybackLeader || skippingRef.current) return;
+      const current = live.room?.current;
+      if (!current || current.queueId !== queueId || !live.room?.isPlaying) return;
+      if (canSyncAudioForQueue(controller.audio, queueId)) return;
+      // 仍在取链：交给 LEADER_LOAD_STUCK_SKIP；此处专治 loading=false 却永久脱节
+      if (useAudioStore.getState().trackLoading) return;
+
+      debugLog('leader_bind_mismatch_skip', debugLine({
+        queueId,
+        afterMs: LEADER_BIND_MISMATCH_SKIP_MS,
+        sourceError: isTrackSourceError(current),
+      }));
+      loadLockRef.current = EMPTY_LOAD_LOCK;
+      const now = Date.now();
+      if (now - lastSourceErrorSkipToastAt >= SOURCE_ERROR_SKIP_TOAST_COOLDOWN_MS) {
+        lastSourceErrorSkipToastAt = now;
+        notifyPlaybackToast(
+          isTrackSourceError(current) ? '音源异常，正在跳过…' : '播放异常，正在跳过…',
+          'error',
+        );
+      }
+      requestSkip({ reason: 'source_error', bypassThrottle: true });
+    }, LEADER_BIND_MISMATCH_SKIP_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    isPlaybackLeader,
+    room?.isPlaying,
+    room?.current?.queueId,
+    requestSkip,
+    controller,
+  ]);
+
+  // 在房期间开启 Web Lock + Worker，缓解后台节流/冻结（无法真正关闭浏览器节流）
+  useEffect(() => {
+    const inRoom = Boolean(room?.id);
+    setBackgroundKeepaliveActive(inRoom);
+    return () => setBackgroundKeepaliveActive(false);
+  }, [room?.id]);
+
+  // room.current 与 audio.src 脱节时重试 load；源异常占锁时主动解锁并重试切歌
+  // 用共享 Worker 定时器叫醒主线程，避免后台 setInterval 被节流拖垮
+  useEffect(() => {
+    let lastWatchdogAt = 0;
+    const runLoadWatchdog = () => {
+      const now = Date.now();
+      if (now - lastWatchdogAt < LOAD_WATCHDOG_INTERVAL_MS) return;
+      lastWatchdogAt = now;
+
+      const live = useRoomStore.getState();
+      const liveRoom = live.room;
       const current = liveRoom?.current;
       if (!current) return;
       const audio = controller.audio;
+
+      // 主控卡在「源异常 + loadLock / 未跳成」：解开锁并触发 load effect 再次 requestSkip
+      if (
+        live.isPlaybackLeader
+        && liveRoom?.isPlaying
+        && isTrackSourceError(current)
+        && !skippingRef.current
+        && !useAudioStore.getState().trackLoading
+      ) {
+        if (loadLockRef.current.queueId === current.queueId) {
+          loadLockRef.current = EMPTY_LOAD_LOCK;
+        }
+        if (!canSyncAudioForQueue(audio, current.queueId)) {
+          setLoadRetryNonce((n) => n + 1);
+          return;
+        }
+      }
+
       if (shouldSkipTrackLoad(audio, current.queueId)) return;
       if (loadLockRef.current.queueId) return;
       if (useAudioStore.getState().trackLoading) return;
       setLoadRetryNonce((n) => n + 1);
-    }, LOAD_WATCHDOG_INTERVAL_MS);
+    };
 
-    return () => window.clearInterval(id);
+    return createWorkerInterval(runLoadWatchdog, LOAD_WATCHDOG_INTERVAL_MS);
   }, [controller]);
 
   // 服务端 PlaybackState（150ms 防抖后）→ 统一同步
@@ -1271,7 +1362,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     applySync();
   }, [isPlaybackLeader, tvMode, room?.current?.queueId, trackLoading, applySync, controller]);
 
-  // visibilitychange / pageshow / focus：切走不做任何事；切回强制对齐并续播
+  // visibilitychange / pageshow / focus：切走不做任何事；切回强制对齐并续播；脱节则重载/切歌
   useEffect(() => {
     installBackgroundPlaybackGuards();
     let resumeTimer: number | null = null;
@@ -1280,12 +1371,33 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
       if (document.hidden) return;
       if (isSongPreviewSuppressingRoom()) return;
 
-      const liveRoom = useRoomStore.getState().room;
+      const live = useRoomStore.getState();
+      const liveRoom = live.room;
       if (!liveRoom?.current || !liveRoom.isPlaying) return;
-      if (!canSyncAudioForQueue(controller.audio, liveRoom.current.queueId)) return;
-      if (!playbackStateMatchesCurrentTrack(liveRoom.current)) return;
-      if (shouldSkipForEndedTrackKey(liveRoom.current, controller.audio)) return;
-      if (useAudioStore.getState().trackLoading || skippingRef.current) return;
+      if (skippingRef.current) return;
+
+      const current = liveRoom.current;
+      if (!canSyncAudioForQueue(controller.audio, current.queueId)) {
+        // 回前台发现音源脱节：解开 load 锁；源异常则主控立刻切歌，否则触发重新取链
+        loadLockRef.current = EMPTY_LOAD_LOCK;
+        if (live.isPlaybackLeader && isTrackSourceError(current)) {
+          const now = Date.now();
+          if (now - lastSourceErrorSkipToastAt >= SOURCE_ERROR_SKIP_TOAST_COOLDOWN_MS) {
+            lastSourceErrorSkipToastAt = now;
+            notifyPlaybackToast('音源异常，正在跳过…', 'error');
+          }
+          requestSkip({ reason: 'source_error', bypassThrottle: true });
+          return;
+        }
+        if (!useAudioStore.getState().trackLoading) {
+          setLoadRetryNonce((n) => n + 1);
+        }
+        return;
+      }
+
+      if (!playbackStateMatchesCurrentTrack(current)) return;
+      if (shouldSkipForEndedTrackKey(current, controller.audio)) return;
+      if (useAudioStore.getState().trackLoading) return;
       if (!controller.audio.src) return;
 
       tryFlushPendingSnapshot();
@@ -1296,11 +1408,11 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
       resumeTimer = window.setTimeout(() => {
         resumeTimer = null;
         if (document.hidden) return;
-        const live = useRoomStore.getState().room;
+        const roomNow = useRoomStore.getState().room;
         const audio = controller.audio;
-        if (!live?.current || !live.isPlaying || !audio.src) return;
+        if (!roomNow?.current || !roomNow.isPlaying || !audio.src) return;
         if (!audio.paused && !audio.ended) return;
-        if (!canSyncAudioForQueue(audio, live.current.queueId)) return;
+        if (!canSyncAudioForQueue(audio, roomNow.current.queueId)) return;
         applyVisibilitySync();
       }, 400);
     };
@@ -1319,7 +1431,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
       window.removeEventListener('focus', resumeFromForeground);
       if (resumeTimer != null) window.clearTimeout(resumeTimer);
     };
-  }, [controller, applyVisibilitySync, shouldSkipForEndedTrackKey]);
+  }, [controller, applyVisibilitySync, shouldSkipForEndedTrackKey, requestSkip]);
 
   const handlePlayPause = useCallback(() => {
     if (!room) return;

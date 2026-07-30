@@ -290,9 +290,7 @@ export default function QueuePanel({ fillHeight = false }: Props) {
     next.splice(toIndex, 0, moved);
 
     const res = await reorderQueue(next, fromId);
-    if (res.success) {
-      showQueueMessage('已调整播放顺序');
-    } else {
+    if (!res.success) {
       showQueueMessage(res.error || '排序失败');
     }
   }, [canControlPlayback, queue, reorderQueue, showQueueMessage]);

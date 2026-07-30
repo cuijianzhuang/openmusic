@@ -62,6 +62,7 @@ import {
   isLikelySystemMediaSuspend,
   shouldIgnoreBackgroundRoomPause,
 } from './backgroundPlayback';
+import { getBackgroundKeepaliveDebug } from './backgroundKeepalive';
 import { readRoomVisualMode, shouldProxySongPlaybackUrl } from './roomVisualPreset';
 import { LOCAL_APP_BUILD_ID } from './appVersion';
 import type { MusicSource, QueueItem } from '../types';
@@ -365,6 +366,7 @@ function collectDeviceFields(): Record<string, DebugScalar> {
 
 function collectNetworkFields(socket: SocketSnapshot | null | undefined): Record<string, DebugScalar> {
   const net = readNetworkInformation();
+  const keepalive = getBackgroundKeepaliveDebug();
   return {
     online: typeof navigator !== 'undefined' ? navigator.onLine : null,
     hidden: typeof document !== 'undefined' ? document.hidden : null,
@@ -382,6 +384,10 @@ function collectNetworkFields(socket: SocketSnapshot | null | undefined): Record
     socketEngineReadyState: socket?.engineReadyState ?? null,
     bgSystemSuspend: isLikelySystemMediaSuspend(),
     ignoreBgRoomPause: shouldIgnoreBackgroundRoomPause(),
+    bgKeepaliveActive: keepalive.active,
+    bgWebLockHeld: keepalive.webLockHeld,
+    bgWorkerAlive: keepalive.workerAlive,
+    bgWakeLockHeld: keepalive.wakeLockHeld,
   };
 }
 
