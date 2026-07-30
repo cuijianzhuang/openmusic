@@ -678,6 +678,8 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
       });
 
       audio.addEventListener('pause', () => {
+        // 试听占用本机音频时不自动恢复房间播放
+        if (isSongPreviewSuppressingRoom()) return;
         // 仅对抗息屏瞬间的系统挂起；锁屏控件主动暂停不在此窗口内
         if (intentionalLocalPauseRef.current) return;
         if (isLikelySystemMediaSuspend()) {
@@ -1471,6 +1473,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
   }, [controller]);
 
   const handleSoftResumeLocalAudio = useCallback(() => {
+    if (isSongPreviewSuppressingRoom()) return;
     const live = useRoomStore.getState().room;
     const audio = controller.audio;
     if (!live?.isPlaying || !live.current) return;
