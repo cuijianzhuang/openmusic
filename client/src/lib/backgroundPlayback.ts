@@ -3,7 +3,9 @@
  *
  * 切到微博/其它视频 App 时，系统会抢音频焦点并下发 MediaSession pause；
  * 若据此 toggle_play(false)，整房会被停掉，回来后只能刷新重进。
- * 因此：页面 hidden 全程、以及刚回到前台的短窗口内，MediaSession 都不可改房态。
+ * 过去为了抗系统抢焦点，这里把整个 hidden 生命周期都当成“不可改房态”。
+ * 但现在已有 worker 保活后，锁屏/系统暂停应当可以在后台生效，因此只保留
+ * 「刚切到后台」和「刚回到前台」两个短窗口。
  *
  * audio 元素的 pause 自动续播仍只用「刚进后台」短窗口，避免回前台后与用户点暂停打架。
  */
@@ -41,12 +43,15 @@ export function isLikelySystemMediaSuspend(): boolean {
 
 /**
  * MediaSession pause/stop 是否应忽略（不改房间 isPlaying）。
- * - 整段后台：其它 App 抢焦点无法与锁屏主动暂停区分，保房间继续播
+ * - 刚切到后台短窗口：其它 App 抢焦点常伴随误 pause
  * - 刚回前台短窗口：系统常补发一次 pause
  */
 export function shouldIgnoreBackgroundRoomPause(): boolean {
   if (typeof document === 'undefined') return false;
-  if (document.hidden) return true;
+  if (document.hidden) {
+    if (!hiddenAtMs) return true;
+    return Date.now() - hiddenAtMs < SYSTEM_SUSPEND_GRACE_MS;
+  }
   if (visibleAtMs && Date.now() - visibleAtMs < FOREGROUND_RESUME_GRACE_MS) {
     return true;
   }

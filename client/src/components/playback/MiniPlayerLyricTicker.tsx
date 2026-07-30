@@ -8,10 +8,9 @@ import TruncateTip from '../TruncateTip';
 
 interface Props {
   song: QueueItem;
-  onExpand: () => void;
 }
 
-function MiniPlayerLyricTicker({ song, onExpand }: Props) {
+function MiniPlayerLyricTicker({ song }: Props) {
   const currentTime = useSmoothPlaybackTime();
   const duration = useTrackDuration(song);
   const displayTime = clampPlaybackTime(currentTime, duration);
@@ -19,10 +18,9 @@ function MiniPlayerLyricTicker({ song, onExpand }: Props) {
   const { current: currentLyric, next: nextLyric } = getActiveLyricPair(lyrics, displayTime);
 
   return (
-    <button
-      type="button"
-      onClick={onExpand}
-      className="flex-1 min-w-0 text-center px-1 sm:px-2"
+    <div
+      className="flex-1 min-w-0 px-1 text-center select-text sm:px-2"
+      title="可直接选中复制歌词"
     >
       {currentLyric || nextLyric ? (
         <>
@@ -59,7 +57,7 @@ function MiniPlayerLyricTicker({ song, onExpand }: Props) {
           />
         </>
       )}
-    </button>
+    </div>
   );
 }
 

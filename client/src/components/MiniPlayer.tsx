@@ -383,7 +383,7 @@ export default memo(function MiniPlayer({
 
         </button>
 
-        <MiniPlayerLyricTicker song={current} onExpand={onExpand} />
+        <MiniPlayerLyricTicker song={current} />
 
         <div className="flex flex-shrink-0 items-center gap-1 sm:gap-2">
 

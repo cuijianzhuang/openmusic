@@ -219,6 +219,8 @@ interface AudioRuntime {
   audioRef: MutableRefObject<HTMLAudioElement | null>;
   endedTrackKey: MutableRefObject<string | null>;
   skippingRef: MutableRefObject<boolean>;
+  /** 切歌/换源窗口：禁止 pause/ended/MediaSession 自动 play，避免旧曲被 seek 0 后闪播 */
+  suppressAutoResumeRef: MutableRefObject<boolean>;
   tempRetries: MutableRefObject<number>;
   lowestFallbackAttempted: MutableRefObject<boolean>;
   successRecordedTrackKey: MutableRefObject<string | null>;
@@ -329,6 +331,8 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
   const skippingRef = useRef(false);
   /** 本端主动 pause 时抑制 pause 事件里的自动续播 */
   const intentionalLocalPauseRef = useRef(false);
+  /** 切歌取链/换源完成前禁止任何自动 play（后台节流时窗口更长） */
+  const suppressAutoResumeRef = useRef(false);
   const justSkippedRef = useRef(false);
   const prevQueueIdRef = useRef<string | null>(null);
   const tempRetries = useRef(0);
@@ -429,7 +433,10 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
   }, [applyPlaybackResult, handleBeyondDuration, setNeedsAudioUnlock]);
 
   const enqueuePause = useCallback(() => {
+    // 先同步抬闸，再入队 pause：后台队列延迟时也能挡住 pause 自动续播
+    suppressAutoResumeRef.current = true;
     controller.enqueue(() => {
+      clearAudioQueueBinding(controller.audio);
       controller.audio.pause();
     });
   }, [controller]);
@@ -519,6 +526,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
 
     skippingRef.current = true;
     justSkippedRef.current = true;
+    suppressAutoResumeRef.current = true;
     loadGeneration.current += 1;
     // 打断进行中的 loadTrack：必须立刻清 loading，否则 finally 因 gen 不匹配会永久卡在加载中
     setTrackLoading(false);
@@ -626,6 +634,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
       audioRef,
       endedTrackKey,
       skippingRef,
+      suppressAutoResumeRef,
       tempRetries,
       lowestFallbackAttempted,
       successRecordedTrackKey,
@@ -649,6 +658,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
           const dur = audio.duration;
           const nearEnd = Number.isFinite(dur) && dur > 0 && audio.currentTime >= dur - 1.5;
           if (!nearEnd) {
+            if (runtime.suppressAutoResumeRef.current) return;
             const live = useRoomStore.getState();
             if (live.room?.isPlaying && live.room.current) {
               void audio.play().catch(() => {});
@@ -682,6 +692,9 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
         if (isSongPreviewSuppressingRoom()) return;
         // 仅对抗息屏瞬间的系统挂起；锁屏控件主动暂停不在此窗口内
         if (intentionalLocalPauseRef.current) return;
+        const runtime = activeAudioRuntime;
+        // 切歌/换源窗口：旧 src 可能被误 play，尤其是后台主线程节流时
+        if (runtime?.suppressAutoResumeRef.current) return;
         if (isLikelySystemMediaSuspend()) {
           const live = useRoomStore.getState();
           if (!live.room?.isPlaying || !live.room.current) return;
@@ -751,7 +764,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
               controller.enqueue(async () => {
                 const a = controller.audio;
                 a.pause();
-                a.currentTime = 0;
+                // 直接换 src，勿对旧媒体 seek 0（否则可能闪播旧源开头）
                 a.src = freshFallback;
                 bindAudioQueueId(a, song.queueId);
                 a.load();
@@ -900,6 +913,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     if (!current) {
       loadGeneration.current += 1;
       loadLockRef.current = EMPTY_LOAD_LOCK;
+      suppressAutoResumeRef.current = false;
       controller.enqueue(() => {
         const audio = controller.audio;
         audio.pause();
@@ -920,6 +934,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
 
     if (trackReloadNonce !== lastTrackReloadNonceRef.current) {
       lastTrackReloadNonceRef.current = trackReloadNonce;
+      suppressAutoResumeRef.current = true;
       clearAudioQueueBinding(controller.audio);
       loadLockRef.current = EMPTY_LOAD_LOCK;
     }
@@ -928,6 +943,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
       loadGeneration.current += 1;
       loadLockRef.current = EMPTY_LOAD_LOCK;
       justSkippedRef.current = true;
+      suppressAutoResumeRef.current = true;
       endedTrackKey.current = null;
       if (localRecoveryTimer) {
         window.clearTimeout(localRecoveryTimer);
@@ -943,6 +959,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     }
 
     if (shouldSkipTrackLoad(controller.audio, current.queueId)) {
+      suppressAutoResumeRef.current = false;
       syncActualQualityFromCache(current);
       return;
     }
@@ -1056,9 +1073,10 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
           const audio = controller.audio;
           const liveNow = useRoomStore.getState().room?.current;
           if (!liveNow || liveNow.queueId !== current.queueId) return;
+          // 换源前保持 suppress：禁止对旧 src seek 0，否则后台竞态 play 会闪播旧曲开头
+          suppressAutoResumeRef.current = true;
           audio.pause();
           clearAudioQueueBinding(audio);
-          audio.currentTime = 0;
           snapSmoothPlaybackTime(0);
           audio.src = url;
           bindAudioQueueId(audio, current.queueId);
@@ -1138,6 +1156,10 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
         if (gen === loadGeneration.current) {
           setTrackLoading(false);
           const live = useRoomStore.getState().room;
+          // 新曲已绑定：放开自动续播闸，再走 forceZero/校正同步
+          if (live?.current?.queueId === queueId && isAudioBoundToQueue(controller.audio, queueId)) {
+            suppressAutoResumeRef.current = false;
+          }
           if (
             live?.isPlaying
             && live.current
@@ -1474,6 +1496,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
 
   const handleSoftResumeLocalAudio = useCallback(() => {
     if (isSongPreviewSuppressingRoom()) return;
+    if (suppressAutoResumeRef.current) return;
     const live = useRoomStore.getState().room;
     const audio = controller.audio;
     if (!live?.isPlaying || !live.current) return;
