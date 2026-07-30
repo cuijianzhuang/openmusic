@@ -698,6 +698,16 @@ function AdminPage() {
     }
   }, [message, refresh]);
 
+  const clearAutoBans = useCallback(async () => {
+    try {
+      const res = await adminFetch<{ removed: number }>('/api/admin/bans/clear-auto', { method: 'POST' });
+      message.success(res.removed > 0 ? `已清除 ${res.removed} 条自动封禁` : '没有自动封禁可清');
+      await refresh({ force: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '清除自动封禁失败');
+    }
+  }, [message, refresh]);
+
   const openErrorReport = useCallback(async (id: string) => {
     setReportDetailLoading(true);
     try {
@@ -1664,11 +1674,25 @@ function AdminPage() {
             <Card
               title={`封禁记录（${bans.length}）`}
               extra={
-                bans.some((b) => b.source === 'auto') ? (
-                  <Tag color="orange">
-                    自动 {bans.filter((b) => b.source === 'auto').length}
-                  </Tag>
-                ) : null
+                <Space size={8} wrap>
+                  {bans.some((b) => b.source === 'auto') ? (
+                    <Tag color="orange">
+                      自动 {bans.filter((b) => b.source === 'auto').length}
+                    </Tag>
+                  ) : null}
+                  <Popconfirm
+                    title="清除全部自动封禁？"
+                    description="只删来源为「自动」的记录，手动封禁保留"
+                    okText="清除"
+                    cancelText="取消"
+                    disabled={!bans.some((b) => b.source === 'auto')}
+                    onConfirm={() => void clearAutoBans()}
+                  >
+                    <Button size="small" danger disabled={!bans.some((b) => b.source === 'auto')}>
+                      清除自动封禁
+                    </Button>
+                  </Popconfirm>
+                </Space>
               }
             >
               <Table

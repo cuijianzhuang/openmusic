@@ -373,6 +373,10 @@ function sendSiteBannedResponse(req, res) {
   const message = softBlockMessage(code);
   const wantsHtml = String(req.headers.accept || '').includes('text/html')
     || !String(req.path || '').startsWith('/api/');
+  // 禁止 CDN/浏览器缓存封禁页，否则一人被封可能污染公共缓存误伤全站
+  res.setHeader('Cache-Control', 'no-store, no-cache, private, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   res.setHeader('X-OpenMusic-Site-Blocked', '1');
   setSoftBlockHeaders(res, code);
   if (wantsHtml) {
@@ -1763,6 +1767,8 @@ app.post('/api/rooms', async (req, res) => {
   if (isSiteBanned({ ip: createIp, deviceId: createDeviceId })) {
     // 不暴露封禁细节；拦截本身不写审计（高频重试无价值）
     const code = SOFT_BLOCK_CODES.SITE_BAN;
+    res.setHeader('Cache-Control', 'no-store, no-cache, private, max-age=0');
+    res.setHeader('X-OpenMusic-Site-Blocked', '1');
     setSoftBlockHeaders(res, code);
     return res.status(503).json(softBlockPayload(code));
   }

@@ -108,6 +108,8 @@ export function formatAuditAction(entry: AdminAuditEntry) {
       return `封禁 ${entry.banType || ''} ${entry.value || ''}${typeof entry.kicked === 'number' ? ` · 踢出 ${entry.kicked}` : ''}`;
     case 'site_ban_remove':
       return `解除封禁 ${entry.banId || ''}`;
+    case 'site_ban_clear_auto':
+      return `一键清除自动封禁${typeof entry.removed === 'number' ? ` · ${entry.removed} 条` : ''}`;
     case 'room_create_blocked': {
       const reasonMap: Record<string, string> = {
         site_ban: '站点封禁',
