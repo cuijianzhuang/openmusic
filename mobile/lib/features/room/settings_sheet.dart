@@ -792,6 +792,7 @@ class _SettingsBody extends ConsumerWidget {
                                       ('shuffle', '随机播放'),
                                       ('loop-one', '单曲循环'),
                                       ('loop-all', '列表循环'),
+                                      ('shuffle-loop', '列表内随机'),
                                     ],
                                   );
                                   if (picked != null) await notifier.setRoomPlayMode(picked);
@@ -1560,6 +1561,7 @@ class _SettingsBody extends ConsumerWidget {
         'shuffle' => '随机播放',
         'loop-one' => '单曲循环',
         'loop-all' => '列表循环',
+        'shuffle-loop' => '列表内随机',
         _ => '顺序播放',
       };
 

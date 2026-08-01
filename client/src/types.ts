@@ -223,8 +223,8 @@ export interface RoomState {
   randomLoading?: boolean;
   /** 房间播放音质（红点 / 绿点） */
   audioQuality?: RoomAudioQuality;
-  /** 播放顺序：顺序 / 随机 / 单曲循环 / 列表循环 */
-  playMode?: 'order' | 'shuffle' | 'loop-one' | 'loop-all';
+  /** 播放顺序：顺序 / 随机 / 单曲循环 / 列表循环 / 列表内随机 */
+  playMode?: 'order' | 'shuffle' | 'loop-one' | 'loop-all' | 'shuffle-loop';
   /** 队列为空时私人漫游推荐模式 */
   neteaseFmMode?: string;
   /** 漫游关闭前的模式，重新开启时恢复 */

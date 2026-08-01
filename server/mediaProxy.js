@@ -242,7 +242,14 @@ async function assertSafeMediaUrl(rawUrl, extraAllowedHosts, { requireAllowlist 
     err.statusCode = 403;
     throw err;
   }
-  await assertPublicDnsTarget(parsed.hostname);
+  // 本地开发环境常用 DNS 代理会把已知音乐 CDN 映射到 198.18/16。
+  // 这些主机仍受域名白名单和逐跳重定向校验保护，不能因此放宽未知域名。
+  const knownMusicCdn = isAllowedMediaHostname(parsed.hostname, extraAllowedHosts);
+  try {
+    await assertPublicDnsTarget(parsed.hostname);
+  } catch (error) {
+    if (!(requireAllowlist && knownMusicCdn && error?.message === '禁止访问内网地址')) throw error;
+  }
   return parsed;
 }
 

@@ -113,8 +113,11 @@ export default memo(function MiniPlayer({
     if (fmLoading) {
       return (
         <div id="bottom-bar" data-guide="room-player" className="mineradio-bottom-bar visible room-immersive-bottom mx-auto">
-          <div className="mineradio-progress-bar">
-            <div className="mineradio-progress-fill" style={{ width: '0%' }} />
+          <div className="mineradio-progress-row">
+            <div className="mineradio-progress-bar">
+              <div className="mineradio-progress-fill" style={{ width: '0%' }} />
+            </div>
+            <div className="mineradio-time-display">0:00 / 0:00</div>
           </div>
           <div className="mineradio-controls">
             <div className="control-cluster actions">
@@ -134,7 +137,6 @@ export default memo(function MiniPlayer({
             </div>
             <div className="control-cluster modes">
             <div className="mineradio-ctrl-btn mineradio-ctrl-btn-placeholder" aria-hidden />
-              <div className="mineradio-time-display">0:00 / 0:00</div>
             </div>
           </div>
         </div>
@@ -150,12 +152,18 @@ export default memo(function MiniPlayer({
             {skipMsg || skipError}
           </p>
         )}
-        <PlaybackProgressBar
-          song={current}
-          onSeek={handleSeek}
-          disabled={!canSeek}
-          variant="mineradio"
-        />
+        <div className="mineradio-progress-row">
+          <PlaybackProgressBar
+            song={current}
+            onSeek={handleSeek}
+            disabled={!canSeek}
+            variant="mineradio"
+          />
+          <PlaybackTimeLabel
+            song={current}
+            className="mineradio-time-display"
+          />
+        </div>
         <div className="mineradio-controls">
           <div className="control-cluster actions">
             <button type="button" className="control-track text-left" onClick={onExpand}>
@@ -166,13 +174,12 @@ export default memo(function MiniPlayer({
             className="control-cover bg-netease-card"
           />
               <div className="control-meta">
-                <div className="control-title flex min-w-0 items-center gap-1.5 !overflow-visible">
+                <div className="control-title">
                   <TruncateTip
                     text={current.name}
                     as="span"
-                    className="min-w-0 truncate"
+                    className="block min-w-0 truncate"
                   />
-                  <PlaybackQualityTag label={qualityLabel} source={current.source} />
                 </div>
                 <div className="control-artist truncate">
                   <span className="text-white/70">{current.artist}</span>
@@ -239,16 +246,15 @@ export default memo(function MiniPlayer({
           </div>
 
           <div className="control-cluster modes">
-            <PlaybackTimeLabel
-              song={current}
-              className="mineradio-time-display"
+            <VolumeControl
+              compact
+              className="flex-shrink-0"
+              buttonClassName="mineradio-ctrl-btn"
+              iconClassName="h-4 w-4"
             />
-          </div>
-          <div className="control-cluster report">
             <Tooltip content="上报错误/提交意见">
               <button
                 type="button"
-                data-guide="room-report"
                 onClick={() => setReportOpen(true)}
                 className="mineradio-ctrl-btn"
                 aria-label="上报错误/提交意见"
@@ -258,6 +264,7 @@ export default memo(function MiniPlayer({
             </Tooltip>
           </div>
         </div>
+
         <ErrorReportModal open={reportOpen} onClose={() => setReportOpen(false)} />
       </div>
     );

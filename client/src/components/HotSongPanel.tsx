@@ -162,7 +162,7 @@ function SourceSwitch({
       role="group"
       aria-label="热榜数据源"
     >
-      {btn('netease', '网易云热榜')}
+      {btn('netease', '红点热榜')}
       {btn('platform', '平台热榜')}
     </div>
   );
@@ -178,7 +178,7 @@ export default memo(function HotSongPanel({
   const [source, setSource] = useState<HotRankSource>(readStoredSource);
   const cached = source === 'netease' ? peekNeteaseHotToplist(TOPLIST_LIMIT) : null;
   const [title, setTitle] = useState(
-    source === 'platform' ? '平台热榜' : cached?.name?.trim() || '网易云热榜',
+    source === 'platform' ? '平台热榜' : cached?.name?.trim() || '红点热榜',
   );
   const [songs, setSongs] = useState<SearchResult[]>(() => cached?.songs ?? []);
   const [loading, setLoading] = useState(() => !cached);
@@ -200,7 +200,7 @@ export default memo(function HotSongPanel({
       if (source === 'netease') {
         const hit = peekNeteaseHotToplist(TOPLIST_LIMIT);
         if (hit && !silent) {
-          setTitle(hit.name?.trim() || '网易云热榜');
+          setTitle(hit.name?.trim() || '红点热榜');
           setSongs(hit.songs);
           setError('');
           setLoading(false);
@@ -210,12 +210,12 @@ export default memo(function HotSongPanel({
           setLoading(true);
           setSongs([]);
           setError('');
-          setTitle('网易云热榜');
+          setTitle('红点热榜');
         }
         try {
           const data = await getNeteaseHotToplist(TOPLIST_LIMIT);
           if (cancelled) return;
-          setTitle(data.name?.trim() || '网易云热榜');
+          setTitle(data.name?.trim() || '红点热榜');
           setSongs(data.songs);
           setError('');
         } catch (err: unknown) {
@@ -260,7 +260,7 @@ export default memo(function HotSongPanel({
 
     void load();
 
-    // 平台热榜定时刷新；网易云按日缓存，无需轮询
+    // 平台热榜定时刷新；红点按日缓存，无需轮询
     let timer: number | undefined;
     if (source === 'platform') {
       timer = window.setInterval(() => {

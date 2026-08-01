@@ -26,6 +26,6 @@ export function syncGalaxyFxUniforms(uniforms: UniformBag, fx: RoomVisualFxSetti
     (uniforms.uTintColor.value as THREE.Color).set(fx.visualTintColor);
     uniforms.uTintStrength.value = 0.42;
   } else {
-    uniforms.uTintStrength.value = 0.38;
+    uniforms.uTintStrength.value = 0;
   }
 }

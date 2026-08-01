@@ -5,15 +5,25 @@ export const DEFAULT_GROUND_MOTION_SPEED = 50;
 export const DEFAULT_GROUND_AMPLITUDE = 50;
 export const DEFAULT_TERRAIN_DENSITY = 46;
 export const DEFAULT_FLOATING_BLOCKS_ENABLED = true;
-export const DEFAULT_FLOATING_BLOCK_INTENSITY = 55;
+export const DEFAULT_FLOATING_BLOCK_INTENSITY = 36;
 export const DEFAULT_FLOATING_BLOCK_MIN_SIZE = 9;
-export const DEFAULT_FLOATING_BLOCK_MAX_SIZE = 26;
-export const DEFAULT_FLOATING_BLOCK_SPEED = 77;
+export const DEFAULT_FLOATING_BLOCK_MAX_SIZE = 12;
+export const DEFAULT_FLOATING_BLOCK_SPEED = 59;
 export const DEFAULT_FLOATING_BLOCK_COUNT = 80;
 export const TERRAIN_BASE_SIZE = 168;
 export const TERRAIN_MIN_GRID_SIZE = 96;
 export const TERRAIN_DEFAULT_GRID_SIZE = 160;
 export const TERRAIN_MAX_GRID_SIZE = 224;
+
+export type TopographyPerformanceQuality = 'eco' | 'balanced' | 'high' | 'ultra';
+
+/** 与 Mineradio sonic-topography-preset.js 的 QUALITY_GRID_CAP 保持一致 */
+export const QUALITY_GRID_CAP: Record<TopographyPerformanceQuality, number> = {
+  eco: 112,
+  balanced: 160,
+  high: 192,
+  ultra: 224,
+};
 
 export type GroundEqBandId =
   | 'subBass'
@@ -50,7 +60,7 @@ export const GROUND_EQ_BAND_IDS: GroundEqBandId[] = [
   'air',
 ];
 
-export const defaultGroundEqBands = [90, 92, 50, 50, 50, 50, 50, 48];
+export const defaultGroundEqBands = [90, 92, 50, 50, 50, 25, 50, 48];
 
 const LEGACY_CURVE_BAND_INDEXES = [0, 2, 4, 6, 8, 11, 12, 15];
 
@@ -191,9 +201,15 @@ export function applyGroundEqBandValue(value: number, bands: number[], band: Gro
   return clamp(Math.max(0, value - dullness * 0.35) * (1 - dullness * 0.35), 0, 1);
 }
 
-export function deriveTerrainGridSettings(terrainDensity: unknown) {
+export function deriveTerrainGridSettings(
+  terrainDensity: unknown,
+  quality: TopographyPerformanceQuality = 'balanced',
+) {
   const density = normalizeTerrainDensity(terrainDensity);
-  const gridSize = Math.round(TERRAIN_MIN_GRID_SIZE + ((TERRAIN_MAX_GRID_SIZE - TERRAIN_MIN_GRID_SIZE) * density) / 100);
+  // 与 Mineradio 一致:先按密度取原始网格,再按画质档封顶并做 4 对齐,压住高密度下的实例爆炸。
+  const cap = QUALITY_GRID_CAP[quality] ?? QUALITY_GRID_CAP.balanced;
+  const raw = TERRAIN_MIN_GRID_SIZE + ((TERRAIN_MAX_GRID_SIZE - TERRAIN_MIN_GRID_SIZE) * density) / 100;
+  const gridSize = clamp(Math.round(raw / 4) * 4, TERRAIN_MIN_GRID_SIZE, cap);
   const spacing = TERRAIN_BASE_SIZE / gridSize;
   return {
     density,

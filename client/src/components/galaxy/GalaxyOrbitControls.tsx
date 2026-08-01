@@ -18,7 +18,6 @@ import {
   unlockGalaxyOrbitCenter,
   zoomGalaxyOrbit,
 } from './lib/galaxyOrbit';
-
 const CLICK_THRESHOLD = 6;
 
 interface Props {

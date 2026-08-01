@@ -56,6 +56,8 @@ export interface GalaxyAudioBands {
   smoothBass: number;
   /** 涟漪触发，同 bass */
   rippleBass: number;
+  vocal: number;
+  sunEnergy: number;
 }
 
 export interface GalaxyAudioReadOptions {
@@ -65,6 +67,7 @@ export interface GalaxyAudioReadOptions {
 
 // 视觉平滑输出
 const smooth = { bass: 0, mid: 0, treble: 0, beat: 0, energy: 0 };
+const sun = { avg: 0, peak: 0.48, hold: 0, energy: 0 };
 let bassPeak = 0.12;
 let midPeak = 0.1;
 let treblePeak = 0.08;
@@ -137,9 +140,15 @@ export function resetGalaxyAudioVisualState(): void {
   resetGalaxyCinema();
 }
 
-/** 切歌时重置频谱/节拍，但保留电影镜头平滑状态，避免画面猛跳 */
+/** 切歌时只重置与曲目绑定的节拍状态，能量/峰值让它自然跟上，避免画面猛跳 */
 export function resetGalaxyAudioVisualStateForSongChange(): void {
-  resetGalaxyAudioBandsState();
+  // 把 smooth.* 清零、峰值打回下限会造成两段跳变：
+  // 先是粒子位移瞬间塌陷，紧接着新歌头几帧除以极小的峰值被归一化到 1 又炸开，
+  // 观感就是每次切歌封面「大幅度跳动」。峰值本身每帧 ×0.99 会自己衰减跟上新歌。
+  prevEnergy = smooth.energy;
+  beatPulse = 0;
+  sun.hold = 0;
+  resetRealtimeBeatEngine();
 }
 
 function resetGalaxyAudioBandsState(): void {
@@ -151,8 +160,12 @@ function resetGalaxyAudioBandsState(): void {
   prevEnergy = 0;
   beatPulse = 0;
   vocalPeak = 0.12;
+  sun.avg = 0;
+  sun.peak = 0.48;
+  sun.hold = 0;
+  sun.energy = 0;
   lastAdvanceMs = -1;
-  cachedBands = { bass: 0, mid: 0, treble: 0, beat: 0, energy: 0, smoothBass: 0, rippleBass: 0 };
+  cachedBands = { bass: 0, mid: 0, treble: 0, beat: 0, energy: 0, smoothBass: 0, rippleBass: 0, vocal: 0, sunEnergy: 0 };
   resetRealtimeBeatEngine();
 }
 
@@ -492,13 +505,6 @@ function shapeBandsForPreset(
   let treble = Math.min(0.62, smoothTreb * 1.2) * intensity;
   let beatOut = beat;
 
-  if (preset === 6) {
-    const bassOut = Math.min(1.0, smoothBass * 1.18 + beat * 0.22) * intensity;
-    const midOut = Math.min(0.88, smoothMid * 1.12) * intensity;
-    const trebleOut = Math.min(0.78, smoothTreb * 1.08) * intensity;
-    return { bass: bassOut, mid: midOut, treble: trebleOut, beat: beatOut };
-  }
-
   if (preset !== undefined && preset >= 4) {
     const wallpaperAudio = preset === 5;
     const ringBass =
@@ -528,6 +534,8 @@ let cachedBands: GalaxyAudioBands = {
   energy: 0,
   smoothBass: 0,
   rippleBass: 0,
+  vocal: 0,
+  sunEnergy: 0,
 };
 
 function advanceGalaxyAudioBands(dt: number, options: GalaxyAudioReadOptions): GalaxyAudioBands {
@@ -553,6 +561,8 @@ function advanceGalaxyAudioBands(dt: number, options: GalaxyAudioReadOptions): G
       energy: smooth.energy,
       smoothBass: smooth.bass,
       rippleBass: shaped.bass,
+      vocal: 0,
+      sunEnergy: 0,
     };
   }
 
@@ -566,24 +576,15 @@ function advanceGalaxyAudioBands(dt: number, options: GalaxyAudioReadOptions): G
   node.getByteFrequencyData(freqBuf);
   node.getByteTimeDomainData(timeBuf);
 
-  const len = freqBuf.length;
-  const kickEnd = 7;
-  const vocalEnd = Math.min(len, 140);
-  const midEnd = Math.min(len, 280);
-
-  let bKick = 0;
-  let voc = 0;
-  let mInst = 0;
-  let tHigh = 0;
-  for (let i = 0; i < kickEnd; i++) bKick += freqBuf[i] / 255;
-  for (let i = kickEnd; i < vocalEnd; i++) voc += freqBuf[i] / 255;
-  for (let i = vocalEnd; i < midEnd; i++) mInst += freqBuf[i] / 255;
-  for (let i = midEnd; i < len; i++) tHigh += freqBuf[i] / 255;
-
-  bKick /= kickEnd;
-  voc /= vocalEnd - kickEnd;
-  mInst /= Math.max(1, midEnd - vocalEnd);
-  tHigh /= Math.max(1, len - midEnd);
+  const sampleRate = audioCtx?.sampleRate || 44100;
+  const fftSize = node.fftSize || freqBuf.length * 2;
+  const subKick = beatBandRms(freqBuf, sampleRate, fftSize, 38, 74);
+  const kickCore = beatBandRms(freqBuf, sampleRate, fftSize, 52, 165);
+  const kickBody = beatBandRms(freqBuf, sampleRate, fftSize, 165, 420);
+  const bKick = Math.min(1, kickCore * 0.86 + subKick * 0.42 + kickBody * 0.1);
+  const voc = beatBandRms(freqBuf, sampleRate, fftSize, 420, 2600);
+  const mInst = beatBandRms(freqBuf, sampleRate, fftSize, 2600, 6200);
+  const tHigh = beatBandRms(freqBuf, sampleRate, fftSize, 6200, Math.min(16000, sampleRate / 2));
 
   let rms = 0;
   for (let j = 0; j < timeBuf.length; j++) {
@@ -691,6 +692,20 @@ function advanceGalaxyAudioBands(dt: number, options: GalaxyAudioReadOptions): G
 
   const audioEnergy = Math.max(smoothEnergy, beatPulse * 0.3);
   const shaped = shapeBandsForPreset(preset, intensity, smoothBass, smoothMid, smoothTreb, beatPulse);
+  const sunEnergyBand = clamp01((smoothEnergy - 0.18) / 0.38);
+  const sunVoice = clamp01((voc - 0.11) / 0.34);
+  const sunMelody = clamp01((smoothMid - 0.16) / 0.27);
+  const sunAir = clamp01((smoothTreb - 0.105) / 0.17);
+  let sunRaw = clamp01(sunEnergyBand * 0.36 + sunVoice * 0.18 + sunMelody * 0.26 + sunAir * 0.20);
+  sunRaw = sunRaw * sunRaw * (3 - 2 * sunRaw);
+  sun.avg += (sunRaw - sun.avg) * (sunRaw > sun.avg ? 0.006 : 0.014);
+  sun.peak = Math.max(0.48, sun.peak * Math.pow(0.9985, safeDt * 60), sunRaw);
+  const sunThreshold = Math.max(0.78, sun.avg + 0.20, sun.peak * 0.74);
+  const sunGate = clamp01((sunRaw - sunThreshold) / Math.max(0.08, 1 - sunThreshold));
+  const smoothGate = sunGate * sunGate * (3 - 2 * sunGate);
+  sun.hold += (smoothGate - sun.hold) * (smoothGate > sun.hold ? 0.035 : 0.014);
+  const sunTarget = sun.hold > 0.16 ? clamp01((sun.hold - 0.16) / 0.84) : 0;
+  sun.energy += (sunTarget - sun.energy) * (sunTarget > sun.energy ? 0.075 : 0.030);
 
   return {
     bass: shaped.bass,
@@ -700,6 +715,8 @@ function advanceGalaxyAudioBands(dt: number, options: GalaxyAudioReadOptions): G
     energy: audioEnergy,
     smoothBass,
     rippleBass: shaped.bass,
+    vocal: voc,
+    sunEnergy: sun.energy,
   };
 }
 
@@ -709,8 +726,9 @@ export function readGalaxyAudioBands(dt = 1 / 60, options: GalaxyAudioReadOption
   if (now - lastAdvanceMs < 32) {
     return cachedBands;
   }
+  const analysisDt = lastAdvanceMs < 0 ? dt : Math.max(0.001, Math.min(0.08, (now - lastAdvanceMs) / 1000));
   lastAdvanceMs = now;
-  cachedBands = advanceGalaxyAudioBands(dt, options);
+  cachedBands = advanceGalaxyAudioBands(analysisDt, options);
   return cachedBands;
 }
 

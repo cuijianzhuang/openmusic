@@ -23,18 +23,18 @@ export function groundEqFromMineradioFx(fx: RoomVisualFxSettings): StoredGroundE
     motionSpeed: clamp100(fx.speed * 50),
     amplitude: clamp100(fx.intensity * (DEFAULT_GROUND_AMPLITUDE / 0.85)),
     terrainDensity: clamp100(((fx.depth - 0.2) / 1.6) * 100) || DEFAULT_TERRAIN_DENSITY,
-    floatingBlocksEnabled: fx.floatLayer,
-    floatingBlockIntensity: clamp100(fx.bloomStrength * 88) || DEFAULT_FLOATING_BLOCK_INTENSITY,
+    floatingBlocksEnabled: fx.floatLayer !== false,
+    floatingBlockIntensity: DEFAULT_FLOATING_BLOCK_INTENSITY,
     floatingBlockMinSize: DEFAULT_FLOATING_BLOCK_MIN_SIZE,
     floatingBlockMaxSize: DEFAULT_FLOATING_BLOCK_MAX_SIZE,
-    floatingBlockSpeed: clamp100(fx.speed * 77) || DEFAULT_FLOATING_BLOCK_SPEED,
+    floatingBlockSpeed: DEFAULT_FLOATING_BLOCK_SPEED,
     floatingBlockCount: DEFAULT_FLOATING_BLOCK_COUNT,
     enabledBands: new Array(8).fill(true),
   });
 }
 
 export function topographyRotationSpeed(fx: RoomVisualFxSettings): number {
-  return 0.08 + fx.speed * 0.42;
+  return 0.15 * fx.speed;
 }
 
 export function topographyCameraDistanceScale(fx: RoomVisualFxSettings): number {

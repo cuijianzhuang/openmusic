@@ -16,9 +16,11 @@ import {
 } from './lib/topographyGroundEq';
 import { clampAnimationBlend, deriveKickFollowLowBands } from './lib/topographyTerrainResponse';
 import {
-  TOPOGRAPHY_CAMERA_STATE_STORAGE_KEY,
-  DEFAULT_TOPOGRAPHY_CAMERA_STATE,
-  normalizeCameraState,
+  TOPOGRAPHY_FOG_FAR,
+  TOPOGRAPHY_FOG_NEAR,
+  TOPOGRAPHY_WORLD_SCALE,
+  TOPOGRAPHY_WORLD_Y,
+  TOPOGRAPHY_WORLD_Z,
 } from './lib/topographySceneDefaults';
 import {
   createTopographyFloatingBlockMaterial,
@@ -30,17 +32,18 @@ import {
   topographyRotationSpeed,
 } from './lib/topographyFxBridge';
 import { resolveTopographyTheme } from './lib/topographyThemeResolve';
-import TopographyOrbitControls from './TopographyOrbitControls';
+import { getParticleRootGroup } from '../galaxy/lib/galaxyGestureRotation';
 
 export default function TopographyMapScene() {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const mapMaterial = useMemo(() => createTopographyMapMaterial(), []);
   const floatingBlockMaterial = useMemo(() => createTopographyFloatingBlockMaterial(), []);
   const floatingBlockMeshRef = useRef<THREE.InstancedMesh>(null);
+  const worldRef = useRef<THREE.Group>(null);
   const visualPlatterRef = useRef<THREE.Group>(null);
   const platterRotationRef = useRef(0);
   const localPointRef = useRef(new THREE.Vector3());
-  const { clock, camera } = useThree();
+  const { clock } = useThree();
   const smoothedGroundAudioRef = useRef({
     subBass: 0,
     bass: 0,
@@ -59,48 +62,14 @@ export default function TopographyMapScene() {
   const groundEqSettings = groundEqFromMineradioFx(fx);
 
   const terrainDensity = groundEqSettings.terrainDensity ?? DEFAULT_TERRAIN_DENSITY;
-  const gridSettings = useMemo(() => deriveTerrainGridSettings(terrainDensity), [terrainDensity]);
+  const performanceQuality = fx.performanceQuality ?? 'balanced';
+  const gridSettings = useMemo(
+    () => deriveTerrainGridSettings(terrainDensity, performanceQuality),
+    [terrainDensity, performanceQuality],
+  );
   const { gridSize, spacing, boxWidth, instanceCount } = gridSettings;
   const floatingBlocksEnabled = groundEqSettings.floatingBlocksEnabled ?? DEFAULT_FLOATING_BLOCKS_ENABLED;
 
-  const controlsRef = useRef<any>(null);
-  
-  useEffect(() => {
-    // Restore on mount, falling back to the factory camera captured from the tuned Electron profile.
-    const saved = localStorage.getItem(TOPOGRAPHY_CAMERA_STATE_STORAGE_KEY);
-    let cameraState = DEFAULT_TOPOGRAPHY_CAMERA_STATE;
-    if (saved) {
-      try {
-        cameraState = normalizeCameraState(JSON.parse(saved));
-      } catch (e) {
-        console.error("Failed to restore camera state", e);
-      }
-    }
-    camera.position.set(cameraState.position.x, cameraState.position.y, cameraState.position.z);
-    // Use a timeout to ensure controls are fully initialized before applying target
-    setTimeout(() => {
-      if (controlsRef.current) {
-        controlsRef.current.target.set(cameraState.target.x, cameraState.target.y, cameraState.target.z);
-        controlsRef.current.update();
-      }
-    }, 0);
-
-    const saveState = () => {
-      if (controlsRef.current && camera) {
-        localStorage.setItem(TOPOGRAPHY_CAMERA_STATE_STORAGE_KEY, JSON.stringify({
-          position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
-          target: { x: controlsRef.current.target.x, y: controlsRef.current.target.y, z: controlsRef.current.target.z }
-        }));
-      }
-    };
-
-    window.addEventListener('beforeunload', saveState);
-
-    return () => {
-      saveState();
-      window.removeEventListener('beforeunload', saveState);
-    };
-  }, [camera]);
 
   useLayoutEffect(() => {
     if (!meshRef.current) return;
@@ -264,7 +233,9 @@ export default function TopographyMapScene() {
     };
   }, []);
 
-  useFrame((state, delta) => {
+  useFrame((state, rawDelta) => {
+    // 长任务（切歌重建封面/歌词纹理）会让 delta 冲高，转盘按原值积分会瞬移一大段
+    const delta = Math.min(rawDelta, 1 / 20);
     const liveFx = roomVisualFxLive.current;
     const liveGround = groundEqFromMineradioFx(liveFx);
     const liveRotationSpeed = topographyRotationSpeed(liveFx);
@@ -274,6 +245,9 @@ export default function TopographyMapScene() {
     const floatingBlockMaxSize = Math.max(floatingBlockMinSize, Math.min(100, liveGround.floatingBlockMaxSize ?? DEFAULT_FLOATING_BLOCK_MAX_SIZE));
     const floatingBlockSpeed = Math.max(0, Math.min(100, liveGround.floatingBlockSpeed ?? DEFAULT_FLOATING_BLOCK_SPEED));
 
+    // Mineradio bindVisualRotation：地形整体跟着歌词那组的拖拽旋转走
+    const visualRoot = getParticleRootGroup();
+    if (worldRef.current && visualRoot) worldRef.current.rotation.copy(visualRoot.rotation);
     if (visualPlatterRef.current) {
       platterRotationRef.current += liveRotationSpeed * delta;
       visualPlatterRef.current.rotation.y = platterRotationRef.current;
@@ -529,12 +503,20 @@ export default function TopographyMapScene() {
 
   return (
     <>
-      <fog ref={fogRef} attach="fog" args={[`#${t.uBaseColor1.getHexString()}`, 30, 95]} />
+      <fog
+        ref={fogRef}
+        attach="fog"
+        args={[`#${t.uBaseColor1.getHexString()}`, TOPOGRAPHY_FOG_NEAR, TOPOGRAPHY_FOG_FAR]}
+      />
       <ambientLight intensity={0.5} />
       <directionalLight position={[10, 20, 10]} intensity={1} />
-      
-      <TopographyOrbitControls ref={controlsRef} cameraDistance={roomVisualFxLive.current.cameraDistance} />
 
+      {/* 168 单位的地形整体缩进星河世界，相机推拉即可同时缩放地形与歌词 */}
+      <group
+        ref={worldRef}
+        position={[0, TOPOGRAPHY_WORLD_Y, TOPOGRAPHY_WORLD_Z]}
+        scale={TOPOGRAPHY_WORLD_SCALE}
+      >
       <group ref={visualPlatterRef}>
         <instancedMesh
           key={gridSize}
@@ -568,6 +550,7 @@ export default function TopographyMapScene() {
            <boxGeometry args={[0.8, 0.8, 0.8]} />
            <meshBasicMaterial ref={particleMatRef} color="#ffffff" toneMapped={false} transparent={true} opacity={0.6} /> 
         </instancedMesh>
+      </group>
       </group>
     </>
   );

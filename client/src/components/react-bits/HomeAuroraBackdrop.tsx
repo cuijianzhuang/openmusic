@@ -53,7 +53,14 @@ export default function HomeAuroraBackdrop() {
       ) : (
         <StaticGlow />
       )}
-      <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-[0.02]" />
+      <div
+        className="absolute inset-0 opacity-[0.025]"
+        style={{
+          backgroundImage:
+            'repeating-radial-gradient(circle at 17% 23%, rgba(255,255,255,0.34) 0 0.55px, transparent 0.8px 3px)',
+          backgroundSize: '5px 5px',
+        }}
+      />
     </div>
   );
 }

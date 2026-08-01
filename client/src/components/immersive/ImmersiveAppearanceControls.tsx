@@ -1,16 +1,20 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { RoomVisualFxSettings } from '../../lib/roomVisualPreset';
 import { DEFAULT_ROOM_VISUAL_FX } from '../../lib/roomVisualPreset';
-import { FxSectionLabel, FxMineradioSlider } from '../RoomVisualFxSettingsBody';
+import { FxSectionLabel } from '../RoomVisualFxSettingsBody';
 import CoverColorPickerPopover from './CoverColorPickerPopover';
+import {
+  clearLocalBackgroundMedia,
+  LOCAL_BACKGROUND_MEDIA_REF,
+  readLocalBackgroundMedia,
+  saveLocalBackgroundMedia,
+} from '../../lib/localBackgroundMedia';
 
 interface Props {
   value: RoomVisualFxSettings;
   onPatch: (patch: Partial<RoomVisualFxSettings>) => void;
   coverUrl?: string | null;
   dragging: boolean;
-  draggingKey: string | null;
-  setDraggingKey: (key: string | null) => void;
 }
 
 function ColorRow({
@@ -58,13 +62,37 @@ export default function ImmersiveAppearanceControls({
   onPatch,
   coverUrl,
   dragging,
-  draggingKey,
-  setDraggingKey,
 }: Props) {
   const [coverPickerTarget, setCoverPickerTarget] = useState<'visualTint' | 'backgroundColor' | null>(null);
+  const [localMediaLabel, setLocalMediaLabel] = useState<string | null>(null);
   const bgInputRef = useRef<HTMLInputElement>(null);
 
   const hidden = dragging ? 'pointer-events-none invisible' : '';
+
+  const refreshLocalMediaLabel = useCallback(async () => {
+    if (value.backgroundMedia !== LOCAL_BACKGROUND_MEDIA_REF) {
+      setLocalMediaLabel(null);
+      return;
+    }
+    try {
+      const record = await readLocalBackgroundMedia();
+      if (!record) {
+        setLocalMediaLabel(null);
+        return;
+      }
+      const kind = record.type.startsWith('video/') ? '视频' : '图片';
+      setLocalMediaLabel(`${kind} · ${record.name || '本机文件'}`);
+    } catch {
+      setLocalMediaLabel('本机文件');
+    }
+  }, [value.backgroundMedia]);
+
+  useEffect(() => {
+    void refreshLocalMediaLabel();
+    const onUpdate = () => void refreshLocalMediaLabel();
+    window.addEventListener('openmusic:local-background-updated', onUpdate);
+    return () => window.removeEventListener('openmusic:local-background-updated', onUpdate);
+  }, [refreshLocalMediaLabel]);
 
   const applyCoverColor = useCallback(
     (hex: string) => {
@@ -78,26 +106,79 @@ export default function ImmersiveAppearanceControls({
     [coverPickerTarget, onPatch],
   );
 
-  const onBgFile = (file: File | null) => {
+  const onBgFile = async (file: File | null) => {
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = String(reader.result || '');
-      if (dataUrl.length > 4_000_000) {
-        window.dispatchEvent(
-          new CustomEvent('openmusic:visual-toast', {
-            detail: { message: '背景图片过大，请选择 3MB 以内的文件', type: 'error' },
-          }),
-        );
-        return;
-      }
-      onPatch({ backgroundMedia: dataUrl });
-    };
-    reader.readAsDataURL(file);
+    const image = file.type.startsWith('image/');
+    const video = file.type === 'video/mp4' || file.type === 'video/webm';
+    const maxBytes = image ? 30 * 1024 * 1024 : 600 * 1024 * 1024;
+    if ((!image && !video) || file.size > maxBytes) {
+      window.dispatchEvent(new CustomEvent('openmusic:visual-toast', {
+        detail: {
+          message: !image && !video
+            ? '仅支持图片或 MP4/WebM 视频'
+            : `文件过大，${image ? '图片上限 30MB' : '视频上限 600MB'}`,
+          type: 'error',
+        },
+      }));
+      return;
+    }
+    try {
+      await saveLocalBackgroundMedia(file);
+      onPatch({ backgroundMedia: LOCAL_BACKGROUND_MEDIA_REF });
+      window.dispatchEvent(new CustomEvent('openmusic:local-background-updated'));
+      window.dispatchEvent(new CustomEvent('openmusic:visual-toast', {
+        detail: { message: '已导入本机背景（仅保存在浏览器，不上传服务器）', type: 'success' },
+      }));
+    } catch (error) {
+      console.error('Unable to save local background media:', error);
+      window.dispatchEvent(new CustomEvent('openmusic:visual-toast', {
+        detail: { message: '本机背景保存失败，请检查浏览器存储空间', type: 'error' },
+      }));
+    }
+  };
+
+  const clearBackgroundMedia = async () => {
+    if (value.backgroundMedia === LOCAL_BACKGROUND_MEDIA_REF) {
+      try { await clearLocalBackgroundMedia(); } catch (error) { console.warn(error); }
+    }
+    onPatch({ backgroundMedia: null });
+    setLocalMediaLabel(null);
+    window.dispatchEvent(new CustomEvent('openmusic:local-background-updated'));
   };
 
   return (
     <>
+      <FxSectionLabel>本机背景</FxSectionLabel>
+      <div className={hidden}>
+        <div className="lyric-color-row image-pick-row">
+          <button type="button" className="fx-mini-btn ghost" onClick={() => bgInputRef.current?.click()}>
+            导入
+          </button>
+          <div className="fx-color-row-label">
+            图片 / MP4
+            <small>{localMediaLabel || (value.backgroundMedia ? '已设置' : '未设置 · 仅存本机')}</small>
+          </div>
+          <button
+            type="button"
+            className="fx-mini-btn ghost"
+            onClick={() => void clearBackgroundMedia()}
+            disabled={!value.backgroundMedia}
+          >
+            清除
+          </button>
+          <input
+            ref={bgInputRef}
+            type="file"
+            accept="image/*,video/mp4,video/webm"
+            className="hidden"
+            onChange={(e) => {
+              void onBgFile(e.target.files?.[0] || null);
+              e.target.value = '';
+            }}
+          />
+        </div>
+      </div>
+
       <FxSectionLabel>自定义颜色</FxSectionLabel>
       <div className={hidden}>
         <ColorRow
@@ -131,27 +212,6 @@ export default function ImmersiveAppearanceControls({
           }
         />
         <ColorRow
-          label="Home 填充"
-          color={value.homeAccentColor}
-          small={value.homeAccentColor.toUpperCase()}
-          onChange={(homeAccentColor) => onPatch({ homeAccentColor })}
-          onReset={() => onPatch({ homeAccentColor: DEFAULT_ROOM_VISUAL_FX.homeAccentColor })}
-        />
-        <ColorRow
-          label="主页图标"
-          color={value.homeIconColor}
-          small={value.homeIconColor.toUpperCase()}
-          onChange={(homeIconColor) => onPatch({ homeIconColor })}
-          onReset={() => onPatch({ homeIconColor: DEFAULT_ROOM_VISUAL_FX.homeIconColor })}
-        />
-        <ColorRow
-          label="视觉图标"
-          color={value.visualIconColor}
-          small={value.visualIconColor.toUpperCase()}
-          onChange={(visualIconColor) => onPatch({ visualIconColor })}
-          onReset={() => onPatch({ visualIconColor: DEFAULT_ROOM_VISUAL_FX.visualIconColor })}
-        />
-        <ColorRow
           label="背景颜色"
           color={value.backgroundColor}
           small={value.backgroundColorMode === 'cover' ? '封面' : value.backgroundColor.toUpperCase()}
@@ -172,82 +232,6 @@ export default function ImmersiveAppearanceControls({
             >
               取色
             </button>
-          }
-        />
-        <div className="lyric-color-row image-pick-row">
-          <button type="button" className="fx-mini-btn ghost" onClick={() => bgInputRef.current?.click()}>
-            选择
-          </button>
-          <div className="fx-color-row-label">
-            背景媒体
-            <small>{value.backgroundMedia ? '已设置' : '未设置'}</small>
-          </div>
-          <button
-            type="button"
-            className="fx-mini-btn ghost"
-            onClick={() => onPatch({ backgroundMedia: null })}
-            disabled={!value.backgroundMedia}
-          >
-            清除
-          </button>
-          <input
-            ref={bgInputRef}
-            type="file"
-            accept="image/*,video/*"
-            className="hidden"
-            onChange={(e) => {
-              onBgFile(e.target.files?.[0] || null);
-              e.target.value = '';
-            }}
-          />
-        </div>
-      </div>
-
-      <FxSectionLabel>背景与玻璃</FxSectionLabel>
-      <div
-        className={
-          draggingKey !== null && draggingKey !== 'backgroundOpacity'
-            ? 'pointer-events-none invisible'
-            : ''
-        }
-      >
-        <FxMineradioSlider
-          def={{
-            key: 'backgroundOpacity' as never,
-            label: '背景透明度',
-            min: 0,
-            max: 1,
-            step: 0.01,
-            formatValue: (v) => `${Math.round(v * 100)}%`,
-          }}
-          value={value.backgroundOpacity}
-          defaultValue={DEFAULT_ROOM_VISUAL_FX.backgroundOpacity}
-          onDragStart={() => setDraggingKey('backgroundOpacity')}
-          onLiveChange={(backgroundOpacity) => onPatch({ backgroundOpacity })}
-          onReset={() => onPatch({ backgroundOpacity: DEFAULT_ROOM_VISUAL_FX.backgroundOpacity })}
-        />
-      </div>
-      <div
-        className={
-          draggingKey !== null && draggingKey !== 'controlGlassChromaticOffset'
-            ? 'pointer-events-none invisible'
-            : ''
-        }
-      >
-        <FxMineradioSlider
-          def={{
-            key: 'controlGlassChromaticOffset' as never,
-            label: '控制台玻璃色差',
-            min: 0,
-            max: 140,
-            step: 1,
-          }}
-          value={value.controlGlassChromaticOffset}
-          defaultValue={DEFAULT_ROOM_VISUAL_FX.controlGlassChromaticOffset}
-          onDragStart={() => setDraggingKey('controlGlassChromaticOffset')}
-          onLiveChange={(controlGlassChromaticOffset) => onPatch({ controlGlassChromaticOffset })}
-          onReset={() =>
-            onPatch({ controlGlassChromaticOffset: DEFAULT_ROOM_VISUAL_FX.controlGlassChromaticOffset })
           }
         />
       </div>

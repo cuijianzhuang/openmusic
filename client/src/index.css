@@ -1102,7 +1102,7 @@ body {
 
 .room-immersive-mode .mineradio-bottom-bar.visible.room-immersive-bottom {
   border-radius: 22px;
-  width: min(520px, calc(100vw - 56px));
+  width: min(720px, calc(100vw - 48px));
   padding: 10px 20px 13px;
   gap: 9px;
   display: flex;
@@ -1120,6 +1120,16 @@ body {
   -webkit-backdrop-filter: blur(46px) saturate(1.36);
 }
 
+.mineradio-progress-row {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin: 4px 0 1px;
+}
+
 .mineradio-progress-bar {
   position: relative;
   z-index: 1;
@@ -1135,6 +1145,14 @@ body {
   box-shadow:
     inset 0 1px 1px rgba(255, 255, 255, 0.12),
     inset 0 -1px 1px rgba(0, 0, 0, 0.2);
+}
+
+.mineradio-progress-row .mineradio-progress-bar {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  margin: 0;
+  align-self: center;
 }
 
 .mineradio-progress-bar:hover,
@@ -1155,6 +1173,18 @@ body {
 .room-immersive-mode .mineradio-progress-bar.is-dragging {
   height: 5px;
   background: rgba(255, 255, 255, 0.14);
+}
+
+.room-immersive-mode .mineradio-progress-row .mineradio-time-display {
+  height: auto;
+  min-width: 72px;
+  padding: 0;
+  font-size: 11px;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.55);
+  justify-content: flex-end;
+  text-align: right;
+  white-space: nowrap;
 }
 
 .mineradio-progress-fill {
@@ -1201,7 +1231,8 @@ body {
 
 .room-immersive-mode .mineradio-controls {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) max-content minmax(0, 1fr) max-content;
+  /* 右列要放下 时间 + 音量 + 上报 */
+  grid-template-columns: minmax(180px, 1fr) max-content minmax(186px, 0.55fr);
   width: 100%;
   align-items: center;
   gap: 12px;
@@ -1220,6 +1251,11 @@ body {
   justify-content: center;
   height: 64px;
   gap: 10px;
+}
+
+.room-immersive-mode .control-cluster.actions {
+  min-width: 220px;
+  justify-content: flex-start;
 }
 
 .control-cluster.actions {
@@ -1259,7 +1295,8 @@ body {
 }
 
 .room-immersive-mode .control-track {
-  max-width: 190px;
+  width: 100%;
+  max-width: none;
 }
 
 .control-cover {
@@ -1293,7 +1330,8 @@ body {
 }
 
 .room-immersive-mode .control-meta {
-  max-width: min(132px, 100%);
+  flex: 1 1 auto;
+  max-width: none;
 }
 
 .control-title {
@@ -1406,13 +1444,7 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-.room-immersive-mode .mineradio-time-display {
-  display: flex;
-  height: 40px;
-  min-width: 86px;
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.58);
-}
+/* 沉浸底栏时长已挪到进度条右侧，见 .mineradio-progress-row */
 
 .mineradio-glass-btn {
   border: 0;
@@ -1700,8 +1732,17 @@ html.control-glass-svg-ok #search-box {
 }
 
 .topography-center-lyric-transform {
+  position: relative;
+  width: min(90vw, 920px);
+  height: min(78vh, 820px);
   transform-style: preserve-3d;
   will-change: transform;
+}
+
+.topography-center-lyric-track {
+  position: absolute;
+  inset: 50% 0 auto;
+  height: 0;
 }
 
 .topography-center-lyric-line {
@@ -1728,6 +1769,28 @@ html.control-glass-svg-ok #search-box {
     drop-shadow(0 0 calc(var(--lyric-glow-blur, 0) * 1px) var(--lyric-glow, rgba(138, 190, 255, 0.32)))
     drop-shadow(0 2px 22px rgba(0, 0, 0, 0.38));
   will-change: background-image, filter;
+  transition: opacity 220ms ease, transform 420ms cubic-bezier(0.2, 0.7, 0.2, 1), filter 220ms ease;
+}
+
+.topography-center-lyric-scroll {
+  animation: none;
+}
+
+.topography-center-lyric-slot {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  margin: 0;
+  transform-origin: center center;
+  transition: transform 560ms cubic-bezier(0.16, 0.84, 0.32, 1), opacity 420ms ease, filter 220ms ease;
+}
+
+.topography-center-lyric-translation {
+  display: block;
+  margin-top: 0.42em;
+  font-size: 0.62em;
+  opacity: 0.78;
 }
 
 .topography-center-lyric-line.topography-center-lyric-stone {
@@ -3312,6 +3375,14 @@ body.immersive-mode #hand-canvas {
   pointer-events: none;
 }
 
+/* 鼠标静止 3 秒：原地渐隐，不像 auto-hidden 那样滑出屏幕 */
+.immersive-fx-fab.idle-hidden,
+.immersive-fx-fab-hide.idle-hidden {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.5s ease;
+}
+
 .fx-actions {
   display: flex;
   gap: 8px;
@@ -3372,7 +3443,9 @@ body.immersive-mode #hand-canvas {
   }
 
   .room-immersive-mode .control-track {
-    max-width: 152px;
+    max-width: none;
+    min-width: 0;
+    flex: 1 1 auto;
   }
 
   .room-immersive-mode .mineradio-ctrl-btn {
@@ -3385,8 +3458,8 @@ body.immersive-mode #hand-canvas {
     height: 58px;
   }
 
-  .room-immersive-mode .mineradio-time-display {
-    min-width: 72px;
+  .room-immersive-mode .mineradio-progress-row .mineradio-time-display {
+    min-width: 68px;
     font-size: 10.5px;
   }
 }
@@ -3449,14 +3522,32 @@ body.immersive-mode #hand-canvas {
     margin-left: auto;
   }
 
+  /* 普通底栏窄屏可隐藏歌名区；沉浸模式必须显示歌曲名 */
   .control-track {
     display: none;
+  }
+
+  .room-immersive-mode .control-track {
+    display: flex;
+    max-width: none;
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .room-immersive-mode .mineradio-controls {
+    grid-template-columns: minmax(0, 1fr) max-content max-content;
+    gap: 8px;
+  }
+
+  .room-immersive-mode .control-cluster.actions {
+    min-width: 0;
   }
 }
 
 @media (max-width: 420px) {
-  .room-immersive-mode .mineradio-time-display {
-    display: none;
+  .room-immersive-mode .mineradio-progress-row .mineradio-time-display {
+    min-width: 64px;
+    font-size: 10px;
   }
 }
 

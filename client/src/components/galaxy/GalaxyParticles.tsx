@@ -6,7 +6,8 @@ import { makeDotTexture } from './lib/dotTexture';
 import { getCachedGalaxyAudioBands, resumeGalaxyAudioContext } from './lib/galaxyAudio';
 import {
   buildGalaxyParticleGeometry,
-  coverParticleGridForResolution as gridForResolution,
+  galaxyParticleGridForQuality,
+  GALAXY_LAYER_COUNT_SCALE,
   PLANE_SIZE,
 } from './lib/particleGeometry';
 import {
@@ -17,6 +18,9 @@ import {
 import { roomVisualFxLive } from '../../lib/roomVisualFxLive';
 import { toProxiedMediaUrl } from '../../lib/mediaProxyUrl';
 import { useSignedApiUrl } from '../../lib/signedApiUrl';
+import { cacheCoverImage, getCachedCoverImage } from '../../lib/coverImageCache';
+import { scheduleVisualApply } from '../../lib/scheduleVisualApply';
+import { getCoverEdgeCanvas, setCoverEdgeCanvas } from './lib/coverEdgeCache';
 import { effectiveBloomStrength, syncGalaxyFxUniforms } from './lib/syncVisualUniforms';
 import { buildCoverEdgeTexture } from './lib/buildCoverEdgeTexture';
 import {
@@ -51,10 +55,15 @@ import {
 import { galaxyOrbitRef } from './lib/galaxyOrbit';
 import GalaxyStageLyrics from './GalaxyStageLyrics';
 import GalaxyFloatingSongCard from './GalaxyFloatingSongCard';
+import GalaxyBackgroundStarRiver from './GalaxyBackgroundStarRiver';
 
 const DEFAULT_COVER = '#1c1c28';
-const FLOAT_COUNT = 1300;
-const BACK_COVER_COUNT = 3000;
+// 基准(=high 1.0 档)粒子量;缓冲区按 ultra 最大尺寸分配,使极致档能真正增粒。
+const FLOAT_COUNT_BASE = 1300;
+const BACK_COVER_COUNT_BASE = 3000;
+const GALAXY_LAYER_MAX_SCALE = 1.16;
+const FLOAT_COUNT = Math.ceil(FLOAT_COUNT_BASE * GALAXY_LAYER_MAX_SCALE);
+const BACK_COVER_COUNT = Math.ceil(BACK_COVER_COUNT_BASE * GALAXY_LAYER_MAX_SCALE);
 
 type SharedUniforms = {
   uTime: { value: number };
@@ -397,9 +406,16 @@ interface Props {
   coverUrl?: string | null;
   preset: RoomVisualPresetId;
   isPlaying: boolean;
+  /** 地形场景里歌词要按地形的锚点排版 */
+  spatialAnchor?: 'galaxy' | 'topography';
 }
 
-export default function GalaxyParticles({ coverUrl, preset, isPlaying }: Props) {
+export default function GalaxyParticles({
+  coverUrl,
+  preset,
+  isPlaying,
+  spatialAnchor = 'galaxy',
+}: Props) {
   const proxiedCover = useMemo(
     () => (coverUrl ? toProxiedMediaUrl(coverUrl) : null),
     [coverUrl],
@@ -407,7 +423,10 @@ export default function GalaxyParticles({ coverUrl, preset, isPlaying }: Props) 
   const signedCover = useSignedApiUrl(proxiedCover);
   const invalidate = useThree((state) => state.invalidate);
   const [particleGrid, setParticleGrid] = useState(() =>
-    gridForResolution(roomVisualFxLive.current.coverResolution),
+    galaxyParticleGridForQuality(
+      roomVisualFxLive.current.coverResolution,
+      roomVisualFxLive.current.performanceQuality,
+    ),
   );
   const geometry = useMemo(() => buildGalaxyParticleGeometry(particleGrid), [particleGrid]);
   const bloomGeometry = useMemo(() => geometry.clone(), [geometry]);
@@ -423,8 +442,11 @@ export default function GalaxyParticles({ coverUrl, preset, isPlaying }: Props) 
   const backCoverRef = useRef<THREE.Points | null>(null);
   const depthTweenCancelRef = useRef<(() => void) | null>(null);
   const colorMixCancelRef = useRef<(() => void) | null>(null);
+  const heavyCoverCancelRef = useRef<(() => void) | null>(null);
+  const coverTokenRef = useRef(0);
   const coverImageCacheRef = useRef<HTMLImageElement | null>(null);
   const gridRef = useRef(particleGrid);
+  const layerQualityRef = useRef<string>('');
   const vinylSpinRef = useRef(0);
   const presetTransitionRef = useRef(createPresetTransitionState());
 
@@ -459,7 +481,7 @@ export default function GalaxyParticles({ coverUrl, preset, isPlaying }: Props) 
     uHandActive: { value: 0 },
     uGestureGrip: { value: 0 },
     uTintColor: { value: new THREE.Color(roomVisualFxLive.current.visualTintColor) },
-    uTintStrength: { value: roomVisualFxLive.current.visualTintMode === 'custom' ? 0.42 : 0.38 },
+    uTintStrength: { value: roomVisualFxLive.current.visualTintMode === 'custom' ? 0.42 : 0 },
     uPixel: { value: Math.min(window.devicePixelRatio || 1, 1.75) },
     uColorMixT: { value: 1 },
     uLoading: { value: 0 },
@@ -543,15 +565,22 @@ export default function GalaxyParticles({ coverUrl, preset, isPlaying }: Props) 
   }, [preset, rippleSystem, uniforms]);
 
   useEffect(() => {
-    depthTweenCancelRef.current?.();
-    depthTweenCancelRef.current = null;
-    colorMixCancelRef.current?.();
-    colorMixCancelRef.current = null;
+    const swapEdgeTexture = (canvas: HTMLCanvasElement | null) => {
+      const prevEdge = edgeTexRef.current;
+      const nextEdge = canvas ? new THREE.CanvasTexture(canvas) : makeEdgePlaceholderTexture();
+      nextEdge.minFilter = THREE.LinearFilter;
+      nextEdge.magFilter = THREE.LinearFilter;
+      nextEdge.needsUpdate = true;
+      edgeTexRef.current = nextEdge;
+      uniforms.uEdgeTex.value = nextEdge;
+      if (prevEdge && prevEdge !== nextEdge && prevEdge !== prevEdgeTex.current) prevEdge.dispose();
+    };
 
     const applyLoadedCover = (img: HTMLImageElement) => {
       const fx = roomVisualFxLive.current;
       const texSize = coverTextureSizeForResolution(fx.coverResolution);
-      const hasPrevCover = uniforms.uHasCover.value > 0.5 && coverTex.current?.image;
+      const token = ++coverTokenRef.current;
+      const hasPrevCover = uniforms.uHasCover.value > 0.5 && Boolean(coverTex.current?.image);
 
       if (hasPrevCover) {
         const prevCoverCv = cloneCoverCanvas(coverTex.current.image as CanvasImageSource);
@@ -575,6 +604,8 @@ export default function GalaxyParticles({ coverUrl, preset, isPlaying }: Props) 
         }
       }
 
+      // 新封面先上屏。边缘深度图 / 取色 / 浮层染色留到空闲帧：
+      // 这几步同步跑完要上百毫秒，挤在切歌这一帧里就是整场一次大跳。
       const cv = makeSquareCoverCanvas(img, texSize);
       const prevMain = coverTex.current;
       const tex = new THREE.CanvasTexture(cv);
@@ -583,46 +614,60 @@ export default function GalaxyParticles({ coverUrl, preset, isPlaying }: Props) 
       coverTex.current = tex;
       uniforms.uCoverTex.value = tex;
       uniforms.uHasCover.value = 1;
+      if (prevMain && prevMain !== prevCoverTex.current) prevMain.dispose();
 
-      if (fx.visualTintMode === 'auto') {
-        (uniforms.uTintColor.value as THREE.Color).set(sampleCoverAccentColor(cv));
-      }
-
-      updateLyricPaletteFromCover(cv);
-
-      floatLayer.refreshColorsFromCover(cv);
-      backCoverLayer.refreshColorsFromCover(cv);
-
-      const edgeCanvas = buildCoverEdgeTexture(cv);
-      const prevEdge = edgeTexRef.current;
-      const nextEdge = new THREE.CanvasTexture(edgeCanvas);
-      nextEdge.minFilter = THREE.LinearFilter;
-      nextEdge.magFilter = THREE.LinearFilter;
-      nextEdge.needsUpdate = true;
-      edgeTexRef.current = nextEdge;
-      uniforms.uEdgeTex.value = nextEdge;
-
-      const mixMs = preset === 0 ? 520 : 1400;
+      const edgeCacheKey = `${proxiedCover ?? ''}|${texSize}`;
+      const cachedEdge = getCoverEdgeCanvas(edgeCacheKey);
       depthTweenCancelRef.current?.();
-      if (hasPrevCover) {
-        uniforms.uHasDepth.value = 1;
-        uniforms.uAiBoost.value = 0.55;
+      if (cachedEdge) {
+        swapEdgeTexture(cachedEdge);
+        depthTweenCancelRef.current = tweenCoverDepthUniforms(uniforms, 1, 0.55, 120);
       } else {
-        depthTweenCancelRef.current = tweenCoverDepthUniforms(uniforms, 1, 0.55, 180);
+        // 中性边缘图 = 零深度：先把粒子平顺摊平，等真深度图算好再涨回来
+        swapEdgeTexture(null);
+        depthTweenCancelRef.current = tweenCoverDepthUniforms(uniforms, 0, 0, 96);
       }
 
       colorMixCancelRef.current?.();
       if (hasPrevCover) {
-        colorMixCancelRef.current = startCoverColorMixTween(uniforms, mixMs);
+        colorMixCancelRef.current = startCoverColorMixTween(uniforms, preset === 0 ? 520 : 960);
       } else {
         uniforms.uColorMixT.value = 1;
       }
 
-      if (prevMain && prevMain !== prevCoverTex.current) prevMain.dispose();
-      if (prevEdge && prevEdge !== nextEdge && prevEdge !== prevEdgeTex.current) prevEdge.dispose();
+      const refreshCoverDependentColors = () => {
+        if (token !== coverTokenRef.current) return;
+        const liveFx = roomVisualFxLive.current;
+        if (liveFx.visualTintMode === 'auto') {
+          (uniforms.uTintColor.value as THREE.Color).set(sampleCoverAccentColor(cv));
+        }
+        updateLyricPaletteFromCover(cv);
+        floatLayer.refreshColorsFromCover(cv);
+        if (liveFx.backCover) backCoverLayer.refreshColorsFromCover(cv);
+        invalidate();
+      };
+
+      heavyCoverCancelRef.current?.();
+      if (cachedEdge) {
+        heavyCoverCancelRef.current = scheduleVisualApply(refreshCoverDependentColors, 90, 700);
+      } else {
+        heavyCoverCancelRef.current = scheduleVisualApply(() => {
+          if (token !== coverTokenRef.current) return;
+          const edgeCanvas = buildCoverEdgeTexture(cv);
+          setCoverEdgeCanvas(edgeCacheKey, edgeCanvas);
+          swapEdgeTexture(edgeCanvas);
+          depthTweenCancelRef.current?.();
+          depthTweenCancelRef.current = tweenCoverDepthUniforms(uniforms, 1, 0.55, 180);
+          refreshCoverDependentColors();
+        }, 120, 900);
+      }
+
+      invalidate();
     };
 
     if (!signedCover) {
+      // 新封面的签名还在算：保持当前这张，退回占位图会让粒子先塌一下再弹回来
+      if (proxiedCover) return;
       coverImageCacheRef.current = null;
       uniforms.uHasDepth.value = 0;
       uniforms.uAiBoost.value = 0;
@@ -635,12 +680,28 @@ export default function GalaxyParticles({ coverUrl, preset, isPlaying }: Props) 
     }
 
     let cancelled = false;
+
+    const reused = getCachedCoverImage(proxiedCover);
+    if (reused) {
+      coverImageCacheRef.current = reused;
+      applyLoadedCover(reused);
+      invalidate();
+      return () => {
+        cancelled = true;
+        depthTweenCancelRef.current?.();
+        depthTweenCancelRef.current = null;
+        colorMixCancelRef.current?.();
+        colorMixCancelRef.current = null;
+      };
+    }
+
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.decoding = 'async';
     img.onload = () => {
       if (cancelled) return;
       coverImageCacheRef.current = img;
+      cacheCoverImage(proxiedCover, img);
       applyLoadedCover(img);
       // 暂停时为 demand 帧循环，封面纹理就绪后需请求一帧才能显示。
       invalidate();
@@ -667,9 +728,12 @@ export default function GalaxyParticles({ coverUrl, preset, isPlaying }: Props) 
       img.onload = null;
       img.onerror = null;
     };
-  }, [backCoverLayer, signedCover, floatLayer, preset, uniforms, invalidate]);
+  }, [backCoverLayer, signedCover, proxiedCover, floatLayer, preset, uniforms, invalidate]);
 
-  useFrame((state, delta) => {
+  useFrame((state, rawDelta) => {
+    // 切歌时封面解码 / 边缘纹理 / 调色板都在同一帧里跑，delta 会冲到几百毫秒；
+    // 按原值积分会让唱片自转、涟漪、淡入一次性跳一大截，看着就是封面猛地弹一下。
+    const delta = Math.min(rawDelta, 1 / 20);
     updateGalaxyParticlePointerFrame(state.camera);
     const currentFx = roomVisualFxLive.current;
     syncGalaxyFxUniforms(uniforms, currentFx);
@@ -685,7 +749,10 @@ export default function GalaxyParticles({ coverUrl, preset, isPlaying }: Props) 
     uniforms.uHandActive.value += (hand.handActive - (uniforms.uHandActive.value as number)) * Math.min(1, delta * 7.5);
     uniforms.uGestureGrip.value += (hand.gestureGrip - (uniforms.uGestureGrip.value as number)) * Math.min(1, delta * 8);
 
-    const nextGrid = gridForResolution(currentFx.coverResolution);
+    const nextGrid = galaxyParticleGridForQuality(
+      currentFx.coverResolution,
+      currentFx.performanceQuality,
+    );
     if (nextGrid !== gridRef.current) {
       gridRef.current = nextGrid;
       setParticleGrid(nextGrid);
@@ -723,8 +790,12 @@ export default function GalaxyParticles({ coverUrl, preset, isPlaying }: Props) 
         coverTex.current = tex;
         uniforms.uCoverTex.value = tex;
         floatLayer.refreshColorsFromCover(cv);
-        backCoverLayer.refreshColorsFromCover(cv);
-        const edgeCanvas = buildCoverEdgeTexture(cv);
+        if (currentFx.backCover) backCoverLayer.refreshColorsFromCover(cv);
+        // 画质变了要重算深度图，顺手让还挂着的延后任务作废（它算的是旧尺寸的画布）
+        coverTokenRef.current += 1;
+        const edgeCacheKey = `${proxiedCover ?? ''}|${texSize}`;
+        const edgeCanvas = getCoverEdgeCanvas(edgeCacheKey) ?? buildCoverEdgeTexture(cv);
+        setCoverEdgeCanvas(edgeCacheKey, edgeCanvas);
         const prevEdge = edgeTexRef.current;
         const nextEdge = new THREE.CanvasTexture(edgeCanvas);
         nextEdge.minFilter = THREE.LinearFilter;
@@ -735,7 +806,7 @@ export default function GalaxyParticles({ coverUrl, preset, isPlaying }: Props) 
         colorMixCancelRef.current?.();
         colorMixCancelRef.current = startCoverColorMixTween(
           uniforms,
-          preset === 0 ? 520 : 1400,
+          preset === 0 ? 300 : 520,
         );
         if (prevMain && prevMain !== prevCoverTex.current) prevMain.dispose();
         if (prevEdge && prevEdge !== nextEdge && prevEdge !== prevEdgeTex.current) prevEdge.dispose();
@@ -743,6 +814,22 @@ export default function GalaxyParticles({ coverUrl, preset, isPlaying }: Props) 
     }
 
     resumeGalaxyAudioContext();
+
+    // 浮层 / 背景粒子按画质档用 drawRange 降规模,不重建图层实例(稳定且零分配)。
+    if (layerQualityRef.current !== currentFx.performanceQuality) {
+      layerQualityRef.current = currentFx.performanceQuality;
+      const scale = GALAXY_LAYER_COUNT_SCALE[currentFx.performanceQuality] ?? 1;
+      const floatGeo = floatRef.current?.geometry;
+      if (floatGeo) {
+        const total = floatGeo.getAttribute('position')?.count ?? 0;
+        floatGeo.setDrawRange(0, Math.max(1, Math.min(total, Math.round(FLOAT_COUNT_BASE * scale))));
+      }
+      const backGeo = backCoverRef.current?.geometry;
+      if (backGeo) {
+        const total = backGeo.getAttribute('position')?.count ?? 0;
+        backGeo.setDrawRange(0, Math.max(1, Math.min(total, Math.round(BACK_COVER_COUNT_BASE * scale))));
+      }
+    }
     const bands = getCachedGalaxyAudioBands();
     const elapsed = state.clock.elapsedTime;
     uniforms.uTime.value = elapsed;
@@ -789,7 +876,7 @@ export default function GalaxyParticles({ coverUrl, preset, isPlaying }: Props) 
       floatRef.current.visible = emilyLayers && currentFx.floatLayer;
     }
     if (backCoverRef.current) {
-      backCoverRef.current.visible = emilyLayers;
+      backCoverRef.current.visible = emilyLayers && currentFx.backCover;
     }
 
     uniforms.uBurstAmt.value *= 0.9;
@@ -813,6 +900,8 @@ export default function GalaxyParticles({ coverUrl, preset, isPlaying }: Props) 
     () => () => {
       depthTweenCancelRef.current?.();
       colorMixCancelRef.current?.();
+      heavyCoverCancelRef.current?.();
+      coverTokenRef.current += 1;
       rippleSystem.texture.dispose();
       geometry.dispose();
       bloomGeometry.dispose();
@@ -832,7 +921,8 @@ export default function GalaxyParticles({ coverUrl, preset, isPlaying }: Props) 
   return (
     <group ref={(node) => registerParticleRootGroup(node)}>
       <GalaxyFloatingSongCard />
-      <GalaxyStageLyrics isPlaying={isPlaying} />
+      <GalaxyStageLyrics isPlaying={isPlaying} spatialAnchor={spatialAnchor} />
+      <GalaxyBackgroundStarRiver preset={preset} dotTexture={dotTex} />
       <primitive object={backCoverLayer.points} />
       <points
         ref={bloomRef}

@@ -41,7 +41,25 @@ type LocalSliderDef = {
   step: number;
 };
 
+const WORKSHOP_THEME_COLORS: Record<RoomVisualFxSettings['sonicWorkshopTheme'], string> = {
+  'coral-mirage': '#cb6c89',
+  'ocean-deep': '#1b6fb8',
+  'arctic-aurora': '#79e1c4',
+  'cyber-forest': '#3fc78a',
+  'minimal-monochrome': '#d9dde3',
+};
+
+const WORKSHOP_COLOR_CONTROLS = [
+  { label: '主题基色', modeKey: 'sonicWorkshopColorMode', colorKey: 'sonicWorkshopCustomColor' },
+  { label: '地形底色', modeKey: 'sonicWorkshopBaseColorMode', colorKey: 'sonicWorkshopBaseColor' },
+  { label: '暖色主体', modeKey: 'sonicWorkshopWarmColorMode', colorKey: 'sonicWorkshopWarmColor' },
+  { label: '上层高光', modeKey: 'sonicWorkshopCoolColorMode', colorKey: 'sonicWorkshopCoolColor' },
+  { label: '波纹亮区', modeKey: 'sonicWorkshopRippleColorMode', colorKey: 'sonicWorkshopRippleColor' },
+  { label: '峰值高光', modeKey: 'sonicWorkshopPeakColorMode', colorKey: 'sonicWorkshopPeakColor' },
+] as const;
+
 function motionSlidersForMode(mode: RoomVisualMode) {
+  if (mode === 'topography-we') return [];
   if (mode === 'topography') {
     return MOTION_FX_SLIDERS.filter((s) => s.key !== 'coverResolution' && s.key !== 'cinemaShake').map((s) => {
       if (s.key === 'intensity') return { ...s, label: '起伏幅度' };
@@ -55,6 +73,7 @@ function motionSlidersForMode(mode: RoomVisualMode) {
 }
 
 function advancedSlidersForMode(mode: RoomVisualMode) {
+  if (mode === 'topography-we') return [];
   if (mode === 'topography') {
     return ADVANCED_FX_SLIDERS.filter((s) => s.key === 'colorBoost' || s.key === 'bloomStrength');
   }
@@ -169,10 +188,15 @@ export default function ImmersiveFxSettingsPanel({
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
   const defaultOpenFolds = {
     lyricToggles: true,
+    lyricLayout: true,
     lyricPosition: true,
     motionCore: true,
+    sonicWorkshop: true,
+    lyricMotion: true,
     shelf3d: true,
     advancedCore: true,
+    lyricGlitch: false,
+    perfQuality: true,
 
   } as const satisfies Record<string, boolean>;
 
@@ -262,8 +286,6 @@ export default function ImmersiveFxSettingsPanel({
               onPatch={onPatch}
               coverUrl={coverUrl}
               dragging={dragging}
-              draggingKey={draggingKey}
-              setDraggingKey={setDraggingKey}
             />
           </div>
         ) : null}
@@ -281,11 +303,6 @@ export default function ImmersiveFxSettingsPanel({
                   label="粒子歌词"
                   checked={value.particleLyrics}
                   onChange={(particleLyrics) => onPatch({ particleLyrics })}
-                />
-                <FxMineradioToggle
-                  label="显示翻译"
-                  checked={value.lyricShowTranslation}
-                  onChange={(lyricShowTranslation) => onPatch({ lyricShowTranslation })}
                 />
                 <FxMineradioToggle
                   label="歌词溢光"
@@ -307,7 +324,101 @@ export default function ImmersiveFxSettingsPanel({
                   checked={value.lyricCameraLock}
                   onChange={(lyricCameraLock) => onPatch({ lyricCameraLock })}
                 />
+                <FxMineradioToggle
+                  label="纵向漂浮"
+                  checked={value.lyricVerticalFloat}
+                  onChange={(lyricVerticalFloat) => onPatch({ lyricVerticalFloat })}
+                />
+                <FxMineradioToggle
+                  label="背景星河层"
+                  title="整个场景最远处那层流动星点，和歌词后面的光带（歌词光粒）无关"
+                  checked={value.backgroundStarRiver}
+                  onChange={(backgroundStarRiver) => onPatch({ backgroundStarRiver })}
+                />
+                <FxMineradioToggle
+                  label="暂停保持歌词"
+                  checked={value.lyricPauseHold}
+                  onChange={(lyricPauseHold) => onPatch({ lyricPauseHold })}
+                />
               </div>
+            </FxFold>
+
+            <FxFold
+              title="歌词布局"
+              subtitle="行数 / 翻译 / 清晰度"
+              open={openFolds.lyricLayout}
+              onToggle={() => toggleFold('lyricLayout')}
+            >
+              <FxSectionLabel>显示模式</FxSectionLabel>
+              <FxSeg
+                value={value.lyricDisplayMode}
+                onChange={(lyricDisplayMode) =>
+                  onPatch({ lyricDisplayMode: lyricDisplayMode as RoomVisualFxSettings['lyricDisplayMode'] })
+                }
+                options={[
+                  { value: 'single', label: '单行' },
+                  { value: 'dual', label: '双行' },
+                  { value: 'triple', label: '三行' },
+                  { value: 'cinema', label: '电影' },
+                  { value: 'custom', label: '自定义' },
+                ]}
+              />
+
+              <FxSectionLabel>翻译模式</FxSectionLabel>
+              <FxSeg
+                value={value.lyricShowTranslation ? value.lyricTranslationMode : 'off'}
+                onChange={(mode) => onPatch({
+                  lyricShowTranslation: mode !== 'off',
+                  lyricTranslationMode: (mode === 'off' ? 'off' : mode) as RoomVisualFxSettings['lyricTranslationMode'],
+                })}
+                options={[
+                  { value: 'off', label: '关闭' },
+                  { value: 'current', label: '当前' },
+                  { value: 'dual', label: '双语' },
+                  { value: 'multi', label: '多行' },
+                ]}
+              />
+
+              <FxSectionLabel>纹理清晰度</FxSectionLabel>
+              <FxSeg
+                value={String(value.lyricTextureClarity)}
+                onChange={(clarity) => onPatch({
+                  lyricTextureClarity: Number(clarity) as RoomVisualFxSettings['lyricTextureClarity'],
+                })}
+                options={[
+                  { value: '1', label: '1×' },
+                  { value: '2', label: '2×' },
+                  { value: '3', label: '3×' },
+                  { value: '4', label: '4×' },
+                ]}
+              />
+
+              {value.lyricDisplayMode === 'custom'
+                ? renderSliders(
+                    [{ key: 'lyricCustomLineCount', label: '自定义行数', min: 1, max: 10, step: 1 }],
+                    value,
+                    onPatch,
+                    draggingKey,
+                    setDraggingKey,
+                  )
+                : null}
+
+              <FxSectionLabel>上下文层次</FxSectionLabel>
+              {renderSliders(
+                [
+                  { key: 'lyricContextOpacity', label: '上下句透明度', min: 0.25, max: 1, step: 0.01 },
+                  { key: 'lyricContextSpread', label: '上下句间距', min: 0.6, max: 2.4, step: 0.01 },
+                  { key: 'lyricTranslationGap', label: '翻译间距', min: 0.28, max: 2.2, step: 0.01 },
+                  { key: 'lyricTranslationScale', label: '翻译字号', min: 0.46, max: 1.12, step: 0.01 },
+                  { key: 'lyricTranslationOpacity', label: '翻译透明度', min: 0.2, max: 1, step: 0.01 },
+                  { key: 'lyricEdgeFade', label: '边缘淡出', min: 0, max: 1, step: 0.01 },
+                  { key: 'lyricBackgroundAdapt', label: '背景适配', min: 0, max: 1, step: 0.01 },
+                ],
+                value,
+                onPatch,
+                draggingKey,
+                setDraggingKey,
+              )}
             </FxFold>
 
             <FxFold
@@ -339,7 +450,111 @@ export default function ImmersiveFxSettingsPanel({
 
         {tab === 'motion' ? (
           <div className="fx-tab-page active" role="tabpanel">
+            {visualMode === 'topography-we' ? (
+              <FxFold
+                title="音域回响 · WE"
+                subtitle="响应 / 配色 / 网格"
+                open={openFolds.sonicWorkshop}
+                onToggle={() => toggleFold('sonicWorkshop')}
+              >
+                {renderSliders(
+                  [
+                    { key: 'sonicWorkshopInputGain', label: '输入压制', min: 40, max: 100, step: 1 },
+                    { key: 'sonicWorkshopAudioIntensity', label: '音频响应', min: 0.3, max: 2.5, step: 0.01 },
+                    { key: 'sonicWorkshopResponseRange', label: '响应范围', min: 0.3, max: 2, step: 0.01 },
+                    { key: 'sonicWorkshopPeakIntensity', label: '中心高光', min: 0, max: 1.4, step: 0.01 },
+                  ],
+                  value,
+                  onPatch,
+                  draggingKey,
+                  setDraggingKey,
+                )}
+
+                <FxSectionLabel>主题</FxSectionLabel>
+                <FxSeg
+                  value={value.sonicWorkshopTheme}
+                  onChange={(theme) => {
+                    const sonicWorkshopTheme = theme as RoomVisualFxSettings['sonicWorkshopTheme'];
+                    onPatch({
+                      sonicWorkshopTheme,
+                      sonicWorkshopColorMode: 'custom',
+                      sonicWorkshopCustomColor: WORKSHOP_THEME_COLORS[sonicWorkshopTheme],
+                    });
+                  }}
+                  options={[
+                    { value: 'coral-mirage', label: '珊瑚' },
+                    { value: 'ocean-deep', label: '深海' },
+                    { value: 'arctic-aurora', label: '冰蓝' },
+                    { value: 'cyber-forest', label: '翠绿' },
+                    { value: 'minimal-monochrome', label: '极简' },
+                  ]}
+                />
+
+                <FxSectionLabel>区域配色</FxSectionLabel>
+                {WORKSHOP_COLOR_CONTROLS.map((item) => {
+                  const mode = value[item.modeKey];
+                  const color = value[item.colorKey];
+                  return (
+                    <div key={item.colorKey} className={`lyric-color-row ${dragging ? 'pointer-events-none invisible' : ''}`}>
+                      <input
+                        type="color"
+                        className="lyric-color-picker"
+                        value={color}
+                        title={item.label}
+                        disabled={mode !== 'custom'}
+                        onChange={(event) => onPatch({
+                          [item.modeKey]: 'custom',
+                          [item.colorKey]: event.target.value.toLowerCase(),
+                        } as Partial<RoomVisualFxSettings>)}
+                      />
+                      <div className="fx-color-row-label">
+                        {item.label}
+                        <small>{mode === 'custom' ? color.toUpperCase() : '封面取色'}</small>
+                      </div>
+                      <button
+                        type="button"
+                        className={`fx-mini-btn ghost${mode !== 'custom' ? ' active' : ''}`}
+                        onClick={() => onPatch({ [item.modeKey]: mode === 'custom' ? 'cover' : 'custom' } as Partial<RoomVisualFxSettings>)}
+                      >
+                        {mode === 'custom' ? '自定义' : '封面'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </FxFold>
+            ) : null}
+
             <FxFold
+              title="歌词运动"
+              subtitle="入场 / 漂浮 / 高光"
+              open={openFolds.lyricMotion}
+              onToggle={() => toggleFold('lyricMotion')}
+            >
+              <FxSectionLabel>运动风格</FxSectionLabel>
+              <FxSeg
+                value={value.lyricMotionStyle}
+                onChange={(lyricMotionStyle) =>
+                  onPatch({ lyricMotionStyle: lyricMotionStyle as RoomVisualFxSettings['lyricMotionStyle'] })
+                }
+                options={[
+                  { value: 'float', label: '漂浮' },
+                  { value: 'smooth', label: '丝滑' },
+                  { value: 'glass', label: '玻璃' },
+                  { value: 'quick', label: '迅捷' },
+                  { value: 'shine', label: '闪耀' },
+                  { value: 'glitch', label: '故障' },
+                ]}
+              />
+              {renderSliders(
+                [{ key: 'lyricMotionSoftness', label: '运动柔和度', min: 0.15, max: 1.2, step: 0.01 }],
+                value,
+                onPatch,
+                draggingKey,
+                setDraggingKey,
+              )}
+            </FxFold>
+
+            {visualMode !== 'topography-we' ? <FxFold
               title="画面基础"
               subtitle="律动 / 景深 / 镜头"
               open={openFolds.motionCore}
@@ -362,11 +577,18 @@ export default function ImmersiveFxSettingsPanel({
                   disabled={visualMode !== 'emily' && visualMode !== 'topography'}
                   title={
                     visualMode !== 'emily' && visualMode !== 'topography'
-                      ? '仅 emily / 声波地形可用'
+                      ? '仅 emily / Sonic-Topography 可用'
                       : undefined
                   }
                   onChange={(floatLayer) => onPatch({ floatLayer })}
                 />
+                {visualMode === 'emily' ? (
+                  <FxMineradioToggle
+                    label="封面背面粒子"
+                    checked={value.backCover}
+                    onChange={(backCover) => onPatch({ backCover })}
+                  />
+                ) : null}
                 {visualMode !== 'topography' ? (
                   <>
                     <FxMineradioToggle
@@ -393,8 +615,10 @@ export default function ImmersiveFxSettingsPanel({
                   </>
                 ) : null}
               </div>
-            </FxFold>
+            </FxFold> : null}
 
+            {/* WE 地形同样会渲染歌单架（SonicWorkshopBackground 里挂着 GalaxyFloatingSongCard），
+                这组设置不能跟着整块隐藏，否则架子在屏幕上却调不了 */}
             <FxFold
               title="3D / 手势"
               subtitle="歌单架 / 摄像头交互"
@@ -468,6 +692,14 @@ export default function ImmersiveFxSettingsPanel({
                   { key: 'shelfAngleY', label: '侧向角度', min: -35, max: 15, step: 1 },
                   { key: 'shelfOpacity', label: '整体透明度', min: 0.2, max: 1, step: 0.01 },
                   { key: 'shelfBgOpacity', label: '背景透明度', min: 0.15, max: 1, step: 0.01 },
+                  { key: 'shelfSummonOpenDuration', label: '召唤入场时长', min: 0.12, max: 2, step: 0.01 },
+                  { key: 'shelfSummonCloseDuration', label: '召唤退场时长', min: 0.08, max: 1.5, step: 0.01 },
+                  { key: 'shelfSummonSlide', label: '召唤滑入幅度', min: 0, max: 3, step: 0.01 },
+                  { key: 'shelfSummonStagger', label: '卡片错峰', min: 0, max: 2, step: 0.01 },
+                  { key: 'shelfSummonScale', label: '入场缩放', min: 0, max: 2, step: 0.01 },
+                  { key: 'shelfSummonParallax', label: '指针视差', min: 0, max: 2, step: 0.01 },
+                  { key: 'shelfCameraEnterSpeed', label: '镜头进入速度', min: 0.08, max: 0.8, step: 0.01 },
+                  { key: 'shelfCameraExitSpeed', label: '镜头退出速度', min: 0.08, max: 0.8, step: 0.01 },
                 ],
                 value,
                 onPatch,
@@ -475,17 +707,22 @@ export default function ImmersiveFxSettingsPanel({
                 setDraggingKey,
               )}
 
-              <FxSectionLabel>摄像头交互</FxSectionLabel>
-              <FxSeg
-                value={value.cameraInteraction}
-                onChange={(cameraInteraction) =>
-                  onPatch({ cameraInteraction: cameraInteraction as RoomVisualFxSettings['cameraInteraction'] })
-                }
-                options={[
-                  { value: 'off', label: '关闭' },
-                  { value: 'gesture', label: '手势触碰' },
-                ]}
-              />
+              {/* WE 场景里没有粒子层，也没挂手势桥接，这一项在那儿点了没用 */}
+              {visualMode !== 'topography-we' ? (
+                <>
+                  <FxSectionLabel>摄像头交互</FxSectionLabel>
+                  <FxSeg
+                    value={value.cameraInteraction}
+                    onChange={(cameraInteraction) =>
+                      onPatch({ cameraInteraction: cameraInteraction as RoomVisualFxSettings['cameraInteraction'] })
+                    }
+                    options={[
+                      { value: 'off', label: '关闭' },
+                      { value: 'gesture', label: '手势触碰' },
+                    ]}
+                  />
+                </>
+              ) : null}
             </FxFold>
           </div>
         ) : null}
@@ -493,12 +730,66 @@ export default function ImmersiveFxSettingsPanel({
         {tab === 'advanced' ? (
           <div className="fx-tab-page active" role="tabpanel">
             <FxFold
-              title="粒子高级参数"
-              subtitle="尺寸 / 流速 / 色彩"
-              open={openFolds.advancedCore}
-              onToggle={() => toggleFold('advancedCore')}
+              title="歌词故障"
+              subtitle="切片 / 色散 / 鼓点"
+              open={openFolds.lyricGlitch}
+              onToggle={() => toggleFold('lyricGlitch')}
             >
-              {renderSliders(advancedSlidersForMode(visualMode), value, onPatch, draggingKey, setDraggingKey)}
+              {renderSliders(
+                [
+                  { key: 'lyricGlitchIntensity', label: '故障强度', min: 0, max: 1.5, step: 0.01 },
+                  { key: 'lyricGlitchSlice', label: '切片密度', min: 0, max: 1.4, step: 0.01 },
+                  { key: 'lyricGlitchChroma', label: '色散强度', min: 0, max: 1.6, step: 0.01 },
+                  { key: 'lyricGlitchRate', label: '故障频率', min: 0.45, max: 2.2, step: 0.01 },
+                  { key: 'lyricGlitchJitter', label: '抖动强度', min: 0, max: 1.8, step: 0.01 },
+                ],
+                value,
+                onPatch,
+                draggingKey,
+                setDraggingKey,
+              )}
+              <div className={`fx-toggle-grid ${dragging ? 'pointer-events-none invisible' : ''}`}>
+                <FxMineradioToggle
+                  label="故障跟鼓点"
+                  checked={value.lyricGlitchCameraBind}
+                  onChange={(lyricGlitchCameraBind) => onPatch({ lyricGlitchCameraBind })}
+                />
+              </div>
+            </FxFold>
+
+            {advancedSlidersForMode(visualMode).length > 0 ? (
+              <FxFold
+                title="粒子高级参数"
+                subtitle="尺寸 / 流速 / 色彩"
+                open={openFolds.advancedCore}
+                onToggle={() => toggleFold('advancedCore')}
+              >
+                {renderSliders(advancedSlidersForMode(visualMode), value, onPatch, draggingKey, setDraggingKey)}
+              </FxFold>
+            ) : null}
+
+            <FxFold
+              title="性能画质"
+              subtitle="3D 网格 / 粒子规模"
+              open={openFolds.perfQuality}
+              onToggle={() => toggleFold('perfQuality')}
+            >
+              <FxSectionLabel>画质档位</FxSectionLabel>
+              <FxSeg
+                value={value.performanceQuality}
+                onChange={(performanceQuality) =>
+                  onPatch({
+                    performanceQuality:
+                      performanceQuality as RoomVisualFxSettings['performanceQuality'],
+                  })
+                }
+                options={[
+                  { value: 'eco', label: '省电' },
+                  { value: 'balanced', label: '均衡' },
+                  { value: 'high', label: '高' },
+                  { value: 'ultra', label: '极致' },
+                ]}
+              />
             </FxFold>
 
             <div className={`fx-actions ${dragging ? 'pointer-events-none invisible' : ''}`}>

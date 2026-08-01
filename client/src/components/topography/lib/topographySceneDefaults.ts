@@ -1,33 +1,12 @@
-export const TOPOGRAPHY_CAMERA_STATE_STORAGE_KEY = 'openmusic-topography-camera-state';
+/**
+ * Mineradio sonic-topography 的世界锚定：168 单位的地形整体缩进主场景，
+ * 相机沿用星河那台，所以推拉会同时作用在地形、歌词和歌单架上。
+ * 数值取自 deriveGroundLayoutSettings 的中位档（range/lower/depth = 50）。
+ */
+export const TOPOGRAPHY_WORLD_SCALE = 0.132;
+export const TOPOGRAPHY_WORLD_Y = -5.75;
+export const TOPOGRAPHY_WORLD_Z = -6.95;
 
-export interface CameraPoint {
-  x: number;
-  y: number;
-  z: number;
-}
-
-export interface CameraState {
-  position: CameraPoint;
-  target: CameraPoint;
-}
-
-/** sonic-topography 默认视角 */
-export const DEFAULT_TOPOGRAPHY_CAMERA_STATE: CameraState = {
-  position: {
-    x: -37.5836298835141,
-    y: 25.718921008284557,
-    z: 92.25687558089541,
-  },
-  target: { x: 0, y: 0, z: 0 },
-};
-
-export function normalizeCameraState(value: Partial<CameraState> | null | undefined): CameraState {
-  const fb = DEFAULT_TOPOGRAPHY_CAMERA_STATE;
-  const pos = value?.position;
-  const tgt = value?.target;
-  const num = (v: unknown, d: number) => (Number.isFinite(Number(v)) ? Number(v) : d);
-  return {
-    position: { x: num(pos?.x, fb.position.x), y: num(pos?.y, fb.position.y), z: num(pos?.z, fb.position.z) },
-    target: { x: num(tgt?.x, fb.target.x), y: num(tgt?.y, fb.target.y), z: num(tgt?.z, fb.target.z) },
-  };
-}
+/** 场景雾按同一比例收缩，否则缩小后的地形会整片糊掉 */
+export const TOPOGRAPHY_FOG_NEAR = 30 * TOPOGRAPHY_WORLD_SCALE;
+export const TOPOGRAPHY_FOG_FAR = 95 * TOPOGRAPHY_WORLD_SCALE;

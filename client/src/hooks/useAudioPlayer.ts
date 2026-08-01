@@ -661,7 +661,13 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
             if (runtime.suppressAutoResumeRef.current) return;
             const live = useRoomStore.getState();
             if (live.room?.isPlaying && live.room.current) {
-              void audio.play().catch(() => {});
+              // ended 状态下 play() 会把进度归零，续播后钉回原处
+              const resumeAt = audio.currentTime;
+              void audio.play().then(() => {
+                if (resumeAt > 1 && audio.currentTime < resumeAt - 1) {
+                  audio.currentTime = resumeAt;
+                }
+              }).catch(() => {});
             }
             return;
           }
@@ -692,6 +698,9 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
         if (isSongPreviewSuppressingRoom()) return;
         // 仅对抗息屏瞬间的系统挂起；锁屏控件主动暂停不在此窗口内
         if (intentionalLocalPauseRef.current) return;
+        // 播完触发的 pause：此时元素处于 ended，play() 会从 0 重放同一首。
+        // 后台切歌要等取链，旧曲会被从头顶播两秒；恢复交给 applyFollowerSync。
+        if (audio.ended) return;
         const runtime = activeAudioRuntime;
         // 切歌/换源窗口：旧 src 可能被误 play，尤其是后台主线程节流时
         if (runtime?.suppressAutoResumeRef.current) return;

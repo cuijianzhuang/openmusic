@@ -70,7 +70,7 @@ export const LYRIC_FX_SLIDERS: SliderDef[] = [
 
 export const LYRIC_TYPOGRAPHY_SLIDERS: SliderDef[] = [
   { key: 'lyricLetterSpacing', label: '字间距', min: -0.04, max: 0.18, step: 0.005 },
-  { key: 'lyricLineHeight', label: '行距', min: 0.86, max: 1.35, step: 0.01 },
+  { key: 'lyricLineHeight', label: '行距', min: 0.72, max: 1.8, step: 0.01 },
   { key: 'lyricWeight', label: '字重', min: 500, max: 900, step: 50 },
 ];
 

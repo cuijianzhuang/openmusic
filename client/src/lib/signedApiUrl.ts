@@ -68,29 +68,32 @@ export async function resolveSignedApiUrl(url: string | null | undefined): Promi
 
 /** 为 `<img>` / `<audio>` 等同源媒体地址异步附加 query 签名 */
 export function useSignedApiUrl(url: string | null | undefined): string | null {
-  const [signed, setSigned] = useState<string | null>(() => {
-    if (!url) return null;
-    return needsApiSign(url) ? null : url;
-  });
+  const target = url ?? null;
+  const [state, setState] = useState<{ url: string | null; signed: string | null }>(() => ({
+    url: target,
+    signed: target && !needsApiSign(target) ? target : null,
+  }));
 
   useEffect(() => {
-    if (!url) {
-      setSigned(null);
+    if (!target) {
+      setState({ url: null, signed: null });
       return;
     }
-    if (!needsApiSign(url)) {
-      setSigned(url);
+    if (!needsApiSign(target)) {
+      setState({ url: target, signed: target });
       return;
     }
 
     let cancelled = false;
-    void signApiUrl(url).then((next) => {
-      if (!cancelled) setSigned(next);
+    void signApiUrl(target).then((next) => {
+      if (!cancelled) setState({ url: target, signed: next });
     });
     return () => {
       cancelled = true;
     };
-  }, [url]);
+  }, [target]);
 
-  return signed;
+  // 签名是跟着具体地址走的：切歌后新签名没算出来之前交出旧签名，
+  // 拿到的会是上一首的图，调用方还可能把它缓存到新歌的 key 上。
+  return state.url === target ? state.signed : null;
 }

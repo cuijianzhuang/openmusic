@@ -3,7 +3,7 @@ import { toProxiedMediaUrl } from '../../../lib/mediaProxyUrl';
 import { needsApiSign } from '../../../lib/apiSign';
 import { signApiUrl } from '../../../lib/signedApiUrl';
 
-export type FloatingSongCardActionId = 'favorite' | 'like' | 'jump' | 'remove' | 'ban';
+export type FloatingSongCardActionId = 'favorite' | 'like' | 'dislike' | 'jump' | 'remove' | 'ban';
 
 export interface FloatingSongCardAction {
   id: FloatingSongCardActionId;
@@ -66,6 +66,10 @@ function fillTone(ctx: CanvasRenderingContext2D, action: FloatingSongCardAction,
       ctx.fillStyle = hovered ? 'rgba(56,189,248,0.28)' : 'rgba(56,189,248,0.18)';
       return;
     }
+    if (action.tone === 'red') {
+      ctx.fillStyle = hovered ? 'rgba(239,68,68,0.36)' : 'rgba(239,68,68,0.26)';
+      return;
+    }
   }
   if (action.tone === 'red') {
     ctx.fillStyle = hovered ? 'rgba(239,68,68,0.24)' : 'rgba(239,68,68,0.14)';
@@ -88,6 +92,10 @@ function strokeTone(ctx: CanvasRenderingContext2D, action: FloatingSongCardActio
       ctx.strokeStyle = hovered ? 'rgba(56,189,248,0.72)' : 'rgba(56,189,248,0.52)';
       return;
     }
+    if (action.tone === 'red') {
+      ctx.strokeStyle = hovered ? 'rgba(248,113,113,0.88)' : 'rgba(248,113,113,0.66)';
+      return;
+    }
   }
   if (action.tone === 'red') {
     ctx.strokeStyle = hovered ? 'rgba(248,113,113,0.7)' : 'rgba(248,113,113,0.45)';
@@ -100,6 +108,7 @@ function textTone(action: FloatingSongCardAction): string {
   if (action.active && action.tone === 'rose') return 'rgba(253,164,175,0.96)';
   if (action.active && action.tone === 'amber') return 'rgba(253,230,138,0.96)';
   if (action.active && action.tone === 'sky') return 'rgba(186,230,253,0.96)';
+  if (action.active && action.tone === 'red') return 'rgba(254,226,226,0.98)';
   if (action.tone === 'red') return 'rgba(254,202,202,0.94)';
   return 'rgba(255,255,255,0.86)';
 }
@@ -383,6 +392,8 @@ export function createFloatingSongCardMesh(): {
     toneMapped: false,
     depthWrite: false,
     depthTest: false,
+    // 地形预设的场景雾只该罩地形，歌单架和歌词一样属于前景层
+    fog: false,
     side: THREE.DoubleSide,
   });
   const geometry = new THREE.PlaneGeometry(2.05, 1.025, 1, 1);
@@ -454,6 +465,12 @@ export function applyFloatingSongCardPose(
     offsetZ?: number;
     angleY?: number;
     breathWeight?: number;
+    reveal?: number;
+    entry?: number;
+    pointerX?: number;
+    pointerY?: number;
+    parallax?: number;
+    summonScale?: number;
   },
 ): { visible: boolean; absD: number } {
   const layout = getFloatingSongCardSideLayout();
@@ -478,8 +495,12 @@ export function applyFloatingSongCardPose(
   const offsetZ = config?.offsetZ ?? 0;
   const angleY = (config?.angleY ?? -15) * (Math.PI / 180);
   const breathWeight = config?.breathWeight ?? 1;
-  const reveal = 1;
-  const entry = 0;
+  const reveal = Math.max(0, Math.min(1, config?.reveal ?? 1));
+  const entry = Math.max(0, config?.entry ?? 0);
+  const pointerX = config?.pointerX ?? 0;
+  const pointerY = config?.pointerY ?? 0;
+  const parallax = config?.parallax ?? 1;
+  const summonScale = config?.summonScale ?? 1;
 
   if (absD > 5.5) {
     mesh.visible = false;
@@ -494,9 +515,9 @@ export function applyFloatingSongCardPose(
     const stageY = portrait ? -2.46 : -2.2;
     const stageZ = portrait ? 0.84 : 1.0;
     const stageScale = portrait ? 0.72 : narrow ? 0.86 : 1.0;
-    const pxStage = offsetX + delta * 1.08;
-    const pyStage = stageY + offsetY;
-    const pzStage = stageZ + offsetZ - Math.min(2, absD) * 0.52;
+    const pxStage = offsetX + delta * 1.08 + entry * delta * 0.18;
+    const pyStage = stageY + offsetY - entry * 0.22 + pointerY * 0.06 * parallax;
+    const pzStage = stageZ + offsetZ - Math.min(2, absD) * 0.52 - entry * 0.28 + pointerX * 0.04 * parallax;
     mesh.position.set(
       pxStage - hover * 0.06,
       pyStage + breath * 0.7,
@@ -509,7 +530,8 @@ export function applyFloatingSongCardPose(
       (absD < 0.5 ? 1.2 : Math.max(0.45, 1 - absD * 0.22)) *
         stageScale *
         scale *
-        (1 + pulse * 0.06 + hover * 0.04 + active * 0.04),
+        (1 + pulse * 0.06 + hover * 0.04 + active * 0.04) *
+        (1 - (1 - reveal) * 0.18 * summonScale),
     );
     return { visible: true, absD };
   }
@@ -517,9 +539,10 @@ export function applyFloatingSongCardPose(
   const sideXStep = portrait ? 0.15 : 0.18;
   const sideYStep = layout.sideYStep;
   const sideZStep = layout.sideZStep;
-  let px = sideX + absD * sideXStep + entry * 0.22 + offsetX;
+  let px = sideX + absD * sideXStep + entry * 0.22 + offsetX + pointerX * 0.055 * parallax;
   let py = sideY - delta * sideYStep + (1 - reveal) * (delta < 0 ? -0.18 : 0.18) + offsetY;
-  let pz = sideZ - absD * sideZStep - (1 - reveal) * 0.2 + offsetZ;
+  let pz = sideZ - absD * sideZStep - (1 - reveal) * 0.2 + offsetZ + pointerY * 0.045 * parallax;
+  py += pointerY * 0.07 * Math.max(0.2, 1 - absD * 0.14) * parallax;
   if (active > 0.001 || hover > 0.001) {
     px -= (portrait ? 0.065 : 0.145) * Math.max(active, hover);
     py += (portrait ? 0.075 : 0.105) * Math.max(active, hover);
@@ -535,7 +558,8 @@ export function applyFloatingSongCardPose(
     (absD < 0.5 ? 1.12 : Math.max(0.55, 1.04 - absD * 0.14)) *
       sideScale *
       scale *
-      (1 + pulse * 0.056 + hover * 0.05 + active * 0.05),
+      (1 + pulse * 0.056 + hover * 0.05 + active * 0.05) *
+      (1 - (1 - reveal) * 0.2 * summonScale),
   );
   return { visible: true, absD };
 }

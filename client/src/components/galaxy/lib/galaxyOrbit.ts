@@ -3,6 +3,8 @@ import type { RoomVisualPresetId } from '../../../lib/roomVisualPreset';
 import type { BeatCameraKick } from './galaxyCinema';
 
 const BASE_FOV = 45;
+/** 相机中心的默认落点，只读不改 */
+const ORBIT_ORIGIN = new THREE.Vector3(0, 0, 0);
 
 export const GALAXY_PRESET_CAMERA: Record<
   RoomVisualPresetId,
@@ -13,8 +15,8 @@ export const GALAXY_PRESET_CAMERA: Record<
   2: { radius: 7.0, phi: 0.15, theta: 0 },
   3: { radius: 8.0, phi: 0.05, theta: 0 },
   4: { radius: 6.5, phi: 0.04, theta: 0 },
-  5: { radius: 9.4, phi: 0.34, theta: -0.52 },
-  6: { radius: 9.4, phi: 0.34, theta: -0.52 },
+  5: { radius: 6.6, phi: 0.08, theta: 0 },
+  6: { radius: 7.4, phi: 0.1, theta: 0.18 },
 };
 
 function clampRange(v: number, min: number, max: number): number {
@@ -44,12 +46,15 @@ export type GalaxyOrbitState = {
   centerLocked: boolean;
   lookAt: THREE.Vector3;
   focusZone: {
-    type: 'none' | 'search' | 'queue' | 'chat' | 'cardHover';
+    /** 退出时 type 先留着，好让歌单架继续用「镜头退出速度」滑回去（Mineradio orbit.focus.type） */
+    type: 'none' | 'queue' | 'cardHover';
+    active: boolean;
     theta: number;
     phi: number;
     radius: number;
     lookAt: THREE.Vector3;
-    ease: number;
+    /** 仅歌单架用：进/出镜头速度倍率，乘在基础缓动上 */
+    speed: number;
   };
 };
 
@@ -81,16 +86,18 @@ export function createGalaxyOrbitState(
     lookAt: new THREE.Vector3(0, 0, 0),
     focusZone: {
       type: 'none',
+      active: false,
       theta: base.theta,
       phi: base.phi,
       radius: base.radius,
       lookAt: new THREE.Vector3(0, 0, 0),
-      ease: 0.1,
+      speed: 1,
     },
   };
 }
 
 export function setGalaxyOrbitPreset(orbit: GalaxyOrbitState, preset: RoomVisualPresetId): void {
+  if (preset === 5) return;
   const base = GALAXY_PRESET_CAMERA[preset];
   orbit.userTheta = base.theta;
   orbit.userPhi = base.phi;
@@ -112,18 +119,21 @@ export function recenterGalaxyOrbit(orbit: GalaxyOrbitState): void {
 export function setGalaxyOrbitFocusZone(
   orbit: GalaxyOrbitState,
   type: GalaxyOrbitState['focusZone']['type'],
-  config?: Partial<Omit<GalaxyOrbitState['focusZone'], 'type'>>,
+  config?: Partial<Omit<GalaxyOrbitState['focusZone'], 'type' | 'active'>>,
 ): void {
   if (type === 'none') {
-    orbit.focusZone.type = 'none';
+    // 只熄灭 active：type 留到镜头真的滑回原位再清，否则退出这一段拿不到退出速度
+    orbit.focusZone.active = false;
+    if (config?.speed !== undefined) orbit.focusZone.speed = config.speed;
     return;
   }
   orbit.focusZone.type = type;
+  orbit.focusZone.active = true;
   if (config?.theta !== undefined) orbit.focusZone.theta = config.theta;
   if (config?.phi !== undefined) orbit.focusZone.phi = config.phi;
   if (config?.radius !== undefined) orbit.focusZone.radius = config.radius;
   if (config?.lookAt) orbit.focusZone.lookAt.copy(config.lookAt);
-  if (config?.ease !== undefined) orbit.focusZone.ease = config.ease;
+  if (config?.speed !== undefined) orbit.focusZone.speed = config.speed;
 }
 
 /** Mineradio updateCinema → orbit.cine* */
@@ -134,8 +144,8 @@ export function applyGalaxyOrbitCinema(
   cinemaShake: number,
 ): void {
   const shake = clampRange(cinemaShake, 0, 1.8);
-  const beatDamp = shake;
-  const idleDamp = shake;
+  const beatDamp = orbit.focusZone.active ? 0.55 * shake : shake;
+  const idleDamp = (orbit.rotating ? 0.25 : 1) * shake;
   orbit.cineTheta = Math.sin(cinemaT * 0.08) * 0.012 * idleDamp + kick.thetaKick * beatDamp;
   orbit.cinePhi = Math.sin(cinemaT * 0.06 + 1.0) * 0.01 * idleDamp + kick.phiKick * beatDamp;
   orbit.cineRadius =
@@ -169,9 +179,11 @@ export function updateGalaxyOrbitCamera(
   let targetTheta: number;
   let targetPhi: number;
   let targetRadius: number;
-  let tLookAt = orbit.lookAt;
+  // 非聚焦状态一律回原点（Mineradio ZERO_VEC）。之前这里退回 orbit.lookAt 自己，
+  // 等于永远插值到当前值，歌单架跟拍偏出去的中心点就再也回不来了。
+  let tLookAt = ORBIT_ORIGIN;
 
-  if (orbit.focusZone.type !== 'none') {
+  if (orbit.focusZone.active) {
     targetTheta = orbit.focusZone.theta;
     targetPhi = clampRange(orbit.focusZone.phi, orbit.minPhi, orbit.maxPhi);
     targetRadius = clampRange(orbit.focusZone.radius, orbit.minRadius, orbit.maxRadius);
@@ -194,11 +206,20 @@ export function updateGalaxyOrbitCamera(
     );
   }
 
-  let focusEase = orbit.focusZone.type !== 'none' ? orbit.focusZone.ease : 0.1;
-  let radiusEase = 0.07;
+  // Mineradio：线性 lerp 自带「快→慢」的缓出，聚焦时略快、回位时略慢
+  const focused = orbit.focusZone.active;
+  let focusEase = focused ? 0.16 : 0.1;
+  let radiusEase = focused ? 0.12 : 0.07;
   if (kick.punch > 0.01) {
     focusEase = Math.max(focusEase, 0.12 + kick.punch * 0.12);
     radiusEase = Math.max(radiusEase, 0.09 + kick.punch * 0.12);
+  }
+  // 歌单架的进/出速度是倍率，不是缓动本身：0.24 档要把 0.16 压到 0.038 才是 Mineradio 那种慢慢贴近
+  const shelfFocus = orbit.focusZone.type === 'cardHover';
+  if (shelfFocus) {
+    const speed = orbit.focusZone.speed || 1;
+    focusEase = clampRange(focusEase * speed, 0.018, 0.42);
+    radiusEase = clampRange(radiusEase * speed, 0.014, 0.36);
   }
 
   orbit.theta += (targetTheta - orbit.theta) * focusEase;
@@ -207,6 +228,21 @@ export function updateGalaxyOrbitCamera(
   orbit.lookAt.x += (tLookAt.x - orbit.lookAt.x) * focusEase;
   orbit.lookAt.y += (tLookAt.y - orbit.lookAt.y) * focusEase;
   orbit.lookAt.z += (tLookAt.z - orbit.lookAt.z) * focusEase;
+
+  // 滑回原位后再把 type 清掉，之后的常规运镜就不该再被歌单架速度拖慢
+  if (shelfFocus && !focused) {
+    const lookDx = tLookAt.x - orbit.lookAt.x;
+    const lookDy = tLookAt.y - orbit.lookAt.y;
+    const lookDz = tLookAt.z - orbit.lookAt.z;
+    if (
+      Math.abs(targetTheta - orbit.theta) < 0.003 &&
+      Math.abs(targetPhi - orbit.phi) < 0.003 &&
+      Math.abs(targetRadius - orbit.radius) < 0.03 &&
+      lookDx * lookDx + lookDy * lookDy + lookDz * lookDz < 0.0009
+    ) {
+      orbit.focusZone.type = 'none';
+    }
+  }
 
   const cy = Math.cos(orbit.phi);
   const sy = Math.sin(orbit.phi);

@@ -210,8 +210,8 @@ const MAX_RANDOM_PREFETCH_ATTEMPTS = 20;
 /** 非控制者首次补种时长的最小合理值（毫秒），杜绝 durationMs:1 之类的恶意切歌 */
 const MIN_REPORTABLE_DURATION_MS = 1000;
 
-/** 播放顺序：顺序 / 乱序 / 单曲循环 / 列表循环 */
-export const PLAY_MODES = ["order", "shuffle", "loop-one", "loop-all"];
+/** 播放顺序：顺序 / 乱序 / 单曲循环 / 列表循环 / 列表内随机（随机且不消耗列表） */
+export const PLAY_MODES = ["order", "shuffle", "loop-one", "loop-all", "shuffle-loop"];
 export const DEFAULT_PLAY_MODE = "order";
 
 export function normalizePlayMode(value) {
@@ -1036,6 +1036,8 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
     /** 无 VIP 网易 Cookie（不广播、不上传 Meting） */
     musicAccountSecrets: { netease: null },
     playMode: DEFAULT_PLAY_MODE,
+    /** 列表内随机：上一首回收进队列的 queueId，避免立刻抽到自己 */
+    lastRecycledQueueId: null,
     announcementEnabled: false,
     announcementText: "",
     /** 房主自定义封面；有值时房间/大厅不再跟随当前歌曲封面 */
@@ -3990,15 +3992,26 @@ function restartCurrentSong(room) {
 
 function takeNextFromQueue(room) {
   if (!room.queue.length) return null;
-  if (normalizePlayMode(room.playMode) === "shuffle") {
-    const idx = Math.floor(Math.random() * room.queue.length);
+  const mode = normalizePlayMode(room.playMode);
+  if (mode === "shuffle" || mode === "shuffle-loop") {
+    // 列表内随机：刚回收的那首排除在外，否则两首以上时会原地重播
+    const excludeId = mode === "shuffle-loop" ? room.lastRecycledQueueId : null;
+    const pool = excludeId
+      ? room.queue.map((item, index) => index).filter((index) => room.queue[index]?.queueId !== excludeId)
+      : room.queue.map((_, index) => index);
+    const candidates = pool.length ? pool : room.queue.map((_, index) => index);
+    const idx = candidates[Math.floor(Math.random() * candidates.length)];
     return room.queue.splice(idx, 1)[0] || null;
   }
   return room.queue.shift() || null;
 }
 
 function recycleFinishedSongToQueue(room, finishedSong) {
-  if (!finishedSong || normalizePlayMode(room.playMode) !== "loop-all") return;
+  const mode = normalizePlayMode(room.playMode);
+  if (!finishedSong || (mode !== "loop-all" && mode !== "shuffle-loop")) {
+    room.lastRecycledQueueId = null;
+    return;
+  }
   const recycled = serializeQueueItemForRoom({
     ...finishedSong,
     queueId: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -4009,8 +4022,12 @@ function recycleFinishedSongToQueue(room, finishedSong) {
     manualOrder: undefined,
     addedAt: Date.now(),
   });
-  if (!recycled) return;
+  if (!recycled) {
+    room.lastRecycledQueueId = null;
+    return;
+  }
   room.queue.push(recycled);
+  room.lastRecycledQueueId = recycled.queueId;
 }
 
 async function playNextUnlocked(room, options = {}) {

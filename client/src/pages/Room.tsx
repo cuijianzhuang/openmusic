@@ -2985,7 +2985,7 @@ export default function Room() {
 
         <div className={`flex flex-col gap-3 lg:gap-4 lg:h-full lg:min-h-0 ${pureMode ? '' : 'lg:grid lg:grid-cols-[320px_minmax(0,1fr)_340px]'}`}>
 
-          {/* 左侧：网易云热榜 */}
+          {/* 左侧：红点热榜 */}
           {isLgUp && !pureMode && (
             <div
               data-guide="room-hot"

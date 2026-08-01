@@ -119,35 +119,51 @@ function rgbCss(rgb: { r: number; g: number; b: number }, alpha?: number): strin
   return `rgba(${rgb.r},${rgb.g},${rgb.b},${alpha})`;
 }
 
+/**
+ * Mineradio lyricHighImpactTextHsl —
+ * 歌词文字一律推到高亮高饱和区间，绝不压成暗色，否则深色背景上直接看不清。
+ */
+function lyricHighImpactTextHsl(
+  hsl: { h: number; s: number; l: number },
+  opts: { avgL?: number; minS?: number; neutralCutoff?: number; sampledBright?: boolean } = {},
+): { h: number; s: number; l: number; neutral: boolean } {
+  const avgL = opts.avgL == null ? hsl.l : opts.avgL;
+  const neutral = hsl.s < (opts.neutralCutoff ?? 0.035);
+  const sampledBright = hsl.l >= 0.62 || avgL >= 0.64 || opts.sampledBright === true;
+  const minS = opts.minS ?? 0.88;
+  const s = neutral
+    ? 0
+    : sampledBright
+      ? clampRange(Math.max(hsl.s, minS), 0, 1)
+      : clampRange(Math.max(hsl.s * 1.2, minS), 0, 1);
+  const l = sampledBright
+    ? clampRange(Math.max(hsl.l, 0.7), 0.66, 0.94)
+    : clampRange(Math.max(hsl.l + 0.3, 0.74), 0.7, 0.9);
+  return { h: hsl.h, s, l, neutral };
+}
+
 /** Mineradio lyricPaletteFromHex */
 export function lyricPaletteFromHex(hex: string): LyricPalette {
   const c = hexToRgb(hex);
   const hsl = rgbToHsl(c.r, c.g, c.b);
-  const neutral = hsl.s < 0.035;
-  const s = neutral ? 0 : clampRange(hsl.s * 1.08, 0.14, 0.92);
-  let l = hsl.l;
-  if (l < 0.11) l = 0.15 + l * 1.18;
-  else if (l < 0.28) l = 0.21 + (l - 0.11) * 1.18;
-  else l = clampRange(l, 0.3, 0.82);
-  l = clampRange(l, 0.14, 0.84);
-  const primary = hslToRgb(hsl.h, s, l);
+  const tone = lyricHighImpactTextHsl(hsl, { minS: 0.86 });
+  const primary = hslToRgb(tone.h, tone.s, tone.l);
   const secondary = hslToRgb(
-    (hsl.h + 0.055) % 1,
-    neutral ? 0 : clampRange(s * 0.88, 0.12, 0.78),
-    clampRange(l + (l < 0.38 ? 0.1 : -0.08), 0.18, 0.76),
+    (tone.h + 0.055) % 1,
+    tone.neutral ? 0 : clampRange(Math.max(tone.s * 0.92, 0.8), 0, 1),
+    clampRange(tone.l - 0.1, 0.58, 0.86),
   );
   const highlight = hslToRgb(
-    (hsl.h + 0.018) % 1,
-    neutral ? 0 : clampRange(s * 0.72, 0.1, 0.7),
-    clampRange(l + 0.22, 0.38, 0.92),
+    (tone.h + 0.018) % 1,
+    tone.neutral ? 0 : clampRange(Math.max(tone.s * 0.82, 0.74), 0, 1),
+    clampRange(tone.l + 0.12, 0.8, 0.96),
   );
-  const darkText = l < 0.4;
   return {
     primary: rgbCss(primary),
     secondary: rgbCss(secondary),
     highlight: rgbCss(highlight),
-    shadow: darkText ? 'rgba(0,6,10,0.46)' : 'rgba(248,253,255,0.34)',
-    glow: rgbCss(primary, 0.26),
+    shadow: 'rgba(0,6,10,0.48)',
+    glow: rgbCss(primary, 0.3),
   };
 }
 
@@ -162,40 +178,79 @@ export function silverBlueLyricPalette(): LyricPalette {
   };
 }
 
+/** 整张封面的色度统计，用来判断这张图值不值得取色 */
+export interface LyricCoverChromaStats {
+  avgChroma?: number;
+  maxChroma?: number;
+  colorfulRatio?: number;
+  usableColorfulRatio?: number;
+  monochrome?: boolean;
+}
+
+/** Mineradio lyricCoverLooksMonochrome */
+function lyricCoverLooksMonochrome(stats: LyricCoverChromaStats): boolean {
+  return (
+    (stats.maxChroma ?? 0) < 0.095 ||
+    (stats.avgChroma ?? 0) < 0.026 ||
+    (stats.colorfulRatio ?? 0) < 0.014 ||
+    (stats.usableColorfulRatio ?? 0) < 0.006
+  );
+}
+
 /** Mineradio lyricTextPaletteFromHsl */
 export function lyricTextPaletteFromHsl(
   hsl: { h: number; s: number; l: number },
   avgL: number,
   chroma: number,
+  opts: LyricCoverChromaStats = {},
 ): LyricPalette {
-  if (avgL < 0.16 || chroma < 0.08) {
+  const sampleChroma = Number.isFinite(chroma) ? chroma : 0;
+  const avgChroma = Number.isFinite(opts.avgChroma) ? (opts.avgChroma as number) : sampleChroma;
+  const maxChroma = Number.isFinite(opts.maxChroma) ? (opts.maxChroma as number) : sampleChroma;
+  const colorfulRatio = Number.isFinite(opts.colorfulRatio)
+    ? (opts.colorfulRatio as number)
+    : sampleChroma > 0.055
+      ? 1
+      : 0;
+  // 灰度封面 / 太暗 / 色度不够，一律退回银蓝色，不硬凑一个脏色出来
+  if (
+    opts.monochrome === true ||
+    avgL < 0.16 ||
+    sampleChroma < 0.055 ||
+    avgChroma < 0.026 ||
+    maxChroma < 0.095 ||
+    colorfulRatio < 0.014 ||
+    hsl.s < 0.06
+  ) {
     return silverBlueLyricPalette();
   }
   const hue = hsl.h;
   if (avgL < 0.3 && (hue < 0.06 || hue > 0.86 || (hue > 0.75 && hue < 0.86))) {
     return silverBlueLyricPalette();
   }
-  if (avgL > 0.82 && chroma < 0.12) {
-    return {
-      primary: '#064b5b',
-      secondary: '#168c88',
-      highlight: '#315f68',
-      shadow: 'rgba(255,255,255,0.48)',
-      glow: 'rgba(143,233,255,0.14)',
-    };
-  }
-  const lightText = avgL < 0.52;
-  const s = Math.max(0.42, Math.min(0.78, hsl.s + 0.16));
-  const c1 = hslToRgb(hsl.h, s, lightText ? 0.74 : 0.34);
-  const c2 = hslToRgb((hsl.h + 0.08) % 1, Math.max(0.36, s - 0.1), lightText ? 0.62 : 0.46);
+  const tone = lyricHighImpactTextHsl(hsl, {
+    avgL,
+    minS: 0.9,
+    sampledBright: avgL > 0.66 || hsl.l > 0.62,
+  });
+  const c1 = hslToRgb(tone.h, tone.s, tone.l);
+  const c2 = hslToRgb(
+    (tone.h + 0.08) % 1,
+    clampRange(Math.max(tone.s * 0.9, 0.78), 0, 1),
+    clampRange(tone.l - 0.1, 0.58, 0.86),
+  );
   return {
     primary: rgbCss(c1),
     secondary: rgbCss(c2),
     highlight: rgbCss(
-      hslToRgb((hsl.h + 0.03) % 1, Math.max(0.28, s - 0.18), lightText ? 0.86 : 0.58),
+      hslToRgb(
+        (tone.h + 0.03) % 1,
+        clampRange(Math.max(tone.s * 0.82, 0.72), 0, 1),
+        clampRange(tone.l + 0.12, 0.8, 0.96),
+      ),
     ),
-    shadow: lightText ? 'rgba(0,6,10,0.44)' : 'rgba(248,253,255,0.40)',
-    glow: rgbCss(c1, lightText ? 0.24 : 0.14),
+    shadow: 'rgba(0,6,10,0.48)',
+    glow: rgbCss(c1, 0.3),
   };
 }
 
@@ -211,7 +266,11 @@ export function extractLyricPaletteFromCover(coverCanvas: HTMLCanvasElement): Ly
     let sumG = 0;
     let sumB = 0;
     let count = 0;
-    let best = { score: -1, r: 143, g: 233, b: 255 };
+    let sumChroma = 0;
+    let maxChroma = 0;
+    let colorfulCount = 0;
+    let usableColorfulCount = 0;
+    let best = { score: -1, r: 143, g: 233, b: 255, chroma: 0 };
     for (let y = 0; y < h; y += 8) {
       for (let x = 0; x < w; x += 8) {
         const di = (y * w + x) * 4;
@@ -230,15 +289,28 @@ export function extractLyricPaletteFromCover(coverCanvas: HTMLCanvasElement): Ly
         sumG += g;
         sumB += b;
         count += 1;
+        sumChroma += chroma;
+        if (chroma > maxChroma) maxChroma = chroma;
+        const hs = rgbToHsl(r, g, b);
+        if (chroma > 0.055 && hs.s > 0.075) colorfulCount += 1;
+        if (chroma > 0.08 && hs.s > 0.1 && lum > 0.08 && lum < 0.92) usableColorfulCount += 1;
         if (lum > 0.08 && lum < 0.92 && score > best.score) {
-          best = { score, r, g, b };
+          best = { score, r, g, b, chroma };
         }
       }
     }
     if (!count) return null;
     const avgL = (sumR / count * 0.299 + sumG / count * 0.587 + sumB / count * 0.114) / 255;
+    const stats: LyricCoverChromaStats = {
+      avgChroma: sumChroma / count,
+      maxChroma,
+      colorfulRatio: colorfulCount / count,
+      usableColorfulRatio: usableColorfulCount / count,
+    };
+    stats.monochrome = lyricCoverLooksMonochrome(stats);
     const hsl = rgbToHsl(best.r, best.g, best.b);
-    return lyricTextPaletteFromHsl(hsl, avgL, Math.max(0, best.score));
+    // 传的是采样点色度，不是打分——score 会到 1.8，当色度用会把饱和度顶爆
+    return lyricTextPaletteFromHsl(hsl, avgL, Math.max(0, best.chroma), stats);
   } catch {
     return null;
   }
@@ -342,7 +414,7 @@ export function lyricLetterSpacingPx(fx: RoomVisualFxSettings, fontSize: number)
 }
 
 export function lyricLineHeightFactor(fx: RoomVisualFxSettings): number {
-  return clampRange(Number(fx.lyricLineHeight) || 1, 0.86, 1.35);
+  return clampRange(Number(fx.lyricLineHeight) || 1, 0.72, 1.8);
 }
 
 export function measureTextWithLetterSpacing(

@@ -39,12 +39,13 @@ export function preloadGalaxyBackground(): Promise<unknown> {
   return import('../components/galaxy/GalaxyBackground3D');
 }
 
-export function preloadTopographyBackground(): Promise<unknown> {
-  return import('../components/topography/TopographyBackground3D');
+export function preloadSonicWorkshopBackground(): Promise<unknown> {
+  return import('../components/topography/SonicWorkshopBackground');
 }
 
 export function preloadImmersiveBackground(mode: RoomVisualMode): Promise<unknown> {
-  if (mode === 'topography') return preloadTopographyBackground();
+  if (mode === 'topography') return import('../components/topography/TopographyBackground3D');
+  if (mode === 'topography-we') return preloadSonicWorkshopBackground();
   return preloadGalaxyBackground();
 }
 

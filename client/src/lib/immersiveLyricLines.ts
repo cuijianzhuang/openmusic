@@ -8,6 +8,53 @@
 export interface ResolveImmersiveLyricOptions {
   /** 是否显示翻译，默认 true */
   showTranslation?: boolean;
+  /** 新版沉浸翻译模式；off 优先于 showTranslation */
+  translationMode?: 'off' | 'current' | 'dual' | 'multi';
+}
+
+export function immersiveLyricLineCount(fx: {
+  lyricDisplayMode: 'single' | 'dual' | 'triple' | 'cinema' | 'custom';
+  lyricCustomLineCount: number;
+}): number {
+  if (fx.lyricDisplayMode === 'single') return 1;
+  if (fx.lyricDisplayMode === 'dual') return 2;
+  if (fx.lyricDisplayMode === 'triple') return 3;
+  if (fx.lyricDisplayMode === 'cinema') return 5;
+  return Math.max(1, Math.min(10, Math.round(fx.lyricCustomLineCount) || 3));
+}
+
+/** 相对当前行的偏移（不含边界裁剪）。dual 固定当前+下一句。 */
+export function immersiveLyricOffsets(fx: Parameters<typeof immersiveLyricLineCount>[0]): number[] {
+  const count = immersiveLyricLineCount(fx);
+  if (fx.lyricDisplayMode === 'dual') return [0, 1];
+  const activeSlot = Math.floor(count / 2);
+  return Array.from({ length: count }, (_, index) => index - activeSlot);
+}
+
+/**
+ * 滑动窗口：尽量凑满设定行数。
+ * 旧逻辑直接 filter 负索引，歌开头自定义 10 行会只剩 5 行。
+ */
+export function immersiveLyricIndexes(
+  activeIndex: number,
+  total: number,
+  fx: Parameters<typeof immersiveLyricLineCount>[0],
+): number[] {
+  if (activeIndex < 0 || total <= 0) return [];
+  const count = immersiveLyricLineCount(fx);
+  if (count <= 1) return [activeIndex];
+
+  if (fx.lyricDisplayMode === 'dual') {
+    const indexes = [activeIndex];
+    if (activeIndex + 1 < total) indexes.push(activeIndex + 1);
+    return indexes;
+  }
+
+  const window = Math.min(count, total);
+  let start = activeIndex - Math.floor(window / 2);
+  if (start < 0) start = 0;
+  if (start + window > total) start = Math.max(0, total - window);
+  return Array.from({ length: window }, (_, index) => start + index);
 }
 
 function stripEmbeddedTranslation(text: string): string {
@@ -21,7 +68,8 @@ export function resolveImmersiveLyricLines(
   translation?: string | null,
   options?: ResolveImmersiveLyricOptions,
 ): string[] {
-  const showTranslation = options?.showTranslation !== false;
+  const translationMode = options?.translationMode;
+  const showTranslation = options?.showTranslation !== false && translationMode !== 'off';
   const original = String(text || '').replace(/\r\n/g, '\n').trim();
   const trans = String(translation || '').replace(/\r\n/g, '\n').trim();
 

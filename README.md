@@ -108,7 +108,7 @@ npm run install:all && npm run build && npm start
 ### 🌌 视觉与客户端
 
 - 星河 / 声波地形 3D 背景、封面模糊背景、桌面沉浸模式
-- Android / iOS
+- Android / iOS（重构中）
 - 静默 / 强制更新提示
 
 ### ⚙️ 点歌规则（房主 / 管理员）
@@ -144,32 +144,13 @@ npm run install:all && npm run build && npm start
 
 ### 1. 申请 OAuth 应用
 
-**Linux.do**：去 [connect.linux.do](https://connect.linux.do) 注册，拿到 `client_id` / `client_secret`，回调地址填 `https://你的域名/api/auth/linuxdo/callback`；还需要向 Linux.do 官方文档核实真实的授权 / 令牌 / 用户信息接口地址（`.env.example` 里不提供默认值，照抄示例地址大概率无法工作）。
+**Linux.do**：去 [connect.linux.do](https://connect.linux.do) 注册，拿到 `client_id` / `client_secret`，回调地址填 `https://你的域名/api/auth/linuxdo/callback`；还需要向 Linux.do 官方文档核实真实的授权 / 令牌 / 用户信息接口地址（项目不提供默认值，照抄示例地址大概率无法工作）。
 
 **GitHub**：去 [github.com/settings/developers](https://github.com/settings/developers) 新建一个 OAuth App，拿到 `client_id` / `client_secret`，Authorization callback URL 填 `https://你的域名/api/auth/github/callback`。GitHub 的接口地址是固定的，不需要额外核实/配置。
 
 ### 2. 填写配置
 
-在 `server/.env` 里填（两个都是可选，各自独立）：
-
-```bash
-# Linux.do
-LINUXDO_CLIENT_ID=
-LINUXDO_CLIENT_SECRET=
-LINUXDO_REDIRECT_URI=https://你的域名/api/auth/linuxdo/callback
-LINUXDO_AUTHORIZE_URL=
-LINUXDO_TOKEN_URL=
-LINUXDO_USERINFO_URL=
-LINUXDO_SCOPE=user
-
-# GitHub
-GITHUB_CLIENT_ID=
-GITHUB_CLIENT_SECRET=
-GITHUB_REDIRECT_URI=https://你的域名/api/auth/github/callback
-GITHUB_SCOPE=read:user
-```
-
-留空即为关闭对应功能。也可以不改 `.env`，直接在管理后台「运行时配置」里填，免重启生效。
+管理后台 →「运行时配置」→「身份登录」标签页，填 Client ID / Secret / 回调地址（Linux.do 还要填授权、令牌、用户信息三个接口地址），保存即时生效，无需重启。两个平台各自独立，留空即为关闭。
 
 ### 3. 怎么绑定
 
@@ -187,7 +168,9 @@ GITHUB_SCOPE=read:user
 
 ---
 
-## 📱 Android / iOS
+## 📱 Android / iOS（重构中）
+
+> 客户端正在重构，功能与产物随时可能变动，暂不建议作为稳定版本使用。
 
 原生客户端位于 [`mobile/`](mobile/)（Flutter，**不嵌入 WebView**），与网页共用 Socket.IO 后端。
 
@@ -198,8 +181,6 @@ flutter run --dart-define=OM_SERVER_URL=https://your-host
 ```
 
 GitHub Actions：`flutter-android-apk.yml` / `flutter-ios-ipa.yml`。产物仍发布到 `/downloads/openmusic.apk` 与 `/downloads/openmusic.ipa`。
-
-历史 Capacitor WebView 壳见 `client/android/DEPRECATED.md`（仅过渡回退）。
 
 ---
 
@@ -215,10 +196,9 @@ GitHub Actions：`flutter-android-apk.yml` / `flutter-ios-ipa.yml`。产物仍�
 
 ## 🙏 致谢
 
-| 项目                                                               | 作者                                         | 说明                                    |
-| ------------------------------------------------------------------ | -------------------------------------------- | --------------------------------------- |
-| [Mineradio](https://github.com/XxHuberrr/Mineradio)                | [@XxHuberrr](https://github.com/XxHuberrr)   | 星河粒子、沉浸玻璃质感、舞台歌词等      |
-| [sonic-topography](https://github.com/yin-yizhen/sonic-topography) | [@yin-yizhen](https://github.com/yin-yizhen) | 「声波地形」着色器（仅限个人 / 非商业） |
+| 项目                                                | 作者                                       | 说明                               |
+| --------------------------------------------------- | ------------------------------------------ | ---------------------------------- |
+| [Mineradio](https://github.com/XxHuberrr/Mineradio) | [@XxHuberrr](https://github.com/XxHuberrr) | 星河粒子、沉浸玻璃质感、舞台歌词等 |
 
 ## 🔗 友情链接
 

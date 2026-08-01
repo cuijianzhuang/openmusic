@@ -17,6 +17,8 @@ const PANEL_EXIT_PAD = 24;
 const EDGE_SIZE = 14;
 const BOTTOM_BAR_CLOSE_DELAY_MS = 420;
 const FX_FAB_PEEK_DELAY_MS = 1100;
+/** 鼠标静止多久后把整套沉浸 UI 渐隐 */
+const CHROME_IDLE_MS = 3000;
 
 interface Props {
   className?: string;
@@ -52,7 +54,7 @@ function EdgeHint({
 
   return (
     <div
-      className={`pointer-events-none absolute z-20 flex items-center gap-1 border border-white/10 bg-black/20 text-[10px] font-medium tracking-wide text-white/45 backdrop-blur-md transition-all duration-300 ${sideClass} ${
+      className={`pointer-events-none absolute z-20 flex items-center gap-1 border border-white/15 bg-black/32 text-[10px] font-medium tracking-wide text-white/78 backdrop-blur-md transition-all duration-300 ${sideClass} ${
         visible ? 'opacity-100' : 'opacity-0'
       }`}
       aria-hidden
@@ -77,11 +79,21 @@ export default function RoomImmersiveShell({
   player,
 }: Props) {
   const [openPanel, setOpenPanel] = useState<PanelId | null>(null);
+  // 一旦某面板被打开过就保持内容挂载,收起时仅用 CSS 离屏隐藏,
+  // 避免重新挂载导致列表图片重载(黑一下再加载);初进沉浸不会三面板全挂载。
+  const [mountedPanels, setMountedPanels] = useState<Record<PanelId, boolean>>({
+    search: false,
+    queue: false,
+    chat: false,
+  });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [fxFabAutoHide, setFxFabAutoHide] = useState(false);
   const [fxFabPeek, setFxFabPeek] = useState(true);
   const [bottomBarVisible, setBottomBarVisible] = useState(false);
+  const [chromeIdle, setChromeIdle] = useState(false);
   const [isNativeFullscreen, setIsNativeFullscreen] = useState(() => isDocumentFullscreen());
+  const chromeHoverRef = useRef(false);
+  const idleTimerRef = useRef<number | null>(null);
   const closeTimerRef = useRef<number | null>(null);
   const bottomBarCloseTimerRef = useRef<number | null>(null);
   const fxFabPeekTimerRef = useRef<number | null>(null);
@@ -95,6 +107,11 @@ export default function RoomImmersiveShell({
 
   useEffect(() => {
     openPanelRef.current = openPanel;
+  }, [openPanel]);
+
+  useEffect(() => {
+    if (!openPanel) return;
+    setMountedPanels((prev) => (prev[openPanel] ? prev : { ...prev, [openPanel]: true }));
   }, [openPanel]);
 
   useEffect(() => {
@@ -316,6 +333,50 @@ export default function RoomImmersiveShell({
   }, [cancelFxFabPeek, scheduleFxFabHide, settingsOpen]);
 
   const anyPanelOpen = openPanel !== null || settingsOpen;
+
+  // 鼠标静止 3 秒后整套 UI 渐隐；面板展开或指针停在某块 UI 上时不计时
+  const wakeChrome = useCallback(() => {
+    if (idleTimerRef.current !== null) {
+      window.clearTimeout(idleTimerRef.current);
+      idleTimerRef.current = null;
+    }
+    setChromeIdle((prev) => (prev ? false : prev));
+    if (anyPanelOpen || chromeHoverRef.current) return;
+    idleTimerRef.current = window.setTimeout(() => {
+      idleTimerRef.current = null;
+      setChromeIdle(true);
+    }, CHROME_IDLE_MS);
+  }, [anyPanelOpen]);
+
+  const holdChrome = useCallback(() => {
+    chromeHoverRef.current = true;
+    wakeChrome();
+  }, [wakeChrome]);
+
+  const releaseChrome = useCallback(() => {
+    chromeHoverRef.current = false;
+    wakeChrome();
+  }, [wakeChrome]);
+
+  useEffect(() => {
+    wakeChrome();
+    const onActivity = () => wakeChrome();
+    window.addEventListener('pointermove', onActivity, { passive: true });
+    window.addEventListener('pointerdown', onActivity, { passive: true });
+    window.addEventListener('wheel', onActivity, { passive: true });
+    window.addEventListener('keydown', onActivity);
+    return () => {
+      window.removeEventListener('pointermove', onActivity);
+      window.removeEventListener('pointerdown', onActivity);
+      window.removeEventListener('wheel', onActivity);
+      window.removeEventListener('keydown', onActivity);
+      if (idleTimerRef.current !== null) {
+        window.clearTimeout(idleTimerRef.current);
+        idleTimerRef.current = null;
+      }
+    };
+  }, [wakeChrome]);
+
   const chatDocked = openPanel === 'chat' && !settingsOpen;
   const openSettingsPanel = useCallback(() => {
     setOpenPanel(null);
@@ -357,11 +418,17 @@ export default function RoomImmersiveShell({
         style={{ height: 28 }}
         onMouseEnter={showBottomBar}
       />
-      <EdgeHint label="搜索" icon={Search} side="top" visible={!anyPanelOpen} />
-      <EdgeHint label="队列" icon={ListMusic} side="left" visible={!anyPanelOpen} />
-      <EdgeHint label="聊天" icon={MessageCircle} side="right" visible={!anyPanelOpen} />
+      <EdgeHint label="搜索" icon={Search} side="top" visible={!anyPanelOpen && !chromeIdle} />
+      <EdgeHint label="队列" icon={ListMusic} side="left" visible={!anyPanelOpen && !chromeIdle} />
+      <EdgeHint label="聊天" icon={MessageCircle} side="right" visible={!anyPanelOpen && !chromeIdle} />
 
-      <div className="pointer-events-auto absolute right-4 top-4 z-[72] flex items-center gap-2">
+      <div
+        className={`absolute right-4 top-4 z-[72] flex items-center gap-2 transition-opacity duration-500 ${
+          chromeIdle ? 'pointer-events-none opacity-0' : 'pointer-events-auto opacity-100'
+        }`}
+        onMouseEnter={holdChrome}
+        onMouseLeave={releaseChrome}
+      >
         <button
           type="button"
           onClick={() => {
@@ -387,10 +454,16 @@ export default function RoomImmersiveShell({
       <button
         type="button"
         id="fx-fab"
-        onMouseEnter={revealFxFab}
-        onMouseLeave={scheduleFxFabHide}
+        onMouseEnter={() => {
+          holdChrome();
+          revealFxFab();
+        }}
+        onMouseLeave={() => {
+          releaseChrome();
+          scheduleFxFabHide();
+        }}
         onClick={openSettingsPanel}
-        className={`immersive-fx-fab ${settingsOpen ? 'active' : ''} ${chatDocked ? 'chat-docked' : ''} ${fxFabAutoHide && !fxFabPeek && !settingsOpen ? 'auto-hidden' : ''}`}
+        className={`immersive-fx-fab ${settingsOpen ? 'active' : ''} ${chatDocked ? 'chat-docked' : ''} ${fxFabAutoHide && !fxFabPeek && !settingsOpen ? 'auto-hidden' : ''} ${chromeIdle ? 'idle-hidden' : ''}`}
         style={{ pointerEvents: 'auto' }}
         aria-label="视觉控制台"
         aria-expanded={settingsOpen}
@@ -400,8 +473,14 @@ export default function RoomImmersiveShell({
       <button
         type="button"
         id="fx-fab-hide-btn"
-        onMouseEnter={revealFxFab}
-        onMouseLeave={scheduleFxFabHide}
+        onMouseEnter={() => {
+          holdChrome();
+          revealFxFab();
+        }}
+        onMouseLeave={() => {
+          releaseChrome();
+          scheduleFxFabHide();
+        }}
         onClick={(e) => {
           e.stopPropagation();
           setFxFabAutoHide((prev) => {
@@ -410,7 +489,7 @@ export default function RoomImmersiveShell({
             return next;
           });
         }}
-        className={`immersive-fx-fab-hide ${fxFabAutoHide ? 'on' : ''} ${chatDocked ? 'chat-docked' : ''} ${fxFabAutoHide && !fxFabPeek && !settingsOpen ? 'auto-hidden' : ''}`}
+        className={`immersive-fx-fab-hide ${fxFabAutoHide ? 'on' : ''} ${chatDocked ? 'chat-docked' : ''} ${fxFabAutoHide && !fxFabPeek && !settingsOpen ? 'auto-hidden' : ''} ${chromeIdle ? 'idle-hidden' : ''}`}
         style={{ pointerEvents: 'auto' }}
         title={fxFabAutoHide ? '取消自动隐藏视觉控制台' : '自动隐藏视觉控制台'}
         aria-label={fxFabAutoHide ? '取消自动隐藏视觉控制台' : '自动隐藏视觉控制台'}
@@ -467,7 +546,7 @@ export default function RoomImmersiveShell({
             <QueueSystemToast />
           </div>
           <div className="min-h-0 flex-1 overflow-hidden p-2">
-            {openPanel === 'queue' ? queueContent : null}
+            {mountedPanels.queue ? queueContent : null}
           </div>
         </div>
       </div>
@@ -483,7 +562,7 @@ export default function RoomImmersiveShell({
         onPointerLeave={handlePanelLeave}
       >
         <div className="mineradio-glass-panel m-3 flex h-[calc(100%-1.5rem)] flex-col overflow-hidden rounded-[22px]">
-          <div className="min-h-0 flex-1 overflow-hidden">{openPanel === 'chat' && !settingsOpen ? chatContent : null}</div>
+          <div className="min-h-0 flex-1 overflow-hidden">{mountedPanels.chat ? chatContent : null}</div>
         </div>
       </div>
 
@@ -533,14 +612,22 @@ export default function RoomImmersiveShell({
       </div>
 
       <div
-        className={`pointer-events-none fixed inset-x-0 bottom-0 z-[71] flex justify-center px-3 pb-4 transition-transform duration-[380ms] ease-[cubic-bezier(0.16,1,0.3,1)] ${
-          bottomBarVisible ? 'translate-y-0' : 'translate-y-[calc(100%+24px)]'
+        className={`pointer-events-none fixed inset-x-0 bottom-0 z-[71] flex justify-center px-3 pb-4 transition-[transform,opacity] duration-[380ms] ease-[cubic-bezier(0.16,1,0.3,1)] ${
+          bottomBarVisible && !chromeIdle
+            ? 'translate-y-0 opacity-100'
+            : 'translate-y-[calc(100%+24px)] opacity-0'
         }`}
       >
         <div
           className="pointer-events-auto w-full max-w-[min(1120px,calc(100vw-clamp(20px,5vw,72px)))]"
-          onMouseEnter={showBottomBar}
-          onMouseLeave={scheduleBottomBarClose}
+          onMouseEnter={() => {
+            holdChrome();
+            showBottomBar();
+          }}
+          onMouseLeave={() => {
+            releaseChrome();
+            scheduleBottomBarClose();
+          }}
         >
           {player}
         </div>

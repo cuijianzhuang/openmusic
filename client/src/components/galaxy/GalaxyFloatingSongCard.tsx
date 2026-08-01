@@ -7,6 +7,7 @@ import { useTrackDuration, clampPlaybackTime } from '../../hooks/useTrackDuratio
 import { useFavorites } from '../../hooks/useFavorites';
 import { useSocket } from '../../hooks/useSocket';
 import { getClientId } from '../../lib/clientId';
+import { resolveDislikeSkipThreshold } from '../../lib/dislikeSkip';
 import { roomVisualFxLive } from '../../lib/roomVisualFxLive';
 import { useRoomStore } from '../../stores/roomStore';
 import type { QueueItem } from '../../types';
@@ -31,36 +32,42 @@ import type { RoomVisualFxSettings } from '../../lib/roomVisualPreset';
 
 const CLICK_THRESHOLD = 6;
 const SHELF_VISIBLE_RADIUS = 5;
+/** 跟拍镜头允许偏离居中卡片的最大槽位 */
+const FOCUS_SLOT_LIMIT = 2;
 const MAX_SHELF_ITEMS = 24;
 
 type DisplayQueueItem = QueueItem & { isCurrent: boolean };
 
 type CardSlot = ReturnType<typeof createFloatingSongCardMesh>;
 
+/**
+ * slot 是卡片相对居中卡片的偏移（applyFloatingSongCardPose 里的 delta），不是队列绝对序号。
+ * 用绝对序号会让队列一长就把 lookAt 甩到画面外，镜头来回抽搐。
+ */
 function makeCardFocusZone(
   mode: 'side' | 'stage',
-  index: number,
+  slot: number,
   offsets?: Pick<RoomVisualFxSettings, 'shelfOffsetX' | 'shelfOffsetY' | 'shelfOffsetZ'>,
-): { theta: number; phi: number; radius: number; lookAt: THREE.Vector3; ease: number } {
+): { theta: number; phi: number; radius: number; lookAt: THREE.Vector3 } {
   const ox = offsets?.shelfOffsetX ?? 0;
   const oy = offsets?.shelfOffsetY ?? 0;
   const oz = offsets?.shelfOffsetZ ?? 0;
+  const d = Math.max(-FOCUS_SLOT_LIMIT, Math.min(FOCUS_SLOT_LIMIT, slot));
+  const absD = Math.abs(d);
   if (mode === 'stage') {
     return {
-      theta: -0.08 + index * 0.08,
+      theta: -0.08 + d * 0.08,
       phi: -0.2,
-      radius: 4.36 + Math.min(index, 2) * 0.08,
-      lookAt: new THREE.Vector3((index - 1.5) * 0.72 + ox, -1.28 + oy, 0.86 - index * 0.03 + oz),
-      ease: 0.1,
+      radius: 4.36 + Math.min(absD, 2) * 0.08,
+      lookAt: new THREE.Vector3(d * 0.72 + ox, -1.28 + oy, 0.86 - d * 0.03 + oz),
     };
   }
   const anchor = getShelfSideAnchor(ox, oy, oz);
   return {
     theta: 0.28,
-    phi: -0.04 + (1.5 - index) * 0.025,
-    radius: 4.74 + Math.min(index, 3) * 0.05,
-    lookAt: new THREE.Vector3(anchor.x - 1.4, anchor.y + 0.22 - index * 0.9, anchor.z - index * 0.08),
-    ease: 0.1,
+    phi: -0.04 - d * 0.025,
+    radius: 4.74 + Math.min(absD, 3) * 0.05,
+    lookAt: new THREE.Vector3(anchor.x - 1.4, anchor.y + 0.22 - d * 0.9, anchor.z - absD * 0.08),
   };
 }
 
@@ -95,7 +102,7 @@ export default function GalaxyFloatingSongCard() {
   const canControlPlayback = useRoomStore((s) => s.canControlPlayback);
   const memberJumpEnabled = Boolean(room?.memberJumpEnabled);
   const { toggleFavorite, isFavorite } = useFavorites();
-  const { removeSong, requestJump, toggleQueueLike, banRoomSong } = useSocket();
+  const { removeSong, requestJump, toggleQueueLike, toggleCurrentDislike, banRoomSong } = useSocket();
   const current = room?.current ?? null;
   const currentTime = useSmoothPlaybackTime();
   const duration = useTrackDuration(current);
@@ -109,10 +116,19 @@ export default function GalaxyFloatingSongCard() {
   const presenceRef = useRef(
     roomVisualFxLive.current.shelfPresence === 'always' ? 1 : 0,
   );
+  const shelfMixRef = useRef(roomVisualFxLive.current.shelfMode === 'off' ? 0 : 1);
+  const lastShelfModeRef = useRef<'side' | 'stage'>(
+    roomVisualFxLive.current.shelfMode === 'stage' ? 'stage' : 'side',
+  );
   const raycasterRef = useRef(new THREE.Raycaster());
   const actionRegionsRef = useRef<FloatingSongCardActionRegion[][]>([]);
   const hoveredCardRef = useRef<number>(-1);
   const hoveredActionRef = useRef<FloatingSongCardActionId | null>(null);
+  /** 镜头跟拍的进入 / 退出延迟计时（Mineradio focusHover 的 pendingTimer / exitTimer） */
+  const focusWantRef = useRef(false);
+  const focusSinceRef = useRef(0);
+  /** 最近一次悬停卡片相对居中卡片的槽位偏移 */
+  const focusSlotRef = useRef(0);
   const pointerDownRef = useRef<{
     x: number;
     y: number;
@@ -136,6 +152,8 @@ export default function GalaxyFloatingSongCard() {
     return items.slice(0, MAX_SHELF_ITEMS);
   }, [room]);
 
+  const dislikeThreshold = useMemo(() => resolveDislikeSkipThreshold(room), [room]);
+
   const displayItems = useMemo(() => {
     const myUserId = mySocketId || getClientId();
     return displaySongs.map((song, index) => {
@@ -148,6 +166,17 @@ export default function GalaxyFloatingSongCard() {
       const actions: FloatingSongCardAction[] = [
         { id: 'favorite', label: favorite ? '已收藏' : '收藏', active: favorite, tone: 'rose' },
       ];
+      if (song.isCurrent) {
+        const dislikedByIds = Array.isArray(song.dislikedByIds) ? song.dislikedByIds : [];
+        const dislikedByMe = Boolean(myUserId && dislikedByIds.includes(myUserId));
+        actions.push({
+          id: 'dislike',
+          label: dislikedByMe ? '已踩' : '踩歌',
+          active: dislikedByMe,
+          tone: 'red',
+          badge: dislikedByIds.length > 0 ? `${dislikedByIds.length}/${dislikeThreshold}` : undefined,
+        });
+      }
       if (!song.isCurrent) {
         if (!isMine) {
           actions.push({
@@ -187,7 +216,7 @@ export default function GalaxyFloatingSongCard() {
       };
       return { song, item, likedByMe };
     });
-  }, [canControlPlayback, displaySongs, isFavorite, memberJumpEnabled, mySocketId, nickname, progress, actionRevision]);
+  }, [canControlPlayback, dislikeThreshold, displaySongs, isFavorite, memberJumpEnabled, mySocketId, nickname, progress, actionRevision]);
 
   useEffect(() => {
     const nextCount = displayItems.length;
@@ -269,6 +298,8 @@ export default function GalaxyFloatingSongCard() {
       try {
         if (actionId === 'favorite') {
           await toggleFavorite(entry.song);
+        } else if (actionId === 'dislike' && entry.song.isCurrent) {
+          await toggleCurrentDislike();
         } else if (actionId === 'like' && !entry.song.isCurrent) {
           await toggleQueueLike(entry.song.queueId);
         } else if (actionId === 'jump' && !entry.song.isCurrent) {
@@ -283,7 +314,7 @@ export default function GalaxyFloatingSongCard() {
         setActionRevision((v) => v + 1);
       }
     },
-    [banRoomSong, displayItems, removeSong, requestJump, toggleFavorite, toggleQueueLike],
+    [banRoomSong, displayItems, removeSong, requestJump, toggleCurrentDislike, toggleFavorite, toggleQueueLike],
   );
 
   const isShelfWheelZone = useCallback((clientX: number, clientY: number) => {
@@ -363,7 +394,7 @@ export default function GalaxyFloatingSongCard() {
     };
   }, [displayItems.length, getHitAtClientPoint, gl, isShelfWheelZone, runCardAction]);
 
-  useFrame((state) => {
+  useFrame((state, deltaTime) => {
     const count = displayItems.length;
     for (let i = 0; i < count; i += 1) {
       pulseRef.current[i] = (pulseRef.current[i] || 0) * 0.9;
@@ -381,7 +412,15 @@ export default function GalaxyFloatingSongCard() {
     }
 
     const fx = roomVisualFxLive.current;
-    if (fx.shelfMode === 'off') {
+    const shelfTarget = fx.shelfMode === 'off' ? 0 : 1;
+    if (fx.shelfMode !== 'off') lastShelfModeRef.current = fx.shelfMode;
+    const summonDuration = shelfTarget > shelfMixRef.current
+      ? fx.shelfSummonOpenDuration
+      : fx.shelfSummonCloseDuration;
+    shelfMixRef.current += (shelfTarget - shelfMixRef.current)
+      * Math.min(1, deltaTime / Math.max(0.016, summonDuration));
+    if (shelfTarget === 0 && shelfMixRef.current < 0.006) {
+      shelfMixRef.current = 0;
       for (const card of cardsRef.current) card.mesh.visible = false;
       return;
     }
@@ -392,7 +431,7 @@ export default function GalaxyFloatingSongCard() {
       fx.shelfAccentColor || (fx.visualTintMode === 'custom' ? fx.visualTintColor : fx.visualTintColor || '#00f5d4');
     const centerIndex = centerSmoothRef.current;
     const centerRounded = Math.round(centerIndex);
-    const shelfMode = fx.shelfMode === 'stage' ? 'stage' : 'side';
+    const shelfMode = fx.shelfMode === 'off' ? lastShelfModeRef.current : fx.shelfMode;
 
     raycastFrameRef.current += 1;
     const pointerMoved =
@@ -448,16 +487,35 @@ export default function GalaxyFloatingSongCard() {
     presenceRef.current += (presenceTarget - presenceRef.current) * 0.08;
 
     const dynamicCamera = fx.shelfCameraMode === 'dynamic';
+    const orbit = galaxyOrbitRef.current;
+    const shelfFocusEngaged = orbit.focusZone.active && orbit.focusZone.type === 'cardHover';
+    const pointerInShelfZone = shelfMode === 'stage'
+      ? Math.abs(pointer.x) < 0.42 && pointer.y < 0.4
+      : nearShelfSide;
+    if (hoveredIndex >= 0) focusSlotRef.current = hoveredIndex - centerIndex;
+    // 跟拍一旦生效就只看指针还在不在歌单架区域：镜头推近本身会让卡片滑离指针，
+    // 若这时判定为「没悬停」就会进入 跟拍→丢失→回位→再跟拍 的抽搐循环
     const focusCard =
-      hoveredIndex >= 0 &&
       dynamicCamera &&
       !hoveredActionRef.current &&
-      pointerDownRef.current === null;
-    if (focusCard) {
-      const hoverZone = makeCardFocusZone(shelfMode, centerRounded, fx);
-      setGalaxyOrbitFocusZone(galaxyOrbitRef.current, 'cardHover', { ...hoverZone });
-    } else if (galaxyOrbitRef.current.focusZone.type === 'cardHover') {
-      setGalaxyOrbitFocusZone(galaxyOrbitRef.current, 'none');
+      pointerDownRef.current === null &&
+      (hoveredIndex >= 0 || (shelfFocusEngaged && pointerInShelfZone));
+    // Mineradio setFocusZone：进入要悬停 260ms 才跟拍，离开也拖 120ms，
+    // 否则鼠标扫过歌单架镜头就整个扑上去
+    const nowMs = state.clock.elapsedTime * 1000;
+    if (focusCard !== focusWantRef.current) {
+      focusWantRef.current = focusCard;
+      focusSinceRef.current = nowMs;
+    }
+    const focusSettled = nowMs - focusSinceRef.current >= (focusCard ? 260 : 120);
+    if (focusCard && focusSettled) {
+      const hoverZone = makeCardFocusZone(shelfMode, focusSlotRef.current, fx);
+      setGalaxyOrbitFocusZone(orbit, 'cardHover', {
+        ...hoverZone,
+        speed: fx.shelfCameraEnterSpeed,
+      });
+    } else if (!focusCard && focusSettled && shelfFocusEngaged) {
+      setGalaxyOrbitFocusZone(orbit, 'none', { speed: fx.shelfCameraExitSpeed });
     }
 
     gl.domElement.style.cursor = hoveredIndex >= 0 ? 'pointer' : '';
@@ -474,6 +532,9 @@ export default function GalaxyFloatingSongCard() {
       const targetHover = isHovered ? 1 : 0;
       hoverRef.current[i] = (hoverRef.current[i] || 0) + (targetHover - (hoverRef.current[i] || 0)) * 0.14;
 
+      const staggerDelay = Math.min(0.72, i * 0.055 * fx.shelfSummonStagger);
+      const reveal = Math.max(0, Math.min(1, (shelfMixRef.current - staggerDelay) / Math.max(0.001, 1 - staggerDelay)));
+      const easedReveal = reveal * reveal * (3 - 2 * reveal);
       const pose = applyFloatingSongCardPose(mesh, state.clock.elapsedTime, hoverRef.current[i], {
         mode: shelfMode,
         cardIndex: i,
@@ -486,6 +547,12 @@ export default function GalaxyFloatingSongCard() {
         offsetZ: fx.shelfOffsetZ,
         angleY: fx.shelfAngleY,
         breathWeight: Math.max(0.35, presenceRef.current),
+        reveal: easedReveal,
+        entry: (1 - easedReveal) * fx.shelfSummonSlide,
+        pointerX: pointer.x,
+        pointerY: pointer.y,
+        parallax: fx.shelfSummonParallax,
+        summonScale: fx.shelfSummonScale,
       });
 
       if (!pose.visible) {
@@ -494,9 +561,9 @@ export default function GalaxyFloatingSongCard() {
       }
       mesh.visible = true;
 
-      mesh.renderOrder = 60 + Math.round((SHELF_VISIBLE_RADIUS + 1 - Math.min(pose.absD, SHELF_VISIBLE_RADIUS + 1)) * 10)
-        + (isCenter ? 24 : 0)
-        + (isHovered ? 12 : 0);
+      const foreground = isHovered || (isCenter && fx.shelfPresence !== 'always');
+      mesh.renderOrder = (foreground ? 300 : 30)
+        + Math.round((SHELF_VISIBLE_RADIUS + 1 - Math.min(pose.absD, SHELF_VISIBLE_RADIUS + 1)) * 4);
       mesh.updateMatrixWorld(true);
 
       const item: FloatingSongCardItem = {
@@ -553,7 +620,7 @@ export default function GalaxyFloatingSongCard() {
       const passiveDim = passiveAlways && !isCenter ? 0.92 : 1;
       mat.opacity = Math.min(
         1,
-        (presenceRef.current + (pulseRef.current[i] || 0) * 0.1) * fx.shelfOpacity * stackOpacity * passiveDim,
+        (presenceRef.current + (pulseRef.current[i] || 0) * 0.1) * fx.shelfOpacity * stackOpacity * passiveDim * easedReveal,
       );
     }
   });

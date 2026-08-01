@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { normalizeCoverResolution } from '../../../lib/roomVisualPreset';
+import type { RoomVisualFxSettings } from '../../../lib/roomVisualPreset';
 
 export const PLANE_SIZE = 4.8;
 
@@ -8,6 +9,36 @@ export function coverParticleGridForResolution(value: number): number {
   let grid = Math.round(118 * normalizeCoverResolution(value));
   grid = Math.max(88, Math.min(183, grid));
   return grid % 2 ? grid : grid + 1;
+}
+
+export type GalaxyPerformanceQuality = RoomVisualFxSettings['performanceQuality'];
+
+/** 主封面网格按画质封顶,与 topography 的 QUALITY_GRID_CAP 治理思路一致 */
+export const GALAXY_GRID_CAP: Record<GalaxyPerformanceQuality, number> = {
+  eco: 183,
+  balanced: 183,
+  high: 183,
+  ultra: 183,
+};
+
+/** 浮层 / 背景粒子的 drawRange 缩放系数,默认(均衡)即偏轻 */
+export const GALAXY_LAYER_COUNT_SCALE: Record<GalaxyPerformanceQuality, number> = {
+  eco: 0.5,
+  balanced: 0.76,
+  high: 1,
+  ultra: 1.16,
+};
+
+/** 分辨率派生网格后再按画质封顶,结果保持奇数(与 buildGalaxyParticleGeometry 约定一致) */
+export function galaxyParticleGridForQuality(
+  value: number,
+  quality: GalaxyPerformanceQuality = 'balanced',
+): number {
+  const base = coverParticleGridForResolution(value);
+  const cap = GALAXY_GRID_CAP[quality] ?? GALAXY_GRID_CAP.balanced;
+  let grid = Math.min(base, cap);
+  if (grid % 2 === 0) grid -= 1;
+  return Math.max(87, grid);
 }
 
 export function buildGalaxyParticleGeometry(

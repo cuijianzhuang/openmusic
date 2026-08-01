@@ -16,7 +16,7 @@ import 'package:openmusic/widgets/om_cover_image.dart';
 import 'package:openmusic/widgets/om_dialog.dart';
 import 'package:openmusic/widgets/om_ui.dart';
 
-const _playModes = ['order', 'shuffle', 'loop-one', 'loop-all'];
+const _playModes = ['order', 'shuffle', 'loop-one', 'loop-all', 'shuffle-loop'];
 
 String _normalizePlayMode(String? mode) {
   final m = (mode ?? '').trim().toLowerCase();
@@ -33,6 +33,7 @@ String _nextPlayMode(String? mode) {
       'shuffle' => (Icons.shuffle_rounded, '随机播放'),
       'loop-one' => (Icons.repeat_one_rounded, '单曲循环'),
       'loop-all' => (Icons.repeat_rounded, '列表循环'),
+      'shuffle-loop' => (Icons.casino_rounded, '列表内随机'),
       _ => (Icons.queue_music_rounded, '顺序播放'),
     };
 
