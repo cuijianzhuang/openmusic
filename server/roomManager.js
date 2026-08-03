@@ -435,7 +435,14 @@ export async function verifyRoomPassword(roomId, password, options = {}) {
 
   const clientId = sanitizeCreatorId(options.clientId);
   const deviceId = sanitizeCreatorId(options.deviceId);
-  if (clientId && deviceId && room.creatorDeviceId === deviceId && room.creatorId !== clientId) {
+  // TV/只读进房会发临时 clientId，绝不能用设备绑定把永久房主改写给该临时身份。
+  if (
+    !options.readOnly
+    && clientId
+    && deviceId
+    && room.creatorDeviceId === deviceId
+    && room.creatorId !== clientId
+  ) {
     // 身份 Cookie 因重装/密钥轮换而变化时，以 HttpOnly 设备绑定恢复永久房主。
     room.creatorId = clientId;
     ensureAdminIds(room).delete(clientId);

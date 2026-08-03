@@ -12,6 +12,10 @@ import {
   MOTION_FX_SLIDERS,
   ADVANCED_FX_SLIDERS,
 } from '../RoomVisualFxSettingsBody';
+import {
+  galaxyHandGestureStartup,
+  subscribeGalaxyHandGestureStartup,
+} from '../galaxy/lib/galaxyHandGestureStartup';
 
 export type ImmersiveFxTab = 'preset' | 'appearance' | 'lyrics' | 'motion' | 'advanced';
 
@@ -115,23 +119,36 @@ function FxSeg({
   value,
   onChange,
   options,
+  busy = false,
+  busyValue,
+  busyLabel,
 }: {
   value: string;
   onChange: (value: string) => void;
   options: Array<{ value: string; label: string }>;
+  busy?: boolean;
+  busyValue?: string;
+  busyLabel?: string;
 }) {
   return (
-    <div className="fx-seg">
-      {options.map((option) => (
-        <button
-          key={option.value}
-          type="button"
-          className={value === option.value ? 'active' : ''}
-          onClick={() => onChange(option.value)}
-        >
-          {option.label}
-        </button>
-      ))}
+    <div className={`fx-seg${busy ? ' is-busy' : ''}`} aria-busy={busy || undefined}>
+      {options.map((option) => {
+        const optionBusy = busy && busyValue === option.value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            className={value === option.value ? 'active' : ''}
+            disabled={busy && !optionBusy && option.value !== 'off'}
+            onClick={() => {
+              if (busy && option.value === value) return;
+              onChange(option.value);
+            }}
+          >
+            {optionBusy && busyLabel ? busyLabel : option.label}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -186,6 +203,11 @@ export default function ImmersiveFxSettingsPanel({
     }
   });
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
+  const [gestureStartup, setGestureStartup] = useState(() => ({
+    phase: galaxyHandGestureStartup.phase,
+    progress: galaxyHandGestureStartup.progress,
+    label: galaxyHandGestureStartup.label,
+  }));
   const defaultOpenFolds = {
     lyricToggles: true,
     lyricLayout: true,
@@ -216,6 +238,10 @@ export default function ImmersiveFxSettingsPanel({
     }
   });
   const dragging = draggingKey !== null;
+  const gestureBusy =
+    gestureStartup.phase === 'loading-model'
+    || gestureStartup.phase === 'requesting-camera'
+    || gestureStartup.phase === 'starting';
 
   const toggleFold = (key: string) => {
     setOpenFolds((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -236,6 +262,18 @@ export default function ImmersiveFxSettingsPanel({
       // ignore
     }
   }, [openFolds]);
+
+  useEffect(() => {
+    const sync = () => {
+      setGestureStartup({
+        phase: galaxyHandGestureStartup.phase,
+        progress: galaxyHandGestureStartup.progress,
+        label: galaxyHandGestureStartup.label,
+      });
+    };
+    sync();
+    return subscribeGalaxyHandGestureStartup(sync);
+  }, []);
 
   useEffect(() => {
     onDraggingChange?.(dragging);
@@ -713,6 +751,9 @@ export default function ImmersiveFxSettingsPanel({
                   <FxSectionLabel>摄像头交互</FxSectionLabel>
                   <FxSeg
                     value={value.cameraInteraction}
+                    busy={gestureBusy}
+                    busyValue="gesture"
+                    busyLabel="开启中…"
                     onChange={(cameraInteraction) =>
                       onPatch({ cameraInteraction: cameraInteraction as RoomVisualFxSettings['cameraInteraction'] })
                     }
@@ -721,6 +762,19 @@ export default function ImmersiveFxSettingsPanel({
                       { value: 'gesture', label: '手势触碰' },
                     ]}
                   />
+                  {gestureBusy ? (
+                    <div className="fx-gesture-startup" aria-live="polite">
+                      <div className="fx-gesture-startup-label">
+                        {gestureStartup.label || '正在开启手势…'}
+                      </div>
+                      <div className="fx-gesture-startup-track">
+                        <div
+                          className="fx-gesture-startup-fill"
+                          style={{ width: `${Math.round(gestureStartup.progress * 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                  ) : null}
                 </>
               ) : null}
             </FxFold>

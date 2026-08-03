@@ -2473,7 +2473,12 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const auth = await verifyRoomPassword(id, password, { clientId: userId, deviceId });
+    // TV/只读进房使用临时 userId，不可走设备绑定恢复房主（否则会把 creatorId 偷给电视机）。
+    const auth = await verifyRoomPassword(id, password, {
+      clientId: userId,
+      deviceId: readOnly ? null : deviceId,
+      readOnly: Boolean(readOnly),
+    });
     if (!auth.ok) {
       if (!limitJoinPasswordFail(`joinfail:${ip}:${id}`)) {
         callback?.({ success: false, error: '尝试过于频繁，请稍后再试' });
@@ -2534,7 +2539,8 @@ io.on('connection', (socket) => {
       readOnly: Boolean(readOnly),
       connectionId: socket.id,
       location,
-      deviceId: deviceId || undefined,
+      // 只读会话不绑定设备，避免后续路径误用本机 deviceId 恢复/改写房主
+      deviceId: readOnly ? undefined : (deviceId || undefined),
       clientIp: clientIp || undefined,
     });
     if (!joinedRoom) {

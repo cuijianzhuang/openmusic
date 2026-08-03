@@ -3,6 +3,11 @@ import {
   galaxyHandGestureLive,
   onGalaxyGestureModeChange,
 } from './lib/galaxyHandGesture';
+import {
+  galaxyHandGestureStartup,
+  isGalaxyHandGestureStarting,
+  subscribeGalaxyHandGestureStartup,
+} from './lib/galaxyHandGestureStartup';
 import { drawHandSkeleton } from './lib/drawHandSkeleton';
 import { patchRoomVisualFx, roomVisualFxLive } from '../../lib/roomVisualFxLive';
 
@@ -20,7 +25,7 @@ export default function GestureHudOverlay() {
       if (mode === 'off' && failed) {
         window.dispatchEvent(
           new CustomEvent('openmusic:visual-toast', {
-            detail: { message: '手势启动失败（需要摄像头权限）', type: 'error' },
+            detail: { message: '手势启动失败（需要摄像头权限或网络）', type: 'error' },
           }),
         );
       }
@@ -45,15 +50,32 @@ export default function GestureHudOverlay() {
     resize();
     window.addEventListener('resize', resize);
 
+    const scheduleDraw = (immediate = false) => {
+      if (idleTimerRef.current) {
+        clearTimeout(idleTimerRef.current);
+        idleTimerRef.current = 0;
+      }
+      cancelAnimationFrame(rafRef.current);
+      if (immediate) {
+        rafRef.current = requestAnimationFrame(draw);
+      } else {
+        idleTimerRef.current = window.setTimeout(() => {
+          idleTimerRef.current = 0;
+          rafRef.current = requestAnimationFrame(draw);
+        }, 120);
+      }
+    };
+
     const draw = () => {
       const live = galaxyHandGestureLive;
+      const starting = isGalaxyHandGestureStarting();
       const hud = live.hud;
       const hudEl = document.getElementById('gesture-hud');
       const fillEl = document.getElementById('gesture-fill');
       const labelEl = document.getElementById('gesture-label');
       const confirmEl = document.getElementById('gesture-confirm');
 
-      if (!live.active) {
+      if (!live.active && !starting) {
         if (hudEl) hudEl.classList.remove('show');
         canvas.classList.remove('show');
         const W = window.innerWidth;
@@ -61,18 +83,24 @@ export default function GestureHudOverlay() {
         if (canvas.width > 0 && canvas.height > 0) {
           ctx.clearRect(0, 0, W, H);
         }
-        if (!idleTimerRef.current) {
-          idleTimerRef.current = window.setTimeout(() => {
-            idleTimerRef.current = 0;
-            rafRef.current = requestAnimationFrame(draw);
-          }, 120);
-        }
+        scheduleDraw(false);
         return;
       }
 
       if (idleTimerRef.current) {
         clearTimeout(idleTimerRef.current);
         idleTimerRef.current = 0;
+      }
+
+      if (starting) {
+        const startup = galaxyHandGestureStartup;
+        if (hudEl) hudEl.classList.add('show');
+        if (labelEl) labelEl.textContent = startup.label || '正在开启手势…';
+        if (confirmEl) confirmEl.textContent = '首次开启需下载模型并授权摄像头';
+        if (fillEl) fillEl.style.width = `${Math.max(0, Math.min(100, startup.progress * 100))}%`;
+        canvas.classList.remove('show');
+        rafRef.current = requestAnimationFrame(draw);
+        return;
       }
 
       if (hudEl) hudEl.classList.toggle('show', hud.visible);
@@ -97,15 +125,19 @@ export default function GestureHudOverlay() {
 
       rafRef.current = requestAnimationFrame(draw);
     };
+
+    const unsubStartup = subscribeGalaxyHandGestureStartup(() => {
+      scheduleDraw(true);
+    });
     rafRef.current = requestAnimationFrame(draw);
 
     return () => {
       window.removeEventListener('resize', resize);
       cancelAnimationFrame(rafRef.current);
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      unsubStartup();
     };
   }, []);
-
   return (
     <>
       <div id="gesture-hud" className="gesture-hud" aria-live="polite">

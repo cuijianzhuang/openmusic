@@ -11,13 +11,33 @@ import {
 } from './galaxyGestureRotation';
 import { particleLocalPointFromNdc } from './galaxyParticlePointer';
 import { unlockGalaxyOrbitCenter, galaxyOrbitRef } from './galaxyOrbit';
+import {
+  clearGalaxyHandGestureStartup,
+  setGalaxyHandGestureStartup,
+  type GestureStartupPhase,
+} from './galaxyHandGestureStartup';
 
 const HAND_SMOOTH_ALPHA = 0.35;
 const PARTICLE_HAND_SPIN_X = 4.15;
 const PARTICLE_HAND_SPIN_Y = 4.3;
+const MODEL_LOAD_TIMEOUT_MS = 30_000;
 const VISION_WASM_BASE = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21/wasm';
 const HAND_MODEL_URL =
   'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
+
+async function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 type Landmark = { x: number; y: number; z?: number };
 
@@ -234,6 +254,12 @@ function toLandmarks(points: NormalizedLandmark[]): Landmark[] {
   return points.map((p) => ({ x: p.x, y: p.y, z: p.z }));
 }
 
+function publishStartup(phase: GestureStartupPhase, progress: number, label: string, gen: number): void {
+  if (gen !== syncGeneration || desiredMode !== 'gesture') return;
+  setGalaxyHandGestureStartup(phase, progress, label);
+  showGestureHUD(label, progress, '首次开启需下载模型并授权摄像头');
+}
+
 async function ensureHandLandmarker(): Promise<HandLandmarker> {
   if (handLandmarker) return handLandmarker;
   if (!landmarkerInitPromise) {
@@ -265,7 +291,11 @@ async function ensureHandLandmarker(): Promise<HandLandmarker> {
       throw err;
     });
   }
-  return landmarkerInitPromise;
+  return withTimeout(
+    landmarkerInitPromise,
+    MODEL_LOAD_TIMEOUT_MS,
+    '手势模型加载超时，请检查网络后重试',
+  );
 }
 
 function detectLoop(): void {
@@ -347,15 +377,18 @@ function stopHardware(): void {
 export function stopGalaxyHandGesture(): void {
   stopHardware();
   startPromise = null;
+  clearGalaxyHandGestureStartup();
 }
 
 async function startGalaxyHandGesture(): Promise<boolean> {
   if (galaxyHandGestureLive.active) return true;
   const gen = syncGeneration;
   try {
+    publishStartup('loading-model', 0.18, '正在加载手势模型…', gen);
     await ensureHandLandmarker();
     if (gen !== syncGeneration || desiredMode !== 'gesture') return false;
 
+    publishStartup('requesting-camera', 0.58, '正在请求摄像头权限…', gen);
     const video = document.createElement('video');
     video.playsInline = true;
     video.muted = true;
@@ -373,13 +406,21 @@ async function startGalaxyHandGesture(): Promise<boolean> {
       return false;
     }
 
+    publishStartup('starting', 0.86, '正在启动识别…', gen);
     video.srcObject = stream;
     await video.play();
+    if (gen !== syncGeneration || desiredMode !== 'gesture') {
+      stream.getTracks().forEach((t) => t.stop());
+      video.remove();
+      return false;
+    }
 
     gestureVideo = video;
     galaxyHandGestureLive.active = true;
+    setGalaxyHandGestureStartup('ready', 1, '手势已就绪');
     showGestureHUD('待命', 0, '把手放进视野');
     rafId = requestAnimationFrame(detectLoop);
+    clearGalaxyHandGestureStartup();
 
     window.dispatchEvent(
       new CustomEvent('openmusic:visual-toast', {
@@ -390,7 +431,7 @@ async function startGalaxyHandGesture(): Promise<boolean> {
   } catch (e) {
     console.warn('Gesture failed:', e);
     stopHardware();
-    notifyModeChange('off', true);
+    if (gen === syncGeneration) clearGalaxyHandGestureStartup();
     return false;
   }
 }
@@ -406,16 +447,23 @@ export async function syncGalaxyHandGestureMode(mode: 'off' | 'gesture'): Promis
   }
 
   if (galaxyHandGestureLive.active) return;
-  if (startPromise) {
+
+  // 等待进行中的启动结束后，若仍需开启则重试（修复代际竞态导致的假死）
+  while (startPromise) {
     await startPromise;
-    return;
+    if (gen !== syncGeneration) return;
+    if (galaxyHandGestureLive.active || desiredMode !== 'gesture') return;
   }
 
-  startPromise = startGalaxyHandGesture().finally(() => {
-    if (startPromise && gen === syncGeneration) startPromise = null;
+  if (galaxyHandGestureLive.active || desiredMode !== 'gesture' || gen !== syncGeneration) return;
+
+  const run = startGalaxyHandGesture();
+  startPromise = run.finally(() => {
+    if (startPromise === run) startPromise = null;
   });
   const ok = await startPromise;
-  if (!ok && gen === syncGeneration) {
+  if (!ok && gen === syncGeneration && desiredMode === 'gesture' && !galaxyHandGestureLive.active) {
+    clearGalaxyHandGestureStartup();
     notifyModeChange('off', true);
   }
 }
