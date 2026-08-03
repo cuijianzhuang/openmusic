@@ -5,5 +5,5 @@
     "沉浸模式支持本机自定义背景图/视频",
     "优化界面交互，隐藏控件、音量、错误上报等体验调整"
   ],
-  "forcePrompt": true
+  "forcePrompt": false
 }

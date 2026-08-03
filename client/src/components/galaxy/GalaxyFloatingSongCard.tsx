@@ -274,10 +274,14 @@ export default function GalaxyFloatingSongCard() {
       raycasterRef.current.setFromCamera(new THREE.Vector2(nx, ny), camera);
       const hits = raycasterRef.current.intersectObjects(objects, false);
       if (!hits.length) return null;
-      const hit = hits[0];
-      const cardIndex = Number(hit.object.userData.cardIndex ?? -1);
+      // 重叠时优先当前居中卡，避免命中背后卡再放大前推造成抽搐
+      const centerRounded = Math.round(centerSmoothRef.current);
+      const preferred =
+        hits.find((entry) => Number(entry.object.userData.cardIndex ?? -1) === centerRounded)
+        || hits[0];
+      const cardIndex = Number(preferred.object.userData.cardIndex ?? -1);
       if (cardIndex < 0) return null;
-      const uv = hit.uv;
+      const uv = preferred.uv;
       const x = (uv?.x ?? 0) * 720;
       const y = (1 - (uv?.y ?? 0)) * 360;
       const actionId = hitTestFloatingSongCardAction(actionRegionsRef.current[cardIndex] || [], x, y);
@@ -349,7 +353,10 @@ export default function GalaxyFloatingSongCard() {
         cardIndex: hit.cardIndex,
         actionId: hit.actionId,
       };
-      pulseRef.current[hit.cardIndex] = 1;
+      // 仅当前居中选中曲给按下放大反馈，背后卡放大前推会与前景抢命中
+      if (hit.cardIndex === Math.round(centerSmoothRef.current)) {
+        pulseRef.current[hit.cardIndex] = 1;
+      }
       e.stopPropagation();
     };
 
@@ -453,11 +460,17 @@ export default function GalaxyFloatingSongCard() {
         .sort((a, b) => (b.renderOrder || 0) - (a.renderOrder || 0));
       syncVisibleShelfMatrices(visibleMeshes);
       const intersections = raycasterRef.current.intersectObjects(visibleMeshes, false);
-      const hoveredMesh = intersections[0]?.object as THREE.Mesh | undefined;
+      // 重叠时优先居中卡，避免背后卡 hover 放大后再被前景抢走
+      const preferredHit =
+        intersections.find(
+          (entry) => Number(entry.object.userData.cardIndex ?? -1) === centerRounded,
+        )
+        || intersections[0];
+      const hoveredMesh = preferredHit?.object as THREE.Mesh | undefined;
       hoveredIndex = hoveredMesh ? Number(hoveredMesh.userData.cardIndex ?? -1) : -1;
       hoveredAction = null;
-      if (hoveredIndex >= 0 && intersections[0]?.uv) {
-        const uv = intersections[0].uv!;
+      if (hoveredIndex >= 0 && preferredHit?.uv) {
+        const uv = preferredHit.uv;
         hoveredAction = hitTestFloatingSongCardAction(
           actionRegionsRef.current[hoveredIndex] || [],
           uv.x * 720,
@@ -469,6 +482,7 @@ export default function GalaxyFloatingSongCard() {
     }
 
     const nearShelfSide = shelfMode === 'side' && isPointerNearShelfSide(pointer, camera, fx);
+    const hoveringCenter = hoveredIndex >= 0 && hoveredIndex === centerRounded;
     const sidePresenceTarget =
       fx.shelfPresence === 'always'
         ? 1
@@ -492,14 +506,16 @@ export default function GalaxyFloatingSongCard() {
     const pointerInShelfZone = shelfMode === 'stage'
       ? Math.abs(pointer.x) < 0.42 && pointer.y < 0.4
       : nearShelfSide;
-    if (hoveredIndex >= 0) focusSlotRef.current = hoveredIndex - centerIndex;
+    if (hoveringCenter) focusSlotRef.current = hoveredIndex - centerIndex;
     // 跟拍一旦生效就只看指针还在不在歌单架区域：镜头推近本身会让卡片滑离指针，
     // 若这时判定为「没悬停」就会进入 跟拍→丢失→回位→再跟拍 的抽搐循环
+    // 仅当前居中曲触发跟拍；按钮悬停/按下仍算在卡上，不能因此退出放大
     const focusCard =
       dynamicCamera &&
-      !hoveredActionRef.current &&
-      pointerDownRef.current === null &&
-      (hoveredIndex >= 0 || (shelfFocusEngaged && pointerInShelfZone));
+      (
+        hoveringCenter
+        || (shelfFocusEngaged && pointerInShelfZone && pointerDownRef.current === null)
+      );
     // Mineradio setFocusZone：进入要悬停 260ms 才跟拍，离开也拖 120ms，
     // 否则鼠标扫过歌单架镜头就整个扑上去
     const nowMs = state.clock.elapsedTime * 1000;
@@ -529,7 +545,13 @@ export default function GalaxyFloatingSongCard() {
 
       const isHovered = hoveredIndex === i;
       const isCenter = Math.abs(i - centerIndex) < 0.5;
-      const targetHover = isHovered ? 1 : 0;
+      // 只有当前居中选中曲才 hover 放大；背后卡放大前推会抢命中导致抽搐
+      // 按住卡上按钮时也保持放大，避免按钮区重绘/短暂丢命中时缩回去
+      const pressKeepsHover =
+        pointerDownRef.current !== null
+        && pointerDownRef.current.cardIndex === i
+        && isCenter;
+      const targetHover = (isHovered && isCenter) || pressKeepsHover ? 1 : 0;
       hoverRef.current[i] = (hoverRef.current[i] || 0) + (targetHover - (hoverRef.current[i] || 0)) * 0.14;
 
       const staggerDelay = Math.min(0.72, i * 0.055 * fx.shelfSummonStagger);
@@ -561,7 +583,7 @@ export default function GalaxyFloatingSongCard() {
       }
       mesh.visible = true;
 
-      const foreground = isHovered || (isCenter && fx.shelfPresence !== 'always');
+      const foreground = (isHovered && isCenter) || (isCenter && fx.shelfPresence !== 'always');
       mesh.renderOrder = (foreground ? 300 : 30)
         + Math.round((SHELF_VISIBLE_RADIUS + 1 - Math.min(pose.absD, SHELF_VISIBLE_RADIUS + 1)) * 4);
       mesh.updateMatrixWorld(true);

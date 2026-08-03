@@ -9,9 +9,14 @@ export type ClientPlaybackState = PlaybackState & {
   basePositionSec: number;
 };
 
+/** 同曲连续播放时，服务端时间轴跳变超过此值才视为远端 seek（房主拖进度 / 循环回 0） */
+const SERVER_SEEK_DETECT_SEC = 0.75;
+
 const clientState = {
   server: null as ClientPlaybackState | null,
   localVersion: 0,
+  /** 最近一次成功 commit 是否为同曲远端 seek（含循环回 0） */
+  lastCommitWasSeek: false,
 };
 
 function statePositionSeconds(state: PlaybackState): number {
@@ -44,6 +49,67 @@ function deriveBasePositionSec(
   const atReceive = positionSecAtServerSnapshot(state);
   const queueDelaySec = Math.max(0, (committedAt - receivedAt) / 1000);
   return Math.max(0, atReceive + queueDelaySec);
+}
+
+/**
+ * 判断新快照是否相对上一快照发生了真实远端 seek（含单曲循环回 0）。
+ * 标签页冻结后迟到的连续播放快照不应命中此处。
+ */
+function isServerTimelineSeek(
+  prev: ClientPlaybackState,
+  next: PlaybackState,
+): boolean {
+  if (prev.trackId !== next.trackId) return true;
+  if (prev.status !== 'playing' || next.status !== 'playing') return false;
+
+  const prevSnap = positionSecAtServerSnapshot(prev);
+  const nextSnap = positionSecAtServerSnapshot(next);
+  const prevServerNow = Number(prev.serverNowMs);
+  const nextServerNow = Number(next.serverNowMs);
+  const serverElapsedSec = Number.isFinite(prevServerNow) && prevServerNow > 0
+    && Number.isFinite(nextServerNow) && nextServerNow > 0
+    ? (nextServerNow - prevServerNow) / 1000
+    : Number.NaN;
+
+  if (Number.isFinite(serverElapsedSec)) {
+    const expectedSnap = prevSnap + Math.max(0, serverElapsedSec);
+    return Math.abs(nextSnap - expectedSnap) > SERVER_SEEK_DETECT_SEC;
+  }
+
+  return Math.abs(nextSnap - prevSnap) > SERVER_SEEK_DETECT_SEC;
+}
+
+/**
+ * 同曲 playing→playing：禁止迟到快照把本机外推时钟往回拨。
+ * 真实远端 seek（房主拖进度 / 单曲循环）仍允许跳变。
+ */
+function clampMonotonicPlayingBase(
+  prev: ClientPlaybackState | null,
+  state: PlaybackState,
+  basePositionSec: number,
+  committedAt: number,
+): number {
+  if (
+    !prev
+    || prev.trackId !== state.trackId
+    || prev.status !== 'playing'
+    || state.status !== 'playing'
+  ) {
+    return basePositionSec;
+  }
+
+  const continuousSec = Math.max(
+    0,
+    prev.basePositionSec + (committedAt - prev.committedAt) / 1000,
+  );
+  if (basePositionSec >= continuousSec - 0.05) return basePositionSec;
+  if (isServerTimelineSeek(prev, state)) return basePositionSec;
+  return continuousSec;
+}
+
+/** 最近一次 playback_state commit 是否为远端 seek（房主拖进度等） */
+export function wasLastPlaybackCommitASeek(): boolean {
+  return clientState.lastCommitWasSeek;
 }
 
 /**
@@ -98,7 +164,14 @@ export function applyPlaybackState(
   if (state.version < clientState.localVersion) return false;
   const committedAt = timing?.committedAt ?? Date.now();
   const receivedAt = timing?.receivedAt ?? committedAt;
-  const basePositionSec = deriveBasePositionSec(state, receivedAt, committedAt);
+  const prev = clientState.server;
+  const rawBase = deriveBasePositionSec(state, receivedAt, committedAt);
+  const seekCommit = Boolean(
+    prev
+    && prev.trackId === state.trackId
+    && isServerTimelineSeek(prev, state),
+  );
+  const basePositionSec = clampMonotonicPlayingBase(prev, state, rawBase, committedAt);
   clientState.server = {
     ...state,
     positionSec: statePositionSeconds(state),
@@ -107,12 +180,14 @@ export function applyPlaybackState(
     committedAt,
   };
   clientState.localVersion = state.version;
+  clientState.lastCommitWasSeek = seekCommit;
   return true;
 }
 
 export function resetPlaybackStateCache(): void {
   clientState.server = null;
   clientState.localVersion = 0;
+  clientState.lastCommitWasSeek = false;
 }
 
 export function optimisticSeekPosition(

@@ -3,7 +3,12 @@ import { snapSmoothPlaybackTime } from '../hooks/useSmoothPlaybackTime';
 import { resolveTrackDurationSeconds } from '../hooks/useTrackDuration';
 import { useAudioStore } from '../stores/audioStore';
 import { useRoomStore } from '../stores/roomStore';
-import { getClientPlaybackState, getPlaybackTime, type ClientPlaybackState } from './playbackState';
+import {
+  getClientPlaybackState,
+  getPlaybackTime,
+  wasLastPlaybackCommitASeek,
+  type ClientPlaybackState,
+} from './playbackState';
 import { isAudioBuffering } from './audioBuffering';
 import { shouldSkipRoutineSync as shouldSkipByBufferingState } from './syncStateMachine';
 import { resetDriftController } from './driftController';
@@ -17,12 +22,13 @@ import { recordDriftSample } from './driftHistogram';
 
 /**
  * 离散事件同步：
- * - 播放中：UI/歌词跟本机 audio；仅尾部 FINAL（≤3s）或服务端已播完时向前跳
- * - 强制同步（切歌 forceZero、拖进度 forceTime）：立即对齐
- * - 状态校正（forceCorrection）：暂停/远端 seek（偏差 > 阈值）时对齐，中途不追
+ * - 播放中途：不 hard-seek（跟本机 audio），避免回前台因时钟滞后倒退
+ * - 曲末 FINAL（≤3s）：允许向前一次性对齐
+ * - 房主拖进度：forceTime（本机）或 playback_state 时间轴跳变（远端）→ 立即对齐
+ * - 切歌 forceZero / 暂停对齐 / 曲末 beyond_duration：照常处理
  */
 const FINAL_WINDOW_SEC = 3;
-/** 播放中远端校正阈值；略低于常见 pending-snapshot 延迟，避免长期固定偏差 */
+/** 远端 seek / 暂停对齐阈值 */
 const REMOTE_SEEK_THRESHOLD_SEC = 0.5;
 const BEYOND_DURATION_GRACE_SEC = 0.15;
 /** 本机已到媒体末尾的判定窗口（不依赖 audio.ended，规避 seek 卡死） */
@@ -341,7 +347,7 @@ async function recoverFromEndedAudio(
   return result;
 }
 
-/** 播放状态变更：暂停必对齐；播放中仅远端 seek（偏差大）或开声，中途不追 */
+/** 暂停必对齐；播放中仅房主拖进度 / 曲末 FINAL 可 seek，中途不追 */
 async function applyCorrectionSync(
   audio: HTMLAudioElement,
   options: ApplySyncOptions,
@@ -404,8 +410,26 @@ async function applyCorrectionSync(
   }
 
   const diff = target - audio.currentTime;
-  if (Math.abs(diff) > REMOTE_SEEK_THRESHOLD_SEC) {
-    explicitHardSeek(audio, target, trackId, 'force_correction');
+  const remoteSeek = wasLastPlaybackCommitASeek();
+  const remaining = getRemainingTimeSec(options.song, target);
+
+  if (remoteSeek && Math.abs(diff) > REMOTE_SEEK_THRESHOLD_SEC) {
+    // 房主拖进度（或单曲循环回 0）：playback_state 时间轴跳变，必须对齐
+    explicitHardSeek(audio, target, trackId, 'remote_seek');
+  } else if (remaining <= FINAL_WINDOW_SEC) {
+    // 仅曲末允许向前追一次；中途时钟漂移不 seek
+    applyAutoPlaybackSync(audio, target, options);
+  } else if (Math.abs(diff) > REMOTE_SEEK_THRESHOLD_SEC) {
+    debugLog('sync_skip', debugLine({
+      reason: 'midtrack_no_seek',
+      diffMs: Math.round(diff * 1000),
+      remainingMs: Number.isFinite(remaining) ? Math.round(remaining * 1000) : null,
+      target: Number(target.toFixed(3)),
+      audio: Number(audio.currentTime.toFixed(3)),
+      trackId,
+      version: state?.version ?? null,
+    }));
+    lockPlaybackRate(audio);
   } else {
     debugLog('sync_skip', debugLine({
       reason: 'correction_below_threshold',
@@ -549,7 +573,7 @@ export async function applyVisibilityResume(
   if (isEndedWhileServerPlaying(audio, options.song)) {
     return recoverFromEndedAudio(audio, options, 'visibility');
   }
-  // 切回前台：强制校正进度并 play，避免仅 routine 软恢复失败后一直静音
+  // 切回前台：续播 + 曲末/切歌判定；中途不因时钟漂移 hard-seek（见 applyCorrectionSync）
   return applyFollowerSync(audio, {
     ...options,
     forceCorrection: true,
