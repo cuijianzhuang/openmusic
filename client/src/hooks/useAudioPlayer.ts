@@ -1086,7 +1086,14 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
           suppressAutoResumeRef.current = true;
           audio.pause();
           clearAudioQueueBinding(audio);
-          snapSmoothPlaybackTime(0);
+          // 先用已知进度占位，避免换源瞬间进度条跳回 0；真正对齐在 load 完成后 forceTime
+          {
+            const pb = getClientPlaybackState();
+            const previewTime = pb
+              ? getPlaybackTime(pb)
+              : Math.max(0, Number(useRoomStore.getState().room?.currentTime) || 0);
+            snapSmoothPlaybackTime(justSkippedRef.current ? 0 : previewTime);
+          }
           audio.src = url;
           bindAudioQueueId(audio, current.queueId);
           audio.load();
@@ -1170,15 +1177,24 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
             suppressAutoResumeRef.current = false;
           }
           if (
-            live?.isPlaying
-            && live.current
+            live?.current
             && live.current.queueId === queueId
             && trackKeyOf(live.current) === trackKey
             && canSyncAudioForQueue(controller.audio, live.current.queueId)
           ) {
             const forceZero = justSkippedRef.current;
             justSkippedRef.current = false;
-            applySync(forceZero ? { forceZero: true } : { forceCorrection: true });
+            // 换源后 audio 停在 0：必须 mandatory seek，不能只靠 forceCorrection（中途会 midtrack_no_seek）
+            tryFlushPendingSnapshot();
+            if (forceZero) {
+              applySync({ forceZero: true });
+            } else {
+              const pb = getClientPlaybackState();
+              const targetTime = pb
+                ? getPlaybackTime(pb)
+                : Math.max(0, Number(live.currentTime) || 0);
+              applySync({ forceTime: targetTime });
+            }
           }
         }
       }

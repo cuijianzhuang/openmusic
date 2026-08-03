@@ -52,7 +52,8 @@ function shouldDropPendingAgainstOptimisticPause(state: PlaybackState): boolean 
 function isAudioReadyForSnapshot(trackId: string): boolean {
   const audio = getSharedAudio();
   if (!audio.src) return false;
-  if (audio.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return false;
+  // HAVE_METADATA 即可 seek；与 waitForAudioMinimumReady 对齐，避免 load 完成后 flush 失败从 0 开播
+  if (audio.readyState < HTMLMediaElement.HAVE_METADATA) return false;
   const duration = audio.duration;
   if (!Number.isFinite(duration) || duration <= 0) return false;
   const { room } = useRoomStore.getState();

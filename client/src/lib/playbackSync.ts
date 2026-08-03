@@ -23,6 +23,7 @@ import { recordDriftSample } from './driftHistogram';
 /**
  * 离散事件同步：
  * - 播放中途：不 hard-seek（跟本机 audio），避免回前台因时钟滞后倒退
+ * - 初次加载（本机仍在曲首、服务端已在中途）：必须 hard-seek，否则刷新后从 0 开播
  * - 曲末 FINAL（≤3s）：允许向前一次性对齐
  * - 房主拖进度：forceTime（本机）或 playback_state 时间轴跳变（远端）→ 立即对齐
  * - 切歌 forceZero / 暂停对齐 / 曲末 beyond_duration：照常处理
@@ -30,6 +31,8 @@ import { recordDriftSample } from './driftHistogram';
 const FINAL_WINDOW_SEC = 3;
 /** 远端 seek / 暂停对齐阈值 */
 const REMOTE_SEEK_THRESHOLD_SEC = 0.5;
+/** 本机仍视为「刚加载/曲首」的阈值；刷新进房后 audio 停在 0，需对齐服务端进度 */
+const INITIAL_SYNC_AUDIO_SEC = 1;
 const BEYOND_DURATION_GRACE_SEC = 0.15;
 /** 本机已到媒体末尾的判定窗口（不依赖 audio.ended，规避 seek 卡死） */
 const LOCAL_ENDED_WAIT_SEC = 0.35;
@@ -416,6 +419,12 @@ async function applyCorrectionSync(
   if (remoteSeek && Math.abs(diff) > REMOTE_SEEK_THRESHOLD_SEC) {
     // 房主拖进度（或单曲循环回 0）：playback_state 时间轴跳变，必须对齐
     explicitHardSeek(audio, target, trackId, 'remote_seek');
+  } else if (
+    audio.currentTime < INITIAL_SYNC_AUDIO_SEC
+    && Math.abs(diff) > REMOTE_SEEK_THRESHOLD_SEC
+  ) {
+    // 刷新/进房后本机仍在曲首：必须对齐服务端进度（否则会从 0 开播）
+    explicitHardSeek(audio, target, trackId, 'initial_sync');
   } else if (remaining <= FINAL_WINDOW_SEC) {
     // 仅曲末允许向前追一次；中途时钟漂移不 seek
     applyAutoPlaybackSync(audio, target, options);

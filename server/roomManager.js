@@ -3403,13 +3403,8 @@ export async function kickUser(roomId, actorId, targetUserId, connectionId = nul
 
   if (room.users.size === 0) {
     clearAllPendingLeaveClears(room);
-    if (room.isPlaying && room.current) {
-      room.currentTime = getPlaybackTime(room);
-      room.startedAt = null;
-      bumpPlaybackState(room);
-    } else {
-      freezePlayback(room);
-    }
+    // 最后一人被踢出：暂停播放（断线宽限期内刷新不会走到空房）
+    freezePlayback(room);
     room.ownerId = null;
     room.ownerConnectionId = null;
     room.emptySince = Date.now();
@@ -3528,14 +3523,8 @@ export function removeUser(roomId, userId, connectionId = null) {
 
   if (room.users.size === 0) {
     clearAllPendingLeaveClears(room);
-    // 刷新/断线时房间会短暂无人：保留 isPlaying，仅冻结进度，便于重新进入后继续播放
-    if (room.isPlaying && room.current) {
-      room.currentTime = getPlaybackTime(room);
-      room.startedAt = null;
-      bumpPlaybackState(room);
-    } else {
-      freezePlayback(room);
-    }
+    // 最后一人退出：暂停播放并冻结进度。刷新有断线宽限期，不会误触空房。
+    freezePlayback(room);
     room.ownerId = null;
     room.ownerConnectionId = null;
     room.emptySince = Date.now();
