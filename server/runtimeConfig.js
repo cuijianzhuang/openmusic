@@ -17,6 +17,7 @@ const SECRET_FIELDS = new Set([
   'apihzKey',
   'linuxdoClientSecret',
   'githubClientSecret',
+  'roomCredentialEncryptionKey',
 ]);
 const QINIU_ZONES = new Set(['z0', 'z1', 'z2', 'na0', 'as0']);
 const ENC_PREFIX = 'enc:v1:';
@@ -79,6 +80,7 @@ function envDefaults() {
     githubClientSecret: envText('GITHUB_CLIENT_SECRET'),
     githubRedirectUri: envText('GITHUB_REDIRECT_URI'),
     githubScope: envText('GITHUB_SCOPE', 'read:user'),
+    roomCredentialEncryptionKey: envText('ROOM_CREDENTIAL_ENCRYPTION_KEY'),
     /** 是否开放 SVIP 音质（网易沉浸环绕声/超清母带/杜比；QQ 臻品全景声/臻品母带） */
     svipQualityEnabled: envText('SVIP_QUALITY_ENABLED') === '1' || envText('SVIP_QUALITY_ENABLED').toLowerCase() === 'true',
     metingApiUrl: envText('METING_API_URL'),
@@ -271,6 +273,7 @@ function normalize(config) {
     githubClientSecret: String(config.githubClientSecret || '').trim(),
     githubRedirectUri: String(config.githubRedirectUri || '').trim(),
     githubScope: String(config.githubScope || 'read:user').trim() || 'read:user',
+    roomCredentialEncryptionKey: String(config.roomCredentialEncryptionKey || '').trim(),
     svipQualityEnabled: config.svipQualityEnabled === true
       || config.svipQualityEnabled === 1
       || String(config.svipQualityEnabled || '').trim().toLowerCase() === 'true'
@@ -309,7 +312,44 @@ function normalize(config) {
 }
 
 export function getRuntimeConfig() {
-  return normalize({ ...envDefaults(), ...getPersisted() });
+  const persisted = getPersisted();
+  const env = envDefaults();
+  const merged = { ...env, ...persisted };
+  // 房间凭证主密钥一旦通过环境变量提供，始终以环境变量为准，
+  // 便于从后台配置故障中恢复，且不会被旧的加密配置覆盖。
+  if (env.roomCredentialEncryptionKey) {
+    merged.roomCredentialEncryptionKey = env.roomCredentialEncryptionKey;
+  }
+  return normalize(merged);
+}
+
+function persistedSecretState(field) {
+  try {
+    if (!fs.existsSync(CONFIG_PATH)) return 'missing';
+    const parsed = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+    if (!Object.hasOwn(parsed, field) || !String(parsed[field] || '').trim()) return 'missing';
+    return String(parsed[field]).startsWith(ENC_PREFIX) ? 'encrypted' : 'plain';
+  } catch {
+    return 'unreadable';
+  }
+}
+
+export function ensureRoomCredentialEncryptionKey() {
+  const config = getRuntimeConfig();
+  if (config.roomCredentialEncryptionKey) return { created: false, config };
+  const persistedState = persistedSecretState('roomCredentialEncryptionKey');
+  if (persistedState === 'encrypted' || persistedState === 'unreadable') {
+    return {
+      created: false,
+      error: '房间凭证密钥已存在但无法解密，请恢复原 CLIENT_ID_SECRET 后再启动，禁止自动生成新密钥',
+      unavailable: true,
+    };
+  }
+  const key = randomBytes(32).toString('base64');
+  const result = setRuntimeConfig({ roomCredentialEncryptionKey: key });
+  return result.success
+    ? { created: true, config: getRuntimeConfig() }
+    : { created: false, error: result.error };
 }
 
 /** 公开 SEO 视图：后台留空字段回退内置默认文案 */

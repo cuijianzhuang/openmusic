@@ -84,7 +84,7 @@ export default function LoginForm({ onLoggedIn }: { onLoggedIn: () => void }) {
             <Space>
               <SafetyCertificateOutlined style={{ fontSize: 22, color: '#1677ff' }} />
               <Typography.Title level={4} style={{ margin: 0 }}>
-                站点管理后台
+                OpenMusic管理后台
               </Typography.Title>
             </Space>
             <Typography.Text type="secondary">输入管理员账号密码登录</Typography.Text>

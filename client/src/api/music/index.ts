@@ -18,6 +18,52 @@ function getProvider(source: MusicSource) {
   return providers[source];
 }
 
+/** 汽水部分音源返回 video_mp4，浏览器会按跨域视频响应拦截它，必须先走本站媒体代理。 */
+function shouldProxyQishuiVideoUrl(source: MusicSource, url: string): boolean {
+  if (source !== 'qishui' || !url) return false;
+  try {
+    const mimeType = new URL(url).searchParams.get('mime_type') || '';
+    return /(?:^|_)video_mp4$/i.test(mimeType) || /^video\/mp4$/i.test(mimeType);
+  } catch {
+    return false;
+  }
+}
+
+/** Meting 汽水适配器可能返回自己的鉴权流地址，不能再套 media-proxy，否则会被 SSRF 防护拦截。 */
+function isMetingQishuiAudioUrl(source: MusicSource, url: string): boolean {
+  if (source !== 'qishui' || !url) return false;
+  try {
+    return /\/audio\/qishui\/?$/i.test(new URL(url).pathname);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 汽水带 auth 的 `/audio/qishui` 是解密端点，不能拆成原始 CDN 地址。
+ * 原始 audio_mp4 可能仍是 `enca` 加密轨道，浏览器直接加载会卡在 0 秒。
+ * 没有 auth 的历史包装地址才允许还原为普通音频直链。
+ */
+export function unwrapQishuiAudioUrl(source: MusicSource, url: string): string {
+  if (source !== 'qishui' || !url) return url;
+  try {
+    const wrapped = new URL(url, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
+    if (!/\/audio\/qishui\/?$/i.test(wrapped.pathname)) return url;
+    const rawNested = wrapped.searchParams.get('url') || '';
+    if (!rawNested) return url;
+    if (wrapped.searchParams.get('auth')) return url;
+    const nested = new URL(rawNested);
+    if (!['http:', 'https:'].includes(nested.protocol) || !nested.hostname.toLowerCase().includes('douyin')) {
+      return url;
+    }
+    const mimeType = (nested.searchParams.get('mime_type') || wrapped.searchParams.get('mime_type') || '').trim();
+    if (!/^audio_mp4$/i.test(mimeType)) return url;
+    return nested.toString();
+  } catch {
+    return url;
+  }
+}
+
 export async function searchSongs(source: MusicSource, keyword: string): Promise<SearchResult[]> {
   return getProvider(source).search(keyword);
 }
@@ -84,29 +130,40 @@ export async function getSongById(source: MusicSource, id: string): Promise<Sear
 }
 
 export async function getSongUrlInfo(
-  song: Pick<Song, 'id' | 'source' | 'url'>,
+  song: Pick<Song, 'id' | 'source' | 'url' | 'duration'>,
   qualityOverride?: string,
   options?: { proxy?: boolean },
-): Promise<{ url: string; qualityLabel?: string }> {
+): Promise<import('./types').SongUrlResult> {
   const source = song.source || 'netease';
   const quality = qualityOverride ?? getUserPlaybackQuality(source);
   const result = await getProvider(source).getSongUrl({ ...song, source }, quality);
   if (!result.url || isBlockedPlaybackUrl(result.url)) {
     throw new SourceUnavailableError('no url');
   }
-  const useProxy = options?.proxy ?? shouldProxyPlaybackUrl(result.url, shouldProxySongPlaybackUrl());
-  let resolved = useProxy ? toProxiedMediaUrl(result.url) : result.url;
+  const playbackUrl = unwrapQishuiAudioUrl(source, result.url);
+  const wantsProxy = options?.proxy
+    ?? (shouldProxyQishuiVideoUrl(source, playbackUrl)
+      || shouldProxyPlaybackUrl(playbackUrl, shouldProxySongPlaybackUrl()));
+  // 汽水鉴权端点普通播放直连；沉浸/Web Audio 时必须走同源媒体代理。
+  const qishuiAuthProxy = source === 'qishui'
+    && isMetingQishuiAudioUrl(source, playbackUrl)
+    && wantsProxy
+    ? `/api/media-proxy?url=${encodeURIComponent(playbackUrl)}`
+    : null;
+  let resolved = qishuiAuthProxy || (wantsProxy ? toProxiedMediaUrl(playbackUrl) : playbackUrl);
   if (resolved.startsWith('/api/')) {
     resolved = await signApiUrl(resolved);
   }
   return {
     url: resolved,
     qualityLabel: result.qualityLabel?.trim() || undefined,
+    loudness: result.loudness,
+    duration: result.duration,
   };
 }
 
 export async function getSongUrl(
-  song: Pick<Song, 'id' | 'source' | 'url'>,
+  song: Pick<Song, 'id' | 'source' | 'url' | 'duration'>,
   qualityOverride?: string,
   options?: { proxy?: boolean },
 ): Promise<string> {
@@ -365,7 +422,8 @@ export async function getAvailableSources(): Promise<MusicProviderMeta[]> {
   } catch {
     // fallback
   }
-  return getAllSources();
+  // 服务端固定启用网易和 QQ；接口不可用时不要臆测酷狗/汽水已开启。
+  return getAllSources().filter((source) => source.id === 'netease' || source.id === 'tencent');
 }
 
 export function formatDuration(seconds: number): string {

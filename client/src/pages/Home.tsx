@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, memo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Users, ArrowRight, Lock, ListMusic,
-  Loader2, RefreshCw, Plus, X, Disc3, Sparkles, Github, History, Download, Smartphone,
+  Loader2, RefreshCw, Plus, X, Disc3, Sparkles, Github, History, Download, HeartHandshake,
   Play, Activity, Search, ShieldCheck
 } from 'lucide-react';
 import { createRoom, checkRoom, listRooms } from '../api/meting';
@@ -13,9 +13,7 @@ import { usePageSeo } from '../lib/seo';
 import { partitionRoomsByRecent } from '../lib/recentRooms';
 import { getStoredRoomPassword } from '../lib/roomPassword';
 import { areRoomListsEqual, isLobbyHardLocked, sortLobbyRooms } from '../lib/roomListCompare';
-import { isMobileDevice } from '../lib/audioUnlock';
 import { ANDROID_APK_URL } from '../lib/androidDownload';
-import { IOS_IPA_URL } from '../lib/iosDownload';
 import { resizeCoverUrl } from '../lib/coverUrl';
 import {
   fetchSiteAnnouncement,
@@ -25,6 +23,7 @@ import {
 } from '../lib/siteAnnouncement';
 import Tooltip from '../components/Tooltip';
 import ClientDownloadModal from '../components/ClientDownloadModal';
+import MusicContributionModal from '../components/MusicContributionModal';
 import SiteAnnouncementPopup from '../components/SiteAnnouncementPopup';
 import UserGuideTour from '../components/UserGuideTour';
 import BrandMark from '../components/BrandMark';
@@ -334,6 +333,7 @@ export default function Home() {
   const [joinPassword, setJoinPassword] = useState('');
   const [modalError, setModalError] = useState('');
   const [downloadModalOpen, setDownloadModalOpen] = useState(false);
+  const [contributionOpen, setContributionOpen] = useState(false);
   const [siteAnnouncement, setSiteAnnouncement] = useState<SiteAnnouncement | null>(null);
   const [siteAnnouncementOpen, setSiteAnnouncementOpen] = useState(false);
 
@@ -574,23 +574,26 @@ export default function Home() {
           </div>
 
           <div className="flex items-center gap-2 sm:gap-2.5">
-            {!isMobileDevice() && (
-              <div className="hidden lg:flex items-center gap-2 mr-1">
-                <Tooltip content="下载 Android 客户端">
-                  <a href={ANDROID_APK_URL} download="openmusic.apk" className={headerPillCls}>
-                    <Download className="home-header-pill__dl w-4 h-4" />
-                    Android
-                  </a>
-                </Tooltip>
-                <Tooltip content="下载 iOS IPA（需自签安装）">
-                  <a href={IOS_IPA_URL} download="openmusic.ipa" className={headerPillCls}>
-                    <Download className="home-header-pill__dl w-4 h-4" />
-                    iOS
-                  </a>
-                </Tooltip>
-              </div>
-            )}
+            <div className="hidden lg:flex items-center gap-2 mr-1">
+              <Tooltip content="下载 Android 客户端">
+                <a href={ANDROID_APK_URL} download="openmusic.apk" className={headerPillCls}>
+                  <Download className="home-header-pill__dl w-4 h-4" />
+                  Android
+                </a>
+              </Tooltip>
+            </div>
             <div className="flex items-center gap-1.5 sm:gap-2">
+              <Tooltip content="把会员能力分享给大家">
+                <button type="button" onClick={() => setContributionOpen(true)} className={`sm:hidden ${headerIconCls}`} aria-label="共享会员">
+                  <HeartHandshake className="h-4 w-4 text-rose-200" />
+                </button>
+              </Tooltip>
+              <Tooltip content="把会员能力分享给大家">
+                <button type="button" onClick={() => setContributionOpen(true)} className={`hidden sm:inline-flex ${headerPillCls}`} aria-label="共享会员">
+                  <HeartHandshake className="h-4 w-4 text-rose-200" />
+                  <span>共享会员</span>
+                </button>
+              </Tooltip>
               {adminEntryPath && (
                 <Tooltip content="管理后台（仅本机可见）">
                   <a href={adminEntryPath} className={`hidden sm:inline-flex ${headerIconCls}`} aria-label="管理后台">
@@ -620,11 +623,11 @@ export default function Home() {
                   <Github className="w-5 h-5" />
                 </a>
               </Tooltip>
-              {isMobileDevice() && (
-                <button type="button" onClick={() => setDownloadModalOpen(true)} className={headerIconCls} aria-label="App">
-                  <Smartphone className="home-header-icon__phone w-5 h-5" />
+              <Tooltip content="下载 Android 客户端">
+                <button type="button" onClick={() => setDownloadModalOpen(true)} className={`sm:hidden ${headerIconCls}`} aria-label="下载 Android 客户端">
+                  <Download className="home-header-icon__download h-5 w-5 text-emerald-300" />
                 </button>
-              )}
+              </Tooltip>
             </div>
           </div>
         </div>
@@ -1041,6 +1044,7 @@ export default function Home() {
       )}
 
       <ClientDownloadModal open={downloadModalOpen} onClose={() => setDownloadModalOpen(false)} />
+      <MusicContributionModal open={contributionOpen} onClose={() => setContributionOpen(false)} defaultProvider={nickname} />
 
       <SiteAnnouncementPopup
         open={siteAnnouncementOpen}

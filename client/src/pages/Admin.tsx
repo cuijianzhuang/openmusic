@@ -2008,7 +2008,7 @@ function AdminPage() {
         >
           <div style={{ padding: '20px 16px 12px', display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
             <SafetyCertificateOutlined style={{ fontSize: 20, color: '#1677ff' }} />
-            <Typography.Text strong>站点管理后台</Typography.Text>
+            <Typography.Text strong>OpenMusic管理后台</Typography.Text>
           </div>
           <Menu
             mode="inline"
@@ -2026,7 +2026,7 @@ function AdminPage() {
       </Sider>
 
       <Drawer
-        title="站点管理后台"
+        title="OpenMusic管理后台"
         placement="left"
         open={mobileMenuOpen}
         onClose={() => setMobileMenuOpen(false)}

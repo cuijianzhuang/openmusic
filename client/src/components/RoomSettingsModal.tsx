@@ -34,8 +34,8 @@ const QUEUE_LIMIT_OPTIONS = [50, 100, 200] as const;
 
 type SettingsTab = 'fm' | 'account' | 'member' | 'room' | 'announcement' | 'chat' | 'songRequest';
 
-/** 扫码绑定音源会员账号：暂时隐藏前端入口 */
-const MUSIC_ACCOUNT_TAB_ENABLED = false;
+/** 房主扫码绑定网易云 / QQ 音乐账号。 */
+const MUSIC_ACCOUNT_TAB_ENABLED = true;
 
 export interface SongRequestSettings {
   enabled: boolean;
@@ -78,6 +78,7 @@ interface Props {
   isOwner: boolean;
   canModerate: boolean;
   fmMode: string;
+  fmSource: 'netease' | 'qishui';
   fmModeBeforeOff?: string;
   fmSaving?: boolean;
   announcementEnabled: boolean;
@@ -117,18 +118,17 @@ interface Props {
   identityLinuxdoBound?: LinuxdoBinding | null;
   identityGithubBound?: GithubBinding | null;
   musicAccounts?: RoomMusicAccounts;
-  onMusicAccountCreateQr?: (platform: 'netease' | 'tencent') => Promise<{ success: boolean; error?: string; data?: Record<string, unknown> }>;
+  onMusicAccountCreateQr?: (platform: 'netease' | 'tencent' | 'qishui') => Promise<{ success: boolean; error?: string; data?: Record<string, unknown> }>;
   onMusicAccountCheckQr?: (payload: Record<string, unknown>) => Promise<{ success: boolean; error?: string; data?: Record<string, unknown> }>;
   onMusicAccountBind?: (payload: {
-    platform: 'netease' | 'tencent';
-    cookie: string;
+    sessionId: string;
     shared?: boolean;
   }) => Promise<{ success: boolean; error?: string; message?: string }>;
   onMusicAccountRefresh?: () => Promise<{ success: boolean; error?: string; data?: RoomMusicAccounts }>;
-  onMusicAccountSetShared?: (platform: 'netease' | 'tencent', shared: boolean) => Promise<{ success: boolean; error?: string }>;
-  onMusicAccountUnbind?: (platform: 'netease' | 'tencent') => Promise<{ success: boolean; error?: string }>;
+  onMusicAccountSetShared?: (platform: 'netease' | 'tencent' | 'qishui', shared: boolean) => Promise<{ success: boolean; error?: string }>;
+  onMusicAccountUnbind?: (platform: 'netease' | 'tencent' | 'qishui') => Promise<{ success: boolean; error?: string }>;
   onClose: () => void;
-  onSaveFmMode: (mode: string) => void;
+  onSaveFmMode: (mode: string, source?: 'netease' | 'qishui') => void;
   onOpenMemberModal: () => void;
   onSaveAnnouncement: (options: { enabled: boolean; text: string }) => void;
   onSaveChatHistory: (enabled: boolean) => void;
@@ -256,6 +256,7 @@ export default function RoomSettingsModal({
   isOwner,
   canModerate,
   fmMode,
+  fmSource,
   fmModeBeforeOff,
   fmSaving = false,
   announcementEnabled,
@@ -289,7 +290,7 @@ export default function RoomSettingsModal({
   identityGithubEnabled = false,
   identityLinuxdoBound = null,
   identityGithubBound = null,
-  musicAccounts = { netease: null, tencent: null },
+  musicAccounts = { netease: null, tencent: null, qishui: null },
   onMusicAccountCreateQr,
   onMusicAccountCheckQr,
   onMusicAccountBind,
@@ -583,23 +584,45 @@ export default function RoomSettingsModal({
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           {activeTab === 'fm' && isOwner && (
             <section>
+              <div className="mb-4 grid grid-cols-2 gap-1 rounded-lg border border-white/10 bg-black/20 p-1" role="tablist" aria-label="选择漫游来源">
+                {([
+                  { value: 'netease', label: '网易云' },
+                  { value: 'qishui', label: '汽水音乐' },
+                ] as const).map((item) => (
+                  <button
+                    key={item.value}
+                    type="button"
+                    role="tab"
+                    aria-selected={fmSource === item.value}
+                    disabled={fmSaving}
+                    onClick={() => onSaveFmMode(currentFm, item.value)}
+                    className={`min-h-9 rounded-md px-3 py-2 text-xs font-medium transition-colors disabled:opacity-50 ${
+                      fmSource === item.value ? 'bg-white/10 text-white' : 'text-netease-muted hover:bg-white/[0.05] hover:text-white'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
               <Toggle
                 checked={currentFm !== FM_MODE_OFF}
                 disabled={fmSaving}
                 onChange={(next) => {
                   const restored = normalizeFmMode(fmModeBeforeOff);
-                  onSaveFmMode(next ? (restored === FM_MODE_OFF ? DEFAULT_FM_MODE : restored) : FM_MODE_OFF);
+                  onSaveFmMode(next ? (restored === FM_MODE_OFF ? DEFAULT_FM_MODE : restored) : FM_MODE_OFF, fmSource);
                 }}
                 label="自动漫游"
                 description="队列为空时通过私人漫游自动推荐下一首"
               />
               <div className={`mt-3 space-y-1.5 ${currentFm === FM_MODE_OFF ? 'opacity-40' : ''}`}>
-                {NETEASE_FM_MODE_OPTIONS.map((opt) => (
+                {(fmSource === 'qishui'
+                  ? [{ value: DEFAULT_FM_MODE, label: '汽水推荐', description: '使用汽水音乐账号的个性化推荐' }]
+                  : NETEASE_FM_MODE_OPTIONS).map((opt) => (
                   <button
                     key={opt.value}
                     type="button"
                     disabled={fmSaving || currentFm === FM_MODE_OFF}
-                    onClick={() => onSaveFmMode(opt.value)}
+                    onClick={() => onSaveFmMode(opt.value, fmSource)}
                     className={`w-full rounded-xl border px-3 py-2 text-left transition-colors disabled:opacity-50 ${
                       currentFm === opt.value
                         ? 'border-netease-red/25 bg-netease-red/[0.08]'
@@ -619,7 +642,7 @@ export default function RoomSettingsModal({
                 ))}
               </div>
               <p className="mt-2 text-[10px] text-netease-muted">
-                当前：{getFmModeLabel(currentFm)}
+                当前：{fmSource === 'qishui' ? '汽水推荐' : getFmModeLabel(currentFm)}
               </p>
             </section>
           )}

@@ -1,6 +1,7 @@
 import { useAudioStore } from '../stores/audioStore';
 import { getTrackKey } from '../api/music';
 import type { Song, QueueItem } from '../types';
+import { normalizeDurationMs } from '../lib/duration';
 
 type TrackSong = Pick<Song, 'duration' | 'id' | 'source'> &
   Partial<Pick<QueueItem, 'queueId'>>;
@@ -16,8 +17,8 @@ const MIN_TRUSTED_MEDIA_DURATION_SEC = 5;
 const TINY_MEDIA_DURATION_RATIO = 0.05;
 
 function metadataDurationSeconds(song: TrackSong | null | undefined): number {
-  const durationMs = Number(song?.duration || 0);
-  return Number.isFinite(durationMs) && durationMs > 0 ? durationMs / 1000 : 0;
+  const durationMs = normalizeDurationMs(song?.duration);
+  return durationMs ? durationMs / 1000 : 0;
 }
 
 function lrcDurationSeconds(sources: DurationSources, key: string): number {
@@ -61,7 +62,7 @@ function trustedStoredMediaDurationSeconds(
     : 0;
 }
 
-/** Seek/end cap：音频文件优先，元数据次之，不使用歌词推算 */
+/** Seek/end cap：接口元数据优先，媒体时长仅在接口缺失时使用 */
 export function resolveTrackDurationSeconds(
   song: TrackSong | null | undefined,
   sources: DurationSources,
@@ -69,16 +70,16 @@ export function resolveTrackDurationSeconds(
   if (!song) return 0;
 
   const key = getTrackKey(song as Pick<QueueItem, 'queueId' | 'id' | 'source'>);
-  const mediaDur = trustedStoredMediaDurationSeconds(song, sources, key);
-  if (mediaDur > 0) return mediaDur;
-
   const metadataDur = metadataDurationSeconds(song);
   if (metadataDur > 0) return metadataDur;
+
+  const mediaDur = trustedStoredMediaDurationSeconds(song, sources, key);
+  if (mediaDur > 0) return mediaDur;
 
   return 0;
 }
 
-/** Display duration for progress/lyrics: trusted media first, then metadata/lyrics. */
+/** Display duration for progress/lyrics: interface metadata first, then media/lyrics. */
 export function resolveDisplayDurationSeconds(
   song: TrackSong | null | undefined,
   sources: DurationSources,
@@ -86,11 +87,11 @@ export function resolveDisplayDurationSeconds(
   if (!song) return 0;
 
   const key = getTrackKey(song as Pick<QueueItem, 'queueId' | 'id' | 'source'>);
-  const mediaDur = trustedStoredMediaDurationSeconds(song, sources, key);
-  if (mediaDur > 0) return mediaDur;
-
   const referenceDur = resolveReferenceDurationSeconds(song, sources);
   if (referenceDur > 0) return referenceDur;
+
+  const mediaDur = trustedStoredMediaDurationSeconds(song, sources, key);
+  if (mediaDur > 0) return mediaDur;
 
   const lrcDur = lrcDurationSeconds(sources, key);
   if (lrcDur > 0) return lrcDur;
@@ -108,13 +109,12 @@ export function resolveAutoSkipThresholdSeconds(
 
   const key = getTrackKey(song as Pick<QueueItem, 'queueId' | 'id' | 'source'>);
   const referenceDur = resolveReferenceDurationSeconds(song, sources);
+  if (referenceDur > 0) return referenceDur;
   const fileDur = isTrustedMediaDurationSeconds(fileDurationSec, referenceDur) ? fileDurationSec! : 0;
   const storedMedia = trustedStoredMediaDurationSeconds(song, sources, key);
 
   const mediaCandidates = [fileDur, storedMedia].filter((d) => d > 0);
   if (mediaCandidates.length > 0) return Math.min(...mediaCandidates);
-
-  if (referenceDur > 0) return referenceDur;
 
   return 0;
 }

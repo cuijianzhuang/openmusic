@@ -11,7 +11,7 @@ interface Props {
   onClick?: () => void;
 }
 
-function shortenQualityLabel(label: string, source: 'netease' | 'tencent'): string {
+function shortenQualityLabel(label: string, source: 'netease' | 'tencent' | 'qishui'): string {
   const map: Record<string, string> = {
     标准: '标准',
     标准品质: '标准',
@@ -39,23 +39,32 @@ export default function RoomQualityBadge({ audioQuality, className = '', onClick
 
   const neteaseLabel = getQualityLabel(quality.netease, 'netease');
   const tencentLabel = getQualityLabel(quality.tencent, 'tencent');
+  const qishuiLabel = getQualityLabel(quality.qishui, 'qishui');
   const neteaseShort = shortenQualityLabel(neteaseLabel, 'netease');
   const tencentShort = shortenQualityLabel(tencentLabel, 'tencent');
+  const qishuiShort = shortenQualityLabel(qishuiLabel, 'qishui');
 
   const content = (
     <>
       <AudioLines className="h-3 w-3 text-white/35" aria-hidden />
-      <Tooltip content={`红点：${neteaseLabel}`}>
+      <Tooltip content={`网易：${neteaseLabel}`}>
         <span className="inline-flex items-center gap-1">
-          <span className="h-1.5 w-1.5 rounded-full bg-netease-red" aria-hidden />
+          <span className="text-netease-red/80">网易</span>
           <span className="text-white/75">{neteaseShort}</span>
         </span>
       </Tooltip>
       <span className="text-white/15" aria-hidden>/</span>
-      <Tooltip content={`绿点：${tencentLabel}`}>
+      <Tooltip content={`QQ：${tencentLabel}`}>
         <span className="inline-flex items-center gap-1">
-          <span className="h-1.5 w-1.5 rounded-full bg-[#31c27c]" aria-hidden />
+          <span className="text-[#31c27c]/80">QQ</span>
           <span className="text-white/75">{tencentShort}</span>
+        </span>
+      </Tooltip>
+      <span className="text-white/15" aria-hidden>/</span>
+      <Tooltip content={`汽水：${qishuiLabel}`}>
+        <span className="inline-flex items-center gap-1">
+          <span className="text-[#f5c542]/85">汽水</span>
+          <span className="text-white/75">{qishuiShort}</span>
         </span>
       </Tooltip>
     </>

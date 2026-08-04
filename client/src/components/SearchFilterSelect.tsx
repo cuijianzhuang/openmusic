@@ -7,9 +7,10 @@ export type SearchFilterMode = 'smart' | MusicSource;
 
 const BASE_OPTIONS: { value: SearchFilterMode; label: string; hint?: string }[] = [
   { value: 'smart', label: '智能去重', hint: '歌名与歌手相同视为同一首' },
-  { value: 'netease', label: '红点' },
-  { value: 'tencent', label: '绿点' },
-  { value: 'kugou', label: '蓝点' },
+  { value: 'netease', label: '网易' },
+  { value: 'tencent', label: 'QQ' },
+  { value: 'qishui', label: '汽水' },
+  { value: 'kugou', label: '酷狗' },
 ];
 
 function getLabel(mode: SearchFilterMode, options: typeof BASE_OPTIONS): string {
@@ -19,7 +20,7 @@ function getLabel(mode: SearchFilterMode, options: typeof BASE_OPTIONS): string 
 interface Props {
   value: SearchFilterMode;
   onChange: (mode: SearchFilterMode) => void;
-  /** 可搜索平台（来自 /api/music/sources）；未包含 kugou 时不显示蓝点 */
+  /** 可搜索平台（来自 /api/music/sources）；未包含 kugou 时不显示酷狗 */
   searchableSourceIds?: MusicSource[];
 }
 

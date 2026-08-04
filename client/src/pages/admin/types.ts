@@ -92,6 +92,7 @@ export interface RuntimeConfig {
   githubClientSecret: string;
   githubRedirectUri: string;
   githubScope: string;
+  roomCredentialEncryptionKey: string;
   /** 是否开放 SVIP 音质选项（需上游 Cookie 具备对应权益） */
   svipQualityEnabled: boolean;
   metingApiUrl: string;
@@ -131,7 +132,7 @@ export interface RuntimeConfig {
   configuredSecrets: Record<string, boolean>;
 }
 
-export type MusicApiPlatform = 'netease' | 'tencent' | 'kugou' | 'lyrics';
+export type MusicApiPlatform = 'netease' | 'tencent' | 'kugou' | 'qishui' | 'lyrics';
 export type MusicApiOperation = 'search' | 'song' | 'url' | 'lrc' | 'pic' | 'playlist' | 'search_playlist';
 
 export interface CustomMusicApi {

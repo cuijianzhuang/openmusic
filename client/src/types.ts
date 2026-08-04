@@ -1,8 +1,9 @@
-export type MusicSource = 'netease' | 'tencent' | 'kugou';
+export type MusicSource = 'netease' | 'tencent' | 'kugou' | 'qishui';
 
 export interface RoomAudioQuality {
   netease: string;
   tencent: string;
+  qishui?: string;
 }
 
 export interface RoomMemberTier {
@@ -162,12 +163,16 @@ export interface SkipRequest {
 /** 房主扫码绑定的音源账号公开信息 */
 export interface RoomMusicAccount {
   cookieId: string;
-  platform: 'netease' | 'tencent';
+  platform: 'netease' | 'tencent' | 'qishui';
   shared: boolean;
   hasVip: boolean;
+  hasSvip?: boolean;
+  canSearchSongs?: boolean;
+  canSearchPlaylists?: boolean;
   /** vip=写入 Meting 用于搜索/播放；fm=仅本房间网易漫游（不入 Meting） */
   usage?: 'vip' | 'fm';
   nickname: string;
+  providerName?: string;
   avatarUrl: string;
   userId: string;
   isValid: boolean;
@@ -177,6 +182,7 @@ export interface RoomMusicAccount {
 export interface RoomMusicAccounts {
   netease: RoomMusicAccount | null;
   tencent: RoomMusicAccount | null;
+  qishui: RoomMusicAccount | null;
 }
 
 export interface RoomState {
@@ -227,6 +233,8 @@ export interface RoomState {
   playMode?: 'order' | 'shuffle' | 'loop-one' | 'loop-all' | 'shuffle-loop';
   /** 队列为空时私人漫游推荐模式 */
   neteaseFmMode?: string;
+  /** 私人漫游使用的推荐平台 */
+  fmSource?: 'netease' | 'qishui';
   /** 漫游关闭前的模式，重新开启时恢复 */
   fmModeBeforeOff?: string;
   /** 房主扫码绑定的音源账号（公开信息；Cookie 在 Meting） */
@@ -311,8 +319,10 @@ export interface PlaybackState {
   mediaUrl?: string;
   mediaQuality?: string;
   mediaCrossSource?: boolean;
-  /** 跨源取到音源的平台：netease / tencent / kugou */
+  /** 跨源取到音源的平台 */
   mediaCrossSourceFrom?: MusicSource;
+  mediaLoudness?: { gain?: number; peak?: number; lra?: number };
+  mediaDuration?: number;
 }
 
 /** 房间广播：当前曲媒体地址（成员取链成功后分享） */
@@ -323,6 +333,8 @@ export interface PlaybackMediaShare {
   qualityLabel?: string;
   crossSource?: boolean;
   crossSourceFrom?: MusicSource;
+  loudness?: { gain?: number; peak?: number; lra?: number };
+  duration?: number;
 }
 
 export interface RoomSummary {

@@ -231,7 +231,7 @@ export default function ChatPanel({ className = '' }: { className?: string }) {
         event.preventDefault();
       }}
     >
-      <div className="flex flex-shrink-0 items-center justify-between gap-2 border-b border-netease-border/50 px-4 py-2">
+      <div className="room-panel-divider flex flex-shrink-0 items-center justify-between gap-2 border-b px-4 py-2">
         <div className="flex min-w-0 items-center gap-2">
           <MessageCircle className="h-4 w-4 text-netease-muted" />
           <h3 className="text-sm font-medium">聊天室</h3>

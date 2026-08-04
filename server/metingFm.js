@@ -16,6 +16,14 @@ const FM_MODES = new Set([
   'SCENE_RCMD:EXERCISE',
   'SCENE_RCMD:FOCUS',
   'SCENE_RCMD:NIGHT_EMO',
+  // 汽水 PC feed/song-tab 模式
+  'FRESH',
+  'SCENE_MODE_ID:2',
+  'SCENE_MODE_ID:3',
+  'SCENE_MODE_ID:5',
+  'SCENE_MODE_ID:40',
+  'SCENE_MODE_ID:21',
+  'SCENE_MODE_ID:18',
   FM_MODE_OFF,
 ]);
 
@@ -27,10 +35,10 @@ export function normalizeFmMode(input) {
   return DEFAULT_FM_MODE;
 }
 
-function buildFmQuery(mode) {
-  const query = { server: 'netease', type: 'fm' };
+function buildFmQuery(mode, source = 'netease') {
+  const query = { server: source === 'qishui' ? 'qishui' : 'netease', type: 'fm' };
   const normalized = normalizeFmMode(mode);
-  if (normalized && normalized !== 'DEFAULT') {
+  if (query.server === 'netease' && normalized && normalized !== 'DEFAULT') {
     query.id = normalized;
   }
   return query;
@@ -45,8 +53,13 @@ function extractIdFromUrl(url) {
   }
 }
 
-function normalizeFmSong(raw) {
-  const item = Array.isArray(raw) ? raw[0] : raw;
+function normalizeFmSong(raw, source = 'netease') {
+  const candidates = Array.isArray(raw)
+    ? raw.filter((item) => item && typeof item === 'object')
+    : [raw];
+  const item = candidates.length
+    ? candidates[Math.floor(Math.random() * candidates.length)]
+    : null;
   if (!item || typeof item !== 'object') return null;
 
   const artist = item.artist ?? item.author;
@@ -59,15 +72,18 @@ function normalizeFmSong(raw) {
   const name = String(item.name || item.title || '').trim();
   if (!id || !name) return null;
 
-  const duration = Number(item.duration || item.dt || 0);
+  const rawDuration = Number(item.duration || item.dt || 0);
+  const duration = Number.isFinite(rawDuration) && rawDuration > 0
+    ? Math.round(rawDuration < 10_000 ? rawDuration * 1000 : rawDuration)
+    : undefined;
   return {
     id,
-    source: 'netease',
+    source: source === 'qishui' ? 'qishui' : 'netease',
     name,
     artist: artistStr,
     album: String(item.album || item.album_name || ''),
     pic: String(item.pic || item.cover || item.album_pic || ''),
-    duration: Number.isFinite(duration) && duration > 0 ? duration : undefined,
+    duration,
     url: urlStr || undefined,
     lrc: item.lrc ? String(item.lrc) : undefined,
   };
@@ -87,7 +103,7 @@ function sleep(ms) {
 /**
  * 网易云私人漫游。
  * - 传入 ephemeralCookie（无 VIP 本地账号）：走 Meting /admin/fm，不入库
- * - 否则走 type=fm；有 roomId 时 VIP 房间账号优先，否则用 Meting 原有 Cookie 池
+ * - 否则走 type=fm；有 roomId 时房间账号优先，否则用 Meting 原有 Cookie 池
  */
 export async function fetchMetingFmSong(fmMode = DEFAULT_FM_MODE, options = {}) {
   if (normalizeFmMode(fmMode) === FM_MODE_OFF) return null;
@@ -97,19 +113,22 @@ export async function fetchMetingFmSong(fmMode = DEFAULT_FM_MODE, options = {}) 
   const roomName = String(options.roomName || '私人漫游');
   const ephemeralCookie = String(options.ephemeralCookie || '').trim();
   const mode = normalizeFmMode(fmMode);
+  const source = options.source === 'qishui' ? 'qishui' : 'netease';
   const modeId = mode === 'DEFAULT' ? '' : mode;
+  const excludedIds = new Set(Array.isArray(options.excludeIds) ? options.excludeIds.map((id) => String(id).trim()).filter(Boolean) : []);
 
   for (let i = 0; i < MAX_FM_RETRIES; i += 1) {
     if (i > 0) await sleep(FM_RETRY_BACKOFF_MS * i);
     try {
       if (ephemeralCookie) {
-        const result = await fetchEphemeralFmSong(ephemeralCookie, modeId);
+        const result = await fetchEphemeralFmSong(ephemeralCookie, modeId, source, [...excludedIds]);
         if (!result.ok) {
           console.error('Ephemeral FM error:', result.error);
           continue;
         }
-        const song = normalizeFmSong(result.data);
+        const song = normalizeFmSong(result.data, source);
         if (song) {
+          if (excludedIds.has(song.id)) continue;
           fmFailureCooldownUntil = 0;
           return song;
         }
@@ -123,7 +142,7 @@ export async function fetchMetingFmSong(fmMode = DEFAULT_FM_MODE, options = {}) 
           roomId,
           roomName,
         },
-        () => fetchMetingApi(buildFmQuery(fmMode), {}, 12000),
+        () => fetchMetingApi(buildFmQuery(fmMode, source), {}, 12000),
       );
       if (!response.ok) continue;
 
@@ -137,7 +156,7 @@ export async function fetchMetingFmSong(fmMode = DEFAULT_FM_MODE, options = {}) 
         continue;
       }
 
-      const song = normalizeFmSong(data);
+      const song = normalizeFmSong(data, source);
       if (song) {
         fmFailureCooldownUntil = 0;
         return song;

@@ -10,6 +10,7 @@ import { searchAllSongs, getAvailableSources, type SearchFilterMode } from '../a
 import { importPlaylist, searchPlaylists, type PlaylistSearchItem, type PlaylistPlatform, type PlaylistChannelFilter as PlaylistChannelFilterMode } from '../api/music/playlist';
 import { fetchDjPrograms, type DjRadioItem } from '../api/music/djRadio';
 import { normalizeFmMode } from '../api/music/fmMode';
+import { refreshQualityCapabilities } from '../api/music/quality';
 import { addSongsToQueue, formatBulkAddToast } from '../lib/addSongsToQueue';
 import { rememberPlaylistImportHistory } from '../lib/playlistImportHistory';
 import { detectPlaylistLink } from '../lib/playlistLink';
@@ -63,6 +64,7 @@ import { useSongHistoryStore } from '../stores/songHistoryStore';
 import RoomFmModeBadge from '../components/RoomFmModeBadge';
 import type { SongRequestSettings } from '../components/RoomSettingsModal';
 import RoomQualityBadge from '../components/RoomQualityBadge';
+import { useSiteFeaturesStore } from '../stores/siteFeaturesStore';
 import { resolveEffectiveAudioQuality, useUserQualityStore } from '../stores/userQualityStore';
 import { invalidateUnloadedSongUrlCache, prefetchUpcomingFromRoom } from '../lib/songPreloadCache';
 import { DEFAULT_MEMBER_SETTINGS } from '../lib/memberTierPresets';
@@ -90,6 +92,7 @@ import { exitDocumentFullscreen } from '../lib/browserFullscreen';
 import {
   readRoomVisualFx,
   roomAmbientGlassClass,
+  roomVisualModeUsesTransparentChrome,
   readRoomVisualMode,
   writeRoomVisualMode,
   shouldProxySongPlaybackUrl,
@@ -126,6 +129,7 @@ const OnlineUsers = lazyWithRetry(() => import('../components/OnlineUsers'), 'On
 const RoomAmbientBackground = lazyWithRetry(() => import('../components/RoomAmbientBackground'), 'RoomAmbientBackground');
 const MiniPlayer = lazyWithRetry(() => import('../components/MiniPlayer'), 'MiniPlayer');
 const RoomQualityModal = lazyWithRetry(() => import('../components/RoomQualityModal'), 'RoomQualityModal');
+const RoomFmModeModal = lazyWithRetry(() => import('../components/RoomFmModeModal'), 'RoomFmModeModal');
 const RoomAnnouncementPopup = lazyWithRetry(() => import('../components/RoomAnnouncementPopup'), 'RoomAnnouncementPopup');
 
 function ensureGalaxyAudioOutputLazy() {
@@ -371,6 +375,7 @@ export default function Room() {
   const [lockSaving, setLockSaving] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [fmSaving, setFmSaving] = useState(false);
+  const [fmModeOpen, setFmModeOpen] = useState(false);
   const [transferSaving, setTransferSaving] = useState(false);
   const [destroySaving, setDestroySaving] = useState(false);
   const [permanentSaving, setPermanentSaving] = useState(false);
@@ -378,6 +383,7 @@ export default function Room() {
   const [announcementPopupOpen, setAnnouncementPopupOpen] = useState(false);
   const [memberOpen, setMemberOpen] = useState(false);
   const [qualityOpen, setQualityOpen] = useState(false);
+  const qishuiServerVip = useSiteFeaturesStore((s) => s.qishuiVip);
   const [memberSaving, setMemberSaving] = useState(false);
   const [songRequestSaving, setSongRequestSaving] = useState(false);
   const [chatHistorySaving, setChatHistorySaving] = useState(false);
@@ -1003,7 +1009,7 @@ export default function Room() {
       setOverlaySearchMode('song');
       setPlaylistSearchResults([]);
       setPlaylistSearchTotal(0);
-      setSearchedKeyword(`正在解析${platform === 'netease' ? '红点' : '绿点'}歌单…`);
+      setSearchedKeyword(`正在解析${platform === 'netease' ? '网易' : 'QQ'}歌单…`);
       setResults([]);
     }
 
@@ -1349,10 +1355,10 @@ export default function Room() {
     }
   }, [addingPage, addSong, showToast, isOwner, isAdmin]);
 
-  const handleSaveFmMode = useCallback(async (mode: string) => {
+  const handleSaveFmMode = useCallback(async (mode: string, source?: 'netease' | 'qishui') => {
     if (fmSaving) return;
     setFmSaving(true);
-    const res = await setRoomFmMode(mode);
+    const res = await setRoomFmMode(mode, source);
     setFmSaving(false);
     if (res.success) {
       showToast('漫游模式已更新', 'success');
@@ -1635,6 +1641,7 @@ export default function Room() {
 
   const displayVisualMode: RoomVisualMode = pureMode ? 'off' : visualMode;
   const ambientGlassClass = roomAmbientGlassClass(displayVisualMode);
+  const ambientBackgroundRetained = roomVisualModeUsesTransparentChrome(displayVisualMode);
 
   const handlePureModeToggle = useCallback(() => {
     const next = !pureMode;
@@ -2096,11 +2103,11 @@ export default function Room() {
   const renderQueueSection = (fillHeight = false) => (
     <div
       data-guide="room-queue"
-      className={`surface-panel rounded-2xl overflow-hidden flex flex-col ${
+      className={`surface-panel room-main-panel room-main-panel--queue rounded-2xl overflow-hidden flex flex-col ${
         fillHeight ? 'h-full flex-1 min-h-0' : 'flex-shrink-0'
       }`}
     >
-      <div className="relative flex items-center justify-between px-4 py-2.5 sm:py-3 border-b border-netease-border/50 flex-shrink-0">
+      <div className="room-panel-divider relative flex items-center justify-between px-4 py-2.5 sm:py-3 border-b flex-shrink-0">
         <h2 className="text-sm font-medium">播放队列</h2>
         <div className="flex items-center gap-2">
           {canClearQueue && (
@@ -2154,7 +2161,7 @@ export default function Room() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-          placeholder={searchMode === 'playlist' ? '搜索红点/绿点歌单...' : '搜索歌曲、歌手，或粘贴歌单链接...'}
+           placeholder={searchMode === 'playlist' ? '搜索网易/QQ歌单...' : '搜索歌曲、歌手，或粘贴歌单链接...'}
           className="w-full bg-netease-card border border-netease-border rounded-xl sm:rounded-2xl pl-10 sm:pl-12 pr-4 py-3 sm:py-3.5 text-sm sm:text-base text-white placeholder:text-netease-muted/50 focus:outline-none focus:border-netease-red/50 transition-colors"
         />
       </div>
@@ -2200,7 +2207,7 @@ export default function Room() {
                 <div className="min-w-0 flex-1 space-y-0.5">
                   <p className="truncate text-sm font-medium">{playlist.name}</p>
                   <p className="truncate text-xs text-netease-muted">
-                    {playlist.creatorName || (playlist.platform === 'qq' ? '绿点歌单' : '红点歌单')} · {playlist.trackCount} 首
+                    {playlist.creatorName || (playlist.platform === 'qq' ? 'QQ歌单' : '网易歌单')} · {playlist.trackCount} 首
                   </p>
                 </div>
                 <SourceBadge source={playlist.platform === 'qq' ? 'tencent' : 'netease'} variant="muted" />
@@ -2281,7 +2288,7 @@ export default function Room() {
           value={overlayQuery}
           onChange={(e) => setOverlayQuery(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleOverlaySearch()}
-          placeholder={overlaySearchMode === 'playlist' ? '搜索红点/绿点歌单...' : '搜索歌曲、歌手，或粘贴歌单链接...'}
+           placeholder={overlaySearchMode === 'playlist' ? '搜索网易/QQ歌单...' : '搜索歌曲、歌手，或粘贴歌单链接...'}
           className="w-full bg-netease-card border border-netease-border rounded-xl pl-9 pr-3 py-2 text-sm text-white placeholder:text-netease-muted/50 focus:outline-none focus:border-netease-red/50 transition-colors"
         />
       </div>
@@ -2306,7 +2313,7 @@ export default function Room() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-          placeholder={searchMode === 'playlist' ? '搜索红点/绿点歌单...' : '搜索歌曲、歌手，或粘贴歌单链接...'}
+           placeholder={searchMode === 'playlist' ? '搜索网易/QQ歌单...' : '搜索歌曲、歌手，或粘贴歌单链接...'}
           className="min-w-0 flex-1 border-none bg-transparent text-[13.5px] tracking-wide text-white outline-none placeholder:text-white/22"
         />
         <button
@@ -2469,7 +2476,9 @@ export default function Room() {
       </div>
     )}>
     <div
-      className="relative isolate flex h-full flex-col overflow-hidden"
+      className={`room-ambient-root relative isolate flex h-full flex-col overflow-hidden ${
+        ambientBackgroundRetained ? 'room-ambient-root--transparent' : ''
+      }`}
       style={immersiveTransition || immersiveShellMotion ? immersiveTimingCssVars() : undefined}
     >
 
@@ -2578,6 +2587,7 @@ export default function Room() {
         isOwner={isOwner}
         canModerate={canModerate}
         fmMode={normalizeFmMode(room?.neteaseFmMode)}
+        fmSource={room?.fmSource || 'netease'}
         fmModeBeforeOff={room?.fmModeBeforeOff}
         fmSaving={fmSaving}
         announcementEnabled={Boolean(room?.announcementEnabled)}
@@ -2611,7 +2621,7 @@ export default function Room() {
         identityGithubEnabled={identityProviders.githubEnabled}
         identityLinuxdoBound={identityProviders.linuxdoBound}
         identityGithubBound={identityProviders.githubBound}
-        musicAccounts={room?.musicAccounts ?? { netease: null, tencent: null }}
+        musicAccounts={room?.musicAccounts ?? { netease: null, tencent: null, qishui: null }}
         onMusicAccountCreateQr={createMusicAccountQr}
         onMusicAccountCheckQr={checkMusicAccountQr}
         onMusicAccountBind={bindMusicAccount}
@@ -2640,6 +2650,7 @@ export default function Room() {
       <RoomMemberModal
         open={memberOpen}
         users={room?.users ?? []}
+        userNicknames={room?.userNicknames ?? {}}
         creatorId={room?.creatorId ?? undefined}
         adminIds={room?.adminIds ?? []}
         memberTiers={room?.memberTiers ?? {}}
@@ -2658,6 +2669,18 @@ export default function Room() {
         onClose={() => setQualityOpen(false)}
         onSave={handleSaveUserQuality}
       />
+
+      <Suspense fallback={null}>
+      <RoomFmModeModal
+          open={fmModeOpen}
+          value={normalizeFmMode(room?.neteaseFmMode)}
+          source={room?.fmSource || 'netease'}
+          saving={fmSaving}
+          qishuiLocked={!room?.musicAccounts?.qishui && !qishuiServerVip}
+          onClose={() => setFmModeOpen(false)}
+          onSave={handleSaveFmMode}
+        />
+      </Suspense>
 
       <RoomAnnouncementPopup
         open={announcementPopupOpen}
@@ -2821,7 +2844,15 @@ export default function Room() {
                 <span className="inline-flex h-5 items-center whitespace-nowrap text-[10px] leading-none text-netease-muted">
                   {room.userCount} 人在线
                 </span>
-                <RoomFmModeBadge fmMode={room.neteaseFmMode} />
+                <RoomFmModeBadge
+                  fmMode={room.neteaseFmMode}
+                  fmSource={room.fmSource}
+                  clickable={isOwner}
+                  onClick={() => {
+                    setFmModeOpen(true);
+                    void refreshQualityCapabilities();
+                  }}
+                />
                 <RoomQualityBadge
                   onClick={() => {
                     markGuideFeatureUsed('room-header');
@@ -2983,20 +3014,20 @@ export default function Room() {
 
       <div className={`relative z-10 flex-1 min-h-0 mx-auto w-full px-3 sm:px-4 pt-3 sm:pt-4 pb-[calc(4.75rem+env(safe-area-inset-bottom,0px))] overflow-y-auto lg:overflow-hidden ${pureMode ? 'max-w-3xl' : 'max-w-[1680px]'}`}>
 
-        <div className={`flex flex-col gap-3 lg:gap-4 lg:h-full lg:min-h-0 ${pureMode ? '' : 'lg:grid lg:grid-cols-[320px_minmax(0,1fr)_340px]'}`}>
+          <div className={`flex flex-col gap-3 lg:gap-4 lg:h-full lg:min-h-0 ${pureMode ? '' : 'lg:grid lg:grid-cols-[320px_minmax(0,1fr)_340px]'}`}>
 
           {/* 左侧：红点热榜 */}
           {isLgUp && !pureMode && (
             <div
               data-guide="room-hot"
-              className="surface-panel order-0 flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl lg:h-full"
+              className="surface-panel room-main-panel room-main-panel--hot order-0 flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl lg:h-full"
             >
               <HotSongPanel embedded addingId={addingId} onAdd={handleAdd} />
             </div>
           )}
 
           {/* 中间：搜索 + 播放队列 */}
-          <div className="order-1 flex min-h-0 min-w-0 flex-col lg:h-full lg:overflow-hidden">
+          <div className="room-middle-column order-1 flex min-h-0 min-w-0 flex-col rounded-2xl lg:h-full lg:overflow-hidden">
             {!isLgUp && !pureMode && (
               <div className="mb-3" data-guide="room-hot">
                 <HotSongPanel compact addingId={addingId} onAdd={handleAdd} />
@@ -3089,7 +3120,7 @@ export default function Room() {
             )}
 
             <div className="h-[min(55vh,480px)] sm:h-[min(60vh,520px)] lg:h-full lg:min-h-0 lg:flex-1" data-guide="room-chat">
-              <ChatPanel />
+              <ChatPanel className="room-main-panel room-main-panel--chat" />
             </div>
           </div>
           )}

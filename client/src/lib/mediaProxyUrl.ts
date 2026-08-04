@@ -11,6 +11,22 @@ export function isProxiedMediaUrl(url: string): boolean {
   return url.startsWith(`${MEDIA_PROXY_PATH}?`);
 }
 
+/** 汽水鉴权端点本身就是 Meting 的媒体流，禁止普通场景重复套代理。 */
+function isQishuiAudioEndpoint(url: string): boolean {
+  let current = String(url || '').trim();
+  for (let depth = 0; depth < 3 && current; depth += 1) {
+    try {
+      const parsed = new URL(current, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
+      if (/(?:^|\/)audio\/qishui\/?$/i.test(parsed.pathname)) return true;
+      if (!isProxiedMediaUrl(current)) return false;
+      current = parsed.searchParams.get('url') || '';
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
 /** 从代理 URL 取出原始外链（测试/调试） */
 export function unwrapProxiedMediaUrl(url: string): string {
   if (!isProxiedMediaUrl(url)) return url;
@@ -42,6 +58,7 @@ export function isSameOriginMediaUrl(url: string): boolean {
 /** 是否需要走 media-proxy（外部 http/https） */
 export function shouldProxyMediaUrl(url: string): boolean {
   if (!url || isSameOriginMediaUrl(url)) return false;
+  if (isQishuiAudioEndpoint(url)) return false;
   if (toLocalMetingPicUrl(url)) return false;
   return /^https?:\/\//i.test(url);
 }
@@ -117,6 +134,9 @@ export function toProxiedAudioUrl(url: string): string {
  * 封面背景 Canvas 采样等场景使用；普通 `<img>` 封面请直接用 getCoverUrl。
  */
 export function toProxiedMediaUrl(url: string): string {
+  if (isQishuiAudioEndpoint(url) && isProxiedMediaUrl(url)) {
+    return unwrapProxiedMediaUrl(url);
+  }
   if (!url || !shouldProxyMediaUrl(url)) return url;
   const metingPic = toLocalMetingPicUrl(url);
   if (metingPic) return metingPic;

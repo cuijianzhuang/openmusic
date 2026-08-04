@@ -1,4 +1,4 @@
-import { getSongUrlInfo, getTrackKey, searchSongs } from '../api/music';
+import { getAvailableSources, getSongUrlInfo, getTrackKey, searchSongs, unwrapQishuiAudioUrl } from '../api/music';
 import { isHttpsPageContext } from './mediaProxyUrl';
 import { shouldProxySongPlaybackUrl } from './roomVisualPreset';
 import { stripApiSignParams } from './signedApiUrl';
@@ -21,20 +21,26 @@ import {
 import { useAudioStore } from '../stores/audioStore';
 import type { MusicSource, QueueItem, RoomState, SearchResult } from '../types';
 import { isMobileDevice } from './audioUnlock';
+import { normalizeDurationMs } from './duration';
 
 const MAX_URL_CACHE = 24;
 const DEFAULT_PREFETCH_COUNT = 2;
-const URL_CACHE_STORAGE_KEY = 'openmusic:song-url-cache:v2';
+// v4: 汽水带 auth 的 audio_mp4 必须保留解密包装地址，淘汰旧版直链缓存。
+const URL_CACHE_STORAGE_KEY = 'openmusic:song-url-cache:v4';
+
+export type TrackLoudness = { gain?: number; peak?: number; lra?: number };
 
 type CachedUrlEntry = {
   url: string;
   qualityLabel?: string;
   crossSource?: boolean;
   crossSourceFrom?: MusicSource;
+  loudness?: TrackLoudness;
+  duration?: number;
 };
 
 type FetchUrlResult =
-  | { ok: true; url: string; qualityLabel?: string; crossSource?: boolean; crossSourceFrom?: MusicSource }
+  | { ok: true; url: string; qualityLabel?: string; crossSource?: boolean; crossSourceFrom?: MusicSource; loudness?: TrackLoudness; duration?: number }
   | { ok: false; errorClass: PlaybackErrorClass };
 
 const urlCache = loadUrlCacheFromStorage();
@@ -45,9 +51,10 @@ const crossSourceKeys = new Set<string>();
 /** 实际取到音源的平台（红点/绿点/蓝点） */
 const crossSourceFromByKey = new Map<string, MusicSource>();
 const sourceErrorListeners = new Set<() => void>();
-const pendingCrossSourceFallbacks = new Map<string, Promise<string | null>>();
+const pendingCrossSourceFallbacks = new Map<string, Promise<CachedUrlEntry | null>>();
 const crossSourceCandidateCache = new Map<string, { expiresAt: number; candidates: SearchResult[] }>();
 const CROSS_SOURCE_CACHE_TTL_MS = 10 * 60_000;
+// 跨源只在可用于兜底的其它平台中搜索，不把汽水再次作为候选源。
 const ALL_MUSIC_SOURCES: MusicSource[] = ['netease', 'tencent', 'kugou'];
 
 function notifySourceErrors() {
@@ -77,8 +84,22 @@ export function getTrackCrossSourceFrom(
 }
 
 function normalizeMusicSource(value: unknown): MusicSource | undefined {
-  if (value === 'netease' || value === 'tencent' || value === 'kugou') return value;
+  if (value === 'netease' || value === 'tencent' || value === 'kugou' || value === 'qishui') return value;
   return undefined;
+}
+
+function normalizeLoudness(value: unknown): TrackLoudness | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const result: TrackLoudness = {};
+  for (const key of ['gain', 'peak', 'lra'] as const) {
+    const number = Number((value as Record<string, unknown>)[key]);
+    if (Number.isFinite(number)) result[key] = number;
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+function normalizeDuration(value: unknown): number | undefined {
+  return normalizeDurationMs(value);
 }
 
 function markTrackSourceError(song: Pick<QueueItem, 'queueId' | 'id' | 'source'>) {
@@ -159,6 +180,8 @@ function loadUrlCacheFromStorage(): Map<string, CachedUrlEntry> {
           qualityLabel: typeof value.qualityLabel === 'string' ? value.qualityLabel : undefined,
           crossSource: Boolean(value.crossSource),
           crossSourceFrom: normalizeMusicSource(value.crossSourceFrom),
+          loudness: normalizeLoudness(value.loudness),
+          duration: normalizeDuration(value.duration),
         });
       }
     }
@@ -240,11 +263,12 @@ function scoreFallbackCandidate(song: QueueItem, candidate: SearchResult): numbe
 }
 
 async function findCrossSourceCandidates(song: QueueItem): Promise<SearchResult[]> {
-  const cacheKey = `${songSourceOf(song)}:${normalizeMatchText(song.name)}:${normalizeMatchText(song.artist)}`;
+  const enabledSources = await getEnabledCrossSourceIds();
+  const cacheKey = `${songSourceOf(song)}:${[...enabledSources].sort().join(',')}:${normalizeMatchText(song.name)}:${normalizeMatchText(song.artist)}`;
   const cached = crossSourceCandidateCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return cached.candidates;
 
-  const sources = ALL_MUSIC_SOURCES.filter((source) => source !== songSourceOf(song));
+  const sources = ALL_MUSIC_SOURCES.filter((source) => source !== songSourceOf(song) && enabledSources.has(source));
   const batches = await Promise.allSettled(sources.map((source) => searchSongs(source, song.name)));
   const candidates = batches.flatMap((batch) => batch.status === 'fulfilled' ? batch.value : [])
     .map((candidate) => ({ candidate, score: scoreFallbackCandidate(song, candidate) }))
@@ -260,7 +284,25 @@ async function findCrossSourceCandidates(song: QueueItem): Promise<SearchResult[
   return candidates;
 }
 
-async function fetchCrossSourceFallback(song: QueueItem): Promise<string | null> {
+async function getEnabledCrossSourceIds(): Promise<Set<MusicSource>> {
+  try {
+    const sources = await getAvailableSources();
+    const enabled = new Set<MusicSource>(
+      sources
+        .filter((source) => source.supportsSearch)
+        .map((source) => source.id)
+        .filter((source): source is MusicSource => ALL_MUSIC_SOURCES.includes(source)),
+    );
+    // 网易和 QQ 是服务端始终启用的平台；接口异常时仍保留这两个安全候选，
+    // 不把未启用的酷狗或汽水加入跨源搜索。
+    if (enabled.size > 0) return enabled;
+  } catch {
+    // fall through to the built-in always-on sources
+  }
+  return new Set<MusicSource>(['netease', 'tencent']);
+}
+
+async function fetchCrossSourceFallback(song: QueueItem): Promise<CachedUrlEntry | null> {
   const key = trackKeyOf(song);
   const pending = pendingCrossSourceFallbacks.get(key);
   if (pending) return pending;
@@ -273,23 +315,21 @@ async function fetchCrossSourceFallback(song: QueueItem): Promise<string | null>
         const info = await getSongUrlInfo(candidate, quality);
         if (!info.url || isBlockedPlaybackUrl(info.url)) continue;
         const from = normalizeMusicSource(candidate.source);
-        urlCache.set(urlCacheKey(song, getEffectivePlaybackQuality(song)), {
+        const entry: CachedUrlEntry = {
           url: info.url,
           qualityLabel: info.qualityLabel,
           crossSource: true,
           crossSourceFrom: from,
-        });
-        urlCache.set(trackKeyOf(song), {
-          url: info.url,
-          qualityLabel: info.qualityLabel,
-          crossSource: true,
-          crossSourceFrom: from,
-        });
+          loudness: info.loudness,
+          duration: info.duration,
+        };
+        urlCache.set(urlCacheKey(song, getEffectivePlaybackQuality(song)), entry);
+        urlCache.set(trackKeyOf(song), entry);
         trimUrlCache();
         // 取链成功即打标（含下一曲预取）；中途未拿到 URL 前不会走到这里
         markTrackCrossSource(song, from);
         publishActualQuality(song, info.qualityLabel);
-        return info.url;
+        return entry;
       } catch {
         // 当前候选不可播放时继续尝试下一平台/版本。
       }
@@ -389,6 +429,16 @@ async function fetchSongUrlOnce(
   } else {
     const cached = urlCache.get(key);
     if (cached) {
+      // 旧缓存可能仍是汽水的 /audio/qishui 包装地址；带 auth 的地址必须保留，
+      // 由 Meting 解密后再交给浏览器播放。
+      const unwrappedCachedUrl = songSourceOf(song) === 'qishui'
+        ? unwrapQishuiAudioUrl('qishui', cached.url)
+        : cached.url;
+      if (unwrappedCachedUrl !== cached.url) {
+        cached.url = unwrappedCachedUrl;
+        urlCache.set(key, cached);
+        persistUrlCacheToStorage();
+      }
       // 历史缓存里的网易 outer/url 假直链不可播，丢弃后重新取链
       if (/music\.163\.com\/song\/media\/outer\/url/i.test(cached.url)) {
         urlCache.delete(key);
@@ -410,6 +460,8 @@ async function fetchSongUrlOnce(
           qualityLabel: cached.qualityLabel,
           crossSource: Boolean(cached.crossSource),
           crossSourceFrom: normalizeMusicSource(cached.crossSourceFrom),
+          loudness: cached.loudness,
+          duration: cached.duration,
         };
       }
     }
@@ -423,6 +475,8 @@ async function fetchSongUrlOnce(
     try {
       let url: string | null = null;
       let qualityLabel: string | undefined;
+      let loudness: TrackLoudness | undefined;
+      let duration: number | undefined;
       try {
         const info = await getSongUrlInfo({
           id: song.id,
@@ -431,6 +485,8 @@ async function fetchSongUrlOnce(
         }, quality);
         url = info.url;
         qualityLabel = info.qualityLabel;
+        loudness = info.loudness;
+        duration = info.duration;
       } catch (error) {
         return { ok: false, errorClass: classifySongUrlFetchError(error) };
       }
@@ -439,9 +495,9 @@ async function fetchSongUrlOnce(
         return { ok: false, errorClass: classifySongUrlFetchFailure(url) };
       }
 
-      urlCache.set(key, { url, qualityLabel });
+      urlCache.set(key, { url, qualityLabel, loudness, duration });
       trimUrlCache();
-      return { ok: true, url, qualityLabel };
+      return { ok: true, url, qualityLabel, loudness, duration };
     } finally {
       pendingFetches.delete(pendingKey);
     }
@@ -472,6 +528,20 @@ async function fetchSongUrl(
   const alreadyAtLowest = Boolean(lowest && quality === lowest);
   const allowQualityDowngrade = options.allowQualityDowngrade !== false;
 
+  // 汽水一旦成功切到其它已启用平台，就锁定跨源链，避免后续刷新再次请求汽水。
+  const cachedEntry = urlCache.get(urlCacheKey(song, quality)) || urlCache.get(trackKeyOf(song));
+  const qishuiLockedToCrossSource = source === 'qishui'
+    && (isTrackCrossSource(song) || Boolean(cachedEntry?.crossSource));
+  if (qishuiLockedToCrossSource) {
+    if (cachedEntry && !isBlockedPlaybackUrl(cachedEntry.url)) {
+      return cachedEntry;
+    }
+    const crossSourceEntry = await fetchCrossSourceFallback(song as QueueItem);
+    if (crossSourceEntry) return crossSourceEntry;
+    markTrackSourceError(song);
+    return null;
+  }
+
   const first = await fetchSongUrlOnce(song, quality, options);
   if (first.ok) {
     clearTrackSourceError(song);
@@ -483,6 +553,8 @@ async function fetchSongUrl(
       qualityLabel: first.qualityLabel,
       crossSource: Boolean(first.crossSource),
       crossSourceFrom: first.crossSourceFrom,
+      loudness: first.loudness,
+      duration: first.duration,
     };
   }
 
@@ -491,7 +563,7 @@ async function fetchSongUrl(
   }
 
   // 播放取链可降档；预取不做降档（避免 lockPlaybackQualityToLowest 影响全屋）
-  if (allowQualityDowngrade && !alreadyAtLowest) {
+  if (allowQualityDowngrade && source !== 'qishui' && !alreadyAtLowest) {
     const fallback = await tryLowestQualityFetch(song);
     if (fallback.ok) {
       clearTrackSourceError(song);
@@ -502,18 +574,14 @@ async function fetchSongUrl(
         qualityLabel: fallback.qualityLabel,
         crossSource: Boolean(fallback.crossSource),
         crossSourceFrom: fallback.crossSourceFrom,
+        loudness: fallback.loudness,
+        duration: fallback.duration,
       };
     }
   }
 
-  const crossSourceUrl = await fetchCrossSourceFallback(song as QueueItem);
-  if (crossSourceUrl) {
-    return {
-      url: crossSourceUrl,
-      crossSource: true,
-      crossSourceFrom: getTrackCrossSourceFrom(song),
-    };
-  }
+  const crossSourceEntry = await fetchCrossSourceFallback(song as QueueItem);
+  if (crossSourceEntry) return crossSourceEntry;
 
   // 跨源也失败：打「将跳过」异常标；轮到播放时主控直接 source_error 切歌
   markTrackSourceError(song);
@@ -528,9 +596,15 @@ export async function fetchServiceFallbackUrl(
   const quality = getEffectivePlaybackQuality(song);
   const lowest = getLowestQuality(source);
 
+  // 汽水只提供 PC 完整流，当前地址播放失败后直接走跨源，
+  // 不再重复请求汽水的低音质或试听地址。
+  if (source === 'qishui') {
+    return (await fetchCrossSourceFallback(song))?.url || null;
+  }
+
   if (lowest && quality === lowest) {
     // 当前平台最低音质仍触发播放错误时，刷新同一地址意义不大，直接切换平台。
-    return fetchCrossSourceFallback(song);
+    return (await fetchCrossSourceFallback(song))?.url || null;
   }
 
   const fallback = await tryLowestQualityFetch(song);
@@ -538,7 +612,7 @@ export async function fetchServiceFallbackUrl(
     publishActualQuality(song, fallback.qualityLabel);
     return fallback.url;
   }
-  return fetchCrossSourceFallback(song);
+  return (await fetchCrossSourceFallback(song))?.url || null;
 }
 
 export function rememberSongUrl(
@@ -547,6 +621,8 @@ export function rememberSongUrl(
   qualityLabel?: string,
   crossSource?: boolean,
   crossSourceFrom?: MusicSource,
+  loudness?: TrackLoudness,
+  duration?: number,
 ) {
   const existing = urlCache.get(trackKey);
   const from = normalizeMusicSource(crossSourceFrom) || existing?.crossSourceFrom;
@@ -555,6 +631,8 @@ export function rememberSongUrl(
     qualityLabel: qualityLabel?.trim() || existing?.qualityLabel,
     crossSource: crossSource ?? existing?.crossSource,
     crossSourceFrom: from,
+    loudness: loudness || existing?.loudness,
+    duration: normalizeDuration(duration) || existing?.duration,
   });
   trimUrlCache();
 }
@@ -582,9 +660,9 @@ export function getCachedUrlCrossSourceFrom(
  */
 export function seedSharedSongUrl(
   song: Pick<QueueItem, 'queueId' | 'id' | 'source' | 'url'>,
-  entry: { url: string; qualityLabel?: string; crossSource?: boolean; crossSourceFrom?: MusicSource },
+  entry: { url: string; qualityLabel?: string; crossSource?: boolean; crossSourceFrom?: MusicSource; loudness?: TrackLoudness; duration?: number },
 ) {
-  const raw = String(entry.url || '').trim();
+  const raw = unwrapQishuiAudioUrl(songSourceOf(song), String(entry.url || '').trim());
   if (!raw || isBlockedPlaybackUrl(raw)) return false;
 
   const url = stripApiSignParams(raw);
@@ -594,8 +672,9 @@ export function seedSharedSongUrl(
   const key = urlCacheKey(song, getEffectivePlaybackQuality(song));
   const crossSource = Boolean(entry.crossSource);
   const crossSourceFrom = normalizeMusicSource(entry.crossSourceFrom);
-  urlCache.set(key, { url, qualityLabel, crossSource: crossSource || undefined, crossSourceFrom });
-  urlCache.set(trackKeyOf(song), { url, qualityLabel, crossSource: crossSource || undefined, crossSourceFrom });
+  const cached = { url, qualityLabel, crossSource: crossSource || undefined, crossSourceFrom, loudness: normalizeLoudness(entry.loudness), duration: normalizeDuration(entry.duration) };
+  urlCache.set(key, cached);
+  urlCache.set(trackKeyOf(song), cached);
   trimUrlCache();
   persistUrlCacheToStorage();
 
@@ -617,6 +696,8 @@ export function applySharedPlaybackMedia(
     qualityLabel?: string;
     crossSource?: boolean;
     crossSourceFrom?: MusicSource;
+    loudness?: TrackLoudness;
+    duration?: number;
   } | null | undefined,
 ) {
   if (!room?.current || !media?.url || !media.trackId) return false;
@@ -626,6 +707,8 @@ export function applySharedPlaybackMedia(
     qualityLabel: media.qualityLabel,
     crossSource: Boolean(media?.crossSource),
     crossSourceFrom: media?.crossSourceFrom,
+    loudness: media.loudness,
+    duration: media.duration,
   });
 }
 
@@ -638,6 +721,8 @@ export function applySharedPlaybackMediaFromState(
     mediaQuality?: string;
     mediaCrossSource?: boolean;
     mediaCrossSourceFrom?: MusicSource;
+    mediaLoudness?: TrackLoudness;
+    mediaDuration?: number;
   } | null | undefined,
 ) {
   if (!state?.mediaUrl) return false;
@@ -647,6 +732,8 @@ export function applySharedPlaybackMediaFromState(
     qualityLabel: state.mediaQuality,
     crossSource: state.mediaCrossSource,
     crossSourceFrom: state.mediaCrossSourceFrom,
+    loudness: state.mediaLoudness,
+    duration: state.mediaDuration,
   });
 }
 
@@ -662,7 +749,7 @@ export function syncActualQualityFromCache(song: Pick<QueueItem, 'queueId' | 'id
 export async function resolveSongUrl(
   song: QueueItem,
   options: { refresh?: boolean } = {},
-): Promise<{ url: string; qualityLabel?: string; crossSource?: boolean; crossSourceFrom?: MusicSource }> {
+): Promise<CachedUrlEntry> {
   const result = await fetchSongUrl(song, options);
   if (result?.url) return result;
   // service 失败会 markTrackSourceError；temporary 不会

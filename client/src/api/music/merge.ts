@@ -4,6 +4,7 @@ const SOURCE_PRIORITY: Record<MusicSource, number> = {
   netease: 0,
   tencent: 1,
   kugou: 2,
+  qishui: 3,
 };
 
 function normalize(text: string): string {
@@ -241,13 +242,15 @@ export function interleaveSearchResults(
     const netease = prepare(groups.netease ?? []);
     const tencent = prepare(groups.tencent ?? []);
     const kugou = prepare(groups.kugou ?? []);
+    const qishui = prepare(groups.qishui ?? []);
     merged = [];
-    const max = Math.max(netease.length, tencent.length, kugou.length);
+    const max = Math.max(netease.length, tencent.length, kugou.length, qishui.length);
 
     for (let i = 0; i < max; i++) {
       if (i < netease.length) merged.push(netease[i]);
       if (i < tencent.length) merged.push(tencent[i]);
       if (i < kugou.length) merged.push(kugou[i]);
+      if (i < qishui.length) merged.push(qishui[i]);
     }
 
     if (options.dedupeCrossSource) {

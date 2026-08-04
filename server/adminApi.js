@@ -97,8 +97,7 @@ function getAdminSetupStatus() {
 const ADMIN_SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 小时
 const ADMIN_COOKIE = 'om_admin_sid';
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
-const ALLOW_INSECURE_COOKIES = process.env.DEPLOYMENT_MODE === 'test'
-  || process.env.ALLOW_INSECURE_COOKIES === '1'
+const ALLOW_INSECURE_COOKIES = process.env.ALLOW_INSECURE_COOKIES === '1'
   || process.env.ALLOW_INSECURE_COOKIES === 'true';
 const ADMIN_AUDIT_KEY = 'openmusic:admin:audit';
 /** 审计日志保留天数 */

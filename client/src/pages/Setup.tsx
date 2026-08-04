@@ -75,7 +75,7 @@ function SetupPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [database, setDatabase] = useState(0);
-  const [metingApiUrl, setMetingApiUrl] = useState('http://127.0.0.1:3000');
+  const [metingApiUrl, setMetingApiUrl] = useState('https://meting.example.com');
   const [metingApiAuth, setMetingApiAuth] = useState('');
   const [adminPath, setAdminPath] = useState(() => randomAdminPath());
   const [testing, setTesting] = useState(false);
@@ -466,7 +466,7 @@ function SetupPage() {
                 <Input
                   value={metingApiUrl}
                   onChange={(e) => setMetingApiUrl(e.target.value)}
-                  placeholder="http://127.0.0.1:3000"
+                  placeholder="https://meting.example.com"
                   spellCheck={false}
                 />
               </Form.Item>

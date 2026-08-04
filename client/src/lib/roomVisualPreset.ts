@@ -243,7 +243,7 @@ export const DEFAULT_ROOM_VISUAL_FX: RoomVisualFxSettings = {
   backgroundOpacity: 1,
   controlGlassChromaticOffset: 50,
   backgroundMedia: null,
-  lyricGlowStrength: 0.28,
+  lyricGlowStrength: 0.35,
   lyricScale: 1.0,
   lyricOffsetX: 0,
   lyricOffsetY: 0,
@@ -652,9 +652,9 @@ export function writeRoomVisualFx(fx: RoomVisualFxSettings): void {
 }
 
 export const ROOM_AMBIENT_GLASS_CLASS =
-  'border-white/10 bg-black/20 backdrop-blur-xl [-webkit-backdrop-filter:blur(24px)]';
+  'room-chrome-bar';
 
-export const ROOM_AMBIENT_GLASS_TRANSPARENT_CLASS = 'border-transparent bg-transparent';
+export const ROOM_AMBIENT_GLASS_TRANSPARENT_CLASS = 'room-chrome-bar room-chrome-bar--ambient';
 
 const SHADER_VISUAL_MODES = new Set<RoomVisualMode>([
   'emily',
@@ -667,8 +667,12 @@ const SHADER_VISUAL_MODES = new Set<RoomVisualMode>([
   'topography-we',
 ]);
 
+export function roomVisualModeUsesTransparentChrome(mode: RoomVisualMode): boolean {
+  return SHADER_VISUAL_MODES.has(mode);
+}
+
 export function roomAmbientGlassClass(mode: RoomVisualMode): string {
-  return SHADER_VISUAL_MODES.has(mode)
+  return roomVisualModeUsesTransparentChrome(mode)
     ? ROOM_AMBIENT_GLASS_TRANSPARENT_CLASS
     : ROOM_AMBIENT_GLASS_CLASS;
 }

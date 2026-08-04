@@ -623,67 +623,104 @@ function buildGlowTexture(mask: LyricMaskAsset): THREE.CanvasTexture {
   canvas.height = Math.max(1, Math.floor(H * ps));
   const ctx = canvas.getContext('2d')!;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.scale(ps, ps);
-  ctx.lineJoin = 'round';
-  ctx.lineCap = 'round';
-
-  // Mineradio 单 mesh 路径：非当前行不画溢光；当前翻译行 ×0.34
-  const glowAlphaFor = (row: LyricMaskRow) => {
-    if (!row.active) return 0;
-    const base = Math.max(0.22, Math.min(1, row.alpha ?? 1));
-    return row.translation ? Math.max(0.08, base * 0.34) : base;
-  };
-
-  const drawGlowText = (dx: number, dy: number, lineWidth: number) => {
-    ctx.strokeStyle = '#fff';
-    ctx.fillStyle = '#fff';
-    const opts = {
-      alphaFor: glowAlphaFor,
-      lineWidthFor: (rowScale: number) => Math.max(1, lineWidth * rowScale),
-    };
-    if (lineWidth > 0) {
-      drawLyricRowsStyled(ctx, rows, fontSize, W / 2 + dx, H / 2 + dy, { ...opts, stroke: true });
-    }
-    drawLyricRowsStyled(ctx, rows, fontSize, W / 2 + dx, H / 2 + dy, opts);
-  };
-
-  // Mineradio stepLyricGlowTextureBuild 原值：模糊半径按 ps 走设备像素，
-  // 线宽/偏移留在逻辑坐标（ctx 已 scale(ps)），两边等价。
-  ctx.save();
-  ctx.filter = `blur(${Math.max(1, 14 * ps).toFixed(2)}px)`;
-  ctx.globalAlpha = 0.46;
-  drawGlowText(0, 0, Math.max(10, fontSize * 0.1));
-  ctx.restore();
-
-  ctx.save();
-  ctx.filter = `blur(${Math.max(1.5, 34 * ps).toFixed(2)}px)`;
-  ctx.globalAlpha = 0.34;
-  drawGlowText(0, 0, Math.max(18, fontSize * 0.18));
-  ctx.restore();
-
-  ctx.save();
-  ctx.filter = `blur(${Math.max(2, 78 * ps).toFixed(2)}px)`;
-  ctx.globalAlpha = 0.22;
-  drawGlowText(0, 0, Math.max(28, fontSize * 0.26));
-  ctx.restore();
-
-  ctx.save();
-  ctx.filter = `blur(${Math.max(3, 116 * ps).toFixed(2)}px)`;
-  ctx.globalAlpha = 0.13;
-  drawGlowText(0, 0, Math.max(42, fontSize * 0.4));
-  ctx.restore();
-
-  ctx.save();
   ctx.globalCompositeOperation = 'lighter';
-  ctx.filter = `blur(${Math.max(0.8, 8 * ps).toFixed(2)}px)`;
-  ctx.globalAlpha = 0.26;
-  for (let ri = 0; ri < 8; ri++) {
-    const ang = (ri / 8) * Math.PI * 2;
-    drawGlowText(Math.cos(ang) * 7, Math.sin(ang) * 4, Math.max(10, fontSize * 0.1));
-  }
-  ctx.restore();
 
-  applyLyricEdgeFade(ctx, W, H, measuredWidth, fontSize, lines.length);
+  // 每个字使用独立的离屏画布做模糊，避免大半径描边把整句连接成矩形光块。
+  const drawGlyphGlow = (
+    glyph: string,
+    centerX: number,
+    centerY: number,
+    rowSize: number,
+    alpha: number,
+  ) => {
+    if (!glyph.trim() || alpha <= 0.002) return;
+    const scaledSize = rowSize * ps;
+    const measure = document.createElement('canvas').getContext('2d')!;
+    measure.font = lyricFont(scaledSize);
+    const glyphWidth = Math.max(scaledSize * 0.38, measure.measureText(glyph).width);
+    const maxBlur = Math.max(4, scaledSize * 0.34);
+    const pad = Math.ceil(maxBlur * 2.8 + scaledSize * 0.18);
+    const glyphCanvas = document.createElement('canvas');
+    glyphCanvas.width = Math.max(1, Math.ceil(glyphWidth + pad * 2));
+    glyphCanvas.height = Math.max(1, Math.ceil(scaledSize * 1.55 + pad * 2));
+    const glyphCtx = glyphCanvas.getContext('2d')!;
+    glyphCtx.font = lyricFont(scaledSize);
+    glyphCtx.textAlign = 'center';
+    glyphCtx.textBaseline = 'middle';
+    glyphCtx.lineJoin = 'round';
+    glyphCtx.lineCap = 'round';
+    glyphCtx.fillStyle = '#fff';
+    glyphCtx.strokeStyle = '#fff';
+    const gx = glyphCanvas.width / 2;
+    const gy = glyphCanvas.height / 2;
+    const passes = [
+      { blur: Math.max(1, scaledSize * 0.08), opacity: 0.52, stroke: scaledSize * 0.075 },
+      { blur: Math.max(1.5, scaledSize * 0.17), opacity: 0.34, stroke: scaledSize * 0.1 },
+      { blur: Math.max(2, scaledSize * 0.28), opacity: 0.2, stroke: scaledSize * 0.12 },
+    ];
+    for (const pass of passes) {
+      glyphCtx.save();
+      glyphCtx.filter = `blur(${pass.blur.toFixed(2)}px)`;
+      glyphCtx.globalAlpha = alpha * pass.opacity;
+      glyphCtx.lineWidth = Math.max(1, pass.stroke);
+      glyphCtx.strokeText(glyph, gx, gy);
+      glyphCtx.fillText(glyph, gx, gy);
+      glyphCtx.restore();
+    }
+    glyphCtx.save();
+    glyphCtx.filter = `blur(${Math.max(0.8, scaledSize * 0.045).toFixed(2)}px)`;
+    glyphCtx.globalAlpha = alpha * 0.34;
+    glyphCtx.fillText(glyph, gx, gy);
+    glyphCtx.restore();
+    ctx.drawImage(
+      glyphCanvas,
+      centerX * ps - glyphCanvas.width / 2,
+      centerY * ps - glyphCanvas.height / 2,
+    );
+  };
+
+  const blockHeight = lyricRowsBlockHeight(rows, fontSize);
+  let cursorY = H / 2 - blockHeight / 2;
+  const measureCtx = document.createElement('canvas').getContext('2d')!;
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index]!;
+    if (index > 0) cursorY += Math.max(0, row.gapBefore ?? 0) * fontSize;
+    const rowScale = Math.max(0.46, Math.min(1.12, row.scale ?? 1));
+    const rowSize = fontSize * rowScale;
+    const rowStep = rowSize * LYRIC_LINE_HEIGHT;
+    if (row.active) {
+      const alphaBase = Math.max(0.22, Math.min(1, row.alpha ?? 1));
+      const alpha = row.translation ? Math.max(0.08, alphaBase * 0.34) : alphaBase;
+      const spacing = lyricLetterSpacingPx(roomVisualFxLive.current, rowSize);
+      measureCtx.font = lyricFont(rowSize);
+      const glyphs = Array.from(row.text);
+      const widths = glyphs.map((glyph) => measureCtx.measureText(glyph).width);
+      const totalWidth = widths.reduce((sum, width) => sum + width, 0)
+        + Math.max(0, glyphs.length - 1) * spacing;
+      let cursorX = W / 2 - totalWidth / 2;
+      for (let glyphIndex = 0; glyphIndex < glyphs.length; glyphIndex += 1) {
+        const glyphWidth = widths[glyphIndex] || 0;
+        drawGlyphGlow(
+          glyphs[glyphIndex]!,
+          cursorX + glyphWidth / 2,
+          cursorY + rowStep / 2,
+          rowSize,
+          alpha,
+        );
+        cursorX += glyphWidth + spacing;
+      }
+    }
+    cursorY += rowStep;
+  }
+
+  applyLyricEdgeFade(
+    ctx,
+    canvas.width,
+    canvas.height,
+    measuredWidth * ps,
+    fontSize * ps,
+    lines.length,
+  );
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.minFilter = THREE.LinearFilter;

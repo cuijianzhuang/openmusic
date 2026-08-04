@@ -19,10 +19,25 @@ export const NETEASE_FM_MODE_OPTIONS: FmModeOption[] = [
   { value: 'aidj', label: 'AI DJ', description: 'AI 串烧混剪，曲间带过渡衔接' },
 ];
 
+/** 汽水 PC 漫游模式：默认推荐不传 preference，由接口走 daily_mix。 */
+export const QISHUI_FM_MODE_OPTIONS: FmModeOption[] = [
+  { value: 'DEFAULT', label: '推荐模式', description: '综合你的听歌偏好，智能推荐歌曲' },
+  { value: 'FAMILIAR', label: '熟悉模式', description: '更多你听过或相似风格的歌曲' },
+  { value: 'FRESH', label: '新鲜模式', description: '发现更多没听过的新歌' },
+  { value: 'SCENE_MODE_ID:2', label: '动感健身', description: '节奏明快，适合运动锻炼' },
+  { value: 'SCENE_MODE_ID:3', label: 'Chill 放松', description: '舒缓放松，适合安静聆听' },
+  { value: 'SCENE_MODE_ID:5', label: '快乐时光', description: '轻松明快，保持好心情' },
+  { value: 'SCENE_MODE_ID:40', label: '夜晚', description: '适合夜间聆听的氛围歌曲' },
+  { value: 'SCENE_MODE_ID:21', label: '治愈', description: '温柔舒缓，陪你放松心情' },
+  { value: 'SCENE_MODE_ID:18', label: '小酒馆', description: '微醺氛围感歌曲' },
+];
+
 const FM_MODE_VALUES = new Set([...NETEASE_FM_MODE_OPTIONS.map((o) => o.value), FM_MODE_OFF]);
+QISHUI_FM_MODE_OPTIONS.forEach((option) => FM_MODE_VALUES.add(option.value));
 
 const FM_MODE_LABEL_MAP = new Map([
   ...NETEASE_FM_MODE_OPTIONS.map((o) => [o.value, o.label] as [string, string]),
+  ...QISHUI_FM_MODE_OPTIONS.map((o) => [o.value, o.label] as [string, string]),
   [FM_MODE_OFF, '已关闭'] as [string, string],
 ]);
 

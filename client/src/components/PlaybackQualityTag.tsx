@@ -1,4 +1,4 @@
-/** 歌名旁实际音质标：网易红 / QQ 绿 / 酷狗蓝，简洁短标 */
+/** 歌名旁实际音质标：网易红 / QQ 绿 / 汽水黄 / 酷狗蓝，简洁短标 */
 
 import type { MusicSource } from '../types';
 
@@ -36,6 +36,23 @@ function shortenLabel(label: string, source?: MusicSource | null): string {
 
   if (source === 'kugou') {
     return label;
+  }
+
+  if (source === 'qishui') {
+    const qishuiMap: Record<string, string> = {
+      standard: '标准',
+      exhigh: '极高',
+      studio: '录音室',
+      atmos: '全景声',
+      lossless: '无损',
+      标准: '标准',
+      高品: '极高',
+      高品质: '极高',
+      录音室音质: '录音室',
+      全景声: '全景声',
+      无损: '无损',
+    };
+    return qishuiMap[label.toLowerCase()] || qishuiMap[label] || label;
   }
 
   const neteaseMap: Record<string, string> = {
@@ -77,8 +94,17 @@ const KUGOU_TIER_CLASS: Record<QualityTier, string> = {
   vip: 'border-[#2688ee] text-[#2688ee]',
 };
 
+const QISHUI_TIER_CLASS: Record<QualityTier, string> = {
+  standard: 'border-[#f5c542]/35 text-[#f5c542]/70',
+  high: 'border-[#f5c542]/50 text-[#f5c542]/85',
+  lossless: 'border-[#f5c542]/70 text-[#f5c542]',
+  hires: 'border-[#f5c542]/85 text-[#f5c542]',
+  vip: 'border-[#f5c542] text-[#f5c542]',
+};
+
 function tierClassForSource(source: MusicSource | null | undefined, tier: QualityTier): string {
   if (source === 'tencent') return TENCENT_TIER_CLASS[tier];
+  if (source === 'qishui') return QISHUI_TIER_CLASS[tier];
   if (source === 'kugou') return KUGOU_TIER_CLASS[tier];
   return NETEASE_TIER_CLASS[tier];
 }

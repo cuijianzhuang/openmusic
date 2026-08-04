@@ -51,7 +51,12 @@ async function requestSessionBootstrap(): Promise<string | null> {
   const data = (await res.json()) as {
     clientId?: string;
     apiSignKey?: string;
-    features?: { svipQualityEnabled?: boolean };
+    features?: {
+      svipQualityEnabled?: boolean;
+      neteaseSvip?: boolean;
+      tencentSvip?: boolean;
+      qishuiVip?: boolean;
+    };
   };
   // 非安全 HTTP 上 Web Crypto 可能不可用；此时服务端也不会要求请求签名。
   setApiSignKey(globalThis.crypto?.subtle ? data.apiSignKey : null);

@@ -1,3 +1,5 @@
+import { decryptRoomSecrets, encryptRoomSecrets } from './roomCredentialCrypto.js';
+
 const ROOM_IDS_KEY = 'openmusic:room_ids';
 const roomKey = (id) => `openmusic:room:${id}`;
 
@@ -108,7 +110,9 @@ export async function loadAllRoomsFromStorage() {
     try {
       const raw = await redisClient.get(roomKey(id));
       if (!raw) continue;
-      rooms.push(JSON.parse(raw));
+      const room = JSON.parse(raw);
+      room.musicAccountSecrets = decryptRoomSecrets(room.musicAccountSecrets, room.id);
+      rooms.push(room);
     } catch (err) {
       console.error(`Redis: 跳过损坏的房间数据 ${id}:`, err.message);
     }
@@ -120,8 +124,12 @@ export async function loadAllRoomsFromStorage() {
 export async function saveRoomToStorage(roomSnapshot) {
   if (!enabled || !redisClient) return;
 
-  const payload = JSON.stringify(roomSnapshot);
   try {
+    const persisted = {
+      ...roomSnapshot,
+      musicAccountSecrets: encryptRoomSecrets(roomSnapshot.musicAccountSecrets, roomSnapshot.id),
+    };
+    const payload = JSON.stringify(persisted);
     await redisClient.set(roomKey(roomSnapshot.id), payload);
     await redisClient.sAdd(ROOM_IDS_KEY, roomSnapshot.id);
   } catch (err) {

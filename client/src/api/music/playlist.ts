@@ -3,7 +3,7 @@ import { fetchWithTimeout } from '../http';
 import { upgradeInsecureCoverUrl } from '../../lib/coverUrl';
 import { metingSearchPlaylists } from './providers/meting';
 
-export type PlaylistPlatform = 'netease' | 'qq';
+export type PlaylistPlatform = 'netease' | 'qq' | 'qishui';
 
 export interface PlaylistImportResult {
   name: string;
@@ -75,10 +75,10 @@ function interleavePlaylists(
 }
 
 async function fetchMetingPlaylists(
-  server: Extract<MusicSource, 'netease' | 'tencent'>,
+  server: Extract<MusicSource, 'netease' | 'tencent' | 'qishui'>,
   keyword: string,
 ): Promise<PlaylistSearchItem[]> {
-  const platform: PlaylistPlatform = server === 'netease' ? 'netease' : 'qq';
+  const platform: PlaylistPlatform = server === 'netease' ? 'netease' : server === 'tencent' ? 'qq' : 'qishui';
   const data = await metingSearchPlaylists(server, keyword);
   return data
     .map((item) => normalizePlaylist(item, platform))
@@ -106,7 +106,7 @@ export async function importPlaylist(
   return data as PlaylistImportResult;
 }
 
-export type PlaylistChannelFilter = 'all' | 'netease' | 'qq';
+export type PlaylistChannelFilter = 'all' | 'netease' | 'qq' | 'qishui';
 
 /** 歌单搜索，支持按渠道筛选（红点 / 绿点） */
 export async function searchPlaylists(
@@ -126,15 +126,20 @@ export async function searchPlaylists(
   if (channel === 'qq') {
     return searchTencentPlaylists(trimmed, page, limit);
   }
+  if (channel === 'qishui') {
+    return searchQishuiPlaylists(trimmed, page, limit);
+  }
 
-  const [neteaseBatch, tencentBatch] = await Promise.allSettled([
+  const [neteaseBatch, tencentBatch, qishuiBatch] = await Promise.allSettled([
     fetchMetingPlaylists('netease', trimmed),
     fetchMetingPlaylists('tencent', trimmed),
+    fetchMetingPlaylists('qishui', trimmed),
   ]);
 
   const netease = neteaseBatch.status === 'fulfilled' ? neteaseBatch.value : [];
   const tencent = tencentBatch.status === 'fulfilled' ? tencentBatch.value : [];
-  const all = interleavePlaylists(netease, tencent);
+  const qishui = qishuiBatch.status === 'fulfilled' ? qishuiBatch.value : [];
+  const all = interleavePlaylists(interleavePlaylists(netease, tencent), qishui);
   const start = (page - 1) * limit;
 
   return {
@@ -187,6 +192,19 @@ export async function searchTencentPlaylists(
     page,
     limit,
   };
+}
+
+/** 仅搜索汽水歌单 */
+export async function searchQishuiPlaylists(
+  keyword: string,
+  page = 1,
+  limit = 20,
+): Promise<PlaylistSearchResult> {
+  const trimmed = keyword.trim();
+  if (!trimmed) return { playlists: [], total: 0, page, limit };
+  const all = await fetchMetingPlaylists('qishui', trimmed);
+  const start = (page - 1) * limit;
+  return { playlists: all.slice(start, start + limit), total: all.length, page, limit };
 }
 
 export async function fetchNeteasePlaylistMetas(ids: string[]): Promise<PlaylistSearchItem[]> {

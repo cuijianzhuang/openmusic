@@ -4,8 +4,9 @@ import type { PlaylistChannelFilter } from '../api/music/playlist';
 
 const OPTIONS: { value: PlaylistChannelFilter; label: string }[] = [
   { value: 'all', label: '全部' },
-  { value: 'netease', label: '红点' },
-  { value: 'qq', label: '绿点' },
+  { value: 'netease', label: '网易' },
+  { value: 'qq', label: 'QQ' },
+  { value: 'qishui', label: '汽水' },
 ];
 
 function getLabel(mode: PlaylistChannelFilter): string {

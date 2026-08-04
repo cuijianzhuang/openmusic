@@ -401,7 +401,6 @@ export function mountSetupApi(app) {
         CLIENT_URL: siteUrl || '',
         CLIENT_ID_SECRET: clientSecret,
         TRUST_PROXY: req.body?.trustProxy === false ? '0' : '1',
-        DEPLOYMENT_MODE: req.body?.testMode === true ? 'test' : 'production',
         METING_API_URL: metingSources.join(','),
         METING_API_AUTH: metingAuths.some(Boolean) ? metingAuths.join(',') : '',
         SETUP_NONCE: setupNonce,

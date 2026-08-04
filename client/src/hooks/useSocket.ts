@@ -875,7 +875,7 @@ export function useSocket() {
 
   const skipSong = useCallback((options?: { reason?: 'manual' | 'source_error' | 'system' }): Promise<{ success: boolean; error?: string }> => {
     // source_error 需等服务端探测（上游可达 12s），ack 超时必须更长，否则客户端误判失败并卡锁
-    const timeoutMs = options?.reason === 'source_error' ? 20000 : SOCKET_ACK_TIMEOUT_MS;
+    const timeoutMs = options?.reason === 'source_error' ? 90000 : SOCKET_ACK_TIMEOUT_MS;
     return emitWithAck(
       'skip_song',
       { reason: options?.reason || 'manual' },
@@ -895,6 +895,8 @@ export function useSocket() {
     qualityLabel?: string;
     crossSource?: boolean;
     crossSourceFrom?: string;
+    loudness?: { gain?: number; peak?: number; lra?: number };
+    duration?: number;
   }): void => {
     const url = stripApiSignParams(String(payload.url || '').trim());
     const trackId = String(payload.trackId || '').trim();
@@ -907,6 +909,8 @@ export function useSocket() {
         qualityLabel: payload.qualityLabel,
         crossSource: Boolean(payload.crossSource),
         crossSourceFrom: payload.crossSourceFrom,
+        loudness: payload.loudness,
+        duration: payload.duration,
       },
       { success: false },
     );
@@ -1219,10 +1223,10 @@ export function useSocket() {
     });
   }, []);
 
-  const setRoomFmMode = useCallback((mode: string): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
+  const setRoomFmMode = useCallback((mode: string, source?: 'netease' | 'qishui'): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
     return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
       'set_room_fm_mode',
-      { mode },
+      { mode, source },
       { success: false, error: '连接超时，请重试' },
     ).then((res) => {
       if (res.success && res.room) {
@@ -1232,7 +1236,7 @@ export function useSocket() {
     });
   }, []);
 
-  const createMusicAccountQr = useCallback((platform: 'netease' | 'tencent') => {
+  const createMusicAccountQr = useCallback((platform: 'netease' | 'tencent' | 'qishui') => {
     return emitWithAck<{ success: boolean; error?: string; data?: Record<string, unknown> }>(
       'music_account_qr_create',
       { platform },
@@ -1251,8 +1255,7 @@ export function useSocket() {
   }, []);
 
   const bindMusicAccount = useCallback((payload: {
-    platform: 'netease' | 'tencent';
-    cookie: string;
+    sessionId: string;
     shared?: boolean;
   }) => {
     return emitWithAck<{
@@ -1288,7 +1291,7 @@ export function useSocket() {
     });
   }, []);
 
-  const setMusicAccountShared = useCallback((platform: 'netease' | 'tencent', shared: boolean) => {
+  const setMusicAccountShared = useCallback((platform: 'netease' | 'tencent' | 'qishui', shared: boolean) => {
     return emitWithAck<{
       success: boolean;
       error?: string;
@@ -1304,7 +1307,7 @@ export function useSocket() {
     });
   }, []);
 
-  const unbindMusicAccount = useCallback((platform: 'netease' | 'tencent') => {
+  const unbindMusicAccount = useCallback((platform: 'netease' | 'tencent' | 'qishui') => {
     return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
       'music_account_unbind',
       { platform },

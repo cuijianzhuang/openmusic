@@ -7,6 +7,7 @@ import { installOpenMusicDebug } from './lib/debugTools';
 import { installVisibilitySync } from './lib/visibilitySync';
 import { applyPageSeo, fetchSiteSeo } from './lib/seo';
 import { ensureSessionBootstrap } from './lib/sessionBootstrap';
+import { refreshQualityCapabilities } from './api/music/quality';
 import { warmUpSocketSession } from './hooks/useSocket';
 import { applyStoredRoomThemeColor } from './lib/roomThemeColor';
 import { installGuideUsageTracking } from './lib/userGuide';
@@ -17,7 +18,10 @@ installVisibilitySync();
 installGuideUsageTracking();
 void fetchSiteSeo().then(() => applyPageSeo());
 applyPageSeo();
-void ensureSessionBootstrap().then(() => warmUpSocketSession());
+void ensureSessionBootstrap().then(() => {
+  void refreshQualityCapabilities();
+  return warmUpSocketSession();
+});
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

@@ -13,6 +13,7 @@ import {
   resolveTrackDurationSeconds,
 } from '../hooks/useTrackDuration';
 import { reportTrackDurationToServer } from '../lib/reportTrackDuration';
+import { applyTrackLoudness } from '../lib/audioElement';
 import type { QueueItem } from '../types';
 import { getAudioController } from '../lib/audioController';
 import {
@@ -58,6 +59,7 @@ import {
   getTrackCrossSourceFrom,
 } from '../lib/songPreloadCache';
 import { refreshSignedApiUrl, stripApiSignParams } from '../lib/signedApiUrl';
+import { isProxiedMediaUrl, toProxiedMediaUrl } from '../lib/mediaProxyUrl';
 import {
   classifyMediaPlaybackError,
   isSourceUnavailableMessage,
@@ -103,6 +105,9 @@ const RESOLVE_URL_TIMEOUT_MS = 15000;
 const LEADER_LOAD_STUCK_SKIP_MS = 20000;
 /** 主控长时间无法把 audio 绑到当前曲时强制切歌（无 duration 时服务端也不会自动推进） */
 const LEADER_BIND_MISMATCH_SKIP_MS = 25000;
+/** 汽水加密流需由 Meting 完整下载并解密后才能响应，不能按普通直链时限误判。 */
+const QISHUI_LEADER_LOAD_STUCK_SKIP_MS = 100000;
+const QISHUI_LEADER_BIND_MISMATCH_SKIP_MS = 105000;
 /** 源异常切歌提示节流，避免 watchdog 反复弹 toast */
 const SOURCE_ERROR_SKIP_TOAST_COOLDOWN_MS = 20000;
 let localRecoveryTimer: number | null = null;
@@ -223,6 +228,7 @@ interface AudioRuntime {
   suppressAutoResumeRef: MutableRefObject<boolean>;
   tempRetries: MutableRefObject<number>;
   lowestFallbackAttempted: MutableRefObject<boolean>;
+  qishuiProxyAttempted: MutableRefObject<string | null>;
   successRecordedTrackKey: MutableRefObject<string | null>;
   stallRetryTimer: MutableRefObject<number | null>;
   /** 主控本机失败：仅本地重试，不触发全屋切歌 */
@@ -337,6 +343,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
   const prevQueueIdRef = useRef<string | null>(null);
   const tempRetries = useRef(0);
   const lowestFallbackAttempted = useRef(false);
+  const qishuiProxyAttempted = useRef<string | null>(null);
   const successRecordedTrackKey = useRef<string | null>(null);
   const stallRetryTimer = useRef<number | null>(null);
   const lastSkipAt = useRef(0);
@@ -558,17 +565,10 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
 
     skipSong({ reason: options.reason || 'manual' }).then(async (res) => {
       if (!res.success && sourceErrorSkip) {
-        // 服务端探测与本机不一致：以本机已确认无源为准，系统强制切歌，避免全屋卡在不可播曲
-        notifyPlaybackToast(res.error || '音源异常，正在跳过…', 'error');
-        try {
-          const forced = await skipSong({ reason: 'system' });
-          if (!forced.success) {
-            unlockAfterSkipFailure();
-            if (forced.error) notifyPlaybackToast(forced.error, 'error');
-          }
-        } catch {
-          unlockAfterSkipFailure();
-        }
+        // 服务端确认音源仍可用时，只能视为主控本机问题；禁止强制切歌影响全房间。
+        // 解锁后交给本地恢复/watchdog 重试当前歌曲。
+        unlockAfterSkipFailure();
+        notifyPlaybackToast('服务端检测音源正常，正在本地重试…', 'error');
         return;
       }
       if (!res.success) {
@@ -622,6 +622,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
       invalidateTrackUrlCache(live);
       tempRetries.current = 0;
       lowestFallbackAttempted.current = false;
+      qishuiProxyAttempted.current = null;
       loadLockRef.current = EMPTY_LOAD_LOCK;
       setLoadRetryNonce((n) => n + 1);
     }, delayMs);
@@ -637,6 +638,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
       suppressAutoResumeRef,
       tempRetries,
       lowestFallbackAttempted,
+      qishuiProxyAttempted,
       successRecordedTrackKey,
       stallRetryTimer,
       scheduleLocalRecovery,
@@ -739,6 +741,33 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
 
         recordSongPlaybackFailure();
 
+        const failedUrl = audio.currentSrc || audio.src;
+        if (
+          (song.source || 'netease') === 'qishui'
+          && /^https?:\/\//i.test(failedUrl)
+          && !isProxiedMediaUrl(failedUrl)
+          // /audio/qishui 是 Meting 自己的鉴权解密端点，不能再套
+          // /api/media-proxy；否则 SSRF 防护会把 localhost 当内网地址拦掉。
+          && !/(?:^|\/)audio\/qishui(?:[/?]|$)/i.test(failedUrl)
+          && runtime.qishuiProxyAttempted.current !== song.queueId
+        ) {
+          runtime.qishuiProxyAttempted.current = song.queueId;
+          const proxied = toProxiedMediaUrl(failedUrl);
+          void refreshSignedApiUrl(proxied).then((signedProxy) => {
+            const liveNow = useRoomStore.getState().room?.current;
+            if (!signedProxy || liveNow?.queueId !== song.queueId) return;
+            controller.enqueue(async () => {
+              const target = controller.audio;
+              target.pause();
+              target.src = signedProxy;
+              bindAudioQueueId(target, song.queueId);
+              target.load();
+              await target.play().catch(() => {});
+            });
+          });
+          return;
+        }
+
         void classifyMediaPlaybackError(audio).then((errorClass) => {
           if (errorClass === 'temporary') {
             if (runtime.tempRetries.current < MAX_TEMP_PLAYBACK_RETRIES) {
@@ -752,6 +781,10 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
             runtime.scheduleLocalRecovery(song, 'temp_retries_exhausted');
             return;
           }
+
+          // 服务端返回了不可播放的媒体（例如伪装成 .flac 的 video/mp4）时，
+          // 先清掉各音质旧缓存，避免下一次加载再次命中同一坏链。
+          invalidateTrackUrlCache(song);
 
           if (runtime.lowestFallbackAttempted.current) {
             runtime.scheduleLocalRecovery(song, 'service_fallback_exhausted');
@@ -1001,6 +1034,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
       loadLockRef.current = { queueId, gen };
       tempRetries.current = 0;
       lowestFallbackAttempted.current = false;
+      qishuiProxyAttempted.current = null;
       successRecordedTrackKey.current = null;
       setTrackLoading(true);
 
@@ -1018,6 +1052,8 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
         let qualityLabel: string | undefined;
         let crossSource = false;
         let crossSourceFrom: ReturnType<typeof getTrackCrossSourceFrom>;
+        let loudness: { gain?: number; peak?: number; lra?: number } | undefined;
+        let duration: number | undefined;
         try {
           let timeoutId = 0;
           const resolved = await Promise.race([
@@ -1038,6 +1074,8 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
           crossSourceFrom = resolved.crossSourceFrom
             || getCachedUrlCrossSourceFrom(current)
             || getTrackCrossSourceFrom(current);
+          loudness = resolved.loudness;
+          duration = resolved.duration;
           if (crossSource) markTrackCrossSource(current, crossSourceFrom);
           if (resolveFailCountRef.current?.queueId === queueId) {
             resolveFailCountRef.current = null;
@@ -1084,6 +1122,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
           if (!liveNow || liveNow.queueId !== current.queueId) return;
           // 换源前保持 suppress：禁止对旧 src seek 0，否则后台竞态 play 会闪播旧曲开头
           suppressAutoResumeRef.current = true;
+          applyTrackLoudness(loudness);
           audio.pause();
           clearAudioQueueBinding(audio);
           // 先用已知进度占位，避免换源瞬间进度条跳回 0；真正对齐在 load 完成后 forceTime
@@ -1124,7 +1163,18 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
         await waitForAudioMinimumReady(controller.audio);
         if (gen !== loadGeneration.current) return;
 
-        rememberSongUrl(trackKey, url, qualityLabel, crossSource, crossSourceFrom);
+        rememberSongUrl(trackKey, url, qualityLabel, crossSource, crossSourceFrom, loudness, duration);
+        if (duration && duration > 0) {
+          const live = useRoomStore.getState().room;
+          if (live?.current?.queueId === current.queueId) {
+            useRoomStore.getState().setRoom({
+              ...live,
+              current: live.current.duration === duration ? live.current : { ...live.current, duration },
+            });
+          }
+          setMediaDuration(trackKey, duration);
+          reportTrackDurationToServer(current.queueId, duration);
+        }
         if (qualityLabel) {
           useAudioStore.getState().setActualQuality(trackKey, qualityLabel);
         }
@@ -1135,6 +1185,8 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
           qualityLabel,
           crossSource,
           crossSourceFrom,
+          loudness,
+          duration,
         });
         syncMediaDuration(controller.audio, current, trackKey);
         tryFlushPendingSnapshot();
@@ -1230,6 +1282,9 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     const queueId = room?.current?.queueId;
     if (!queueId) return;
 
+    const timeoutMs = room?.current?.source === 'qishui'
+      ? QISHUI_LEADER_LOAD_STUCK_SKIP_MS
+      : LEADER_LOAD_STUCK_SKIP_MS;
     const timer = window.setTimeout(() => {
       const live = useRoomStore.getState();
       if (!live.isPlaybackLeader || skippingRef.current) return;
@@ -1238,11 +1293,11 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
 
       debugLog('leader_load_stuck_skip', debugLine({
         queueId,
-        afterMs: LEADER_LOAD_STUCK_SKIP_MS,
+        afterMs: timeoutMs,
       }));
       notifyPlaybackToast('音源加载超时，正在跳过…', 'error');
       requestSkip({ reason: 'source_error', bypassThrottle: true });
-    }, LEADER_LOAD_STUCK_SKIP_MS);
+    }, timeoutMs);
 
     return () => window.clearTimeout(timer);
   }, [trackLoading, isPlaybackLeader, room?.current?.queueId, requestSkip]);
@@ -1254,6 +1309,9 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     if (!queueId) return;
     if (canSyncAudioForQueue(controller.audio, queueId)) return;
 
+    const timeoutMs = room.current?.source === 'qishui'
+      ? QISHUI_LEADER_BIND_MISMATCH_SKIP_MS
+      : LEADER_BIND_MISMATCH_SKIP_MS;
     const timer = window.setTimeout(() => {
       const live = useRoomStore.getState();
       if (!live.isPlaybackLeader || skippingRef.current) return;
@@ -1265,7 +1323,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
 
       debugLog('leader_bind_mismatch_skip', debugLine({
         queueId,
-        afterMs: LEADER_BIND_MISMATCH_SKIP_MS,
+        afterMs: timeoutMs,
         sourceError: isTrackSourceError(current),
       }));
       loadLockRef.current = EMPTY_LOAD_LOCK;
@@ -1278,7 +1336,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
         );
       }
       requestSkip({ reason: 'source_error', bypassThrottle: true });
-    }, LEADER_BIND_MISMATCH_SKIP_MS);
+    }, timeoutMs);
 
     return () => window.clearTimeout(timer);
   }, [

@@ -68,7 +68,9 @@ npm start   # http://0.0.0.0:4000
 | `TRUST_PROXY` | 推荐 | 反代后设为 `1` |
 | `CLIENT_IP_HEADER` | 有 CDN | Cloudflare：`CF-Connecting-IP`；EdgeOne：`iqp` |
 | `REDIS_URL` | 必需 | Redis 连接串 |
-| `METING_API_URL` | 必填 | Meting 地址，逗号分隔多上游支持负载均衡 |
+| `METING_API_URL` | 必填 | 生产环境必须 HTTPS，本机地址也不例外 |
+| `METING_API_AUTH` | 账号/漫游必填 | Meting API Token，用于扫码绑定和房间私有取链 |
+| `ROOM_CREDENTIAL_ENCRYPTION_KEY` | 可选 | 首次启动自动生成，也可在管理后台随机生成；用于加密 Redis 中的房间凭证 |
 
 生产最小配置示例：
 
@@ -79,8 +81,12 @@ CLIENT_URL=https://music.example.com
 CLIENT_ID_SECRET=换成一段长随机字符串
 TRUST_PROXY=1
 REDIS_URL=redis://127.0.0.1:6379/0
-METING_API_URL=http://127.0.0.1:3000
+METING_API_URL=https://meting.example.com
+METING_API_AUTH=与Meting后台一致的API_Token
+# 房间凭证密钥首次启动自动生成，也可在管理后台「安全存储」中随机生成
 ```
+
+使用汽水音乐时，Meting 必须部署包含 `qishui` provider 的版本。汽水扫码已直接集成在 Meting 的 Node/Linux 服务中，不需要额外桥接配置。非会员汽水账号可绑定到房间，仅用于该房间的汽水漫游，不会进入全站会员 Cookie 池。网易、QQ、汽水均优先使用房间绑定账号；房间未绑定对应平台时才使用全站共享池。汽水两边都没有登录态时不能使用汽水漫游。
 
 ---
 

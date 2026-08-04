@@ -1,39 +1,26 @@
 import https from 'node:https';
 import http from 'node:http';
-import { getRuntimeConfig } from './runtimeConfig.js';
 
-function getMetingHosts() {
-  return new Set(
-    String(getRuntimeConfig().metingApiUrl || '')
-    .split(',')
-    .map((s) => s.trim().replace(/\/$/, ''))
-    .filter(Boolean)
-    .map((base) => {
-      try {
-        return new URL(base).hostname;
-      } catch {
-        return '';
-      }
-    })
-    .filter(Boolean),
-  );
+function isLoopbackHostname(hostname) {
+  const value = String(hostname || '').trim().toLowerCase().replace(/^\[|\]$/g, '');
+  return value === 'localhost'
+    || value === '::1'
+    || /^127(?:\.\d{1,3}){3}$/.test(value);
 }
 
-const insecureHttpsAgent = new https.Agent({ rejectUnauthorized: false });
-
-function isMetingUrl(url) {
-  const metingHosts = getMetingHosts();
-  if (metingHosts.size === 0) return false;
-  try {
-    return metingHosts.has(new URL(url).hostname);
-  } catch {
-    return false;
-  }
+export function isAllowedMetingUrl(url) {
+  const parsed = new URL(url);
+  if (parsed.protocol === 'https:') return true;
+  return parsed.protocol === 'http:' && isLoopbackHostname(parsed.hostname);
 }
 
 function requestOnce(url, options = {}, timeoutMs = 10000) {
   const parsed = new URL(url);
   const isHttps = parsed.protocol === 'https:';
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') throw new Error('Meting 地址协议无效');
+  if (parsed.protocol === 'http:' && !isLoopbackHostname(parsed.hostname)) {
+    throw new Error('非本机 Meting 地址禁止使用 HTTP，请配置 HTTPS');
+  }
   const transport = isHttps ? https : http;
 
   return new Promise((resolve, reject) => {
@@ -44,7 +31,8 @@ function requestOnce(url, options = {}, timeoutMs = 10000) {
       path: `${parsed.pathname}${parsed.search}`,
       method: options.method || 'GET',
       headers: options.headers || {},
-      agent: isHttps && isMetingUrl(url) ? insecureHttpsAgent : undefined,
+      // 使用 Node 系统 CA 校验证书，不允许关闭 TLS 校验。
+      agent: undefined,
     }, (res) => {
       const chunks = [];
       res.on('data', (chunk) => chunks.push(chunk));
@@ -74,7 +62,6 @@ function requestOnce(url, options = {}, timeoutMs = 10000) {
   });
 }
 
-/** Meting 镜像站证书链在 Node 下常无法校验，浏览器可访问但 fetch 会失败 */
 export async function fetchMeting(url, options = {}, timeoutMs = 10000) {
   return requestOnce(url, options, timeoutMs);
 }

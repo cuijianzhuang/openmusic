@@ -1,8 +1,14 @@
 import { resolveSignedApiUrl } from './signedApiUrl';
+import {
+  isProxiedMediaUrl,
+  isSameOriginMediaUrl,
+  toProxiedMediaUrl,
+} from './mediaProxyUrl';
 
 export type PlaybackErrorClass = 'temporary' | 'service';
 
-const SERVICE_HTTP_STATUSES = new Set([404, 502]);
+// 媒体 CDN 的 403 通常表示签名过期/鉴权失效，不能按网络抖动无限重试旧地址。
+const SERVICE_HTTP_STATUSES = new Set([403, 404, 502]);
 const URL_PROBE_TIMEOUT_MS = 5000;
 
 export const MAX_TEMP_PLAYBACK_RETRIES = 3;
@@ -66,34 +72,73 @@ export function isServiceHttpStatus(status: number): boolean {
   return SERVICE_HTTP_STATUSES.has(status);
 }
 
-async function probeMediaUrlStatus(url: string): Promise<number | null> {
-  const probeUrl = (await resolveSignedApiUrl(url)) || url;
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), URL_PROBE_TIMEOUT_MS);
-  try {
-    const head = await fetch(probeUrl, {
-      method: 'HEAD',
-      signal: controller.signal,
-      cache: 'no-store',
-      credentials: 'include',
-    });
-    return head.status;
-  } catch {
+type MediaProbeResult = { status: number; contentType: string };
+
+function isKnownNonAudioContentType(contentType: string): boolean {
+  const type = contentType.split(';', 1)[0].trim().toLowerCase();
+  if (!type) return false;
+  // video/mp4 是本次问题中的典型坏链；HTML/JSON 通常是 CDN 错误页，也不能交给 audio。
+  return type.startsWith('video/')
+    || type.startsWith('text/')
+    || type === 'application/json'
+    || type === 'application/xml'
+    || type === 'application/xhtml+xml'
+    || type.startsWith('image/');
+}
+
+async function probeMediaUrl(url: string): Promise<MediaProbeResult | null> {
+  const signForProbe = async (rawUrl: string) => {
     try {
-      const ranged = await fetch(probeUrl, {
-        method: 'GET',
-        headers: { Range: 'bytes=0-0' },
-        signal: controller.signal,
-        cache: 'no-store',
-        credentials: 'include',
-      });
-      return ranged.status;
+      return (await resolveSignedApiUrl(rawUrl)) || rawUrl;
     } catch {
-      return null;
+      return rawUrl;
     }
-  } finally {
-    window.clearTimeout(timer);
+  };
+  const candidates = [await signForProbe(url)];
+  // 外链通常禁止 CORS，失败时改探测同源媒体代理；代理会透传上游 Content-Type。
+  if (!isSameOriginMediaUrl(url) && !isProxiedMediaUrl(url)) {
+    const proxied = toProxiedMediaUrl(url);
+    if (proxied && proxied !== url) {
+      candidates.push(await signForProbe(proxied));
+    }
   }
+
+  for (const probeUrl of candidates) {
+    const request = async (method: 'HEAD' | 'GET'): Promise<MediaProbeResult | null> => {
+      const controller = new AbortController();
+      const timer = window.setTimeout(() => controller.abort(), URL_PROBE_TIMEOUT_MS);
+      try {
+        const response = await fetch(probeUrl, {
+          method,
+          ...(method === 'GET' ? { headers: { Range: 'bytes=0-0' } } : {}),
+          signal: controller.signal,
+          cache: 'no-store',
+          credentials: 'include',
+        });
+        const result = {
+          status: response.status,
+          contentType: response.headers.get('content-type') || '',
+        };
+        try {
+          await response.body?.cancel?.();
+        } catch {
+          // 只读响应头，取消 Range body，避免探测请求占用连接。
+        }
+        return result;
+      } catch {
+        return null;
+      } finally {
+        window.clearTimeout(timer);
+      }
+    };
+
+    // Express 的媒体代理以 GET 路由处理 HEAD；跳过 HEAD 可避免上游被无 Range 拉取整段音频。
+    const head = isProxiedMediaUrl(probeUrl) ? null : await request('HEAD');
+    if (head) return head;
+    const ranged = await request('GET');
+    if (ranged) return ranged;
+  }
+  return null;
 }
 
 /** 拉取播放地址失败（API / 空链） */
@@ -133,17 +178,31 @@ export async function classifyMediaPlaybackError(audio: HTMLAudioElement): Promi
   const url = audio.currentSrc || audio.src;
   if (isInvalidPlaybackUrl(url)) return 'service';
 
+  // 某些浏览器会把 video/mp4 先交给 media 元素再触发解码错误；若已暴露视频尺寸，
+  // 可直接确认它不是纯音频流，无需再按网络抖动重试。
+  const mediaDimensions = audio as HTMLAudioElement & { videoWidth?: number; videoHeight?: number };
+  if ((mediaDimensions.videoWidth || 0) > 0 || (mediaDimensions.videoHeight || 0) > 0) return 'service';
+
   const mediaError = audio.error;
-  if (mediaError?.code === MediaError.MEDIA_ERR_DECODE) return 'temporary';
   if (mediaError?.code === MediaError.MEDIA_ERR_ABORTED) return 'temporary';
   if (mediaError?.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) return 'service';
 
   if (
     mediaError?.code === MediaError.MEDIA_ERR_NETWORK
     || mediaError == null
+    || mediaError?.code === MediaError.MEDIA_ERR_DECODE
   ) {
-    const status = await probeMediaUrlStatus(url);
-    if (status != null && isServiceHttpStatus(status)) return 'service';
+    const probe = await probeMediaUrl(url);
+    const hasNonAudioResponse = Boolean(
+      probe
+      && probe.status >= 200
+      && probe.status < 300
+      && isKnownNonAudioContentType(probe.contentType),
+    );
+    if (probe && (isServiceHttpStatus(probe.status) || hasNonAudioResponse)) {
+      return 'service';
+    }
+    // 解码失败但探测不到跨域响应时仍按临时错误重试，避免误切正常音源。
     return 'temporary';
   }
 

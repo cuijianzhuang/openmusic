@@ -1,26 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, QrCode, Trash2 } from 'lucide-react';
 import type { RoomMusicAccount, RoomMusicAccounts } from '../types';
+import {
+  normalizeQrImage,
+  normalizeQrStatus,
+  textValue,
+  unwrapQrPayload,
+  type MusicAccountQrSession,
+} from '../lib/musicAccountQr';
 
-type Platform = 'netease' | 'tencent';
-
-interface QrSession {
-  platform: Platform;
-  key?: string;
-  qrsig?: string;
-  ptqrtoken?: string;
-  qrurl?: string;
-  qrimg?: string;
-  message?: string;
-}
+type Platform = 'netease' | 'tencent' | 'qishui';
 
 interface Props {
   accounts: RoomMusicAccounts;
   onCreateQr: (platform: Platform) => Promise<{ success: boolean; error?: string; data?: Record<string, unknown> }>;
   onCheckQr: (payload: Record<string, unknown>) => Promise<{ success: boolean; error?: string; data?: Record<string, unknown> }>;
   onBind: (payload: {
-    platform: Platform;
-    cookie: string;
+    sessionId: string;
     shared?: boolean;
   }) => Promise<{ success: boolean; error?: string; message?: string }>;
   onRefresh: () => Promise<{ success: boolean; error?: string; data?: RoomMusicAccounts }>;
@@ -29,19 +25,44 @@ interface Props {
 }
 
 function getShareBannerText(accounts: RoomMusicAccounts): string {
-  const vipAccounts = [accounts.netease, accounts.tencent].filter((a) => a?.hasVip);
+  const vipAccounts = [accounts.netease, accounts.tencent, accounts.qishui].filter((a) => a?.hasVip);
   const hasShared = vipAccounts.some((a) => a?.shared);
 
   if (hasShared) {
     return '感谢你的共享！大家都能用到～你是最棒的 ♪';
   }
   if (vipAccounts.length > 0) {
-    return '如果方便的话，开一下共享好不好呀～拜托啦 >_<';
+    return '愿意把会员能力借给大家吗～一份共享，就能点亮更多喜欢的歌 ♪';
   }
-  return '有会员的话，能不能帮大家开个共享呀～';
+  return '把会员能力借给大家吧～一起点亮更多好歌 ♪';
+}
+
+function getSearchAbilityText(account: RoomMusicAccount): string {
+  if (account.canSearchSongs && account.canSearchPlaylists) return '歌曲、歌单搜索可用';
+  if (account.canSearchSongs) return '歌曲搜索可用';
+  if (account.canSearchPlaylists) return '歌单搜索可用';
+  return '搜索能力暂不可用';
 }
 
 const SECURITY_NOTE = '账号加密保管，仅用于取歌，不会泄露给他人';
+
+const PLATFORM_META: Record<Platform, { label: string; qrInstruction: string; waitingText: string }> = {
+  netease: {
+    label: '网易云',
+    qrInstruction: '使用网易云音乐 App 扫码',
+    waitingText: '等待网易云音乐 App 扫码…',
+  },
+  tencent: {
+    label: 'QQ 音乐',
+    qrInstruction: '使用 QQ 音乐 App 扫码',
+    waitingText: '等待 QQ 音乐 App 扫码…',
+  },
+  qishui: {
+    label: '汽水音乐',
+    qrInstruction: '使用已登录的汽水音乐 App 扫码确认登录',
+    waitingText: '等待汽水音乐 App 扫码…',
+  },
+};
 
 function ShareSwitch({
   checked,
@@ -82,10 +103,12 @@ function ShareSwitch({
 
 function QrBlock({
   qrDisplay,
+  instruction,
   statusText,
   onCancel,
 }: {
   qrDisplay: string;
+  instruction: string;
   statusText: string;
   onCancel: () => void;
 }) {
@@ -102,7 +125,8 @@ function QrBlock({
           <Loader2 className="h-6 w-6 animate-spin text-white/50" />
         </div>
       )}
-      <p className="mt-2.5 text-xs text-white/80">{statusText || '请扫码'}</p>
+      <p className="mt-2.5 text-xs font-medium text-white/90">{instruction}</p>
+      <p className="mt-1 text-[11px] text-netease-muted">{statusText || '等待扫码…'}</p>
       <button
         type="button"
         className="mt-1.5 text-[11px] text-netease-muted underline"
@@ -125,6 +149,7 @@ function PlatformCard({
   onUnbind,
   scanning,
   qrDisplay,
+  qrInstruction,
   statusText,
   onCancelQr,
   error,
@@ -140,6 +165,7 @@ function PlatformCard({
   onUnbind: () => void;
   scanning: boolean;
   qrDisplay: string;
+  qrInstruction: string;
   statusText: string;
   onCancelQr: () => void;
   error?: string;
@@ -159,11 +185,7 @@ function PlatformCard({
                 : 'bg-amber-400/15 text-amber-300'
             }`}
           >
-            {account.hasVip
-              ? account.shared
-                ? '全站可用'
-                : '仅房间可用'
-              : '仅漫游'}
+            {account.hasSvip ? '支持 SVIP' : account.hasVip ? '支持 VIP' : '仅漫游'}
           </span>
         ) : (
           <span className="text-[10px] text-netease-muted">未绑定</span>
@@ -171,7 +193,12 @@ function PlatformCard({
       </div>
 
       {scanning ? (
-        <QrBlock qrDisplay={qrDisplay} statusText={statusText} onCancel={onCancelQr} />
+        <QrBlock
+          qrDisplay={qrDisplay}
+          instruction={qrInstruction}
+          statusText={statusText}
+          onCancel={onCancelQr}
+        />
       ) : account ? (
         <>
           <div className="flex items-center gap-3">
@@ -188,8 +215,16 @@ function PlatformCard({
             )}
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm text-white">{account.nickname || '已登录'}</p>
+              {account.shared && account.providerName && (
+                <p className="truncate text-[11px] text-white/45">共享署名：{account.providerName}</p>
+              )}
               {account.isValid === false && (
                 <p className="text-[11px] text-amber-300/90">可能已失效</p>
+              )}
+              {account.isValid !== false && (
+                <p className={`text-[11px] ${account.canSearchSongs || account.canSearchPlaylists ? 'text-white/45' : 'text-amber-300/90'}`}>
+                  {getSearchAbilityText(account)}
+                </p>
               )}
             </div>
           </div>
@@ -256,19 +291,22 @@ export default function RoomMusicAccountPanel({
   onSetShared,
   onUnbind,
 }: Props) {
+  const [activePlatform, setActivePlatform] = useState<Platform>('netease');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [errorPlatform, setErrorPlatform] = useState<Platform | null>(null);
   const [hint, setHint] = useState('');
   const [hintPlatform, setHintPlatform] = useState<Platform | null>(null);
   const [statusText, setStatusText] = useState('');
-  const [session, setSession] = useState<QrSession | null>(null);
-  const [wantShared, setWantShared] = useState<{ netease: boolean; tencent: boolean }>({
+  const [session, setSession] = useState<MusicAccountQrSession | null>(null);
+  const [wantShared, setWantShared] = useState<Record<Platform, boolean>>({
     netease: false,
     tencent: false,
+    qishui: false,
   });
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const bindingRef = useRef(false);
+  const runIdRef = useRef(0);
 
   const stopPoll = useCallback(() => {
     if (pollRef.current) {
@@ -278,6 +316,7 @@ export default function RoomMusicAccountPanel({
   }, []);
 
   const cancelQr = useCallback(() => {
+    runIdRef.current += 1;
     stopPoll();
     setSession(null);
     setStatusText('');
@@ -293,15 +332,14 @@ export default function RoomMusicAccountPanel({
   }, [onRefresh, stopPoll]);
 
   const finishBind = useCallback(
-    async (platform: Platform, cookie: string) => {
+    async (platform: Platform, sessionId: string) => {
       if (bindingRef.current) return;
       bindingRef.current = true;
       setBusy(true);
       setStatusText('绑定中…');
       try {
         const res = await onBind({
-          platform,
-          cookie,
+          sessionId,
           shared: wantShared[platform],
         });
         if (!res.success) {
@@ -315,13 +353,8 @@ export default function RoomMusicAccountPanel({
         setStatusText('');
         setError('');
         setErrorPlatform(null);
-        if (res.message) {
-          setHint(res.message);
-          setHintPlatform(platform);
-        } else {
-          setHint('');
-          setHintPlatform(null);
-        }
+        setHint('');
+        setHintPlatform(null);
         stopPoll();
       } finally {
         bindingRef.current = false;
@@ -334,6 +367,7 @@ export default function RoomMusicAccountPanel({
   const startQr = useCallback(
     async (platform: Platform) => {
       stopPoll();
+      const runId = ++runIdRef.current;
       setError('');
       setErrorPlatform(null);
       setStatusText('生成二维码…');
@@ -342,6 +376,7 @@ export default function RoomMusicAccountPanel({
       bindingRef.current = false;
       try {
         const res = await onCreateQr(platform);
+        if (runId !== runIdRef.current) return;
         if (!res.success || !res.data) {
           setError(res.error || '生成失败');
           setErrorPlatform(platform);
@@ -349,29 +384,42 @@ export default function RoomMusicAccountPanel({
           setSession(null);
           return;
         }
-        const next: QrSession = {
+        const raw = unwrapQrPayload(res.data);
+        const next: MusicAccountQrSession = {
           platform,
-          key: String(res.data.key || ''),
-          qrsig: String(res.data.qrsig || res.data.key || ''),
-          ptqrtoken: res.data.ptqrtoken != null ? String(res.data.ptqrtoken) : undefined,
-          qrurl: res.data.qrurl ? String(res.data.qrurl) : undefined,
-          qrimg: res.data.qrimg ? String(res.data.qrimg) : undefined,
-          message: res.data.message ? String(res.data.message) : undefined,
+          sessionId: textValue(raw.sessionId),
+          qrimg: normalizeQrImage(raw.qrimg || raw.qrImage || raw.image || raw.base64),
+          message: textValue(raw.message || raw.msg) || undefined,
         };
+        if (!next.sessionId) {
+          setError('上游未返回扫码会话标识，请检查 Meting 版本和配置');
+          setErrorPlatform(platform);
+          setStatusText('');
+          setSession(null);
+          stopPoll();
+          return;
+        }
         setSession(next);
-        setStatusText('请扫码');
+        setStatusText(PLATFORM_META[platform].waitingText);
 
         // 状态水位：waiting < scanned < confirmed，禁止回退到「等待扫码」
         let phase: 'waiting' | 'scanned' | 'done' = 'waiting';
         let checking = false;
-        const checkPayload = platform === 'tencent'
-          ? { platform, qrsig: next.qrsig, ptqrtoken: next.ptqrtoken }
-          : { platform, key: next.key };
+        const checkPayload = { sessionId: next.sessionId };
 
         const doCheck = async (): Promise<'retry' | 'done'> => {
           const check = await onCheckQr(checkPayload);
-          if (!check.success || !check.data) return 'retry';
-          const status = String(check.data.status || '');
+          if (runId !== runIdRef.current) return 'done';
+          if (!check.success || !check.data) {
+            setError(textValue(check.error) || '查询扫码状态失败，请重试');
+            setErrorPlatform(platform);
+            setStatusText('');
+            stopPoll();
+            phase = 'done';
+            return 'done';
+          }
+          const rawCheck = unwrapQrPayload(check.data);
+          const status = normalizeQrStatus(rawCheck.status ?? rawCheck.code ?? rawCheck.state);
 
           if (status === 'expired') {
             setStatusText('已过期，请重试');
@@ -381,44 +429,34 @@ export default function RoomMusicAccountPanel({
           }
 
           if (status === 'confirmed') {
-            const cookie = String(check.data.cookie || '');
-            if (!cookie) {
-              setError('登录成功但未拿到凭证');
-              setErrorPlatform(platform);
-              stopPoll();
-              phase = 'done';
-              return 'done';
-            }
             phase = 'done';
             setStatusText('授权成功，绑定中…');
             stopPoll();
-            await finishBind(platform, cookie);
+            await finishBind(platform, next.sessionId || '');
             return 'done';
           }
 
           if (status === 'scanned') {
             phase = 'scanned';
-            setStatusText('已扫码，请在手机上确认');
+            setStatusText(platform === 'tencent' ? '已扫码，请在 QQ 音乐 App 上确认' : platform === 'qishui' ? '已扫码，请在汽水音乐 App 上确认（5 秒后再次检查）' : '已扫码，请在手机上确认');
             return 'retry';
           }
 
           if (status === 'error') {
-            const msg = String(check.data.message || check.error || '扫码异常');
-            // 已扫过时保留提示，避免回退；否则显示错误
-            if (phase === 'waiting') {
-              setError(msg);
-              setErrorPlatform(platform);
-            } else {
-              setStatusText('授权处理中，请稍候…');
-            }
-            return 'retry';
+            const msg = textValue(rawCheck.message || rawCheck.msg || check.error) || '扫码异常';
+            setError(msg);
+            setErrorPlatform(platform);
+            setStatusText('');
+            stopPoll();
+            phase = 'done';
+            return 'done';
           }
 
           // waiting / 其它：已扫过就不要把文案打回「等待扫码」
           if (phase === 'waiting') {
-            setStatusText('等待扫码…');
+            setStatusText(PLATFORM_META[platform].waitingText);
           } else if (phase === 'scanned') {
-            setStatusText('已扫码，请在手机上确认');
+            setStatusText(platform === 'tencent' ? '已扫码，请在 QQ 音乐 App 上确认' : platform === 'qishui' ? '已扫码，请在汽水音乐 App 上确认（5 秒后再次检查）' : '已扫码，请在手机上确认');
           }
           return 'retry';
         };
@@ -443,7 +481,7 @@ export default function RoomMusicAccountPanel({
               checking = false;
             }
           })();
-        }, 2000);
+        }, platform === 'qishui' ? 5000 : 2000);
       } catch (e) {
         setError(e instanceof Error ? e.message : '生成失败');
         setErrorPlatform(platform);
@@ -456,15 +494,11 @@ export default function RoomMusicAccountPanel({
     [finishBind, onCheckQr, onCreateQr, stopPoll],
   );
 
-  const qrDisplay =
-    session?.qrimg ||
-    (session?.qrurl
-      ? `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(session.qrurl)}`
-      : '');
+  const qrDisplay = session?.qrimg || '';
 
   const cardProps = (platform: Platform, label: string) => ({
     label,
-    account: platform === 'netease' ? accounts.netease : accounts.tencent,
+    account: accounts[platform],
     busy,
     wantShared: wantShared[platform],
     onWantSharedChange: (v: boolean) => setWantShared((s) => ({ ...s, [platform]: v })),
@@ -485,10 +519,21 @@ export default function RoomMusicAccountPanel({
     },
     onUnbind: () => {
       setBusy(true);
-      void onUnbind(platform).finally(() => setBusy(false));
+      void onUnbind(platform)
+        .then((res) => {
+          if (!res.success) {
+            setError(res.error || '解绑失败');
+            setErrorPlatform(platform);
+          } else {
+            setError('');
+            setErrorPlatform(null);
+          }
+        })
+        .finally(() => setBusy(false));
     },
     scanning: session?.platform === platform,
     qrDisplay: session?.platform === platform ? qrDisplay : '',
+    qrInstruction: PLATFORM_META[platform].qrInstruction,
     statusText: session?.platform === platform ? statusText : '',
     onCancelQr: cancelQr,
     error: errorPlatform === platform ? error : undefined,
@@ -496,6 +541,13 @@ export default function RoomMusicAccountPanel({
   });
 
   const shareBannerText = useMemo(() => getShareBannerText(accounts), [accounts]);
+  const activeMeta = PLATFORM_META[activePlatform];
+
+  const selectPlatform = (platform: Platform) => {
+    if (platform === activePlatform) return;
+    cancelQr();
+    setActivePlatform(platform);
+  };
 
   return (
     <section className="space-y-3">
@@ -505,8 +557,46 @@ export default function RoomMusicAccountPanel({
           {shareBannerText}
         </p>
       </div>
-      <PlatformCard {...cardProps('netease', '网易云')} />
-      <PlatformCard {...cardProps('tencent', 'QQ 音乐')} />
+      <div
+        role="tablist"
+        aria-label="选择音乐平台"
+        className="grid grid-cols-3 gap-1 rounded-lg border border-white/10 bg-black/20 p-1"
+      >
+        {(Object.keys(PLATFORM_META) as Platform[]).map((platform) => {
+          const selected = activePlatform === platform;
+          const account = accounts[platform];
+          return (
+            <button
+              key={platform}
+              type="button"
+              role="tab"
+              id={`music-account-tab-${platform}`}
+              aria-selected={selected}
+              aria-controls={`music-account-panel-${platform}`}
+              tabIndex={selected ? 0 : -1}
+              onClick={() => selectPlatform(platform)}
+              className={`flex min-h-9 items-center justify-center gap-2 rounded-md px-3 py-2 text-xs font-medium transition-colors ${
+                selected
+                  ? 'bg-white/10 text-white shadow-sm'
+                  : 'text-netease-muted hover:bg-white/[0.05] hover:text-white/85'
+              }`}
+            >
+              <span>{PLATFORM_META[platform].label}</span>
+              <span
+                aria-hidden="true"
+                className={`h-1.5 w-1.5 rounded-full ${account ? 'bg-emerald-400' : 'bg-white/20'}`}
+              />
+            </button>
+          );
+        })}
+      </div>
+      <div
+        role="tabpanel"
+        id={`music-account-panel-${activePlatform}`}
+        aria-labelledby={`music-account-tab-${activePlatform}`}
+      >
+        <PlatformCard {...cardProps(activePlatform, activeMeta.label)} />
+      </div>
       <p className="text-center text-[10px] leading-relaxed text-netease-muted/80">
         {SECURITY_NOTE}
       </p>

@@ -162,7 +162,7 @@ function SourceSwitch({
       role="group"
       aria-label="热榜数据源"
     >
-      {btn('netease', '红点热榜')}
+      {btn('netease', '网易热榜')}
       {btn('platform', '平台热榜')}
     </div>
   );
@@ -178,7 +178,7 @@ export default memo(function HotSongPanel({
   const [source, setSource] = useState<HotRankSource>(readStoredSource);
   const cached = source === 'netease' ? peekNeteaseHotToplist(TOPLIST_LIMIT) : null;
   const [title, setTitle] = useState(
-    source === 'platform' ? '平台热榜' : cached?.name?.trim() || '红点热榜',
+    source === 'platform' ? '平台热榜' : cached?.name?.trim() || '网易热榜',
   );
   const [songs, setSongs] = useState<SearchResult[]>(() => cached?.songs ?? []);
   const [loading, setLoading] = useState(() => !cached);
@@ -200,7 +200,7 @@ export default memo(function HotSongPanel({
       if (source === 'netease') {
         const hit = peekNeteaseHotToplist(TOPLIST_LIMIT);
         if (hit && !silent) {
-          setTitle(hit.name?.trim() || '红点热榜');
+          setTitle(hit.name?.trim() || '网易热榜');
           setSongs(hit.songs);
           setError('');
           setLoading(false);
@@ -210,12 +210,12 @@ export default memo(function HotSongPanel({
           setLoading(true);
           setSongs([]);
           setError('');
-          setTitle('红点热榜');
+          setTitle('网易热榜');
         }
         try {
           const data = await getNeteaseHotToplist(TOPLIST_LIMIT);
           if (cancelled) return;
-          setTitle(data.name?.trim() || '红点热榜');
+          setTitle(data.name?.trim() || '网易热榜');
           setSongs(data.songs);
           setError('');
         } catch (err: unknown) {
@@ -290,9 +290,9 @@ export default memo(function HotSongPanel({
 
   if (compact) {
     return (
-      <div className="flex-shrink-0 overflow-hidden rounded-2xl border border-netease-border/50 bg-netease-card/30">
+      <div className="surface-panel room-main-panel room-main-panel--hot flex-shrink-0 overflow-hidden rounded-2xl">
         {header}
-        <div className="border-t border-netease-border/40 px-2 pb-2 pt-1.5">
+        <div className="room-panel-divider border-t px-2 pb-2 pt-1.5">
           {loading && songs.length === 0 ? (
             <p className="py-3 text-center text-xs text-netease-muted">加载中...</p>
           ) : error && songs.length === 0 ? (
@@ -327,10 +327,10 @@ export default memo(function HotSongPanel({
       className={`flex min-h-0 flex-col ${
         embedded
           ? 'h-full flex-1'
-          : 'h-full overflow-hidden rounded-2xl border border-netease-border/50 bg-netease-card/30'
+          : 'surface-panel room-main-panel room-main-panel--hot h-full overflow-hidden rounded-2xl'
       }`}
     >
-      <div className="border-b border-netease-border/40">{header}</div>
+      <div className="room-panel-divider border-b">{header}</div>
 
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-1.5 py-1">
         {loading && songs.length === 0 ? (

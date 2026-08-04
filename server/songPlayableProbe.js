@@ -103,7 +103,7 @@ export async function isSongPlayableOnServer(song) {
   const source = String(song?.source || 'netease').toLowerCase();
   try {
     if (source === 'kugou') return await probeKugouUrl(id);
-    if (source === 'netease' || source === 'tencent') {
+    if (source === 'netease' || source === 'tencent' || source === 'qishui') {
       return await probeMetingUrl(source, id);
     }
     return false;

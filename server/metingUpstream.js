@@ -26,17 +26,40 @@ export function registerMetingRoomResolver(fn) {
   resolveRoomInternal = typeof fn === 'function' ? fn : null;
 }
 
-/** 房间绑了「VIP 且未共享」时，走定制 /admin/openmusic */
-function roomNeedsScopedProxy(roomId, server) {
-  if (!resolveRoomInternal || !roomId) return false;
+/** 读取房间绑定的对应平台账号和私有凭证。 */
+function getRoomScopedAccount(roomId, server) {
+  if (!resolveRoomInternal || !roomId) return { account: null, cookie: '' };
   try {
     const room = resolveRoomInternal(String(roomId).trim().toUpperCase());
-    const plat = server === 'tencent' ? 'tencent' : 'netease';
+    const plat = server === 'tencent' ? 'tencent' : server === 'qishui' ? 'qishui' : 'netease';
     const acc = room?.musicAccounts?.[plat];
-    return Boolean(acc?.hasVip && !acc.shared);
+    const cookie = String(room?.musicAccountSecrets?.[plat] || '').trim();
+    return { account: acc || null, cookie };
   } catch {
-    return false;
+    return { account: null, cookie: '' };
   }
+}
+
+/** 房间会员账号接管全部请求；非会员账号只用于该房间的私人漫游。 */
+function roomNeedsScopedProxy(roomId, server, type = '') {
+  const { account, cookie } = getRoomScopedAccount(roomId, server);
+  if (!account || !cookie) return false;
+  const normalizedType = String(type).trim().toLowerCase();
+  if (account.hasVip === true || normalizedType === 'fm') return true;
+
+  // 无会员房间账号只允许当前房间的私人漫游取链，不能接管搜索/点播。
+  if (normalizedType === 'url' && server === 'qishui' && resolveRoomInternal) {
+    try {
+      const room = resolveRoomInternal(String(roomId).trim().toUpperCase());
+      const current = room?.current;
+      return current?.source === 'qishui'
+        && current?.requestedBy === '私人漫游'
+        && String(current.id || '').trim() === String(getMetingRequestContext().songId || '').trim();
+    } catch {
+      return false;
+    }
+  }
+  return false;
 }
 
 let upstreams = [];
@@ -181,7 +204,7 @@ function buildUpstreamRequest(upstream, query) {
   const ctx = getMetingRequestContext();
   const roomId = String(ctx.roomId || query?.roomId || '').trim();
   const server = String(query?.server || 'netease');
-  const scoped = roomNeedsScopedProxy(roomId, server);
+  const scoped = roomNeedsScopedProxy(roomId, server, query?.type);
 
   if (scoped) {
     params.delete('auth');
@@ -189,6 +212,10 @@ function buildUpstreamRequest(upstream, query) {
     const headers = {};
     if (upstream.auth) {
       headers.Authorization = `Bearer ${upstream.auth}`;
+    }
+    const privateCookie = getRoomScopedAccount(roomId, server).cookie;
+    if (privateCookie) {
+      headers['X-OpenMusic-Cookie'] = privateCookie;
     }
     return {
       url: `${upstream.base}/admin/openmusic?${params.toString()}`,
@@ -200,15 +227,18 @@ function buildUpstreamRequest(upstream, query) {
   // 公共 API：不带 roomId，只用全站 Cookie 池
   params.delete('roomId');
   params.delete('room_id');
-  if (upstream.auth && !params.has('auth')) {
-    params.set('auth', upstream.auth);
-  }
   return {
     url: `${upstream.base}/api?${params.toString()}`,
-    headers: {},
+    headers: upstream.auth ? { Authorization: `Bearer ${upstream.auth}` } : {},
     scoped: false,
   };
 }
+
+export const __test = {
+  getRoomScopedAccount,
+  roomNeedsScopedProxy,
+  buildUpstreamRequest,
+};
 
 function buildUpstreamUrl(upstream, query) {
   return buildUpstreamRequest(upstream, query).url;
@@ -424,7 +454,8 @@ let probeTimer = null;
 async function probeUpstream(upstream) {
   upstream.lastProbeAt = Date.now();
   try {
-    const response = await fetchMeting(buildUpstreamUrl(upstream, PROBE_QUERY), {}, PROBE_TIMEOUT_MS);
+    const built = buildUpstreamRequest(upstream, PROBE_QUERY);
+    const response = await fetchMeting(built.url, { headers: built.headers }, PROBE_TIMEOUT_MS);
     if (response.status >= 400 && response.status !== 404) {
       markFailure(upstream, `健康探测返回 ${response.status}`, PROBE_QUERY);
       upstream.lastProbeOk = false;

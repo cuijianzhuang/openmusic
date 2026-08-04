@@ -57,6 +57,10 @@ function isNeteaseMusicHost(host) {
   ]);
 }
 
+function isQishuiHost(host) {
+  return String(host || '').toLowerCase().includes('douyin');
+}
+
 /** 拒绝内网 / 链路本地 / 元数据主机，防止 SSRF */
 export function isBlockedMediaHostname(hostname) {
   const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
@@ -146,7 +150,7 @@ export function isAllowedMediaHostname(hostname, extraAllowedHosts = []) {
   for (const extra of extraAllowedHosts) {
     if (extra && host === String(extra).toLowerCase()) return true;
   }
-  return isKugouHost(host) || isQqMusicHost(host) || isNeteaseMusicHost(host);
+  return isKugouHost(host) || isQqMusicHost(host) || isNeteaseMusicHost(host) || isQishuiHost(host);
 }
 
 /**
@@ -157,6 +161,7 @@ export function refererForMediaUrl(rawUrl) {
   if (isKugouHost(host)) return 'https://www.kugou.com/';
   if (isQqMusicHost(host)) return 'https://y.qq.com/';
   if (isNeteaseMusicHost(host)) return 'https://music.163.com/';
+  if (isQishuiHost(host)) return 'https://www.qishui.com/';
   return 'https://music.163.com/';
 }
 
@@ -262,9 +267,12 @@ export async function fetchMediaWithSafeRedirects(fetchWithTimeout, rawUrl, fetc
   const headers = { ...(fetchOptions.headers || {}) };
 
   let currentUrl = preferHttpsMediaUrl(rawUrl);
+  const trustedInitialUrl = String(fetchOptions.trustedInitialUrl || '').trim();
 
   for (let hop = 0; hop <= MAX_MEDIA_REDIRECTS; hop += 1) {
-    await assertSafeMediaUrl(currentUrl, extraAllowedHosts, { requireAllowlist });
+    if (!(hop === 0 && trustedInitialUrl && currentUrl === trustedInitialUrl)) {
+      await assertSafeMediaUrl(currentUrl, extraAllowedHosts, { requireAllowlist });
+    }
 
     const response = await fetchWithTimeout(
       currentUrl,
@@ -330,6 +338,7 @@ export async function serveUpstreamMedia(rawUrl, res, fetchWithTimeout, options 
         headers,
         extraAllowedHosts: options.extraAllowedHosts || [],
         requireAllowlist: options.requireAllowlist !== false,
+        trustedInitialUrl: options.trustedInitialUrl,
       },
       options.timeoutMs || 20000,
     );
@@ -339,6 +348,36 @@ export async function serveUpstreamMedia(rawUrl, res, fetchWithTimeout, options 
       res.status(status).json({ error: err?.message || '媒体代理失败' });
     }
     return false;
+  }
+
+  // 少数汽水 CDN 对带 Range 的请求返回 403/416，但完整 GET 可以正常返回。
+  // 仅在已走代理且上游明确拒绝 Range 时重试一次，不影响普通直链和正常分段播放。
+  if (range && (response.status === 403 || response.status === 416)) {
+    try {
+      await response.body?.cancel?.();
+    } catch {
+      // 忽略上游错误响应的释放失败，继续尝试无 Range 请求。
+    }
+    const fallbackHeaders = { ...headers };
+    delete fallbackHeaders.Range;
+    try {
+      response = await fetchMediaWithSafeRedirects(
+        fetchWithTimeout,
+        fetchUrl,
+        {
+          ...options,
+          headers: fallbackHeaders,
+          range: '',
+        },
+        options.timeoutMs || 20000,
+      );
+    } catch (err) {
+      if (!res.headersSent) {
+        const status = Number(err?.statusCode) || 502;
+        res.status(status).json({ error: err?.message || '媒体代理失败' });
+      }
+      return false;
+    }
   }
 
   if (!response.ok && response.status !== 206) {

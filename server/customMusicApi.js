@@ -1,6 +1,6 @@
 import { getRuntimeConfig } from './runtimeConfig.js';
 
-export const MUSIC_API_PLATFORMS = new Set(['netease', 'tencent', 'kugou', 'lyrics']);
+export const MUSIC_API_PLATFORMS = new Set(['netease', 'tencent', 'kugou', 'qishui', 'lyrics']);
 export const MUSIC_API_OPERATIONS = new Set([
   'search',
   'song',

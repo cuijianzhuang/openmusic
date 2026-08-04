@@ -2,6 +2,7 @@ import type { MusicProvider, SearchResult } from '../types';
 import type { MusicSource } from '../../../types';
 import { fetchWithTimeout } from '../../http';
 import { isSourceUnavailableMessage, SourceUnavailableError } from '../../../lib/audioPlaybackError';
+import { normalizeDurationMs } from '../../../lib/duration';
 
 const API_BASE = '/api/meting';
 
@@ -13,7 +14,7 @@ function parseMetingMediaQuery(url: string): { server: MusicSource; id: string; 
     const server = parsed.searchParams.get('server');
     const id = parsed.searchParams.get('id');
     if (!server || !id) return null;
-    if (server !== 'netease' && server !== 'tencent') return null;
+    if (server !== 'netease' && server !== 'tencent' && server !== 'qishui') return null;
     return { server, id, type };
   } catch {
     return null;
@@ -126,14 +127,14 @@ function normalizeSong(raw: Record<string, unknown>, source: MusicSource): Searc
     artist: artistStr,
     album: String(raw.album || raw.album_name || ''),
     pic: String(raw.pic || raw.cover || raw.album_pic || ''),
-    duration: Number(raw.duration || raw.dt || 0) || undefined,
+    duration: normalizeDurationMs(raw.duration || raw.dt),
     url: isDirectPlayableUrl(urlStr) ? urlStr : undefined,
     lrc: lrcStr.startsWith('[') ? lrcStr : undefined,
   };
 }
 
 function createMetingProvider(
-  source: Extract<MusicSource, 'netease' | 'tencent'>,
+  source: Extract<MusicSource, 'netease' | 'tencent' | 'qishui'>,
   meta: Omit<import('../types').MusicProviderMeta, 'id'>,
 ): MusicProvider {
   return {
@@ -160,13 +161,13 @@ function createMetingProvider(
       return song.id ? song : null;
     },
     async getSongUrl(song, quality) {
-      if (isDirectPlayableUrl(song.url)) return { url: song.url! };
+      if (!song.id && isDirectPlayableUrl(song.url)) return { url: song.url!, duration: song.duration };
       const query = new URLSearchParams({ server: song.source, type: 'url', id: song.id });
       if (quality) query.set('quality', quality);
       const res = await fetchWithTimeout(`${API_BASE}?${query}`, { redirect: 'manual' });
       if (res.status >= 300 && res.status < 400) {
         const location = normalizeMetingTextUrl(res.headers.get('Location') || res.headers.get('location') || '');
-        if (isDirectPlayableUrl(location)) return { url: location };
+        if (isDirectPlayableUrl(location)) return { url: location, duration: song.duration };
       }
       const text = (await res.text()).trim();
       if (!res.ok) {
@@ -176,13 +177,29 @@ function createMetingProvider(
       }
       if (text.startsWith('{')) {
         try {
-          const data = JSON.parse(text) as { url?: unknown; quality?: unknown; error?: unknown };
+          const data = JSON.parse(text) as {
+            url?: unknown; quality?: unknown; error?: unknown; duration?: unknown;
+            loudness?: { gain?: unknown; peak?: unknown; lra?: unknown };
+          };
           const errMsg = typeof data.error === 'string' ? data.error.trim() : '';
           throwIfSourceUnavailable(errMsg);
           const url = normalizeMetingTextUrl(String(data.url || ''));
           if (isDirectPlayableUrl(url)) {
             const qualityLabel = String(data.quality || '').trim() || undefined;
-            return { url, qualityLabel };
+            const duration = Number(data.duration);
+            const loudness = data.loudness && typeof data.loudness === 'object'
+              ? Object.fromEntries(
+                Object.entries(data.loudness)
+                  .map(([key, value]) => [key, Number(value)])
+                  .filter(([, value]) => Number.isFinite(value)),
+              )
+              : undefined;
+            return {
+              url,
+              qualityLabel,
+              duration: normalizeDurationMs(duration),
+              loudness: loudness && Object.keys(loudness).length > 0 ? loudness as { gain?: number; peak?: number; lra?: number } : undefined,
+            };
           }
         } catch (error) {
           if (error instanceof SourceUnavailableError) throw error;
@@ -190,7 +207,7 @@ function createMetingProvider(
         }
       }
       const url = normalizeMetingTextUrl(text);
-      if (isDirectPlayableUrl(url)) return { url };
+      if (isDirectPlayableUrl(url)) return { url, duration: song.duration };
       throw new SourceUnavailableError('no url');
     },
     async getLyrics(song) {
@@ -205,23 +222,32 @@ function createMetingProvider(
 }
 
 export const neteaseProvider = createMetingProvider('netease', {
-  name: '红点',
-  shortName: '红点',
+  name: '网易',
+  shortName: '网易',
   color: '#ec4141',
   supportsSearch: true,
   supportsIdLookup: true,
 });
 
 export const tencentProvider = createMetingProvider('tencent', {
-  name: '绿点',
-  shortName: '绿点',
+  name: 'QQ',
+  shortName: 'QQ',
   color: '#31c27c',
   supportsSearch: true,
   supportsIdLookup: false,
 });
 
+export const qishuiProvider = createMetingProvider('qishui', {
+  name: '汽水',
+  shortName: '汽水',
+  color: '#ff5b73',
+  supportsSearch: true,
+  supportsIdLookup: true,
+  description: '汽水音乐曲库与会员音源',
+});
+
 export async function metingSearchPlaylists(
-  server: Extract<MusicSource, 'netease' | 'tencent'>,
+  server: Extract<MusicSource, 'netease' | 'tencent' | 'qishui'>,
   keyword: string,
 ): Promise<Record<string, unknown>[]> {
   if (!keyword.trim()) return [];

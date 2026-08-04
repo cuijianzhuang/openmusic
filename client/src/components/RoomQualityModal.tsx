@@ -19,7 +19,10 @@ interface Props {
 }
 
 export default function RoomQualityModal({ open, value, saving = false, onClose, onSave }: Props) {
-  const svipQualityEnabled = useSiteFeaturesStore((s) => s.svipQualityEnabled);
+  const neteaseSvip = useSiteFeaturesStore((s) => s.neteaseSvip);
+  const tencentSvip = useSiteFeaturesStore((s) => s.tencentSvip);
+  const qishuiVip = useSiteFeaturesStore((s) => s.qishuiVip);
+  const qishuiSvip = useSiteFeaturesStore((s) => s.qishuiSvip);
   const [draft, setDraft] = useState(() => normalizeRoomAudioQuality(value));
 
   useEffect(() => {
@@ -29,18 +32,21 @@ export default function RoomQualityModal({ open, value, saving = false, onClose,
     setDraft({
       netease: clampQualityToCapabilities('netease', next.netease),
       tencent: clampQualityToCapabilities('tencent', next.tencent),
+      qishui: clampQualityToCapabilities('qishui', next.qishui || 'exhigh'),
     });
-  }, [open, value, svipQualityEnabled]);
+  }, [open, value, neteaseSvip, tencentSvip, qishuiVip, qishuiSvip]);
 
-  const neteaseOptions = useMemo(() => getQualityOptionsForSource('netease'), [svipQualityEnabled]);
-  const tencentOptions = useMemo(() => getQualityOptionsForSource('tencent'), [svipQualityEnabled]);
+  const neteaseOptions = useMemo(() => getQualityOptionsForSource('netease'), [neteaseSvip]);
+  const tencentOptions = useMemo(() => getQualityOptionsForSource('tencent'), [tencentSvip]);
+  const qishuiOptions = useMemo(() => getQualityOptionsForSource('qishui'), [qishuiVip, qishuiSvip]);
 
   if (!open) return null;
 
   const current = draft;
   const baseline = normalizeRoomAudioQuality(value);
   const dirty = current.netease !== clampQualityToCapabilities('netease', baseline.netease)
-    || current.tencent !== clampQualityToCapabilities('tencent', baseline.tencent);
+    || current.tencent !== clampQualityToCapabilities('tencent', baseline.tencent)
+    || current.qishui !== clampQualityToCapabilities('qishui', baseline.qishui || 'exhigh');
 
   const handleNeteaseChange = (netease: string) => {
     setDraft((prev) => ({ ...prev, netease }));
@@ -87,8 +93,7 @@ export default function RoomQualityModal({ open, value, saving = false, onClose,
         <div className="space-y-4">
           <section>
             <div className="mb-2 flex items-center gap-2">
-              <span className="inline-block h-2 w-2 rounded-full bg-netease-red" aria-hidden />
-              <span className="text-sm text-netease-muted">红点</span>
+              <span className="text-sm font-medium text-netease-red/90">网易</span>
             </div>
             <div className="flex flex-wrap gap-2">
               {neteaseOptions.map((opt) => (
@@ -111,8 +116,7 @@ export default function RoomQualityModal({ open, value, saving = false, onClose,
 
           <section>
             <div className="mb-2 flex items-center gap-2">
-              <span className="inline-block h-2 w-2 rounded-full bg-[#31c27c]" aria-hidden />
-              <span className="text-sm text-netease-muted">绿点</span>
+              <span className="text-sm font-medium text-[#31c27c]/90">QQ</span>
             </div>
             <div className="flex flex-wrap gap-2">
               {tencentOptions.map((opt) => (
@@ -124,6 +128,29 @@ export default function RoomQualityModal({ open, value, saving = false, onClose,
                   className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50 ${
                     current.tencent === opt.value
                       ? 'border-[#31c27c]/40 bg-[#31c27c]/15 text-white'
+                      : 'border-white/10 bg-netease-card text-netease-muted hover:border-white/20 hover:text-white'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section>
+            <div className="mb-2 flex items-center gap-2">
+              <span className="text-sm font-medium text-[#f5c542]/90">汽水音乐</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {qishuiOptions.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  disabled={saving}
+                  onClick={() => setDraft((prev) => ({ ...prev, qishui: opt.value }))}
+                  className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50 ${
+                    current.qishui === opt.value
+                      ? 'border-[#f5c542]/40 bg-[#f5c542]/15 text-white'
                       : 'border-white/10 bg-netease-card text-netease-muted hover:border-white/20 hover:text-white'
                   }`}
                 >

@@ -24,6 +24,7 @@ import { getDisplayInitial } from '../lib/displayInitial';
 interface Props {
   open: boolean;
   users: RoomUser[];
+  userNicknames?: Record<string, string>;
   creatorId?: string;
   adminIds?: string[];
   memberTiers: Record<string, RoomMemberTier>;
@@ -37,6 +38,7 @@ interface Props {
 
 type DraftTier = Omit<RoomMemberTier, 'userId' | 'assignedAt'>;
 type UserFilter = 'all' | 'vip';
+type MemberUserOption = RoomUser & { offline?: boolean };
 
 function buildDraftFromTier(
   tier: RoomMemberTier | undefined,
@@ -101,6 +103,7 @@ function ColorSwatches({
 export default function RoomMemberModal({
   open,
   users,
+  userNicknames = {},
   creatorId,
   adminIds = [],
   memberTiers,
@@ -123,9 +126,23 @@ export default function RoomMemberModal({
     setDraft(buildDraftFromTier(undefined, memberSettings));
   }, [open, memberSettings]);
 
-  const assignableUsers = useMemo(() => {
+  const onlineAssignableUsers = useMemo(() => {
     return users.filter((user) => !user.readOnly);
   }, [users]);
+
+  const assignableUsers = useMemo<MemberUserOption[]>(() => {
+    const onlineIds = new Set(onlineAssignableUsers.map((user) => user.id));
+    const offlineVipUsers = Object.keys(memberTiers)
+      .filter((userId) => !onlineIds.has(userId))
+      .map((userId) => ({
+        id: userId,
+        nickname: userNicknames[userId] || `离线贵宾 · ${userId.slice(0, 6)}`,
+        readOnly: false,
+        joinedAt: memberTiers[userId]?.assignedAt || 0,
+        offline: true,
+      }));
+    return [...onlineAssignableUsers, ...offlineVipUsers];
+  }, [memberTiers, onlineAssignableUsers, userNicknames]);
 
   const vipCount = useMemo(
     () => assignableUsers.filter((user) => Boolean(memberTiers[user.id])).length,
@@ -138,7 +155,7 @@ export default function RoomMemberModal({
     }
   }, [assignableUsers, selectedUserId]);
 
-  const onlineUsers = useMemo(() => {
+  const selectableUsers = useMemo(() => {
     const keyword = query.trim().toLowerCase();
     return assignableUsers
       .filter((user) => {
@@ -154,7 +171,7 @@ export default function RoomMemberModal({
       });
   }, [assignableUsers, memberTiers, query, userFilter]);
 
-  const selectedUser = onlineUsers.find((user) => user.id === selectedUserId)
+  const selectedUser = selectableUsers.find((user) => user.id === selectedUserId)
     || assignableUsers.find((user) => user.id === selectedUserId)
     || null;
   const selectedIsVip = Boolean(selectedUser && memberTiers[selectedUser.id]);
@@ -274,12 +291,12 @@ export default function RoomMemberModal({
 
             <div className="min-h-0 max-h-[150px] flex-1 overflow-y-auto px-2 pb-2 lg:max-h-none">
               {assignableUsers.length === 0 ? (
-                <p className="px-2 py-8 text-center text-xs text-netease-muted">暂无可设置的在线用户</p>
-              ) : onlineUsers.length === 0 ? (
+                <p className="px-2 py-8 text-center text-xs text-netease-muted">暂无可设置的成员</p>
+              ) : selectableUsers.length === 0 ? (
                 <p className="px-2 py-8 text-center text-xs text-netease-muted">没有匹配用户</p>
               ) : (
                 <div className="space-y-0.5">
-                  {onlineUsers.map((user) => {
+                  {selectableUsers.map((user) => {
                     const tier = memberTiers[user.id];
                     const active = selectedUserId === user.id;
                     const isAdminUser = adminIds.includes(user.id);
@@ -299,6 +316,7 @@ export default function RoomMemberModal({
                           {getDisplayInitial(user.nickname)}
                         </div>
                         <p className="min-w-0 flex-1 truncate text-sm">{user.nickname}</p>
+                        {user.offline && <span className="flex-shrink-0 text-[10px] text-netease-muted">已离房</span>}
                         {(tier || isAdminUser || isOwnerUser) && (
                           <UserRoleMarks
                             isOwner={isOwnerUser}

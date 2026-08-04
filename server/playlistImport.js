@@ -72,6 +72,14 @@ function extractIdFromApiUrl(url) {
   return match ? decodeURIComponent(match[1]) : '';
 }
 
+export function parseQishuiPlaylistId(input) {
+  const text = String(input || '').trim();
+  if (/^\d{4,}$/.test(text)) return text;
+  const url = extractUrlFromText(text);
+  const match = url.match(/[?&](?:playlist_id|id)=(\d{4,})/i) || url.match(/playlist[\/_-](\d{4,})/i);
+  return match ? match[1] : null;
+}
+
 function normalizeMetingPlaylistSong(raw, source) {
   if (!raw || typeof raw !== 'object') return null;
 
@@ -222,7 +230,7 @@ async function importMetingPlaylist(server, playlistId, defaultName) {
     return {
       name: defaultName,
       playlistId,
-      source: server === 'netease' ? 'netease' : 'tencent',
+      source: server === 'netease' ? 'netease' : server === 'qishui' ? 'qishui' : 'tencent',
       songs: [],
       total: 0,
       failed: 0,
@@ -230,7 +238,7 @@ async function importMetingPlaylist(server, playlistId, defaultName) {
   }
 
   const songs = tracks
-    .map((track) => normalizeMetingPlaylistSong(track, server === 'netease' ? 'netease' : 'tencent'))
+    .map((track) => normalizeMetingPlaylistSong(track, server === 'netease' ? 'netease' : server === 'qishui' ? 'qishui' : 'tencent'))
     .filter(Boolean);
 
   return {
@@ -245,10 +253,10 @@ async function importMetingPlaylist(server, playlistId, defaultName) {
 
 export async function importNeteasePlaylist(input) {
   const playlistId = parseNeteasePlaylistId(input);
-  if (!playlistId) throw new Error('无法识别红点歌单链接，请粘贴完整分享链接');
+  if (!playlistId) throw new Error('无法识别网易歌单链接，请粘贴完整分享链接');
 
   const [result, name] = await Promise.all([
-    importMetingPlaylist('netease', playlistId, '红点歌单'),
+    importMetingPlaylist('netease', playlistId, '网易歌单'),
     fetchNeteasePlaylistName(playlistId),
   ]);
 
@@ -260,13 +268,13 @@ export async function importQqPlaylist(input) {
   const playlistId = parseQqPlaylistId(input);
   if (!playlistId) {
     throw new Error(
-      '无法识别绿点歌单链接。请在 QQ 音乐将歌单分享到「QQ / 我的电脑」，粘贴带 id= 的链接（例如 …playlist.html?…&id=9211556467）',
+      '无法识别 QQ 歌单链接。请在 QQ 音乐将歌单分享到「QQ / 我的电脑」，粘贴带 id= 的链接（例如 …playlist.html?…&id=9211556467）',
     );
   }
 
   try {
     const [result, name] = await Promise.all([
-      importMetingPlaylist('tencent', playlistId, '绿点歌单'),
+      importMetingPlaylist('tencent', playlistId, 'QQ歌单'),
       fetchQqPlaylistName(playlistId),
     ]);
 
@@ -277,4 +285,10 @@ export async function importQqPlaylist(input) {
     if (msg.includes('无法识别')) throw err;
     throw new Error('歌单解析失败，请检查歌单链接是否正确');
   }
+}
+
+export async function importQishuiPlaylist(input) {
+  const playlistId = parseQishuiPlaylistId(input);
+  if (!playlistId) throw new Error('无法识别汽水歌单 ID 或分享链接');
+  return importMetingPlaylist('qishui', playlistId, '汽水歌单');
 }

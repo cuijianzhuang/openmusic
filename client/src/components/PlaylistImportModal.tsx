@@ -19,19 +19,22 @@ export { rememberPlaylistImportHistory } from '../lib/playlistImportHistory';
 const HINTS: Record<PlaylistPlatform, string> = {
   netease: '粘贴歌单分享文案或链接到下方。',
   qq: '请在 QQ 音乐打开歌单 → 分享到「QQ」或「我的电脑」，再把链接粘贴到下方。链接必须带 id= 参数才可解析。',
+  qishui: '粘贴汽水歌单 ID 或分享链接到下方。',
 };
 
 const QQ_EXAMPLE_LINK =
   'https://i2.y.qq.com/n3/other/pages/details/playlist.html?platform=11&appshare=android_qq&appversion=20020008&id=9211556467&ADTAG=qfshare';
 
 const PLATFORM_LABELS: Record<PlaylistPlatform, string> = {
-  netease: '红点',
-  qq: '绿点',
+  netease: '网易',
+  qq: 'QQ',
+  qishui: '汽水',
 };
 
 const TITLES: Record<PlaylistPlatform, string> = {
-  netease: '导入红点歌单',
-  qq: '导入绿点歌单',
+  netease: '导入网易歌单',
+  qq: '导入 QQ 歌单',
+  qishui: '导入汽水歌单',
 };
 
 type HistoryItem = PlaylistImportHistoryItem;
@@ -133,7 +136,7 @@ export default function PlaylistImportModal({
             >
               {PLATFORM_LABELS.netease}
             </button>
-            <Tooltip content={qqImportEnabled ? undefined : '绿点歌单导入暂不可用'}>
+            <Tooltip content={qqImportEnabled ? undefined : 'QQ 歌单导入暂不可用'}>
               <button
                 type="button"
                 onClick={() => setPlatform('qq')}
@@ -143,6 +146,13 @@ export default function PlaylistImportModal({
                 {PLATFORM_LABELS.qq}
               </button>
             </Tooltip>
+            <button
+              type="button"
+              onClick={() => setPlatform('qishui')}
+              className={platformBtnClass}
+            >
+              {PLATFORM_LABELS.qishui}
+            </button>
           </div>
 
           <div className="mt-5 border-t border-white/10 pt-4">

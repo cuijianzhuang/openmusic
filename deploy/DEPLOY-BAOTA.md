@@ -44,7 +44,8 @@ services:
     environment:
       PORT: 4000
       DOCKER_REDIS_URL: redis://redis:6379/0
-      DOCKER_METING_URL: http://meting:3000
+      DOCKER_METING_URL: ${METING_API_URL:-https://meting.example.com}
+      ROOM_CREDENTIAL_ENCRYPTION_KEY: ${ROOM_CREDENTIAL_ENCRYPTION_KEY:-}
     volumes:
       - ./data/.env:/app/server/.env
       - ./data/runtimeConfig.json:/app/server/runtimeConfig.json

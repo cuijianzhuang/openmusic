@@ -73,5 +73,11 @@ export function applyRoomThemeColor(hex: string): void {
 
 /** 启动时恢复缓存的主题色 */
 export function applyStoredRoomThemeColor(): void {
+  document.documentElement.removeAttribute('data-room-theme');
+  try {
+    localStorage.removeItem('openmusic:room-theme-style');
+  } catch {
+    // localStorage may be unavailable.
+  }
   applyRoomThemeColor(readRoomThemeColor());
 }

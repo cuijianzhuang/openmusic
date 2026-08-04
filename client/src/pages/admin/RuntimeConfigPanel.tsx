@@ -137,12 +137,21 @@ const RUNTIME_FIELD_GROUPS: RuntimeFieldGroup[] = [
       { key: 'apihzKey', label: '密钥', secret: true },
     ],
   },
+  {
+    id: 'roomCredential',
+    title: '房间凭证安全存储',
+    purpose: '用于加密 Redis 中的房间音乐登录凭证；首次部署会自动生成，配置后请勿重复更换',
+    fields: [
+      { key: 'roomCredentialEncryptionKey', label: '房间凭证加密密钥', secret: true, tip: '首次部署会自动生成；只有密钥丢失或确认轮换时才使用随机生成，修改后旧房间账号将无法解密。' },
+    ],
+  },
 ];
 
 const MUSIC_API_PLATFORMS: { value: MusicApiPlatform; label: string }[] = [
   { value: 'netease', label: '网易云' },
   { value: 'tencent', label: 'QQ 音乐' },
   { value: 'kugou', label: '酷狗' },
+  { value: 'qishui', label: '汽水' },
 ];
 
 const MUSIC_API_OPERATIONS: { value: MusicApiOperation; label: string }[] = [
@@ -410,26 +419,50 @@ export default function RuntimeConfigPanel({
         <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
           {field.label}
           {field.secret && configured && !dirty && (
-            <Tag color="success" style={{ marginLeft: 6 }}>已配置</Tag>
+            <Tag color="success" style={{ marginLeft: 6 }}>已保存（已隐藏）</Tag>
           )}
           {field.secret && dirty && !String(draft[field.key] || '').trim() && (
             <Tag color="warning" style={{ marginLeft: 6 }}>保存后关闭</Tag>
           )}
         </Typography.Text>
+        <Space.Compact style={{ width: '100%' }}>
         <Input
-          value={draft[field.key]}
+          value={field.secret && configured && !dirty ? '' : draft[field.key]}
           onChange={(e) => {
             const nextValue = e.target.value;
             setDraft({ ...draft, [field.key]: nextValue });
             if (field.secret) markSecretDirty(field.key, nextValue);
           }}
           placeholder={field.secret
-            ? (configured ? '清空保存则关闭该功能' : '填入后启用')
+            ? (configured ? '已保存，输入新值可替换' : '填入后启用')
             : field.placeholder}
           autoComplete="off"
           spellCheck={false}
           style={{ fontFamily: 'monospace' }}
         />
+        {field.key === 'roomCredentialEncryptionKey' && (
+          <Button
+            onClick={() => {
+              const bytes = new Uint8Array(32);
+              crypto.getRandomValues(bytes);
+              let binary = '';
+              for (const byte of bytes) binary += String.fromCharCode(byte);
+              const value = btoa(binary);
+              setDraft({ ...draft, [field.key]: value });
+              markSecretDirty(field.key, value);
+            }}
+          >
+            随机生成
+          </Button>
+        )}
+        </Space.Compact>
+        {field.secret && configured && !dirty && (
+          <Typography.Text type="success" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>
+            {field.key === 'roomCredentialEncryptionKey'
+              ? '当前密钥已保存并正在使用，出于安全原因不会回显完整内容。'
+              : '当前敏感配置已保存，出于安全原因不会回显完整内容。'}
+          </Typography.Text>
+        )}
         {field.tip && (
           <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>
             {field.tip}
@@ -1177,7 +1210,17 @@ export default function RuntimeConfigPanel({
 
   const tabItems = [
     ...(securityTab
-      ? [{ key: 'security', label: '安全与账号', children: securityTab }]
+      ? [{
+          key: 'security',
+          label: '安全与账号',
+          children: (
+            <>
+              {securityTab}
+              <Divider style={{ margin: 0 }} />
+              {fieldGroup('roomCredential')}
+            </>
+          ),
+        }]
       : []),
     {
       key: 'seo',
@@ -1234,8 +1277,7 @@ export default function RuntimeConfigPanel({
         items={tabItems}
       />
 
-      {activeTab !== 'security' && (
-        <div
+      <div
           style={{
             position: 'sticky',
             bottom: 0,
@@ -1261,8 +1303,7 @@ export default function RuntimeConfigPanel({
           <Button type="primary" onClick={() => void save()} loading={saving}>
             保存配置
           </Button>
-        </div>
-      )}
+      </div>
     </>
   );
 }
