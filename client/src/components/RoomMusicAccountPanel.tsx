@@ -298,6 +298,7 @@ export default function RoomMusicAccountPanel({
   const [hint, setHint] = useState('');
   const [hintPlatform, setHintPlatform] = useState<Platform | null>(null);
   const [statusText, setStatusText] = useState('');
+  const [secondVerifyUrl, setSecondVerifyUrl] = useState('');
   const [session, setSession] = useState<MusicAccountQrSession | null>(null);
   const [wantShared, setWantShared] = useState<Record<Platform, boolean>>({
     netease: false,
@@ -307,6 +308,7 @@ export default function RoomMusicAccountPanel({
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const bindingRef = useRef(false);
   const runIdRef = useRef(0);
+  const secondVerifySubmittedRef = useRef(false);
 
   const stopPoll = useCallback(() => {
     if (pollRef.current) {
@@ -320,6 +322,7 @@ export default function RoomMusicAccountPanel({
     stopPoll();
     setSession(null);
     setStatusText('');
+    setSecondVerifyUrl('');
     setError('');
     setErrorPlatform(null);
     setHint('');
@@ -330,6 +333,20 @@ export default function RoomMusicAccountPanel({
     void onRefresh();
     return () => stopPoll();
   }, [onRefresh, stopPoll]);
+
+  useEffect(() => {
+    const handleVerifyMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      if (event.data?.type !== 'qishui-second-verify-complete') return;
+      if (textValue(event.data.key) !== textValue(session?.sessionId)) return;
+      secondVerifySubmittedRef.current = true;
+      setSecondVerifyUrl('');
+      setSession((current) => current ? { ...current, qrimg: '' } : current);
+      setStatusText('汽水验证中，请稍候…');
+    };
+    window.addEventListener('message', handleVerifyMessage);
+    return () => window.removeEventListener('message', handleVerifyMessage);
+  }, [session?.sessionId]);
 
   const finishBind = useCallback(
     async (platform: Platform, sessionId: string) => {
@@ -345,8 +362,9 @@ export default function RoomMusicAccountPanel({
         if (!res.success) {
           setError(res.error || '绑定失败');
           setErrorPlatform(platform);
-          setHint('');
-          setHintPlatform(null);
+    setHint('');
+    setHintPlatform(null);
+    secondVerifySubmittedRef.current = false;
           return;
         }
         setSession(null);
@@ -373,6 +391,7 @@ export default function RoomMusicAccountPanel({
       setStatusText('生成二维码…');
       setBusy(true);
       setSession({ platform });
+      secondVerifySubmittedRef.current = false;
       bindingRef.current = false;
       try {
         const res = await onCreateQr(platform);
@@ -416,6 +435,7 @@ export default function RoomMusicAccountPanel({
             setStatusText('');
             stopPoll();
             phase = 'done';
+            setBusy(false);
             return 'done';
           }
           const rawCheck = unwrapQrPayload(check.data);
@@ -425,6 +445,7 @@ export default function RoomMusicAccountPanel({
             setStatusText('已过期，请重试');
             stopPoll();
             phase = 'done';
+            setBusy(false);
             return 'done';
           }
 
@@ -434,6 +455,15 @@ export default function RoomMusicAccountPanel({
             stopPoll();
             await finishBind(platform, next.sessionId || '');
             return 'done';
+          }
+
+          if (status === 'second_verify') {
+            phase = 'scanned';
+            setStatusText(secondVerifySubmittedRef.current ? '汽水验证中，请稍候…' : '请在当前浏览器窗口完成汽水安全验证');
+            setSecondVerifyUrl(
+              `/api/music-account-contribution/qr/verify/security_host.html?key=${encodeURIComponent(next.sessionId || '')}&bridgeRoot=${encodeURIComponent('/api/music-account-contribution/qr/verify')}`,
+            );
+            return 'retry';
           }
 
           if (status === 'scanned') {
@@ -449,6 +479,7 @@ export default function RoomMusicAccountPanel({
             setStatusText('');
             stopPoll();
             phase = 'done';
+            setBusy(false);
             return 'done';
           }
 
@@ -574,8 +605,10 @@ export default function RoomMusicAccountPanel({
               aria-selected={selected}
               aria-controls={`music-account-panel-${platform}`}
               tabIndex={selected ? 0 : -1}
+              disabled={platform === 'tencent'}
+              title={platform === 'tencent' ? 'QQ 音乐登录暂未开放' : undefined}
               onClick={() => selectPlatform(platform)}
-              className={`flex min-h-9 items-center justify-center gap-2 rounded-md px-3 py-2 text-xs font-medium transition-colors ${
+              className={`flex min-h-9 items-center justify-center gap-2 rounded-md px-3 py-2 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
                 selected
                   ? 'bg-white/10 text-white shadow-sm'
                   : 'text-netease-muted hover:bg-white/[0.05] hover:text-white/85'
@@ -600,6 +633,24 @@ export default function RoomMusicAccountPanel({
       <p className="text-center text-[10px] leading-relaxed text-netease-muted/80">
         {SECURITY_NOTE}
       </p>
+      {secondVerifyUrl ? (
+        <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/70 p-4">
+          <div className="flex h-[min(620px,90vh)] w-full max-w-md flex-col overflow-hidden rounded-xl border border-white/15 bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-black/10 px-4 py-3 text-sm font-medium text-black">
+              <span>汽水安全验证</span>
+              <button
+                type="button"
+                onClick={() => setSecondVerifyUrl('')}
+                className="rounded px-2 py-1 text-black/55 hover:bg-black/5"
+                aria-label="关闭验证窗口"
+              >
+                关闭
+              </button>
+            </div>
+            <iframe title="汽水安全验证" src={secondVerifyUrl} className="min-h-0 flex-1 border-0" />
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

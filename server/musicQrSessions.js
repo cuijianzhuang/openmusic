@@ -1,6 +1,13 @@
 import { randomBytes } from 'node:crypto';
 import QRCode from 'qrcode';
-import { createMusicQrSession, checkMusicQrSession } from './metingAdmin.js';
+import {
+  completeQishuiVerification,
+  createMusicQrSession,
+  fetchQishuiVerificationAsset,
+  checkMusicQrSession,
+  requestQishuiVerification,
+  startQishuiVerification,
+} from './metingAdmin.js';
 import { getRedisClient } from './roomStorage.js';
 import { decryptSensitiveValue, encryptSensitiveValue } from './roomCredentialCrypto.js';
 
@@ -174,8 +181,53 @@ export async function checkManagedMusicQrSession(context) {
     data: {
       status,
       message: text(raw.message || raw.msg) || undefined,
+      secondVerify: raw.secondVerify || undefined,
     },
   };
+}
+
+async function getQishuiSession(context) {
+  // 二次验证页面通过 HTTP 回调，而扫码会话可能来自房间 Socket 或共享会员页面。
+  // 会话 ID 是随机值，仍然必须校验当前用户归属；这里不强制限定 purpose。
+  cleanExpired();
+  const session = await loadSession(text(context.sessionId));
+  if (!session || session.ownerId !== text(context.ownerId)) return null;
+  return session?.platform === 'qishui' ? session : null;
+}
+
+export async function startManagedQishuiVerification(context) {
+  const session = await getQishuiSession(context);
+  if (!session) return { ok: false, status: 404, error: '汽水扫码会话无效或已过期' };
+  const result = await startQishuiVerification(session.upstream.key);
+  if (!result.ok) return result;
+  return { ok: true, data: result.data };
+}
+
+export async function requestManagedQishuiVerification(context, request) {
+  const session = await getQishuiSession(context);
+  if (!session) return { ok: false, status: 404, error: '汽水扫码会话无效或已过期' };
+  return requestQishuiVerification(session.upstream.key, request);
+}
+
+export async function completeManagedQishuiVerification(context) {
+  const session = await getQishuiSession(context);
+  if (!session) return { ok: false, status: 404, error: '汽水扫码会话无效或已过期' };
+  const result = await completeQishuiVerification(session.upstream.key);
+  if (!result.ok) return result;
+  const raw = unwrap(result.data);
+  const status = normalizeStatus(raw.status ?? raw.code ?? raw.state);
+  if (status !== 'confirmed') return { ok: true, data: { status, message: text(raw.message || raw.msg) } };
+  const credential = extractCookie(raw);
+  if (!credential) return { ok: false, error: '二次验证完成但 Meting 未返回有效 Cookie' };
+  session.credential = credential;
+  session.bindingUntil = 0;
+  session.expiresAt = Date.now() + CONFIRMED_TTL_MS;
+  await persistSession(text(context.sessionId), session);
+  return { ok: true, data: { status: 'confirmed', message: '登录成功' } };
+}
+
+export async function fetchManagedQishuiVerificationAsset(name) {
+  return fetchQishuiVerificationAsset(name);
 }
 
 export async function getManagedMusicQrCredential(context) {

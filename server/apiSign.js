@@ -66,6 +66,9 @@ export function isPublicApiPath(req) {
   // 大厅房间列表仅公开摘要，无敏感字段；公开后首屏可与会话并行加载
   if (path === '/api/rooms' && req.method === 'GET') return true;
   if (path === '/api/session/bootstrap' && req.method === 'POST') return true;
+  // 汽水官方二次验证组件运行在 iframe 中，只能通过原生 fetch 回调，
+  // 无法生成 OpenMusic 的 X-OM-* 请求签名；具体路由仍会校验 HttpOnly 会话和扫码会话归属。
+  if (path.startsWith('/api/music-account-contribution/qr/verify/')) return true;
   // OAuth 找回/后台登录场景下浏览器可能压根没有房主身份 Cookie（这正是找回要解决的问题），
   // 这几条路由自己会按 purpose 做对应的身份/会话校验，不能被这里的通用身份门槛提前拦掉。
   if (req.method === 'GET' && OAUTH_PUBLIC_GET_PATHS.has(path)) return true;

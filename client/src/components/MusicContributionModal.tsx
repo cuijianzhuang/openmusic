@@ -34,6 +34,7 @@ export default function MusicContributionModal({ open, onClose, defaultProvider 
   const [platform, setPlatform] = useState<MusicAccountPlatform>('netease');
   const [session, setSession] = useState<MusicAccountQrSession | null>(null);
   const [statusText, setStatusText] = useState('');
+  const [secondVerifyUrl, setSecondVerifyUrl] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [busy, setBusy] = useState(false);
@@ -50,10 +51,25 @@ export default function MusicContributionModal({ open, onClose, defaultProvider 
   const providerRef = useRef(providerName);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const runIdRef = useRef(0);
+  const secondVerifySubmittedRef = useRef(false);
 
   useEffect(() => {
     providerRef.current = providerName;
   }, [providerName]);
+
+  useEffect(() => {
+    const handleVerifyMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      if (event.data?.type !== 'qishui-second-verify-complete') return;
+      if (textValue(event.data.key) !== textValue(session?.sessionId)) return;
+      secondVerifySubmittedRef.current = true;
+      setSecondVerifyUrl('');
+      setSession((current) => current ? { ...current, qrimg: '' } : current);
+      setStatusText('汽水验证中，请稍候…');
+    };
+    window.addEventListener('message', handleVerifyMessage);
+    return () => window.removeEventListener('message', handleVerifyMessage);
+  }, [session?.sessionId]);
 
   const loadContributions = useCallback(async () => {
     try {
@@ -74,6 +90,8 @@ export default function MusicContributionModal({ open, onClose, defaultProvider 
   const cancelRun = useCallback(() => {
     runIdRef.current += 1;
     stopPoll();
+    setSecondVerifyUrl('');
+    secondVerifySubmittedRef.current = false;
   }, [stopPoll]);
 
   const startQr = useCallback(async (nextPlatform: MusicAccountPlatform) => {
@@ -81,6 +99,7 @@ export default function MusicContributionModal({ open, onClose, defaultProvider 
     const runId = runIdRef.current;
     setPlatform(nextPlatform);
     setSession({ platform: nextPlatform });
+    secondVerifySubmittedRef.current = false;
     setBusy(true);
     setError('');
     setSuccess('');
@@ -131,6 +150,7 @@ export default function MusicContributionModal({ open, onClose, defaultProvider 
           setError(result.error || '扫码状态查询失败，请重试');
           stopPoll();
           phase = 'done';
+          setBusy(false);
           return;
         }
         const checked = unwrapQrPayload(result.data);
@@ -139,11 +159,20 @@ export default function MusicContributionModal({ open, onClose, defaultProvider 
           setStatusText('二维码已过期，请切换平台或重新打开');
           stopPoll();
           phase = 'done';
+          setBusy(false);
           return;
         }
         if (state === 'scanned') {
           phase = 'scanned';
           setStatusText(nextPlatform === 'tencent' ? '已扫码，请在 QQ 音乐 App 上确认' : nextPlatform === 'qishui' ? '已扫码，请在汽水音乐 App 上确认（5 秒后再次检查）' : '已扫码，请在手机上确认');
+          return;
+        }
+        if (state === 'second_verify') {
+          phase = 'scanned';
+          setStatusText(secondVerifySubmittedRef.current ? '汽水验证中，请稍候…' : '请在当前浏览器窗口完成汽水安全验证');
+          setSecondVerifyUrl(
+            `/api/music-account-contribution/qr/verify/security_host.html?key=${encodeURIComponent(next.sessionId || '')}&bridgeRoot=${encodeURIComponent('/api/music-account-contribution/qr/verify')}`,
+          );
           return;
         }
         if (state === 'confirmed') {
@@ -216,6 +245,7 @@ export default function MusicContributionModal({ open, onClose, defaultProvider 
       setError('');
       setSuccess('');
       setStatusText('');
+      setSecondVerifyUrl('');
       setRevokeOpen(false);
       setProviderName(defaultProvider.trim().slice(0, 40));
       return;
@@ -312,11 +342,12 @@ export default function MusicContributionModal({ open, onClose, defaultProvider 
               type="button"
               role="tab"
               aria-selected={platform === item}
-              disabled={busy}
+              disabled={busy || item === 'tencent'}
+              title={item === 'tencent' ? 'QQ 音乐登录暂未开放' : undefined}
               onClick={() => void startQr(item)}
-              className={`rounded-lg px-3 py-2 text-xs font-medium transition-colors disabled:opacity-50 ${platform === item ? 'bg-white/10 text-white' : 'text-white/45 hover:bg-white/[0.05] hover:text-white/80'}`}
+              className={`rounded-lg px-3 py-2 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${platform === item ? 'bg-white/10 text-white' : 'text-white/45 hover:bg-white/[0.05] hover:text-white/80'}`}
             >
-              {PLATFORM_META[item].label}
+              {item === 'tencent' ? 'QQ 音乐（暂未开放）' : PLATFORM_META[item].label}
             </button>
           ))}
         </div>
@@ -341,6 +372,28 @@ export default function MusicContributionModal({ open, onClose, defaultProvider 
           )}
         </div>
       </div>
+      {secondVerifyUrl ? (
+        <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/70 p-4">
+          <div className="flex h-[min(620px,90vh)] w-full max-w-md flex-col overflow-hidden rounded-xl border border-white/15 bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-black/10 px-4 py-3 text-sm font-medium text-black">
+              <span>汽水安全验证</span>
+              <button
+                type="button"
+                onClick={() => setSecondVerifyUrl('')}
+                className="rounded px-2 py-1 text-black/55 hover:bg-black/5"
+                aria-label="关闭验证窗口"
+              >
+                关闭
+              </button>
+            </div>
+            <iframe
+              title="汽水安全验证"
+              src={secondVerifyUrl}
+              className="min-h-0 flex-1 border-0"
+            />
+          </div>
+        </div>
+      ) : null}
       {revokeOpen ? (
         <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
           <button type="button" className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setRevokeOpen(false)} aria-label="关闭取消共享弹框" />

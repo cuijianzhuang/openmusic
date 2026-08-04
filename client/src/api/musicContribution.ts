@@ -45,6 +45,33 @@ export async function checkContributionQr(payload: Record<string, unknown>) {
   return parseResponse<Record<string, unknown>>(response);
 }
 
+export async function startQishuiVerification(sessionId: string) {
+  const response = await fetchWithTimeout('/api/music-account-contribution/qr/verify/start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId }),
+  }, 45_000);
+  return parseResponse<Record<string, unknown>>(response);
+}
+
+export async function requestQishuiVerification(sessionId: string, request: Record<string, unknown>) {
+  const response = await fetchWithTimeout('/api/music-account-contribution/qr/verify/request', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId, request }),
+  }, 180_000);
+  return parseResponse<Record<string, unknown>>(response);
+}
+
+export async function completeQishuiVerification(sessionId: string) {
+  const response = await fetchWithTimeout('/api/music-account-contribution/qr/verify/complete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId }),
+  }, 180_000);
+  return parseResponse<Record<string, unknown>>(response);
+}
+
 export async function bindContributionAccount(sessionId: string, providerName: string) {
   const response = await fetchWithTimeout('/api/music-account-contribution/bind', {
     method: 'POST',

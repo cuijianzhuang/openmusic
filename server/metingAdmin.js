@@ -162,6 +162,67 @@ export async function checkMusicQrSession(payload) {
   return { ok: true, data: result.data?.data || result.data };
 }
 
+async function metingAdminAsset(path, timeoutMs = 20000) {
+  const { base, auth } = getAdminEndpoint();
+  if (!base) return { ok: false, status: 503, error: '未配置 METING_API_URL' };
+  if (!auth) return { ok: false, status: 503, error: '未配置 Meting API Token' };
+
+  const url = `${base.replace(/\/$/, '')}${path.startsWith('/') ? path : `/${path}`}`;
+  try {
+    const response = await fetchMeting(url, {
+      headers: {
+        Authorization: `Bearer ${auth}`,
+        Accept: '*/*',
+      },
+    }, timeoutMs);
+    const body = Buffer.from(await response.arrayBuffer());
+    if (!response.ok) {
+      return { ok: false, status: response.status, error: body.toString('utf8') || `Meting 资源接口返回 ${response.status}` };
+    }
+    return {
+      ok: true,
+      body,
+      contentType: response.headers.get('content-type') || 'application/octet-stream',
+    };
+  } catch (err) {
+    return { ok: false, status: 502, error: formatMetingFetchError(err) };
+  }
+}
+
+export async function startQishuiVerification(key) {
+  const result = await metingAdminFetch('/admin/qr/qishui/verify/start', {
+    method: 'POST',
+    body: { key },
+    timeoutMs: 45_000,
+  });
+  if (!result.ok) return result;
+  return { ok: true, data: result.data?.data || result.data };
+}
+
+export async function requestQishuiVerification(key, request) {
+  const result = await metingAdminFetch('/admin/qr/qishui/request', {
+    method: 'POST',
+    body: { key, request },
+    timeoutMs: 180_000,
+  });
+  if (!result.ok) return result;
+  return { ok: true, data: result.data?.data || result.data };
+}
+
+export async function completeQishuiVerification(key) {
+  const result = await metingAdminFetch('/admin/qr/qishui/verify/complete', {
+    method: 'POST',
+    body: { key },
+    timeoutMs: 180_000,
+  });
+  if (!result.ok) return result;
+  return { ok: true, data: result.data?.data || result.data };
+}
+
+export async function fetchQishuiVerificationAsset(name) {
+  return metingAdminAsset(`/admin/qr/qishui/security/${encodeURIComponent(String(name || ''))}`, 45_000);
+}
+
 export async function validateMusicCookie(platform, cookie) {
   if (platform !== 'netease' && platform !== 'tencent' && platform !== 'qishui') {
     return { ok: false, error: '不支持的音源平台' };

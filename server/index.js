@@ -10,6 +10,7 @@ import {
   fetchMetingApi,
   isMetingApiHostname,
   getMetingUpstreamBases,
+  isConfiguredMetingUrl,
   getMetingUpstreamStatus,
   startMetingHealthProbe,
   runWithMetingRequestContext,
@@ -31,9 +32,13 @@ import {
 import {
   createManagedMusicQrSession,
   checkManagedMusicQrSession,
+  completeManagedQishuiVerification,
+  fetchManagedQishuiVerificationAsset,
   getManagedMusicQrCredential,
   releaseManagedMusicQrCredential,
   finalizeManagedMusicQrCredential,
+  requestManagedQishuiVerification,
+  startManagedQishuiVerification,
 } from './musicQrSessions.js';
 import { hasRoomCredentialEncryptionKey } from './roomCredentialCrypto.js';
 import { mountWechatFileHelperProxy } from './wechatFileHelperProxy.js';
@@ -975,6 +980,54 @@ app.post('/api/music-account-contribution/qr/check', async (req, res) => {
   return res.json({ success: true, data: result.data });
 });
 
+app.post('/api/music-account-contribution/qr/verify/start', async (req, res) => {
+  const identity = requireSessionIdentity(req, res);
+  if (!identity) return;
+  const result = await startManagedQishuiVerification({
+    sessionId: limitText(req.body?.sessionId || req.body?.key || req.body?.token, 128),
+    ownerId: identity.userId,
+    purpose: 'contribution',
+  });
+  if (!result.ok) return res.status(result.status || 502).json({ success: false, error: result.error || '汽水验证初始化失败' });
+  return res.json({ success: true, data: result.data });
+});
+
+app.post('/api/music-account-contribution/qr/verify/request', async (req, res) => {
+  const identity = requireSessionIdentity(req, res);
+  if (!identity) return;
+  const result = await requestManagedQishuiVerification({
+    sessionId: limitText(req.body?.sessionId || req.body?.key || req.body?.token, 128),
+    ownerId: identity.userId,
+    purpose: 'contribution',
+  }, req.body?.request || {});
+  if (!result.ok) return res.status(result.status || 502).json({ success: false, error: result.error || '汽水验证请求失败' });
+  return res.json({ success: true, ...result.data });
+});
+
+app.post('/api/music-account-contribution/qr/verify/complete', async (req, res) => {
+  const identity = requireSessionIdentity(req, res);
+  if (!identity) return;
+  const result = await completeManagedQishuiVerification({
+    sessionId: limitText(req.body?.sessionId || req.body?.key || req.body?.token, 128),
+    ownerId: identity.userId,
+    purpose: 'contribution',
+  });
+  if (!result.ok) return res.status(result.status || 502).json({ success: false, error: result.error || '汽水验证完成失败' });
+  return res.json({ success: true, data: result.data });
+});
+
+app.get('/api/music-account-contribution/qr/verify/:asset', async (req, res) => {
+  const identity = requireSessionIdentity(req, res);
+  if (!identity) return;
+  const asset = String(req.params.asset || '');
+  if (!['security_host.html', 'react.js', 'react-dom.js', 'sdk-glue.js', 'bdms.js'].includes(asset)) return res.status(404).end();
+  const result = await fetchManagedQishuiVerificationAsset(asset);
+  if (!result.ok) return res.status(result.status || 502).json({ success: false, error: result.error || '汽水验证资源获取失败' });
+  res.set('Content-Type', result.contentType);
+  res.set('Cache-Control', 'no-store');
+  return res.send(Buffer.from(result.body));
+});
+
 app.post('/api/music-account-contribution/bind', async (req, res) => {
   const identity = requireSessionIdentity(req, res);
   if (!identity) return;
@@ -1277,14 +1330,7 @@ function isTrustedMetingQishuiAudioUrl(rawUrl) {
   if (target.pathname !== '/audio/qishui') return false;
   if (!target.searchParams.get('auth')) return false;
 
-  const matchesConfiguredMeting = getMetingUpstreamBases().some((base) => {
-    try {
-      return new URL(base).origin === target.origin;
-    } catch {
-      return false;
-    }
-  });
-  if (!matchesConfiguredMeting) return false;
+  if (!isConfiguredMetingUrl(rawUrl)) return false;
 
   try {
     const upstreamMedia = new URL(target.searchParams.get('url') || '');
@@ -3165,7 +3211,8 @@ io.on('connection', (socket) => {
       });
     } catch (err) {
       await releaseManagedMusicQrCredential(context);
-      throw err;
+      console.error('[Music Account] 房间账号绑定失败:', err?.message || err);
+      callback?.({ success: false, error: err?.message || '房间账号绑定失败，请稍后重试' });
     }
   });
 

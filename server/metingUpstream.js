@@ -134,6 +134,27 @@ export function getMetingUpstreamBases() {
   return upstreams.map((u) => u.base);
 }
 
+/** 判断地址是否属于当前配置的 Meting 上游，协议不同仍按主机和端口匹配。 */
+export function isConfiguredMetingUrl(rawUrl) {
+  let target;
+  try {
+    target = new URL(rawUrl);
+  } catch {
+    return false;
+  }
+  const targetPort = target.port || (target.protocol === 'https:' ? '443' : '80');
+  return getMetingUpstreamBases().some((base) => {
+    try {
+      const configured = new URL(base);
+      const configuredPort = configured.port || (configured.protocol === 'https:' ? '443' : '80');
+      return configured.hostname.toLowerCase() === target.hostname.toLowerCase()
+        && configuredPort === targetPort;
+    } catch {
+      return false;
+    }
+  });
+}
+
 export function isMetingApiHostname(hostname) {
   syncUpstreams();
   const target = String(hostname || '').toLowerCase();
