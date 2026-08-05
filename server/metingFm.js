@@ -53,13 +53,15 @@ function extractIdFromUrl(url) {
   }
 }
 
-function normalizeFmSong(raw, source = 'netease') {
+function normalizeFmSong(raw, source = 'netease', excludedIds = new Set()) {
   const candidates = Array.isArray(raw)
     ? raw.filter((item) => item && typeof item === 'object')
     : [raw];
-  const item = candidates.length
-    ? candidates[Math.floor(Math.random() * candidates.length)]
-    : null;
+  const item = candidates.find((candidate) => {
+    const url = candidate.url ? String(candidate.url) : '';
+    const id = String(candidate.id || extractIdFromUrl(url) || '').trim();
+    return id && !excludedIds.has(id);
+  }) || null;
   if (!item || typeof item !== 'object') return null;
 
   const artist = item.artist ?? item.author;
@@ -89,6 +91,19 @@ function normalizeFmSong(raw, source = 'netease') {
   };
 }
 
+function normalizeFmSongs(raw, source = 'netease', excludedIds = new Set()) {
+  const candidates = Array.isArray(raw) ? raw : [raw];
+  const usedIds = new Set(excludedIds);
+  const songs = [];
+  for (const candidate of candidates) {
+    const song = normalizeFmSong(candidate, source, usedIds);
+    if (!song) continue;
+    usedIds.add(song.id);
+    songs.push(song);
+  }
+  return songs;
+}
+
 const MAX_FM_RETRIES = 5;
 const FM_RETRY_BACKOFF_MS = 800;
 // FM 整体失败后的熔断窗口：空队列的房间会以自动推进节奏反复预取，
@@ -105,9 +120,9 @@ function sleep(ms) {
  * - 传入 ephemeralCookie（无 VIP 本地账号）：走 Meting /admin/fm，不入库
  * - 否则走 type=fm；有 roomId 时房间账号优先，否则用 Meting 原有 Cookie 池
  */
-export async function fetchMetingFmSong(fmMode = DEFAULT_FM_MODE, options = {}) {
-  if (normalizeFmMode(fmMode) === FM_MODE_OFF) return null;
-  if (Date.now() < fmFailureCooldownUntil) return null;
+export async function fetchMetingFmSongs(fmMode = DEFAULT_FM_MODE, options = {}) {
+  if (normalizeFmMode(fmMode) === FM_MODE_OFF) return [];
+  if (Date.now() < fmFailureCooldownUntil) return [];
 
   const roomId = String(options.roomId || '').trim();
   const roomName = String(options.roomName || '私人漫游');
@@ -126,11 +141,10 @@ export async function fetchMetingFmSong(fmMode = DEFAULT_FM_MODE, options = {}) 
           console.error('Ephemeral FM error:', result.error);
           continue;
         }
-        const song = normalizeFmSong(result.data, source);
-        if (song) {
-          if (excludedIds.has(song.id)) continue;
+        const songs = normalizeFmSongs(result.data, source, excludedIds);
+        if (songs.length) {
           fmFailureCooldownUntil = 0;
-          return song;
+          return songs;
         }
         continue;
       }
@@ -156,10 +170,10 @@ export async function fetchMetingFmSong(fmMode = DEFAULT_FM_MODE, options = {}) 
         continue;
       }
 
-      const song = normalizeFmSong(data, source);
-      if (song) {
+      const songs = normalizeFmSongs(data, source, excludedIds);
+      if (songs.length) {
         fmFailureCooldownUntil = 0;
-        return song;
+        return songs;
       }
     } catch (err) {
       console.error('Meting FM error:', formatMetingFetchError(err));
@@ -168,5 +182,10 @@ export async function fetchMetingFmSong(fmMode = DEFAULT_FM_MODE, options = {}) 
 
   fmFailureCooldownUntil = Date.now() + FM_FAILURE_COOLDOWN_MS;
   console.error(`Meting FM 连续 ${MAX_FM_RETRIES} 次失败，${FM_FAILURE_COOLDOWN_MS / 1000}s 内暂停漫游预取`);
-  return null;
+  return [];
+}
+
+export async function fetchMetingFmSong(fmMode = DEFAULT_FM_MODE, options = {}) {
+  const songs = await fetchMetingFmSongs(fmMode, options);
+  return Array.isArray(songs) ? songs[0] || null : null;
 }

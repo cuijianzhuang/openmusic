@@ -1,6 +1,6 @@
 import { customAlphabet } from "nanoid";
 import { scrypt, scryptSync, randomBytes, timingSafeEqual } from "crypto";
-import { fetchMetingFmSong, normalizeFmMode, DEFAULT_FM_MODE, FM_MODE_OFF } from "./metingFm.js";
+import { fetchMetingFmSongs, normalizeFmMode, DEFAULT_FM_MODE, FM_MODE_OFF } from "./metingFm.js";
 import { getRedisClient, initRoomStorage, isRedisEnabled, loadAllRoomsFromStorage, queueSaveRoomToStorage, deleteRoomFromStorage, saveRoomToStorage } from "./roomStorage.js";
 import {
   DEFAULT_MEMBER_SETTINGS,
@@ -1054,6 +1054,8 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
     chatVisibleSinceByUserId: new Map(),
     songHistory: [],
     randomPlayedKeys: new Set(),
+    /** 当前汽水 song-tab 批次的剩余歌曲，按接口顺序消费，不落盘。 */
+    randomBatch: [],
     nextRandom: null,
     nextRandomPromise: null,
     randomLoading: false,
@@ -3937,6 +3939,7 @@ export function clearQueue(roomId, userId, connectionId = null) {
 function clearNextRandom(room) {
   room.nextRandom = null;
   room.nextRandomPromise = null;
+  room.randomBatch = [];
 }
 
 // function trimRandomPlayedKeys(room, removeCount) {
@@ -3949,18 +3952,25 @@ function clearNextRandom(room) {
 // }
 
 async function fetchRandomForRoom(room) {
+  if (Array.isArray(room.randomBatch) && room.randomBatch.length > 0) {
+    return room.randomBatch.shift();
+  }
+
   const source = normalizeFmSource(room.fmSource);
   const ephemeralCookie = getRoomFmCookie(room.id, source);
   const excludeIds = Array.from(room.randomPlayedKeys || [])
     .filter((key) => key.startsWith(`${source}:`))
     .map((key) => key.slice(source.length + 1));
-  return fetchMetingFmSong(room.neteaseFmMode || DEFAULT_FM_MODE, {
+  const songs = await fetchMetingFmSongs(room.neteaseFmMode || DEFAULT_FM_MODE, {
     roomId: ephemeralCookie ? '' : room.id,
     roomName: room.name || room.id,
     ephemeralCookie: ephemeralCookie || '',
     source,
     excludeIds,
   });
+  if (!Array.isArray(songs) || songs.length === 0) return null;
+  room.randomBatch = songs.slice(1);
+  return songs[0];
 }
 
 async function ensureNextRandom(room) {
@@ -4180,6 +4190,8 @@ async function playNextUnlocked(room, options = {}) {
       return;
     }
     setCurrentSong(room, item);
+    // 当前批次快耗尽时后台拉下一批，播放顺序仍由当前批次决定。
+    if ((room.randomBatch?.length || 0) <= 1) void ensureNextRandom(room);
     return;
   }
 
