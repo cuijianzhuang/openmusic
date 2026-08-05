@@ -51,7 +51,7 @@ export function unwrapQishuiAudioUrl(source: MusicSource, url: string): string {
     if (!/\/audio\/qishui\/?$/i.test(wrapped.pathname)) return url;
     const rawNested = wrapped.searchParams.get('url') || '';
     if (!rawNested) return url;
-    if (wrapped.searchParams.get('auth')) return url;
+    if (wrapped.searchParams.get('auth') || wrapped.searchParams.get('t')) return url;
     const nested = new URL(rawNested);
     if (!['http:', 'https:'].includes(nested.protocol) || !nested.hostname.toLowerCase().includes('douyin')) {
       return url;
@@ -144,7 +144,7 @@ export async function getSongUrlInfo(
   const wantsProxy = options?.proxy
     ?? (shouldProxyQishuiVideoUrl(source, playbackUrl)
       || shouldProxyPlaybackUrl(playbackUrl, shouldProxySongPlaybackUrl()));
-  // 汽水鉴权端点普通播放直连；沉浸/Web Audio 时必须走同源媒体代理。
+  // 汽水鉴权端点普通播放直连公网域名；沉浸/Web Audio 时再走同源媒体代理。
   const qishuiAuthProxy = source === 'qishui'
     && isMetingQishuiAudioUrl(source, playbackUrl)
     && wantsProxy

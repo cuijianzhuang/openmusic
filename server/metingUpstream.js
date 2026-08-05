@@ -219,6 +219,33 @@ export function setMetingUpstreamDisabled(url, disabled) {
   return { success: true, upstream: getMetingUpstreamStatus().find((u) => u.url === upstream.base) };
 }
 
+export function getMetingBearerAuthForUrl(rawUrl) {
+  syncUpstreams();
+  if (!isConfiguredMetingUrl(rawUrl)) return '';
+  try {
+    const target = new URL(rawUrl);
+    const targetPort = target.port || (target.protocol === 'https:' ? '443' : '80');
+    const upstream = upstreams.find((u) => {
+      try {
+        const configured = new URL(u.base);
+        const configuredPort = configured.port || (configured.protocol === 'https:' ? '443' : '80');
+        return configured.hostname.toLowerCase() === target.hostname.toLowerCase()
+          && configuredPort === targetPort;
+      } catch {
+        return false;
+      }
+    });
+    return String(upstream?.auth || '').trim();
+  } catch {
+    return '';
+  }
+}
+
+export function buildMetingAuthHeaders(rawUrl) {
+  const auth = getMetingBearerAuthForUrl(rawUrl);
+  return auth ? { Authorization: `Bearer ${auth}` } : {};
+}
+
 function buildUpstreamRequest(upstream, query) {
   const params = new URLSearchParams(query);
   // 公共 /api 的 auth 查询参数（兼容旧镜像）；定制接口改走 Bearer
@@ -231,9 +258,10 @@ function buildUpstreamRequest(upstream, query) {
     params.delete('auth');
     if (roomId) params.set('roomId', roomId);
     const headers = {};
-    if (upstream.auth) {
-      headers.Authorization = `Bearer ${upstream.auth}`;
+    if (!upstream.auth) {
+      throw new Error('未配置 Meting API Token：请在管理后台填写与 Meting「API Token」一致的令牌');
     }
+    headers.Authorization = `Bearer ${upstream.auth}`;
     const privateCookie = getRoomScopedAccount(roomId, server).cookie;
     if (privateCookie) {
       headers['X-OpenMusic-Cookie'] = privateCookie;
@@ -248,9 +276,12 @@ function buildUpstreamRequest(upstream, query) {
   // 公共 API：不带 roomId，只用全站 Cookie 池
   params.delete('roomId');
   params.delete('room_id');
+  if (!upstream.auth) {
+    throw new Error('未配置 Meting API Token：请在管理后台填写与 Meting「API Token」一致的令牌');
+  }
   return {
     url: `${upstream.base}/api?${params.toString()}`,
-    headers: upstream.auth ? { Authorization: `Bearer ${upstream.auth}` } : {},
+    headers: { Authorization: `Bearer ${upstream.auth}` },
     scoped: false,
   };
 }
@@ -357,6 +388,9 @@ export async function fetchMetingApi(query, options = {}, timeoutMs = 10000) {
   }
   if (upstreams.length === 0) {
     throw new Error('未配置 METING_API_URL');
+  }
+  if (upstreams.every((upstream) => !String(upstream.auth || '').trim())) {
+    throw new Error('未配置 Meting API Token：请在管理后台填写与 Meting「API Token」一致的令牌');
   }
 
   const candidates = orderedUpstreams(query);

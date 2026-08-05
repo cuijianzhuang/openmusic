@@ -1321,6 +1321,9 @@ app.get('/api/meting', async (req, res) => {
     if (/未配置 METING_API_URL/.test(message)) {
       return res.status(502).json({ error: '未配置 METING_API_URL' });
     }
+    if (/未配置 Meting API Token/.test(message)) {
+      return res.status(502).json({ error: message });
+    }
     if (/均已禁用|均不可用/.test(message)) {
       return res.status(502).json({ error: '音源上游暂不可用，请稍后重试' });
     }
@@ -1337,7 +1340,7 @@ function isTrustedMetingQishuiAudioUrl(rawUrl) {
     return false;
   }
   if (target.pathname !== '/audio/qishui') return false;
-  if (!target.searchParams.get('auth')) return false;
+  if (!target.searchParams.get('auth') && !target.searchParams.get('t')) return false;
 
   if (!isConfiguredMetingUrl(rawUrl)) return false;
 

@@ -637,7 +637,7 @@ export default function RuntimeConfigPanel({
   const metingSection = (
       <SettingsSection
         title="Meting 音源"
-        description="多源轮询，故障自动切换"
+        description="多源轮询，故障自动切换；API Token 与 Meting 后台「API Token 管理」中创建的令牌一致"
       >
         <Space direction="vertical" style={{ width: '100%' }} size="middle">
           {draft.metingSources.length === 0 && (
@@ -705,9 +705,9 @@ export default function RuntimeConfigPanel({
                     });
                   }}
                   placeholder={source.configuredAuth
-                    ? '清空保存则关闭 Auth'
-                    : 'Auth 密钥，没有则留空'}
-                  aria-label={`音源 ${index + 1} Auth 密钥`}
+                    ? '留空并保存可清除 Token'
+                    : 'API Token（Authorization: Bearer）'}
+                  aria-label={`音源 ${index + 1} API Token`}
                   autoComplete="off"
                   spellCheck={false}
                   style={{ fontFamily: 'monospace', flex: 1, minWidth: 200 }}
