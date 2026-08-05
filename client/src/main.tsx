@@ -11,11 +11,13 @@ import { refreshQualityCapabilities } from './api/music/quality';
 import { warmUpSocketSession } from './hooks/useSocket';
 import { applyStoredRoomThemeColor } from './lib/roomThemeColor';
 import { installGuideUsageTracking } from './lib/userGuide';
+import { prefetchLoadingQuote } from './lib/loadingQuote';
 
 applyStoredRoomThemeColor();
 installOpenMusicDebug();
 installVisibilitySync();
 installGuideUsageTracking();
+void prefetchLoadingQuote();
 void fetchSiteSeo().then(() => applyPageSeo());
 applyPageSeo();
 void ensureSessionBootstrap().then(() => {

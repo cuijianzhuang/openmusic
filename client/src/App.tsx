@@ -6,6 +6,7 @@ import ErrorReportSolutionGate from './components/ErrorReportSolutionGate';
 import PermanentDecisionGate from './components/PermanentDecisionGate';
 import { rememberAdminEntryPath } from './lib/adminEntryShortcut';
 import { lazyWithRetry } from './lib/lazyWithRetry';
+import { nextLoadingQuote, useLoadingQuote } from './lib/loadingQuote';
 
 const Home = lazyWithRetry(() => import('./pages/Home'), 'Home');
 const Room = lazyWithRetry(() => import('./pages/Room'), 'Room');
@@ -14,11 +15,15 @@ const Admin = lazyWithRetry(() => import('./pages/Admin'), 'Admin');
 const Setup = lazyWithRetry(() => import('./pages/Setup'), 'Setup');
 
 function RouteFallback() {
+  const loadingQuote = useLoadingQuote();
+  useEffect(() => {
+    nextLoadingQuote();
+  }, []);
   return (
     <div className="flex h-full min-h-[50vh] items-center justify-center bg-netease-dark text-netease-muted">
-      <div className="flex items-center gap-2 text-sm">
+      <div className="flex flex-col items-center gap-3 text-center text-sm">
         <span className="h-4 w-4 animate-spin rounded-full border-2 border-netease-muted/30 border-t-netease-red" />
-        加载中…
+        {loadingQuote}
       </div>
     </div>
   );

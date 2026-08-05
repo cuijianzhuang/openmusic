@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import { lazyWithRetry } from '../lib/lazyWithRetry';
+import { nextLoadingQuote, useLoadingQuote } from '../lib/loadingQuote';
 
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 
@@ -230,6 +231,12 @@ type SearchDetailOrigin = 'radio' | 'recommend-playlist';
 
 export default function Room() {
 
+  const loadingQuote = useLoadingQuote();
+
+  useEffect(() => {
+    nextLoadingQuote();
+  }, []);
+
   const { roomId } = useParams<{ roomId: string }>();
 
   const navigate = useNavigate();
@@ -304,7 +311,6 @@ export default function Room() {
 
   const [searching, setSearching] = useState(false);
   const [playlistSearchLoading, setPlaylistSearchLoading] = useState(false);
-
   const [joinError, setJoinError] = useState('');
 
   const [addingId, setAddingId] = useState<string | null>(null);
@@ -1010,7 +1016,8 @@ export default function Room() {
       setOverlaySearchMode('song');
       setPlaylistSearchResults([]);
       setPlaylistSearchTotal(0);
-      setSearchedKeyword(`正在解析${platform === 'netease' ? '网易' : 'QQ'}歌单…`);
+      const platformLabel = platform === 'netease' ? '网易' : platform === 'qq' ? 'QQ' : '汽水';
+      setSearchedKeyword(`正在解析${platformLabel}歌单…`);
       setResults([]);
     }
 
@@ -2012,9 +2019,11 @@ export default function Room() {
 
     return (
 
-      <div className="min-h-full flex items-center justify-center">
-
-        <Loader2 className="w-8 h-8 text-netease-red animate-spin" />
+      <div className="min-h-full flex items-center justify-center px-6">
+        <div className="flex max-w-md flex-col items-center text-center">
+          <Loader2 className="mb-5 h-7 w-7 animate-spin text-netease-red" />
+          <p className="text-sm font-medium leading-6 text-white/80">{loadingQuote}</p>
+        </div>
 
       </div>
 
@@ -2162,7 +2171,7 @@ export default function Room() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-           placeholder={searchMode === 'playlist' ? '搜索网易/QQ歌单...' : '搜索歌曲、歌手，或粘贴歌单链接...'}
+          placeholder={searchMode === 'playlist' ? '搜索网易/QQ/汽水歌单...' : '搜索歌曲、歌手，或粘贴歌单链接...'}
           className="w-full bg-netease-card border border-netease-border rounded-xl sm:rounded-2xl pl-10 sm:pl-12 pr-4 py-3 sm:py-3.5 text-sm sm:text-base text-white placeholder:text-netease-muted/50 focus:outline-none focus:border-netease-red/50 transition-colors"
         />
       </div>
@@ -2208,10 +2217,10 @@ export default function Room() {
                 <div className="min-w-0 flex-1 space-y-0.5">
                   <p className="truncate text-sm font-medium">{playlist.name}</p>
                   <p className="truncate text-xs text-netease-muted">
-                    {playlist.creatorName || (playlist.platform === 'qq' ? 'QQ歌单' : '网易歌单')} · {playlist.trackCount} 首
+                    {playlist.creatorName || (playlist.platform === 'qq' ? 'QQ歌单' : playlist.platform === 'qishui' ? '汽水歌单' : '网易歌单')} · {playlist.trackCount} 首
                   </p>
                 </div>
-                <SourceBadge source={playlist.platform === 'qq' ? 'tencent' : 'netease'} variant="muted" />
+                <SourceBadge source={playlist.platform === 'qq' ? 'tencent' : playlist.platform === 'qishui' ? 'qishui' : 'netease'} variant="muted" />
                 <button
                   type="button"
                   onClick={(e) => {
@@ -2289,7 +2298,7 @@ export default function Room() {
           value={overlayQuery}
           onChange={(e) => setOverlayQuery(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleOverlaySearch()}
-           placeholder={overlaySearchMode === 'playlist' ? '搜索网易/QQ歌单...' : '搜索歌曲、歌手，或粘贴歌单链接...'}
+          placeholder={overlaySearchMode === 'playlist' ? '搜索网易/QQ/汽水歌单...' : '搜索歌曲、歌手，或粘贴歌单链接...'}
           className="w-full bg-netease-card border border-netease-border rounded-xl pl-9 pr-3 py-2 text-sm text-white placeholder:text-netease-muted/50 focus:outline-none focus:border-netease-red/50 transition-colors"
         />
       </div>
@@ -2314,7 +2323,7 @@ export default function Room() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-           placeholder={searchMode === 'playlist' ? '搜索网易/QQ歌单...' : '搜索歌曲、歌手，或粘贴歌单链接...'}
+          placeholder={searchMode === 'playlist' ? '搜索网易/QQ/汽水歌单...' : '搜索歌曲、歌手，或粘贴歌单链接...'}
           className="min-w-0 flex-1 border-none bg-transparent text-[13.5px] tracking-wide text-white outline-none placeholder:text-white/22"
         />
         <button

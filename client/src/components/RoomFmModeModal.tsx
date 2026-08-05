@@ -50,7 +50,7 @@ export default function RoomFmModeModal({ open, value, source = 'netease', savin
             const locked = item === 'qishui' && qishuiLocked;
             return (
             <button key={item} type="button" disabled={saving || locked} onClick={() => onSave(item === 'qishui' ? 'DEFAULT' : current, item)}
-              title={locked ? '房间未绑定汽水账号，服务器也没有可用汽水会员账号' : undefined}
+              title={locked ? '没有可用汽水会员账号' : undefined}
               className={`inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-2 text-xs font-medium ${source === item ? 'bg-white/10 text-white' : 'text-netease-muted hover:bg-white/5 hover:text-white'} disabled:cursor-not-allowed disabled:opacity-45`}>
               {locked ? <Lock className="h-3 w-3" aria-hidden /> : null}
               {label}
@@ -60,7 +60,7 @@ export default function RoomFmModeModal({ open, value, source = 'netease', savin
 
         {qishuiLocked ? (
           <p className="mb-4 rounded-lg bg-white/[0.035] px-3 py-2 text-xs leading-5 text-white/45">
-            绑定房间汽水账号，或等待服务器提供可用汽水会员账号后即可开启汽水漫游。
+            没有可用汽水会员账号。
           </p>
         ) : null}
 
