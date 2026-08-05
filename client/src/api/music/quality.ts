@@ -78,9 +78,9 @@ export const TENCENT_QUALITY_OPTIONS: QualityOption[] = [
 export const QISHUI_QUALITY_OPTIONS: QualityOption[] = [
   { value: 'standard', label: '标准' },
   { value: 'exhigh', label: '极高' },
-  { value: 'studio', label: '录音室音质', svip: true },
-  { value: 'atmos', label: '全景声', svip: true },
   { value: 'lossless', label: '无损', svip: true },
+  { value: 'atmos', label: '全景声', svip: true },
+  { value: 'studio', label: '录音室', svip: true },
 ];
 
 const NETEASE_CANONICAL = new Set(NETEASE_QUALITY_OPTIONS.map((o) => o.value));
