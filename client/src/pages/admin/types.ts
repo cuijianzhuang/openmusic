@@ -95,6 +95,8 @@ export interface RuntimeConfig {
   roomCredentialEncryptionKey: string;
   /** 是否开放 SVIP 音质选项（需上游 Cookie 具备对应权益） */
   svipQualityEnabled: boolean;
+  /** 是否开放全站共享会员入口 */
+  sharedMembershipEnabled: boolean;
   metingApiUrl: string;
   metingApiAuth: string;
   metingSources: {

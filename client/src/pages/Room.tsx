@@ -384,6 +384,7 @@ export default function Room() {
   const [memberOpen, setMemberOpen] = useState(false);
   const [qualityOpen, setQualityOpen] = useState(false);
   const qishuiServerVip = useSiteFeaturesStore((s) => s.qishuiVip);
+  const sharedMembershipEnabled = useSiteFeaturesStore((s) => s.sharedMembershipEnabled);
   const [memberSaving, setMemberSaving] = useState(false);
   const [songRequestSaving, setSongRequestSaving] = useState(false);
   const [chatHistorySaving, setChatHistorySaving] = useState(false);
@@ -655,7 +656,7 @@ export default function Room() {
 
   useEffect(() => {
     setFavoritePage(1);
-  }, [favoriteQuery, favorites.length, favoritePageSize]);
+  }, [favoriteQuery, favoritePageSize]);
 
   useEffect(() => {
     if (favoritePage > favoriteTotalPages) {
@@ -2622,6 +2623,7 @@ export default function Room() {
         identityLinuxdoBound={identityProviders.linuxdoBound}
         identityGithubBound={identityProviders.githubBound}
         musicAccounts={room?.musicAccounts ?? { netease: null, tencent: null, qishui: null }}
+        sharedMembershipEnabled={sharedMembershipEnabled}
         onMusicAccountCreateQr={createMusicAccountQr}
         onMusicAccountCheckQr={checkMusicAccountQr}
         onMusicAccountBind={bindMusicAccount}

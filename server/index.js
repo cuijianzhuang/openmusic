@@ -951,6 +951,9 @@ app.get('/api/app-version', (_req, res) => {
 app.post('/api/music-account-contribution/qr/create', async (req, res) => {
   const identity = requireSessionIdentity(req, res);
   if (!identity) return;
+  if (!getRuntimeConfig().sharedMembershipEnabled) {
+    return res.status(403).json({ success: false, error: '共享会员功能当前已关闭' });
+  }
   if (!limitContributionQr(`contribution-qr:${getRequestIp(req)}:${identity.userId}`)) {
     return res.status(429).json({ success: false, error: '操作有点频繁，请稍等一会儿再试' });
   }
@@ -1031,6 +1034,9 @@ app.get('/api/music-account-contribution/qr/verify/:asset', async (req, res) => 
 app.post('/api/music-account-contribution/bind', async (req, res) => {
   const identity = requireSessionIdentity(req, res);
   if (!identity) return;
+  if (!getRuntimeConfig().sharedMembershipEnabled) {
+    return res.status(403).json({ success: false, error: '共享会员功能当前已关闭' });
+  }
   if (!limitContributionBind(`contribution-bind:${getRequestIp(req)}:${identity.userId}`)) {
     return res.status(429).json({ success: false, error: '提交次数有点多，请稍后再试' });
   }
@@ -1080,6 +1086,9 @@ app.post('/api/music-account-contribution/revoke', async (req, res) => {
 app.get('/api/music-account-contribution/shared', async (req, res) => {
   const identity = requireSessionIdentity(req, res);
   if (!identity) return;
+  if (!getRuntimeConfig().sharedMembershipEnabled) {
+    return res.json({ success: true, data: [] });
+  }
   const result = await fetchMusicContributions(Math.min(Number(req.query.limit) || 20, 50));
   if (!result.ok) return res.status(result.status || 502).json({ success: false, error: result.error || '共享记录暂时不可用' });
   return res.json({ success: true, data: result.data });
@@ -1650,6 +1659,7 @@ function sendBootstrapResponse(res, userId, iat, token, deviceId = null) {
     clientId: userId,
     features: {
       svipQualityEnabled: Boolean(runtime.svipQualityEnabled),
+      sharedMembershipEnabled: Boolean(runtime.sharedMembershipEnabled),
     },
   };
   const requireRequestSign = res.req?.secure || !ALLOW_INSECURE_HTTP_API;
@@ -3156,6 +3166,10 @@ io.on('connection', (socket) => {
   socket.on('music_account_bind', async ({ sessionId, shared } = {}, callback) => {
     if (rejectReadOnly(socket, callback)) return;
     if (rejectRateLimited(socket, limitSocketAction, 'music_account_bind', callback)) return;
+    if (shared && !getRuntimeConfig().sharedMembershipEnabled) {
+      callback?.({ success: false, error: '共享会员功能当前已关闭' });
+      return;
+    }
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
       callback?.({ success: false, error: '未加入房间' });
@@ -3262,6 +3276,10 @@ io.on('connection', (socket) => {
   socket.on('music_account_set_shared', async ({ platform, shared } = {}, callback) => {
     if (rejectReadOnly(socket, callback)) return;
     if (rejectRateLimited(socket, limitSocketAction, 'music_account_set_shared', callback)) return;
+    if (shared && !getRuntimeConfig().sharedMembershipEnabled) {
+      callback?.({ success: false, error: '共享会员功能当前已关闭' });
+      return;
+    }
     const roomId = socketToRoom.get(socket.id);
     if (!roomId) {
       callback?.({ success: false, error: '未加入房间' });

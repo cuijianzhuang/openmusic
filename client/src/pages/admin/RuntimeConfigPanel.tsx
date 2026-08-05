@@ -38,6 +38,7 @@ type RuntimeTextField = Exclude<
   | 'roomCreateMaxOwned'
   | 'roomCreateIpLooseCooldownMs'
   | 'svipQualityEnabled'
+  | 'sharedMembershipEnabled'
   | 'configuredSecrets'
   | 'metingApiUrl'
   | 'metingApiAuth'
@@ -262,6 +263,7 @@ export default function RuntimeConfigPanel({
     setDraft({
       ...config,
       svipQualityEnabled: Boolean(config.svipQualityEnabled),
+      sharedMembershipEnabled: config.sharedMembershipEnabled !== false,
       seoTitle: config.seoTitle || '',
       seoDescription: config.seoDescription || '',
       seoKeywords: config.seoKeywords || '',
@@ -612,6 +614,22 @@ export default function RuntimeConfigPanel({
           aria-label="开放 SVIP 音质"
         />
         <Typography.Text>开放 SVIP 音质</Typography.Text>
+      </Space>
+    </SettingsSection>
+  );
+
+  const sharedMembershipSection = (
+    <SettingsSection
+      title="会员共享"
+      description="关闭后隐藏首页共享入口和房间共享开关"
+    >
+      <Space align="center">
+        <Switch
+          checked={Boolean(draft.sharedMembershipEnabled)}
+          onChange={(checked) => setDraft({ ...draft, sharedMembershipEnabled: checked })}
+          aria-label="开放共享会员"
+        />
+        <Typography.Text>开放共享会员</Typography.Text>
       </Space>
     </SettingsSection>
   );
@@ -1235,6 +1253,8 @@ export default function RuntimeConfigPanel({
           {metingSection}
           <Divider style={{ margin: 0 }} />
           {qualitySection}
+          <Divider style={{ margin: 0 }} />
+          {sharedMembershipSection}
           <Divider style={{ margin: 0 }} />
           {customApiSection}
         </>

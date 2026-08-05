@@ -37,6 +37,7 @@ import TiltedCard from '../components/react-bits/TiltedCard';
 import BorderGlow from '../components/react-bits/BorderGlow';
 import { getRememberedAdminEntryPath } from '../lib/adminEntryShortcut';
 import { markGuideFeatureUsed } from '../lib/userGuide';
+import { useSiteFeaturesStore } from '../stores/siteFeaturesStore';
 
 /** 大厅只用接口带回的 CDN 直链，不走 meting type=pic 再查 */
 function lobbyDirectCoverUrl(pic?: string): string | null {
@@ -312,6 +313,7 @@ function Modal({
 }
 
 export default function Home() {
+  const sharedMembershipEnabled = useSiteFeaturesStore((state) => state.sharedMembershipEnabled);
   const navigate = useNavigate();
   const nickname = useRoomStore((s) => s.nickname);
   const setNickname = useRoomStore((s) => s.setNickname);
@@ -583,17 +585,21 @@ export default function Home() {
               </Tooltip>
             </div>
             <div className="flex items-center gap-1.5 sm:gap-2">
-              <Tooltip content="把会员能力分享给大家">
-                <button type="button" onClick={() => setContributionOpen(true)} className={`sm:hidden ${headerIconCls}`} aria-label="共享会员">
-                  <HeartHandshake className="h-4 w-4 text-rose-200" />
-                </button>
-              </Tooltip>
-              <Tooltip content="把会员能力分享给大家">
-                <button type="button" onClick={() => setContributionOpen(true)} className={`hidden sm:inline-flex ${headerPillCls}`} aria-label="共享会员">
-                  <HeartHandshake className="h-4 w-4 text-rose-200" />
-                  <span>共享会员</span>
-                </button>
-              </Tooltip>
+              {sharedMembershipEnabled && (
+                <>
+                  <Tooltip content="把会员能力分享给大家">
+                    <button type="button" onClick={() => setContributionOpen(true)} className={`sm:hidden ${headerIconCls}`} aria-label="共享会员">
+                      <HeartHandshake className="h-4 w-4 text-rose-200" />
+                    </button>
+                  </Tooltip>
+                  <Tooltip content="把会员能力分享给大家">
+                    <button type="button" onClick={() => setContributionOpen(true)} className={`hidden sm:inline-flex ${headerPillCls}`} aria-label="共享会员">
+                      <HeartHandshake className="h-4 w-4 text-rose-200" />
+                      <span>共享会员</span>
+                    </button>
+                  </Tooltip>
+                </>
+              )}
               {adminEntryPath && (
                 <Tooltip content="管理后台（仅本机可见）">
                   <a href={adminEntryPath} className={`hidden sm:inline-flex ${headerIconCls}`} aria-label="管理后台">

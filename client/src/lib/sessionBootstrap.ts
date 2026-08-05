@@ -56,6 +56,7 @@ async function requestSessionBootstrap(): Promise<string | null> {
       neteaseSvip?: boolean;
       tencentSvip?: boolean;
       qishuiVip?: boolean;
+      sharedMembershipEnabled?: boolean;
     };
   };
   // 非安全 HTTP 上 Web Crypto 可能不可用；此时服务端也不会要求请求签名。

@@ -83,6 +83,8 @@ function envDefaults() {
     roomCredentialEncryptionKey: envText('ROOM_CREDENTIAL_ENCRYPTION_KEY'),
     /** 是否开放 SVIP 音质（网易沉浸环绕声/超清母带/杜比；QQ 臻品全景声/臻品母带） */
     svipQualityEnabled: envText('SVIP_QUALITY_ENABLED') === '1' || envText('SVIP_QUALITY_ENABLED').toLowerCase() === 'true',
+    /** 是否开放全站共享会员入口 */
+    sharedMembershipEnabled: true,
     metingApiUrl: envText('METING_API_URL'),
     metingApiAuth: envText('METING_API_AUTH'),
     musicApis: [],
@@ -278,6 +280,10 @@ function normalize(config) {
       || config.svipQualityEnabled === 1
       || String(config.svipQualityEnabled || '').trim().toLowerCase() === 'true'
       || String(config.svipQualityEnabled || '').trim() === '1',
+    sharedMembershipEnabled: config.sharedMembershipEnabled !== false
+      && config.sharedMembershipEnabled !== 0
+      && String(config.sharedMembershipEnabled || '').trim().toLowerCase() !== 'false'
+      && String(config.sharedMembershipEnabled || '').trim() !== '0',
     metingApiUrl: String(config.metingApiUrl || '').trim(),
     metingApiAuth: String(config.metingApiAuth || '').trim(),
     musicApis,

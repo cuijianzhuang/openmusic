@@ -13,6 +13,7 @@ type Platform = 'netease' | 'tencent' | 'qishui';
 
 interface Props {
   accounts: RoomMusicAccounts;
+  sharedMembershipEnabled?: boolean;
   onCreateQr: (platform: Platform) => Promise<{ success: boolean; error?: string; data?: Record<string, unknown> }>;
   onCheckQr: (payload: Record<string, unknown>) => Promise<{ success: boolean; error?: string; data?: Record<string, unknown> }>;
   onBind: (payload: {
@@ -141,6 +142,7 @@ function QrBlock({
 function PlatformCard({
   label,
   account,
+  sharedMembershipEnabled,
   busy,
   wantShared,
   onWantSharedChange,
@@ -157,6 +159,7 @@ function PlatformCard({
 }: {
   label: string;
   account: RoomMusicAccount | null;
+  sharedMembershipEnabled: boolean;
   busy: boolean;
   wantShared: boolean;
   onWantSharedChange: (v: boolean) => void;
@@ -229,7 +232,7 @@ function PlatformCard({
             </div>
           </div>
 
-          {account.hasVip ? (
+          {sharedMembershipEnabled && account.hasVip ? (
             <ShareSwitch
               checked={account.shared}
               disabled={busy}
@@ -259,11 +262,13 @@ function PlatformCard({
         </>
       ) : (
         <>
-          <ShareSwitch
-            checked={wantShared}
-            disabled={busy}
-            onChange={onWantSharedChange}
-          />
+          {sharedMembershipEnabled && (
+            <ShareSwitch
+              checked={wantShared}
+              disabled={busy}
+              onChange={onWantSharedChange}
+            />
+          )}
           <button
             type="button"
             disabled={busy}
@@ -284,6 +289,7 @@ function PlatformCard({
 
 export default function RoomMusicAccountPanel({
   accounts,
+  sharedMembershipEnabled = true,
   onCreateQr,
   onCheckQr,
   onBind,
@@ -309,6 +315,12 @@ export default function RoomMusicAccountPanel({
   const bindingRef = useRef(false);
   const runIdRef = useRef(0);
   const secondVerifySubmittedRef = useRef(false);
+
+  useEffect(() => {
+    if (!sharedMembershipEnabled) {
+      setWantShared({ netease: false, tencent: false, qishui: false });
+    }
+  }, [sharedMembershipEnabled]);
 
   const stopPoll = useCallback(() => {
     if (pollRef.current) {
@@ -530,6 +542,7 @@ export default function RoomMusicAccountPanel({
   const cardProps = (platform: Platform, label: string) => ({
     label,
     account: accounts[platform],
+    sharedMembershipEnabled,
     busy,
     wantShared: wantShared[platform],
     onWantSharedChange: (v: boolean) => setWantShared((s) => ({ ...s, [platform]: v })),

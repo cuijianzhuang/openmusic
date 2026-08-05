@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 
 interface SiteFeaturesStore {
+  /** 管理端是否开放全站共享会员入口 */
+  sharedMembershipEnabled: boolean;
   /** 管理端是否开放 SVIP 音质选项 */
   svipQualityEnabled: boolean;
   /** 各平台实际可用的高级会员能力，不能用全局开关代替。 */
@@ -14,6 +16,7 @@ interface SiteFeaturesStore {
 }
 
 export interface PlatformCapabilities {
+  sharedMembershipEnabled?: boolean;
   svipQualityEnabled?: boolean;
   neteaseSvip?: boolean;
   tencentSvip?: boolean;
@@ -22,6 +25,7 @@ export interface PlatformCapabilities {
 }
 
 export const useSiteFeaturesStore = create<SiteFeaturesStore>((set) => ({
+  sharedMembershipEnabled: true,
   svipQualityEnabled: false,
   neteaseSvip: false,
   tencentSvip: false,
@@ -33,6 +37,9 @@ export const useSiteFeaturesStore = create<SiteFeaturesStore>((set) => ({
     hydrated: true,
   }),
   setPlatformCapabilities: (features) => set((state) => ({
+    sharedMembershipEnabled: features.sharedMembershipEnabled === undefined
+      ? state.sharedMembershipEnabled
+      : Boolean(features.sharedMembershipEnabled),
     svipQualityEnabled: features.svipQualityEnabled === undefined
       ? state.svipQualityEnabled
       : Boolean(features.svipQualityEnabled),

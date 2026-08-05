@@ -118,6 +118,7 @@ interface Props {
   identityLinuxdoBound?: LinuxdoBinding | null;
   identityGithubBound?: GithubBinding | null;
   musicAccounts?: RoomMusicAccounts;
+  sharedMembershipEnabled?: boolean;
   onMusicAccountCreateQr?: (platform: 'netease' | 'tencent' | 'qishui') => Promise<{ success: boolean; error?: string; data?: Record<string, unknown> }>;
   onMusicAccountCheckQr?: (payload: Record<string, unknown>) => Promise<{ success: boolean; error?: string; data?: Record<string, unknown> }>;
   onMusicAccountBind?: (payload: {
@@ -291,6 +292,7 @@ export default function RoomSettingsModal({
   identityLinuxdoBound = null,
   identityGithubBound = null,
   musicAccounts = { netease: null, tencent: null, qishui: null },
+  sharedMembershipEnabled = true,
   onMusicAccountCreateQr,
   onMusicAccountCheckQr,
   onMusicAccountBind,
@@ -650,6 +652,7 @@ export default function RoomSettingsModal({
           {MUSIC_ACCOUNT_TAB_ENABLED && activeTab === 'account' && isOwner && onMusicAccountCreateQr && onMusicAccountCheckQr && onMusicAccountBind && onMusicAccountRefresh && onMusicAccountSetShared && onMusicAccountUnbind && (
             <RoomMusicAccountPanel
               accounts={musicAccounts}
+              sharedMembershipEnabled={sharedMembershipEnabled}
               onCreateQr={onMusicAccountCreateQr}
               onCheckQr={onMusicAccountCheckQr}
               onBind={onMusicAccountBind}

@@ -4,5 +4,5 @@
     "优化房间无人时自动暂停音乐",
     "优化沉浸模式手势启动加载进度"
   ],
-  "forcePrompt": true
+  "forcePrompt": false
 }
