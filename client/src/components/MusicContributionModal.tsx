@@ -175,6 +175,14 @@ export default function MusicContributionModal({ open, onClose, defaultProvider 
           );
           return;
         }
+        if (state === 'error') {
+          setError(textValue(checked.message || checked.msg) || '扫码失败，请重新生成二维码');
+          setStatusText('');
+          stopPoll();
+          phase = 'done';
+          setBusy(false);
+          return;
+        }
         if (state === 'confirmed') {
           phase = 'done';
           stopPoll();

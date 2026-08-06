@@ -800,9 +800,20 @@ async function resolveMetingMediaUrl(query, depth = 0) {
   return resolved;
 }
 
-function localizeQishuiPayload(payload, metingQuery) {
+function requestPublicOrigin(req) {
+  const forwardedProto = String(req?.get?.('X-Forwarded-Proto') || '').split(',')[0].trim().toLowerCase();
+  const protocol = forwardedProto === 'https' ? 'https' : (req?.protocol || 'http');
+  const host = String(req?.get?.('X-Forwarded-Host') || req?.get?.('Host') || '').split(',')[0].trim();
+  if (!host) return '';
+  const prefix = String(req?.get?.('X-Forwarded-Prefix') || '').trim().replace(/\/$/, '');
+  return `${protocol}://${host}${prefix}`;
+}
+
+function localizeQishuiPayload(payload, metingQuery, req) {
   if (metingQuery?.server !== 'qishui' || metingQuery?.type !== 'url' || !isQishuiPlayUrl(payload?.url)) return payload;
-  return { ...payload, url: `/api/qishui-audio?url=${encodeURIComponent(payload.url)}` };
+  const path = `/api/qishui-audio?url=${encodeURIComponent(payload.url)}`;
+  const origin = requestPublicOrigin(req);
+  return { ...payload, url: origin ? `${origin}${path}` : path };
 }
 
 /** media-proxy 误收到 Meting API 地址时，先解析为真实 CDN 地址 */
@@ -860,7 +871,7 @@ async function finalizeMetingTextResponse(body, metingType) {
   return { url: normalized, quality: '' };
 }
 
-async function proxyMetingResponse(metingQuery, res, thumbPx = 0, metingType = '') {
+async function proxyMetingResponse(metingQuery, res, thumbPx = 0, metingType = '', req = null) {
   const response = await fetchMetingApi(metingQuery, { redirect: 'manual' });
 
   if (response.status >= 300 && response.status < 400) {
@@ -871,7 +882,7 @@ async function proxyMetingResponse(metingQuery, res, thumbPx = 0, metingType = '
     if (location) {
       // type=url/lrc 必须返回文本/JSON，不能把浏览器重定向到第三方 CDN（fetch 会触发 CORS）
       if (metingType === 'url') {
-        const body = localizeQishuiPayload(await finalizeMetingTextResponse(location, metingType), metingQuery);
+        const body = localizeQishuiPayload(await finalizeMetingTextResponse(location, metingType), metingQuery, req);
         if (!body.url) return res.status(403).json({ error: 'no url' });
         return res.json(body);
       }
@@ -893,7 +904,7 @@ async function proxyMetingResponse(metingQuery, res, thumbPx = 0, metingType = '
   const text = await response.text();
 
   if (metingType === 'url') {
-    const body = localizeQishuiPayload(await finalizeMetingTextResponse(text, metingType), metingQuery);
+    const body = localizeQishuiPayload(await finalizeMetingTextResponse(text, metingType), metingQuery, req);
     if (!body.url) return res.status(403).json({ error: 'no url' });
     return res.json(body);
   }
@@ -1313,7 +1324,7 @@ app.get('/api/meting', async (req, res) => {
         roomId: presence?.roomId || '',
         roomName: presence?.roomName || '',
       },
-      () => proxyMetingResponse(query, res, thumbPx, String(query.type || '')),
+      () => proxyMetingResponse(query, res, thumbPx, String(query.type || ''), req),
     );
   } catch (err) {
     const message = formatMetingFetchError(err);

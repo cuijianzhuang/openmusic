@@ -8,7 +8,7 @@ import {
   requestQishuiVerification,
   startQishuiVerification,
 } from './metingAdmin.js';
-import { getRedisClient } from './roomStorage.js';
+import { getRedisClient, isRedisEnabled } from './roomStorage.js';
 import { decryptSensitiveValue, encryptSensitiveValue } from './roomCredentialCrypto.js';
 
 const SESSION_TTL_MS = 10 * 60 * 1000;
@@ -16,6 +16,11 @@ const CONFIRMED_TTL_MS = 2 * 60 * 1000;
 const BINDING_LOCK_MS = 30 * 1000;
 const sessions = new Map();
 const REDIS_PREFIX = 'openmusic:music-qr:';
+
+function shortId(value) {
+  const raw = text(value);
+  return raw ? `${raw.slice(0, 8)}...` : '-';
+}
 
 function redisKey(id) { return `${REDIS_PREFIX}${id}`; }
 
@@ -143,6 +148,15 @@ export async function createManagedMusicQrSession({ ownerId, platform, purpose, 
     sessions.delete(sessionId);
     return { ok: false, error: `扫码会话保存失败：${err.message}` };
   }
+  console.info('[Music QR] 创建会话', JSON.stringify({
+    platform,
+    purpose,
+    roomId: text(roomId).toUpperCase() || undefined,
+    sessionId: shortId(sessionId),
+    upstreamKey: shortId(key),
+    upstreamQrsig: shortId(qrsig),
+    redis: isRedisEnabled(),
+  }));
   return {
     ok: true,
     data: {
@@ -156,7 +170,25 @@ export async function createManagedMusicQrSession({ ownerId, platform, purpose, 
 
 export async function checkManagedMusicQrSession(context) {
   const session = await requireOwnedSession(context);
-  if (!session) return { ok: false, status: 404, error: '扫码会话无效或已过期' };
+  if (!session) {
+    console.warn('[Music QR] OpenMusic 会话不存在', JSON.stringify({
+      platform: 'unknown',
+      purpose: context?.purpose,
+      roomId: text(context?.roomId).toUpperCase() || undefined,
+      sessionId: shortId(context?.sessionId),
+      redis: isRedisEnabled(),
+    }));
+    return { ok: false, status: 404, error: '扫码会话无效或已过期，请重新生成二维码' };
+  }
+  console.info('[Music QR] 检查会话', JSON.stringify({
+    platform: session.platform,
+    purpose: session.purpose,
+    sessionId: shortId(context?.sessionId),
+    upstreamKey: shortId(session.upstream?.key),
+    upstreamQrsig: shortId(session.upstream?.qrsig),
+    expiresInMs: Math.max(0, Number(session.expiresAt) - Date.now()),
+    redis: isRedisEnabled(),
+  }));
   if (session.credential) return { ok: true, data: { status: 'confirmed' } };
   const result = await checkMusicQrSession(session.upstream);
   if (!result.ok) return result;
@@ -175,7 +207,16 @@ export async function checkManagedMusicQrSession(context) {
       return { ok: false, error: `扫码凭证保存失败：${err.message}` };
     }
   }
-  if (status === 'expired' || status === 'error') await removeSession(text(context.sessionId));
+  if (status === 'expired' || status === 'error') {
+    console.warn('[Music QR] 上游会话结束', JSON.stringify({
+      platform: session.platform,
+      sessionId: shortId(context?.sessionId),
+      upstreamQrsig: shortId(session.upstream?.qrsig),
+      status,
+      message: text(raw.message || raw.msg) || undefined,
+    }));
+    await removeSession(text(context.sessionId));
+  }
   return {
     ok: true,
     data: {
