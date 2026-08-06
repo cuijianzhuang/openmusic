@@ -618,8 +618,6 @@ export default function RoomMusicAccountPanel({
               aria-selected={selected}
               aria-controls={`music-account-panel-${platform}`}
               tabIndex={selected ? 0 : -1}
-              disabled={platform === 'tencent'}
-              title={platform === 'tencent' ? 'QQ 音乐登录暂未开放' : undefined}
               onClick={() => selectPlatform(platform)}
               className={`flex min-h-9 items-center justify-center gap-2 rounded-md px-3 py-2 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
                 selected

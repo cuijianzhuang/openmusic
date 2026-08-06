@@ -701,7 +701,7 @@ export default function RoomSettingsModal({
                     <h3 className="text-sm font-medium text-white">申请常驻</h3>
                   </div>
                   <p className="mb-3 text-xs text-netease-muted">
-                    常驻房间在无人时也不会被自动销毁。提交后由管理员审核，通过或拒绝都会弹窗通知你。
+                    长时间不来听歌，房间可能会被管理员强制解散。提交后由管理员审核，通过或拒绝都会弹窗通知你。
                   </p>
 
                   {protectedFromDestroy ? (

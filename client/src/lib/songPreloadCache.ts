@@ -45,6 +45,7 @@ type FetchUrlResult =
 
 const urlCache = loadUrlCacheFromStorage();
 const pendingFetches = new Map<string, Promise<FetchUrlResult>>();
+const warmedQishuiKeys = new Set<string>();
 const sourceErrorKeys = new Set<string>();
 /** 原平台无链、已用其它平台 URL 兜底成功 */
 const crossSourceKeys = new Set<string>();
@@ -765,6 +766,24 @@ export function prefetchCurrentSong(song: QueueItem | null | undefined) {
   void fetchSongUrl(song, { allowQualityDowngrade: false });
 }
 
+/** 预热 OpenMusic 服务端汽水缓存，浏览器只接收一个字节。 */
+async function warmQishuiServerCache(song: UrlPrefetchSong, entry: CachedUrlEntry | null) {
+  if (songSourceOf(song) !== 'qishui' || !entry?.url || !entry.url.includes('/api/qishui-audio')) return;
+  const warmKey = urlCacheKey(song);
+  if (warmedQishuiKeys.has(warmKey)) return;
+  warmedQishuiKeys.add(warmKey);
+  try {
+    const response = await fetch(entry.url, {
+      headers: { Range: 'bytes=0-0' },
+      cache: 'no-store',
+    });
+    await response.body?.cancel();
+  } catch {
+    warmedQishuiKeys.delete(warmKey);
+    // 预热失败不影响正式播放，正式播放仍会按原流程重试。
+  }
+}
+
 type UrlPrefetchSong = Pick<QueueItem, 'queueId' | 'id' | 'source' | 'url'>;
 
 /** 预取即将播放的曲目：队列下一首，或私人漫游 nextRandom */
@@ -819,9 +838,12 @@ export function prefetchQueueSongs(
   else if (options.nextRandom?.id) retain.push(options.nextRandom);
   pruneSourceErrors(retain);
 
-  for (const song of targets) {
+  for (const [index, song] of targets.entries()) {
     // 预取：当前音质 → 跨源（不降档）；跨源成功即常显角标；彻底失败打「将跳过」
-    void fetchSongUrl(song, { allowQualityDowngrade: false });
+    void fetchSongUrl(song, { allowQualityDowngrade: false }).then((entry) => {
+      // 只预热真正的下一首，避免同时拉取多首汽水音频造成服务器突发内存占用。
+      if (index === 0) void warmQishuiServerCache(song, entry);
+    });
   }
 }
 

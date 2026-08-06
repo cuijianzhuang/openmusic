@@ -6,6 +6,8 @@ import {
   serveUpstreamMedia,
 } from './mediaProxy.js';
 import { formatMetingFetchError } from './metingFetch.js';
+import { fetchMeting } from './metingFetch.js';
+import { isQishuiPlayUrl, loadQishuiAudioCached } from './qishuiAudio.js';
 import {
   fetchMetingApi,
   isMetingApiHostname,
@@ -798,6 +800,11 @@ async function resolveMetingMediaUrl(query, depth = 0) {
   return resolved;
 }
 
+function localizeQishuiPayload(payload, metingQuery) {
+  if (metingQuery?.server !== 'qishui' || metingQuery?.type !== 'url' || !isQishuiPlayUrl(payload?.url)) return payload;
+  return { ...payload, url: `/api/qishui-audio?url=${encodeURIComponent(payload.url)}` };
+}
+
 /** media-proxy 误收到 Meting API 地址时，先解析为真实 CDN 地址 */
 async function resolveMediaProxyFetchUrl(fetchUrl, thumbPx = 0) {
   const query = parseMetingMediaQuery(fetchUrl);
@@ -864,7 +871,7 @@ async function proxyMetingResponse(metingQuery, res, thumbPx = 0, metingType = '
     if (location) {
       // type=url/lrc 必须返回文本/JSON，不能把浏览器重定向到第三方 CDN（fetch 会触发 CORS）
       if (metingType === 'url') {
-        const body = await finalizeMetingTextResponse(location, metingType);
+        const body = localizeQishuiPayload(await finalizeMetingTextResponse(location, metingType), metingQuery);
         if (!body.url) return res.status(403).json({ error: 'no url' });
         return res.json(body);
       }
@@ -886,7 +893,7 @@ async function proxyMetingResponse(metingQuery, res, thumbPx = 0, metingType = '
   const text = await response.text();
 
   if (metingType === 'url') {
-    const body = await finalizeMetingTextResponse(text, metingType);
+    const body = localizeQishuiPayload(await finalizeMetingTextResponse(text, metingType), metingQuery);
     if (!body.url) return res.status(403).json({ error: 'no url' });
     return res.json(body);
   }
@@ -1352,6 +1359,95 @@ function isTrustedMetingQishuiAudioUrl(rawUrl) {
     return false;
   }
 }
+
+/** OpenMusic 服务端解密汽水原始音频，浏览器只接触解密后的本地地址。 */
+async function fetchQishuiSourceDirect(rawUrl) {
+  const sourceEndpoint = new URL(rawUrl);
+  sourceEndpoint.searchParams.set('mode', 'source');
+  const metadataResponse = await fetchMeting(sourceEndpoint.toString(), {}, 15_000);
+  if (!metadataResponse.ok) return metadataResponse;
+
+  const metadata = await metadataResponse.json();
+  const sourceUrl = String(metadata?.url || '').trim();
+  const auth = String(metadata?.auth || '').trim();
+  let parsedSource;
+  try {
+    parsedSource = new URL(sourceUrl);
+  } catch {
+    throw new Error('汽水源地址无效');
+  }
+  if (parsedSource.protocol !== 'https:' || !isAllowedMediaHostname(parsedSource.hostname)) {
+    throw new Error('汽水源地址不在允许范围');
+  }
+  if (!auth) throw new Error('汽水音频密钥缺失');
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 120_000);
+  try {
+    const response = await fetch(parsedSource, {
+      signal: controller.signal,
+      headers: {
+        Accept: 'audio/mp4,audio/*;q=0.9,*/*;q=0.8',
+        'Accept-Encoding': 'identity',
+        Referer: 'https://www.qishui.com/',
+        'User-Agent': 'LunaPC/3.0.0(290101097)',
+      },
+    });
+    return {
+      ok: response.ok,
+      status: response.status,
+      headers: {
+        get: (name) => String(name).toLowerCase() === 'x-qishui-auth'
+          ? auth
+          : response.headers.get(name),
+      },
+      arrayBuffer: () => response.arrayBuffer(),
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+app.get('/api/qishui-audio', async (req, res) => {
+  const identity = requireSessionIdentity(req, res);
+  if (!identity) return;
+
+  const rawUrl = String(req.query.url || '').trim();
+  if (!isQishuiPlayUrl(rawUrl) || !isConfiguredMetingUrl(rawUrl)) {
+    return res.status(400).json({ error: '无效的汽水原始音频地址' });
+  }
+
+  try {
+    const decrypted = await loadQishuiAudioCached(rawUrl, () => fetchQishuiSourceDirect(rawUrl));
+    const total = decrypted.buffer.length;
+    const match = /^bytes=(\d*)-(\d*)$/i.exec(String(req.headers.range || ''));
+    let start = 0;
+    let end = total - 1;
+    let status = 200;
+    if (match) {
+      start = match[1] ? Number(match[1]) : 0;
+      end = match[2] ? Number(match[2]) : total - 1;
+      if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || start > end || start >= total) {
+        return res.status(416).set('Content-Range', `bytes */${total}`).end();
+      }
+      end = Math.min(end, total - 1);
+      status = 206;
+    }
+    res.set({
+      'Content-Type': decrypted.contentType,
+      'Accept-Ranges': 'bytes',
+      'Cache-Control': 'no-store, no-cache, must-revalidate, private',
+      'X-Accel-Buffering': 'no',
+      'X-OpenMusic-Qishui-Cache': decrypted.cacheHit ? 'memory-hit' : 'miss',
+      'Content-Length': String(end - start + 1),
+    });
+    if (status === 206) res.set('Content-Range', `bytes ${start}-${end}/${total}`);
+    return res.status(status).send(decrypted.buffer.subarray(start, end + 1));
+  } catch (error) {
+    console.error('OpenMusic 汽水解密失败:', error?.message || error);
+    return res.status(502).json({ error: '汽水音频解密失败' });
+  }
+});
 
 app.get('/api/media-proxy', async (req, res) => {
   const identity = requireSessionIdentity(req, res);

@@ -342,12 +342,12 @@ export default function MusicContributionModal({ open, onClose, defaultProvider 
               type="button"
               role="tab"
               aria-selected={platform === item}
-              disabled={busy || item === 'tencent'}
-              title={item === 'tencent' ? 'QQ 音乐登录暂未开放' : undefined}
+              disabled={busy}
+              title={undefined}
               onClick={() => void startQr(item)}
               className={`rounded-lg px-3 py-2 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${platform === item ? 'bg-white/10 text-white' : 'text-white/45 hover:bg-white/[0.05] hover:text-white/80'}`}
             >
-              {item === 'tencent' ? 'QQ 音乐（暂未开放）' : PLATFORM_META[item].label}
+              {PLATFORM_META[item].label}
             </button>
           ))}
         </div>
