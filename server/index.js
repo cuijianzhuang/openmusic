@@ -444,7 +444,10 @@ app.use((req, res, next) => {
 
   // 仅当管理员显式允许时，HTTP 才降级为只校验会话；HTTPS 始终校验请求签名。
   const requireRequestSign = req.secure || !ALLOW_INSECURE_HTTP_API;
-  if (isApiSignRequired() && requireRequestSign) {
+  // 汽水解密播放地址由服务端随机句柄保护，音频元素的 Range 请求不保证携带
+  // X-OM-* / om_* 签名；这里仍保留 HttpOnly 会话和句柄校验，不放宽其他 API。
+  const isQishuiAudioRequest = req.path === '/api/qishui-audio' && req.method === 'GET';
+  if (isApiSignRequired() && requireRequestSign && !isQishuiAudioRequest) {
     const signKey = deriveApiSignKey(CLIENT_ID_SECRET, identity.userId, identity.iat);
     const result = verifyApiSign(req, signKey, identity.userId);
     if (!result.ok) {
