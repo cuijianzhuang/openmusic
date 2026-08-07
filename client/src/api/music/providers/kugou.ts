@@ -53,7 +53,7 @@ async function fetchKugouDetail(id: string): Promise<KugouDetail | null> {
 
   const promise = (async () => {
     try {
-      const res = await fetchWithTimeout(`/api/music/cyapi/kugou/song?id=${encodeURIComponent(key)}`);
+      const res = await fetchWithTimeout(`/api/music/kugou/song?id=${encodeURIComponent(key)}`);
       if (!res.ok) {
         detailCache.set(key, null);
         return null;
@@ -84,7 +84,7 @@ export const kugouProvider: MusicProvider = {
   async search(keyword) {
     if (!keyword.trim()) return [];
     const params = new URLSearchParams({ q: keyword.trim(), num: '30' });
-    const res = await fetchWithTimeout(`/api/music/cyapi/kugou/search?${params}`);
+    const res = await fetchWithTimeout(`/api/music/kugou/search?${params}`);
     if (!res.ok) return [];
     const data = await res.json() as KugouListItem[];
     if (!Array.isArray(data)) return [];

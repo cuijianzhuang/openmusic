@@ -55,7 +55,6 @@ type RuntimeTextField = Exclude<
   | 'seoHeroSubline'
   | 'seoAboutTitle'
   | 'seoAboutText'
-  | 'lrcapiUrl'
 >;
 
 interface RuntimeFieldDef {

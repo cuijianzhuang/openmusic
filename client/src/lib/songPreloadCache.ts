@@ -52,7 +52,7 @@ const IDENTITY_URL_CACHE_TTL_MS = 8 * 60_000;
 const sourceErrorKeys = new Set<string>();
 /** 原平台无链、已用其它平台 URL 兜底成功 */
 const crossSourceKeys = new Set<string>();
-/** 实际取到音源的平台（红点/绿点/蓝点） */
+/** 实际取到音源的平台（网易/QQ/酷狗） */
 const crossSourceFromByKey = new Map<string, MusicSource>();
 const sourceErrorListeners = new Set<() => void>();
 const pendingCrossSourceFallbacks = new Map<string, Promise<CachedUrlEntry | null>>();
@@ -80,7 +80,7 @@ export function isTrackCrossSource(song: Pick<QueueItem, 'queueId' | 'id' | 'sou
   return crossSourceKeys.has(trackKeyOf(song));
 }
 
-/** 跨源取到音源的平台（红点/绿点/蓝点） */
+/** 跨源取到音源的平台（网易/QQ/酷狗） */
 export function getTrackCrossSourceFrom(
   song: Pick<QueueItem, 'queueId' | 'id' | 'source'>,
 ): MusicSource | undefined {
@@ -356,7 +356,7 @@ function getEffectivePlaybackQuality(song: Pick<QueueItem, 'id' | 'source'>): st
 function songLikelyNeedsPlaybackProxy(song: Pick<QueueItem, 'source' | 'url'>): boolean {
   if (shouldProxySongPlaybackUrl()) return true;
   if (!isHttpsPageContext()) return false;
-  // 酷狗迟言链基本为 http://，HTTPS 站点必须走 media-proxy（不可升 https）
+  // 酷狗播放链多为 http://，HTTPS 站点必须走 media-proxy（不可升 https）
   if (songSourceOf(song) === 'kugou') return true;
   return Boolean(song.url?.trim().startsWith('http://'));
 }

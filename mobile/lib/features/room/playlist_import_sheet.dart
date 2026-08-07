@@ -28,10 +28,10 @@ class _PlaylistImportBodyState extends ConsumerState<_PlaylistImportBody> {
   var _progressText = '';
   List<Map<String, dynamic>> _radios = [];
 
-  /// 服务端 playlistImport 仅支持红点 / 绿点，不提供酷狗歌单导入。
+  /// 服务端 playlistImport 仅支持网易 / QQ，不提供酷狗歌单导入。
   static const _platforms = [
-    ('netease', '红点'),
-    ('tencent', '绿点'),
+    ('netease', '网易'),
+    ('tencent', 'QQ'),
   ];
 
   @override

@@ -49,15 +49,16 @@ npm start   # http://0.0.0.0:4000
 | 依赖 | 必填 | 说明 |
 |------|:----:|------|
 | **Redis** | 必需 | 房间、收藏、管理凭据、公告、封禁均只存 Redis |
-| **Meting-API** | 必填 | 红点 / 绿点搜索播放、歌词、封面、歌单导入。镜像：`w3126197382/meting-api:latest` |
-| 迟言 API | 可选 | 蓝点搜索 / 播放、随机推荐。管理后台「运行配置」填写 |
+| **Meting-API** | 必填 | 网易 / QQ搜索播放、歌词、封面、歌单导入。镜像：`w3126197382/meting-api:latest` |
 | 七牛 OSS | 可选 | 聊天发图。管理后台填写 |
 
 ---
 
 ## 环境变量
 
-向导会自动写入 `server/.env`，下表仅供参考（详见 `server/.env.example`）：
+向导会自动写入 `server/.env`。**业务配置优先用管理后台「运行时配置」**（Meting、OAuth、七牛、歌词、空房 TTL 等），不必改文件。
+
+进程级变量（详见 `server/.env.example`）：
 
 | 变量 | 必填 | 说明 |
 |------|:----:|------|
@@ -67,10 +68,7 @@ npm start   # http://0.0.0.0:4000
 | `CLIENT_ID_SECRET` | 生产必填 | 会话签名密钥（向导自动生成） |
 | `TRUST_PROXY` | 推荐 | 反代后设为 `1` |
 | `CLIENT_IP_HEADER` | 有 CDN | Cloudflare：`CF-Connecting-IP`；EdgeOne：`iqp` |
-| `REDIS_URL` | 必需 | Redis 连接串 |
-| `METING_API_URL` | 必填 | 生产环境必须 HTTPS，本机地址也不例外 |
-| `METING_API_AUTH` | 账号/漫游必填 | Meting API Token，用于扫码绑定和房间私有取链 |
-| `ROOM_CREDENTIAL_ENCRYPTION_KEY` | 可选 | 首次启动自动生成，也可在管理后台随机生成；用于加密 Redis 中的房间凭证 |
+| `REDIS_URL` | 必需 | Redis 连接串（或分项 `REDIS_HOST` 等） |
 
 生产最小配置示例：
 
@@ -81,13 +79,9 @@ CLIENT_URL=https://music.example.com
 CLIENT_ID_SECRET=换成一段长随机字符串
 TRUST_PROXY=1
 REDIS_URL=redis://127.0.0.1:6379/0
-METING_API_URL=https://meting.example.com
-METING_API_AUTH=与Meting后台一致的API_Token
-# 房间凭证密钥首次启动自动生成，也可在管理后台「安全存储」中随机生成
 ```
 
-使用汽水音乐时，Meting 必须部署包含 `qishui` provider 的版本。汽水扫码已直接集成在 Meting 的 Node/Linux 服务中，不需要额外桥接配置。非会员汽水账号可绑定到房间，仅用于该房间的汽水漫游，不会进入全站会员 Cookie 池。网易、QQ、汽水均优先使用房间绑定账号；房间未绑定对应平台时才使用全站共享池。汽水两边都没有登录态时不能使用汽水漫游。
-
+Meting / 房间凭证密钥等由向导或管理后台配置。使用汽水音乐时，Meting 须包含 `qishui` provider；网易、QQ、汽水均优先房间绑定账号，否则走全站共享池。
 ---
 
 ## Docker 部署细节

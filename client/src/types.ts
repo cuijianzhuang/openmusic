@@ -41,7 +41,7 @@ export interface Song {
   album?: string;
   pic?: string;
   duration?: number;
-  /** 直链播放地址（蓝点等） */
+  /** 直链播放地址（酷狗等） */
   url?: string;
   /** 歌词文本或歌词 API 地址 */
   lrc?: string;
@@ -227,7 +227,7 @@ export interface RoomState {
   nextRandom?: QueueItem | null;
   /** 服务端正在为空队列拉取私人漫游 */
   randomLoading?: boolean;
-  /** 房间播放音质（红点 / 绿点） */
+  /** 房间播放音质（网易 / QQ） */
   audioQuality?: RoomAudioQuality;
   /** 播放顺序：顺序 / 随机 / 单曲循环 / 列表循环 / 列表内随机 */
   playMode?: 'order' | 'shuffle' | 'loop-one' | 'loop-all' | 'shuffle-loop';

@@ -112,7 +112,7 @@ String getQualityLabelForSource(String source, String quality) {
 
 String getAudioQualitySummary(RoomAudioQuality quality) {
   final q = normalizeUserAudioQuality(quality);
-  return '红点 ${getQualityLabelForSource('netease', q.netease)} · 绿点 ${getQualityLabelForSource('tencent', q.tencent)}';
+  return '网易 ${getQualityLabelForSource('netease', q.netease)} · QQ ${getQualityLabelForSource('tencent', q.tencent)}';
 }
 
 /// Site feature: whether SVIP quality tiers are exposed to clients.

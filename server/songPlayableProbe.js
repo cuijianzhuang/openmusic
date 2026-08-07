@@ -1,5 +1,4 @@
 import { fetchMetingApi } from './metingUpstream.js';
-import { getKugouSongDetail, isCyapiConfigured } from './cyapi.js';
 import { fetchCustomMusicApi, hasCustomMusicApi } from './customMusicApi.js';
 
 const QQ_PLACEHOLDER_HOST = 'aqqmusic.tc.qq.com';
@@ -65,8 +64,12 @@ async function probeMetingUrl(source, id) {
 }
 
 async function probeKugouUrl(id) {
-  if (hasCustomMusicApi('kugou', 'url')) {
-    try {
+  if (!hasCustomMusicApi('kugou', 'url') && !hasCustomMusicApi('kugou', 'song')) {
+    return false;
+  }
+
+  try {
+    if (hasCustomMusicApi('kugou', 'url')) {
       const custom = await fetchCustomMusicApi({
         server: 'kugou',
         type: 'url',
@@ -78,18 +81,25 @@ async function probeKugouUrl(id) {
         if (isPlayableHttpUrl(url)) return true;
         if (custom.status >= 400) return false;
       }
-    } catch {
-      // fall through to cyapi
     }
-  }
 
-  if (!isCyapiConfigured()) return false;
-  try {
-    const detail = await getKugouSongDetail(id);
-    return isPlayableHttpUrl(detail?.url || detail?.data?.url || '');
+    if (hasCustomMusicApi('kugou', 'song')) {
+      const custom = await fetchCustomMusicApi({
+        server: 'kugou',
+        type: 'song',
+        id,
+      });
+      if (custom) {
+        const songs = await custom.json();
+        const detail = Array.isArray(songs) ? songs[0] : songs;
+        return isPlayableHttpUrl(detail?.url);
+      }
+    }
   } catch {
     return false;
   }
+
+  return false;
 }
 
 /**

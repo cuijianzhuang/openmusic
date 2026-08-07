@@ -107,10 +107,6 @@ export interface RuntimeConfig {
     clearAuth?: boolean;
   }[];
   musicApis: CustomMusicApi[];
-  cyapiBase: string;
-  cyapiKey: string;
-  vmyLrcUrl: string;
-  lrcapiUrl?: string;
   qiniuAccessKey: string;
   qiniuSecretKey: string;
   qiniuBucket: string;
@@ -134,7 +130,7 @@ export interface RuntimeConfig {
   configuredSecrets: Record<string, boolean>;
 }
 
-export type MusicApiPlatform = 'netease' | 'tencent' | 'kugou' | 'qishui' | 'lyrics';
+export type MusicApiPlatform = 'netease' | 'tencent' | 'kugou' | 'qishui';
 export type MusicApiOperation = 'search' | 'song' | 'url' | 'lrc' | 'pic' | 'playlist' | 'search_playlist';
 
 export interface CustomMusicApi {

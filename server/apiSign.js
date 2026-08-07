@@ -61,7 +61,7 @@ const OAUTH_PUBLIC_GET_PATHS = new Set([
 export function isPublicApiPath(req) {
   const path = req.path || '';
   if (path === '/api/health' || path === '/api/app-version' || path === '/api/site-announcement' || path === '/api/site-seo') return true;
-  // 音源能力清单无敏感信息；公开后客户端可在进房前决定是否展示蓝点
+  // 音源能力清单无敏感信息；公开后客户端可在进房前决定是否展示酷狗
   if (path === '/api/music/sources' && req.method === 'GET') return true;
   // 大厅房间列表仅公开摘要，无敏感字段；公开后首屏可与会话并行加载
   if (path === '/api/rooms' && req.method === 'GET') return true;

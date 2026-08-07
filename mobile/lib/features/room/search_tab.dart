@@ -290,7 +290,7 @@ class _SearchTabState extends ConsumerState<SearchTab> {
                           style: const TextStyle(color: OmTheme.textPrimary, fontSize: 14),
                           decoration: InputDecoration(
                             hintText: _mode == 'playlist'
-                                ? '搜索红点/绿点歌单'
+                                ? '搜索网易/QQ歌单'
                                 : _mode == 'radio'
                                     ? '搜索网易电台'
                                     : '搜索歌曲、歌手',
@@ -338,9 +338,9 @@ class _SearchTabState extends ConsumerState<SearchTab> {
               if (_mode == 'song')
                 for (final f in [
                   ('smart', '智能去重'),
-                  ('netease', '红点'),
-                  ('tencent', '绿点'),
-                  if (_searchableSources.contains('kugou')) ('kugou', '蓝点'),
+                  ('netease', '网易'),
+                  ('tencent', 'QQ'),
+                  if (_searchableSources.contains('kugou')) ('kugou', '酷狗'),
                 ])
                   Padding(
                     padding: const EdgeInsets.only(right: 8),
@@ -356,8 +356,8 @@ class _SearchTabState extends ConsumerState<SearchTab> {
               if (_mode == 'playlist')
                 for (final f in const [
                   ('all', '全部'),
-                  ('netease', '红点'),
-                  ('qq', '绿点'),
+                  ('netease', '网易'),
+                  ('qq', 'QQ'),
                 ])
                   Padding(
                     padding: const EdgeInsets.only(right: 8),
@@ -450,9 +450,9 @@ class _SearchTabState extends ConsumerState<SearchTab> {
 }
 
 String _sourceLabel(String source) => switch (source) {
-      'netease' => '红点',
-      'tencent' || 'qq' => '绿点',
-      'kugou' => '蓝点',
+      'netease' => '网易',
+      'tencent' || 'qq' => 'QQ',
+      'kugou' => '酷狗',
       _ => source,
     };
 
@@ -514,7 +514,7 @@ class _PlaylistResultsList extends StatelessWidget {
       return const OmEmptyState(
         icon: Icons.queue_music_rounded,
         title: '搜索歌单',
-        subtitle: '支持红点和绿点歌单导入',
+        subtitle: '支持网易和QQ歌单导入',
       );
     }
     return ListView.builder(
@@ -529,8 +529,8 @@ class _PlaylistResultsList extends StatelessWidget {
         final count = item['trackCount'] ?? item['songCount'] ?? item['count'];
         final subtitle = [
           switch (platform) {
-            'netease' => '红点',
-            'tencent' => '绿点',
+            'netease' => '网易',
+            'tencent' => 'QQ',
             _ => platform,
           },
           if (creator.isNotEmpty) creator,
@@ -755,8 +755,8 @@ class _SongHistorySheetState extends ConsumerState<_SongHistorySheet> {
 }
 
 String _historySourceLabel(String source) => switch (source) {
-      'netease' => '红点',
-      'tencent' || 'qq' => '绿点',
-      'kugou' => '蓝点',
+      'netease' => '网易',
+      'tencent' || 'qq' => 'QQ',
+      'kugou' => '酷狗',
       _ => source,
     };

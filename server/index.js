@@ -17,7 +17,7 @@ import {
   runWithMetingRequestContext,
   registerMetingRoomResolver,
 } from './metingUpstream.js';
-import { fetchCustomMusicApi, hasCustomMusicApi } from './customMusicApi.js';
+import { fetchCustomMusicApi, hasCustomMusicApi, getCustomMusicApiStatus } from './customMusicApi.js';
 import {
   contributeMusicAccount,
   revokeMusicContribution,
@@ -169,9 +169,6 @@ import {
   listPendingPermanentNoticesForUser,
   ackPermanentDecisionNotice,
 } from './permanentApplication.js';
-import {
-  isCyapiConfigured,
-} from './cyapi.js';
 import { importNeteasePlaylist, importQqPlaylist, importQishuiPlaylist, fetchNeteasePlaylistMetas } from './playlistImport.js';
 import { fetchNeteaseHotToplist } from './neteaseToplist.js';
 import { getHotSongs } from './songHotRank.js';
@@ -1512,8 +1509,8 @@ app.get('/api/media-proxy', async (req, res) => {
   }
 });
 
-/** 酷狗音乐搜索：统一走自定义接口 */
-app.get('/api/music/cyapi/kugou/search', async (req, res) => {
+/** 酷狗音乐搜索：走管理后台自定义接口 */
+async function handleKugouSearch(req, res) {
   if (!requireSessionIdentity(req, res)) return;
   if (!limitProxyRequest(proxyLimitKey('kugou', req))) {
     return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
@@ -1538,7 +1535,9 @@ app.get('/api/music/cyapi/kugou/search', async (req, res) => {
     console.error('Kugou search error:', err.message);
     res.status(502).json({ error: '酷狗音乐搜索失败' });
   }
-});
+}
+
+app.get('/api/music/kugou/search', handleKugouSearch);
 
 /** 导入外部歌单（分享链接） */
 app.post('/api/music/playlist/import', async (req, res) => {
@@ -1565,8 +1564,8 @@ app.post('/api/music/playlist/import', async (req, res) => {
   }
 });
 
-/** 酷狗音乐详情（播放链接、歌词）：统一走自定义接口 */
-app.get('/api/music/cyapi/kugou/song', async (req, res) => {
+/** 酷狗音乐详情（播放链接、歌词）：走管理后台自定义接口 */
+async function handleKugouSong(req, res) {
   if (!requireSessionIdentity(req, res)) return;
   if (!limitProxyRequest(proxyLimitKey('kugou-song', req))) {
     return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
@@ -1615,7 +1614,9 @@ app.get('/api/music/cyapi/kugou/song', async (req, res) => {
     console.error('Kugou song error:', err.message);
     res.status(502).json({ error: '酷狗音乐获取失败' });
   }
-});
+}
+
+app.get('/api/music/kugou/song', handleKugouSong);
 
 const IDENTITY_UID_COOKIE = 'openmusic_uid';
 const IDENTITY_TOKEN_COOKIE = 'openmusic_token';
@@ -4662,7 +4663,8 @@ if (!isRedisEnabled()) {
 httpServer.listen(PORT, () => {
   console.log(`🎵 OpenMusic 服务运行在 http://localhost:${PORT}`);
   console.log(`📡 Meting API: ${getMetingUpstreamBases().join(', ') || '未配置'}`);
-  console.log(`🎤 Cyapi (QQ/酷狗): ${isCyapiConfigured() ? '已配置' : '未配置'}`);
+  const customMusic = getCustomMusicApiStatus();
+  console.log(`🔌 自定义音源接口: ${customMusic.configured ? `${customMusic.routes.length} 条路由` : '未配置'}`);
   console.log(`💾 持久化存储: ${isRedisEnabled() ? 'Redis' : '未连接（仅安装向导）'}`);
   startMetingHealthProbe();
 });

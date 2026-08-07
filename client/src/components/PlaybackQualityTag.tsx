@@ -21,7 +21,7 @@ function resolveTier(label: string): QualityTier {
   return 'standard';
 }
 
-/** 按平台短标：SQ 是绿点术语，红点用「无损」 */
+/** 按平台短标：SQ 是QQ术语，网易用「无损」 */
 function shortenLabel(label: string, source?: MusicSource | null): string {
   if (source === 'tencent') {
     const tencentMap: Record<string, string> = {

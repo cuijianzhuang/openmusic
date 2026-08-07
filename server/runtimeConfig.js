@@ -10,7 +10,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = path.join(__dirname, 'runtimeConfig.json');
 const SECRET_FIELDS = new Set([
   'metingApiAuth',
-  'cyapiKey',
   'qiniuAccessKey',
   'qiniuSecretKey',
   'apihzId',
@@ -88,10 +87,6 @@ function envDefaults() {
     metingApiUrl: envText('METING_API_URL'),
     metingApiAuth: envText('METING_API_AUTH'),
     musicApis: [],
-    cyapiBase: envText('CYAPI_BASE', envText('CYAPI_URL').replace(/\/qq_music\.php$/i, '') || 'https://cyapi.top/API'),
-    cyapiKey: envText('CYAPI_KEY'),
-    vmyLrcUrl: envText('VMY_LRC_URL'),
-    lrcapiUrl: envText('LRCAPI_URL'),
     qiniuAccessKey: envText('QINIU_ACCESS_KEY'),
     qiniuSecretKey: envText('QINIU_SECRET_KEY'),
     qiniuBucket: envText('QINIU_BUCKET'),
@@ -287,14 +282,6 @@ function normalize(config) {
     metingApiUrl: String(config.metingApiUrl || '').trim(),
     metingApiAuth: String(config.metingApiAuth || '').trim(),
     musicApis,
-    cyapiBase: trimTrailingSlash(config.cyapiBase) || 'https://cyapi.top/API',
-    cyapiKey: String(config.cyapiKey || '').trim(),
-    vmyLrcUrl: trimTrailingSlash(config.vmyLrcUrl),
-    lrcapiUrl: String(config.lrcapiUrl ?? '')
-      .split(',')
-      .map((s) => trimTrailingSlash(s))
-      .filter(Boolean)
-      .join(','),
     qiniuAccessKey: String(config.qiniuAccessKey || '').trim(),
     qiniuSecretKey: String(config.qiniuSecretKey || '').trim(),
     qiniuBucket: String(config.qiniuBucket || '').trim(),
@@ -482,9 +469,6 @@ export function setRuntimeConfig(raw = {}) {
       allowList: true,
       allowPrivate: true,
     }),
-    validateHttpUrl(normalized.cyapiBase, '迟言 API 地址'),
-    validateHttpUrl(normalized.vmyLrcUrl, '歌词备用地址', { allowEmpty: true }),
-    validateHttpUrl(normalized.lrcapiUrl, 'LrcAPI 歌词地址', { allowEmpty: true, allowList: true }),
     validateHttpUrl(normalized.qiniuDomain, '七牛云域名', { allowEmpty: true }),
     validateHttpUrl(normalized.apihzBaseUrl, '接口盒子地址'),
     validateHttpUrl(normalized.seoCanonicalUrl, 'SEO 规范域名', { allowEmpty: true }),

@@ -1,7 +1,7 @@
 import type { MusicSource } from '../types';
 import type { PlaylistPlatform } from '../api/music/playlist';
 
-/** 用户可见的音源简称（避免第三方品牌名称） */
+/** 用户可见的音源简称 */
 export const SOURCE_SHORT_LABELS: Record<MusicSource, string> = {
   netease: '网易',
   tencent: 'QQ',

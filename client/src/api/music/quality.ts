@@ -105,7 +105,7 @@ const NETEASE_LABEL_MAP = new Map(NETEASE_QUALITY_OPTIONS.map((opt) => [opt.valu
 const TENCENT_LABEL_MAP = new Map(TENCENT_QUALITY_OPTIONS.map((opt) => [opt.value, opt.label]));
 const QISHUI_LABEL_MAP = new Map(QISHUI_QUALITY_OPTIONS.map((opt) => [opt.value, opt.label]));
 
-/** @param source 传入时按红点/绿点各自文案；不传则优先红点再绿点 */
+/** @param source 传入时按网易/QQ各自文案；不传则优先网易再QQ */
 export function getQualityLabel(quality: string | undefined, source?: MusicSource): string {
   if (!quality) return '默认';
   const normalized = QUALITY_ALIASES[quality] || quality;

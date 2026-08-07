@@ -108,7 +108,7 @@ export async function importPlaylist(
 
 export type PlaylistChannelFilter = 'all' | 'netease' | 'qq' | 'qishui';
 
-/** 歌单搜索，支持按渠道筛选（红点 / 绿点） */
+/** 歌单搜索，支持按渠道筛选（网易 / QQ） */
 export async function searchPlaylists(
   keyword: string,
   page = 1,
@@ -150,7 +150,7 @@ export async function searchPlaylists(
   };
 }
 
-/** 仅搜索红点歌单（推荐面板等场景） */
+/** 仅搜索网易歌单（推荐面板等场景） */
 export async function searchNeteasePlaylists(
   keyword: string,
   page = 1,
@@ -172,7 +172,7 @@ export async function searchNeteasePlaylists(
   };
 }
 
-/** 仅搜索绿点歌单（推荐面板等场景） */
+/** 仅搜索QQ歌单（推荐面板等场景） */
 export async function searchTencentPlaylists(
   keyword: string,
   page = 1,

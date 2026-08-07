@@ -161,7 +161,7 @@ pm2 restart openmusic
 | 问题 | 处理 |
 |------|------|
 | 无法加入房间 | 检查 Nginx `/socket.io/` WebSocket 配置 |
-| 蓝点播放卡顿 | `/api/media-proxy` 加 `proxy_buffering off` |
-| 搜不到歌 / 无法播放 | 检查 Meting / 迟言配置 |
+| 媒体播放卡顿 | `/api/media-proxy` 加 `proxy_buffering off` |
+| 搜不到歌 / 无法播放 | 检查 Meting 配置与 Token |
 | 502 | `pm2 list` 或 `docker compose ps` 看服务是否在跑 |
 | 端口冲突 | 改 `.env` 的 `PORT` 和 Nginx 反代端口 |

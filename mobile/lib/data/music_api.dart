@@ -64,7 +64,7 @@ class MusicApi {
   /// Platforms that currently support search (`/api/music/sources`).
   static Future<List<String>> searchableSourceIds() async {
     final sources = await getAvailableSources();
-    // Only expose platforms the server marked searchable (蓝点 absent unless configured).
+    // Only expose platforms the server marked searchable (酷狗 absent unless configured).
     return sources
         .where((s) => s.supportsSearch)
         .map((s) => s.id)
@@ -90,8 +90,8 @@ class MusicApi {
   }
 
   static const _fallbackSources = [
-    MusicSourceMeta(id: 'netease', name: '红点', supportsSearch: true),
-    MusicSourceMeta(id: 'tencent', name: '绿点', supportsSearch: true),
+    MusicSourceMeta(id: 'netease', name: '网易', supportsSearch: true),
+    MusicSourceMeta(id: 'tencent', name: 'QQ', supportsSearch: true),
   ];
 
   /// Cover URL aligned with web `getCoverUrl` / meting `type=pic` fallback.
@@ -113,14 +113,14 @@ class MusicApi {
     if (source == 'kugou') {
       try {
         final res = await OmHttp.get<dynamic>(
-          '/api/music/cyapi/kugou/search',
+          '/api/music/kugou/search',
           query: {'q': keyword.trim(), 'num': '30'},
         );
         _throwIfApiError(res);
         final list = _parseSearchList(res.data, source);
         if (list.isNotEmpty) return list;
       } catch (e) {
-        debugPrint('kugou cyapi search failed, try meting: $e');
+        debugPrint('kugou search failed, try meting: $e');
       }
       // Fallback: some deployments expose kugou via meting/custom upstream.
       final res = await OmHttp.get<dynamic>(
@@ -357,8 +357,8 @@ class MusicApi {
     }
     if (source == 'kugou') {
       final res = await OmHttp.get<Map<String, dynamic>>(
-        '/api/music/cyapi/kugou/url',
-        query: {'hash': song.id, if (resolvedQuality != null) 'quality': resolvedQuality},
+        '/api/music/kugou/song',
+        query: {'id': song.id},
       );
       final url = '${res.data?['url'] ?? ''}';
       if (url.isEmpty) throw StateError('无法获取播放地址');
@@ -393,8 +393,8 @@ class MusicApi {
       final source = song.source;
       if (source == 'kugou') {
         final res = await OmHttp.get<Map<String, dynamic>>(
-          '/api/music/cyapi/kugou/lyric',
-          query: {'hash': song.id},
+          '/api/music/kugou/song',
+          query: {'id': song.id},
         );
         return res.data?['lrc'] as String? ?? res.data?['lyric'] as String?;
       }

@@ -479,7 +479,7 @@ function SetupPage() {
               </Form.Item>
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                 多个上游用英文逗号分隔自动负载均衡；留空可稍后在管理后台「运行配置」里填写。
-                迟言 / 七牛 / 接口盒子等可选服务也在后台配置。
+                七牛 / 接口盒子等可选服务也在后台配置。
               </Typography.Text>
             </Form>
           </Card>

@@ -181,7 +181,7 @@ function dedupExact(songs: SearchResult[]): SearchResult[] {
 
 /**
  * 跨平台去重：歌名 + 歌手一致视为同一首
- * 保留优先级：红点 > 绿点 > 蓝点（先丢蓝点，再丢绿点）
+ * 保留优先级：网易 > QQ > 酷狗（先丢酷狗，再丢QQ）
  */
 function dedupeCrossSource(songs: SearchResult[]): SearchResult[] {
   const best = new Map<string, SearchResult>();
@@ -210,7 +210,7 @@ function dedupeCrossSource(songs: SearchResult[]): SearchResult[] {
 }
 
 export interface InterleaveOptions {
-  /** 跨平台按歌名+歌手去重，优先级：红点 > 绿点 > 蓝点 */
+  /** 跨平台按歌名+歌手去重，优先级：网易 > QQ > 酷狗 */
   dedupeCrossSource?: boolean;
   /** 仅保留指定平台结果 */
   sourceOnly?: MusicSource;

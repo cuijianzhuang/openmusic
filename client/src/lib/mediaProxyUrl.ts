@@ -84,7 +84,7 @@ export function shouldProxyInsecurePlaybackUrl(url: string): boolean {
 /**
  * 播放地址是否应走同源代理：
  * - 沉浸/Web Audio 频谱模式
- * - HTTPS 站点上的 HTTP 音频（如蓝点直链）
+ * - HTTPS 站点上的 HTTP 音频（如酷狗直链）
  */
 export function shouldProxyPlaybackUrl(url: string, visualModeProxy = false): boolean {
   return visualModeProxy || shouldProxyInsecurePlaybackUrl(url);

@@ -44,7 +44,7 @@ class _SettingsBody extends ConsumerWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const _SheetLabel('红点音质'),
+            const _SheetLabel('网易音质'),
             const SizedBox(height: 8),
             Wrap(
               spacing: 8,
@@ -64,7 +64,7 @@ class _SettingsBody extends ConsumerWidget {
               ],
             ),
             const SizedBox(height: 18),
-            const _SheetLabel('绿点音质'),
+            const _SheetLabel('QQ音质'),
             const SizedBox(height: 8),
             Wrap(
               spacing: 8,

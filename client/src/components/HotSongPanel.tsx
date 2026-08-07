@@ -286,7 +286,7 @@ export default memo(function HotSongPanel({
 
     void load();
 
-    // 平台热榜定时刷新；红点按日缓存，无需轮询
+    // 平台热榜定时刷新；网易按日缓存，无需轮询
     let timer: number | undefined;
     if (source === 'platform') {
       timer = window.setInterval(() => {
