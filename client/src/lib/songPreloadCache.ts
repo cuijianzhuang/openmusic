@@ -1,4 +1,5 @@
 import { getAvailableSources, getSongUrlInfo, getTrackKey, searchSongs, unwrapQishuiAudioUrl } from '../api/music';
+import { prefetchQishuiLocalPlayback } from './qishuiLocalPlayback';
 import { isHttpsPageContext } from './mediaProxyUrl';
 import { shouldProxySongPlaybackUrl } from './roomVisualPreset';
 import { stripApiSignParams } from './signedApiUrl';
@@ -810,7 +811,11 @@ export async function resolveSongUrl(
 /** 加入房间后立即预取当前歌曲 URL，缩短刷新后的加载等待 */
 export function prefetchCurrentSong(song: QueueItem | null | undefined) {
   if (!song) return;
-  void fetchSongUrl(song, { allowQualityDowngrade: false });
+  void fetchSongUrl(song, { allowQualityDowngrade: false }).then((result) => {
+    if (result.ok && songSourceOf(song) === 'qishui') {
+      prefetchQishuiLocalPlayback(result.url);
+    }
+  });
 }
 
 type UrlPrefetchSong = Pick<QueueItem, 'queueId' | 'id' | 'source' | 'url'>;
@@ -868,8 +873,12 @@ export function prefetchQueueSongs(
   pruneSourceErrors(retain);
 
   for (const song of targets) {
-    // 这里只预取播放 URL。汽水完整下载和解密只允许在实际播放的客户端触发。
-    void fetchSongUrl(song, { allowQualityDowngrade: false });
+    // 预取播放 URL；汽水额外提前拉 CDN 并本地解密，切到该曲时可直接用 blob 缓存
+    void fetchSongUrl(song, { allowQualityDowngrade: false }).then((result) => {
+      if (result.ok && songSourceOf(song) === 'qishui') {
+        prefetchQishuiLocalPlayback(result.url);
+      }
+    });
   }
 }
 

@@ -1066,10 +1066,12 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     const gen = ++loadGeneration.current;
     const queueId = current.queueId;
 
+    // 同步占锁：避免 effect 连跑两次时都通过「无锁」检查，导致同曲两次 qishui-source（同 t，第一次被 abort）
+    loadLockRef.current = { queueId, gen };
+    qishuiLocalAbortRef.current?.abort();
+    qishuiLocalAbortRef.current = null;
+
     const loadTrack = async () => {
-      loadLockRef.current = { queueId, gen };
-      qishuiLocalAbortRef.current?.abort();
-      qishuiLocalAbortRef.current = null;
       tempRetries.current = 0;
       lowestFallbackAttempted.current = false;
       qishuiProxyAttempted.current = null;
@@ -1105,16 +1107,22 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
           ]).finally(() => {
             if (timeoutId) window.clearTimeout(timeoutId);
           });
+          if (gen !== loadGeneration.current) return;
           url = (await refreshSignedApiUrl(resolved.url)) || resolved.url;
+          if (gen !== loadGeneration.current) return;
           playbackUrl = url;
           // 汽水只允许在听众浏览器本地取 CDN 并解密，服务端不再提供整首音频回退。
           if (current.source === 'qishui') {
             const localAbort = new AbortController();
             qishuiLocalAbortRef.current = localAbort;
-            const localUrl = await resolveQishuiLocalPlaybackUrl(url, localAbort.signal);
-            if (gen !== loadGeneration.current) return;
-            if (!localUrl) throw new Error('汽水解密失败，请刷新重试');
-            playbackUrl = localUrl;
+            const localResult = await resolveQishuiLocalPlaybackUrl(url, localAbort.signal);
+            if (gen !== loadGeneration.current || localAbort.signal.aborted || localResult.status === 'aborted') {
+              return;
+            }
+            if (localResult.status !== 'ok') {
+              throw new Error('汽水解密失败，请刷新重试');
+            }
+            playbackUrl = localResult.url;
           }
           qualityLabel = resolved.qualityLabel;
           crossSource = Boolean(resolved.crossSource)
