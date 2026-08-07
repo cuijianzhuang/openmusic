@@ -868,7 +868,7 @@ export function prefetchQueueSongs(
   pruneSourceErrors(retain);
 
   for (const song of targets) {
-    // 这里只预取播放 URL。汽水播放接口需要完整下载并解密 MP4，不能在预取阶段提前触发整首音频任务。
+    // 这里只预取播放 URL。汽水完整下载和解密只允许在实际播放的客户端触发。
     void fetchSongUrl(song, { allowQualityDowngrade: false });
   }
 }

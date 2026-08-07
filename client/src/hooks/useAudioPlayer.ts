@@ -106,7 +106,7 @@ const RESOLVE_URL_TIMEOUT_MS = 15000;
 const LEADER_LOAD_STUCK_SKIP_MS = 20000;
 /** 主控长时间无法把 audio 绑到当前曲时强制切歌（无 duration 时服务端也不会自动推进） */
 const LEADER_BIND_MISMATCH_SKIP_MS = 25000;
-/** 汽水加密流需由 Meting 完整下载并解密后才能响应，不能按普通直链时限误判。 */
+/** 汽水客户端解密可能受网络和设备性能影响，不能按普通直链时限误判。 */
 const QISHUI_LEADER_LOAD_STUCK_SKIP_MS = 100000;
 const QISHUI_LEADER_BIND_MISMATCH_SKIP_MS = 105000;
 /** 源异常切歌提示节流，避免 watchdog 反复弹 toast */
@@ -1107,14 +1107,14 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
           });
           url = (await refreshSignedApiUrl(resolved.url)) || resolved.url;
           playbackUrl = url;
-          // 汽水当前曲目优先在听众浏览器本地取 CDN 并解密，绕开海外服务器的整首音频中转。
-          // 该尝试有硬超时，且切歌时会中止；失败后继续使用服务端解密地址。
+          // 汽水只允许在听众浏览器本地取 CDN 并解密，服务端不再提供整首音频回退。
           if (current.source === 'qishui') {
             const localAbort = new AbortController();
             qishuiLocalAbortRef.current = localAbort;
             const localUrl = await resolveQishuiLocalPlaybackUrl(url, localAbort.signal);
             if (gen !== loadGeneration.current) return;
-            if (localUrl) playbackUrl = localUrl;
+            if (!localUrl) throw new Error('汽水解密失败，请刷新重试');
+            playbackUrl = localUrl;
           }
           qualityLabel = resolved.qualityLabel;
           crossSource = Boolean(resolved.crossSource)
@@ -1136,6 +1136,10 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
 
           const isLeader = useRoomStore.getState().isPlaybackLeader;
           const errMessage = err instanceof Error ? err.message : '';
+          if (errMessage === '汽水解密失败，请刷新重试') {
+            notifyPlaybackToast(errMessage, 'error');
+            return;
+          }
           const timedOut = /取链超时/.test(errMessage);
           const sourceUnavailable = err instanceof SourceUnavailableError
             || isSourceUnavailableMessage(errMessage)

@@ -104,6 +104,6 @@ async function resolveLocalPlaybackUrl(wrappedUrl: string, signal?: AbortSignal)
 }
 
 export async function resolveQishuiLocalPlaybackUrl(url: string, signal?: AbortSignal): Promise<string | null> {
-  if (!url || !/\/api\/qishui-audio(?:\?|$)/i.test(url)) return null;
+  if (!url || !/\/api\/(?:qishui-source|qishui-audio)(?:\?|$)/i.test(url)) return null;
   return resolveLocalPlaybackUrl(url, signal);
 }

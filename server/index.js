@@ -7,7 +7,6 @@ import {
 } from './mediaProxy.js';
 import { formatMetingFetchError } from './metingFetch.js';
 import { fetchMeting } from './metingFetch.js';
-import { isQishuiPlayUrl, loadQishuiAudioCached } from './qishuiAudio.js';
 import {
   fetchMetingApi,
   isMetingApiHostname,
@@ -444,11 +443,9 @@ app.use((req, res, next) => {
 
   // 仅当管理员显式允许时，HTTP 才降级为只校验会话；HTTPS 始终校验请求签名。
   const requireRequestSign = req.secure || !ALLOW_INSECURE_HTTP_API;
-  // 汽水解密播放地址由服务端随机句柄保护，音频元素的 Range 请求不保证携带
-  // X-OM-* / om_* 签名；这里仍保留 HttpOnly 会话和句柄校验，不放宽其他 API。
-  const isQishuiAudioRequest = req.path === '/api/qishui-audio' && req.method === 'GET';
+  // 汽水客户端解密取链不要求音频 Range 请求携带 API 签名；仍保留会话和句柄校验。
   const isQishuiSourceRequest = req.path === '/api/qishui-source' && req.method === 'GET';
-  if (isApiSignRequired() && requireRequestSign && !isQishuiAudioRequest && !isQishuiSourceRequest) {
+  if (isApiSignRequired() && requireRequestSign && !isQishuiSourceRequest) {
     const signKey = deriveApiSignKey(CLIENT_ID_SECRET, identity.userId, identity.iat);
     const result = verifyApiSign(req, signKey, identity.userId);
     if (!result.ok) {
@@ -817,6 +814,15 @@ function requestPublicOrigin(req) {
 const QISHUI_SOURCE_TOKEN_TTL_MS = 10 * 60 * 1000;
 const qishuiSourceTokens = new Map();
 
+function isQishuiPlayUrl(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+    return url.pathname.endsWith('/audio/qishui') && Boolean(url.searchParams.get('t'));
+  } catch {
+    return false;
+  }
+}
+
 function pruneQishuiSourceTokens() {
   const now = Date.now();
   for (const [token, entry] of qishuiSourceTokens) {
@@ -853,7 +859,7 @@ function resolveQishuiSourceToken(token) {
 async function localizeQishuiPayload(payload, metingQuery, req) {
   if (metingQuery?.server !== 'qishui' || metingQuery?.type !== 'url' || !isQishuiPlayUrl(payload?.url)) return payload;
   const token = createQishuiSourceToken(payload.url);
-  const path = `/api/qishui-audio?t=${encodeURIComponent(token)}`;
+  const path = `/api/qishui-source?t=${encodeURIComponent(token)}`;
   const origin = requestPublicOrigin(req);
   return { ...payload, url: origin ? `${origin}${path}` : path };
 }
@@ -1391,29 +1397,7 @@ app.get('/api/meting', async (req, res) => {
   }
 });
 
-/** HTTPS 站点下代理 http 音频/封面，避免浏览器混合内容警告 */
-function isTrustedMetingQishuiAudioUrl(rawUrl) {
-  let target;
-  try {
-    target = new URL(rawUrl);
-  } catch {
-    return false;
-  }
-  if (target.pathname !== '/audio/qishui') return false;
-  if (!target.searchParams.get('auth') && !target.searchParams.get('t')) return false;
-
-  if (!isConfiguredMetingUrl(rawUrl)) return false;
-
-  try {
-    const upstreamMedia = new URL(target.searchParams.get('url') || '');
-    return ['http:', 'https:'].includes(upstreamMedia.protocol)
-      && isAllowedMediaHostname(upstreamMedia.hostname);
-  } catch {
-    return false;
-  }
-}
-
-/** OpenMusic 服务端解密汽水原始音频，浏览器只接触解密后的本地地址。 */
+/** 仅从 Meting 获取汽水 CDN 地址和本次音频密钥，解密始终在客户端完成。 */
 async function resolveQishuiPlaybackSource(rawUrl, signal) {
   const sourceEndpoint = new URL(rawUrl);
   sourceEndpoint.searchParams.set('mode', 'source');
@@ -1436,39 +1420,6 @@ async function resolveQishuiPlaybackSource(rawUrl, signal) {
   return { sourceUrl, auth };
 }
 
-async function fetchQishuiSourceDirect(rawUrl, signal) {
-  const { sourceUrl, auth } = await resolveQishuiPlaybackSource(rawUrl, signal);
-  const parsedSource = new URL(sourceUrl);
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 120_000);
-  try {
-    signal?.addEventListener('abort', () => controller.abort(), { once: true });
-    const response = await fetch(parsedSource, {
-      signal: controller.signal,
-      headers: {
-        Accept: 'audio/mp4,audio/*;q=0.9,*/*;q=0.8',
-        'Accept-Encoding': 'identity',
-        Referer: 'https://www.qishui.com/',
-        'User-Agent': 'LunaPC/3.0.0(290101097)',
-      },
-    });
-    return {
-      ok: response.ok,
-      status: response.status,
-      body: response.body,
-      headers: {
-        get: (name) => String(name).toLowerCase() === 'x-qishui-auth'
-          ? auth
-          : response.headers.get(name),
-      },
-      arrayBuffer: () => response.arrayBuffer(),
-    };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 /** 浏览器本地解密模式：只返回短时有效的汽水 CDN 地址和本次音频密钥。 */
 app.get('/api/qishui-source', async (req, res) => {
   const identity = requireSessionIdentity(req, res);
@@ -1487,67 +1438,6 @@ app.get('/api/qishui-source', async (req, res) => {
   } catch (error) {
     console.error('OpenMusic 汽水本地解密取链失败:', error?.message || error);
     return res.status(502).json({ error: '汽水本地解密取链失败' });
-  }
-});
-
-app.get('/api/qishui-audio', async (req, res) => {
-  const identity = requireSessionIdentity(req, res);
-  if (!identity) return;
-
-  const token = String(req.query.t || '').trim();
-  const rawUrl = token
-    ? resolveQishuiSourceToken(token)
-    : String(req.query.url || '').trim();
-  if (!rawUrl) return res.status(400).json({ error: '汽水播放会话无效或已过期' });
-  if (!isQishuiPlayUrl(rawUrl) || !isConfiguredMetingUrl(rawUrl)) {
-    return res.status(400).json({ error: '无效的汽水原始音频地址' });
-  }
-
-  try {
-    const requestAbort = new AbortController();
-    let responseClosed = false;
-    const abortRequest = () => {
-      if (!responseClosed) requestAbort.abort();
-    };
-    req.on('aborted', abortRequest);
-    res.on('close', abortRequest);
-    const decrypted = await loadQishuiAudioCached(
-      rawUrl,
-      (signal) => fetchQishuiSourceDirect(rawUrl, signal),
-      requestAbort.signal,
-    );
-    const total = decrypted.buffer.length;
-    const match = /^bytes=(\d*)-(\d*)$/i.exec(String(req.headers.range || ''));
-    let start = 0;
-    let end = total - 1;
-    let status = 200;
-    if (match) {
-      start = match[1] ? Number(match[1]) : 0;
-      end = match[2] ? Number(match[2]) : total - 1;
-      if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || start > end || start >= total) {
-        return res.status(416).set('Content-Range', `bytes */${total}`).end();
-      }
-      end = Math.min(end, total - 1);
-      status = 206;
-    }
-    res.set({
-      'Content-Type': decrypted.contentType,
-      'Accept-Ranges': 'bytes',
-      'Cache-Control': 'no-store, no-cache, must-revalidate, private',
-      'X-Accel-Buffering': 'no',
-      'X-OpenMusic-Qishui-Cache': decrypted.cacheHit ? 'memory-hit' : 'miss',
-      'Content-Length': String(end - start + 1),
-    });
-    if (status === 206) res.set('Content-Range', `bytes ${start}-${end}/${total}`);
-    responseClosed = true;
-    return res.status(status).send(decrypted.buffer.subarray(start, end + 1));
-  } catch (error) {
-    if (error?.name === 'AbortError') return;
-    console.error('OpenMusic 汽水解密失败:', error?.message || error);
-    if (error?.code === 'QISHUI_BUSY') {
-      return res.status(429).json({ error: '汽水解密请求过多，请稍后重试' });
-    }
-    return res.status(502).json({ error: '汽水音频解密失败' });
   }
 });
 
