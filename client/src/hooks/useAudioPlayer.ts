@@ -231,6 +231,8 @@ interface AudioRuntime {
   qishuiProxyAttempted: MutableRefObject<string | null>;
   successRecordedTrackKey: MutableRefObject<string | null>;
   stallRetryTimer: MutableRefObject<number | null>;
+  /** 首次解密较慢时，metadata 到达后补一次播放和进度对齐 */
+  readyRecoveryTimer: MutableRefObject<number | null>;
   /** 主控本机失败：仅本地重试，不触发全屋切歌 */
   scheduleLocalRecovery: (song: QueueItem, reason: string) => void;
   finishSong: (queueId: string) => void;
@@ -240,6 +242,7 @@ interface AudioRuntime {
     audio: HTMLAudioElement,
     liveRoom: NonNullable<ReturnType<typeof useRoomStore.getState>['room']>,
   ) => void;
+  recoverReadyAudio: (audio: HTMLAudioElement) => void;
 }
 
 let activeAudioRuntime: AudioRuntime | null = null;
@@ -346,6 +349,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
   const qishuiProxyAttempted = useRef<string | null>(null);
   const successRecordedTrackKey = useRef<string | null>(null);
   const stallRetryTimer = useRef<number | null>(null);
+  const readyRecoveryTimer = useRef<number | null>(null);
   const lastSkipAt = useRef(0);
   const wasLeaderRef = useRef(isPlaybackLeader);
   const resolveFailCountRef = useRef<{ queueId: string; count: number } | null>(null);
@@ -474,6 +478,21 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
       handleSyncResult(result, audio, liveRoom, song);
     });
   }, [controller, tvMode, shouldSkipForEndedTrackKey, handleSyncResult]);
+
+  const recoverReadyAudio = useCallback((audio: HTMLAudioElement) => {
+    if (isSongPreviewSuppressingRoom() || skippingRef.current) return;
+    const liveRoom = useRoomStore.getState().room;
+    if (!liveRoom?.current || !liveRoom.isPlaying) return;
+    if (!isAudioBoundToQueue(audio, liveRoom.current.queueId)) return;
+    if (audio.readyState < HTMLMediaElement.HAVE_METADATA) return;
+
+    const playbackState = getClientPlaybackState();
+    const targetTime = playbackState
+      ? getPlaybackTime(playbackState)
+      : Math.max(0, Number(liveRoom.currentTime) || 0);
+    // applySync 会在 audio 仍暂停时先 play，再执行强制进度对齐。
+    applySync({ forceTime: targetTime });
+  }, [applySync]);
 
   const applyVisibilitySync = useCallback(() => {
     controller.enqueue(async () => {
@@ -641,10 +660,12 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
       qishuiProxyAttempted,
       successRecordedTrackKey,
       stallRetryTimer,
+      readyRecoveryTimer,
       scheduleLocalRecovery,
       finishSong,
       playAudio,
       applyPlaybackResult,
+      recoverReadyAudio,
     };
 
     if (!audioListenersAttached || audioListenersTarget !== audio) {
@@ -889,6 +910,12 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
         if (!live || !isAudioBoundToQueue(audio, live.queueId)) return;
         syncMediaDuration(audio, live, trackKeyOf(live));
         tryFlushPendingSnapshot();
+        if (runtime?.readyRecoveryTimer.current == null) {
+          runtime.readyRecoveryTimer.current = window.setTimeout(() => {
+            runtime.readyRecoveryTimer.current = null;
+            runtime.recoverReadyAudio(audio);
+          }, 0);
+        }
       });
 
       audio.addEventListener('loadeddata', () => {
@@ -898,6 +925,12 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
         if (!live || !isAudioBoundToQueue(audio, live.queueId)) return;
         syncMediaDuration(audio, live, trackKeyOf(live));
         tryFlushPendingSnapshot();
+        if (runtime?.readyRecoveryTimer.current == null) {
+          runtime.readyRecoveryTimer.current = window.setTimeout(() => {
+            runtime.readyRecoveryTimer.current = null;
+            runtime.recoverReadyAudio(audio);
+          }, 0);
+        }
       });
 
       audio.addEventListener('durationchange', () => {
@@ -910,7 +943,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     }
 
     return audio;
-  }, [controller, scheduleLocalRecovery, finishSong, playAudio, applyPlaybackResult]);
+  }, [controller, scheduleLocalRecovery, finishSong, playAudio, applyPlaybackResult, recoverReadyAudio]);
 
   const retryPlayback = useCallback(async (fromUserGesture = false) => {
     const liveRoom = useRoomStore.getState().room;
@@ -1697,6 +1730,10 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     return () => {
       loadGeneration.current += 1;
       loadLockRef.current = EMPTY_LOAD_LOCK;
+      if (readyRecoveryTimer.current) {
+        window.clearTimeout(readyRecoveryTimer.current);
+        readyRecoveryTimer.current = null;
+      }
       if (activeAudioRuntime?.audioRef === audioRef) {
         activeAudioRuntime = null;
       }

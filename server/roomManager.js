@@ -857,7 +857,9 @@ export async function initRooms() {
       for (const room of rooms.values()) {
         // 无人且已进入销毁倒计时的空房不再刷写，降低与销毁的竞态
         if (room.users.size === 0 && room.destroyTimer) continue;
-        if (room.isPlaying || room.users.size > 0 || room.queue.length > 0) {
+        // 在线但没有播放/队列变化的房间无需每 30 秒重复写 Redis；状态变更路径
+        // 会主动调用 persistRoom，避免中午在线房间多时产生无意义写 IO。
+        if (room.isPlaying || room.queue.length > 0) {
           persistRoom(room);
         }
       }

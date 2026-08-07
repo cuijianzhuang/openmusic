@@ -17,13 +17,59 @@ const DEFAULT_WEIGHT = 100;
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_FAILURE_THRESHOLD = 3;
 const DEFAULT_COOLDOWN_MS = 60_000;
-const JSON_PATH_PATTERN = /^(?:[A-Za-z_$][\w$]*|\[\d+\])(?:\.[A-Za-z_$][\w$]*|\[\d+\])*$/;
+const JSON_PATH_PATTERN = /^(?:\$(?:\.[A-Za-z_$][\w$]*|\[\d+\])*|(?:[A-Za-z_$][\w$]*|\[\d+\])(?:\.[A-Za-z_$][\w$]*|\[\d+\])*)$/;
 const endpointStates = new Map();
 const endpointFingerprints = new Map();
 const roundRobinCursors = new Map();
 const responseCache = new Map();
 const RESPONSE_CACHE_TTL_MS = 10_000;
+const RESPONSE_CACHE_MAX_ENTRIES = 2048;
+const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 let configSignature = '';
+
+function pruneResponseCache(now = Date.now()) {
+  for (const [key, entry] of responseCache) {
+    if (entry.expires <= now) responseCache.delete(key);
+  }
+  while (responseCache.size > RESPONSE_CACHE_MAX_ENTRIES) {
+    const oldest = responseCache.keys().next().value;
+    if (!oldest) break;
+    responseCache.delete(oldest);
+  }
+}
+
+async function readResponseTextLimited(response, maxBytes) {
+  const reader = response.body?.getReader?.();
+  if (!reader) {
+    const text = await response.text();
+    if (Buffer.byteLength(text, 'utf8') > maxBytes) {
+      throw new Error(`自定义音乐接口响应过大（>${maxBytes} bytes）`);
+    }
+    return text;
+  }
+
+  const chunks = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = Buffer.from(value);
+      total += chunk.length;
+      if (total > maxBytes) {
+        await reader.cancel();
+        throw new Error(`自定义音乐接口响应过大（>${maxBytes} bytes）`);
+      }
+      chunks.push(chunk);
+    }
+  } finally {
+    reader.releaseLock?.();
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+const responseCacheCleanupTimer = setInterval(() => pruneResponseCache(), RESPONSE_CACHE_TTL_MS);
+responseCacheCleanupTimer.unref?.();
 
 function normalizeInteger(value, fallback, min, max, label) {
   const number = value === undefined || value === null || value === '' ? fallback : Number(value);
@@ -36,6 +82,7 @@ function normalizeInteger(value, fallback, min, max, label) {
 export function parseJsonPath(path) {
   const value = String(path || '').trim();
   if (!value || !JSON_PATH_PATTERN.test(value)) return null;
+  if (value === '$') return ['$'];
   const tokens = [];
   for (const match of value.matchAll(/([A-Za-z_$][\w$]*)|\[(\d+)\]/g)) {
     tokens.push(match[1] ?? Number(match[2]));
@@ -48,6 +95,7 @@ export function getJsonPath(value, path) {
   if (!tokens) return undefined;
   let current = value;
   for (const token of tokens) {
+    if (token === '$') continue;
     if (current === null || current === undefined) return undefined;
     current = current[token];
   }
@@ -221,6 +269,7 @@ export function normalizeMusicApis(raw) {
 function syncEndpointStates(apis) {
   const signature = JSON.stringify(apis);
   if (signature === configSignature) return;
+  if (configSignature) responseCache.clear();
   const validIds = new Set(apis.map((endpoint) => endpoint.id));
   for (const key of endpointStates.keys()) {
     const endpointId = key.split('\n', 1)[0];
@@ -388,24 +437,35 @@ async function requestEndpoint(endpoint, query, timeoutMs, fetchImpl, preview = 
   const cacheKey = JSON.stringify([
     endpoint.id,
     query?.server || '',
+    query?.type || '',
     url.toString(),
     query?.id || '',
     query?.keyword || '',
     query?.quality || '',
     query?.limit || '',
+    query?.artist || '',
+    query?.album || '',
+    query?.n || '',
   ]);
   const canShareResponse = endpoint.operations.length > 1;
   const cached = canShareResponse ? responseCache.get(cacheKey) : null;
   if (cached && cached.expires > Date.now()) {
     if (preview) return { payload: cached.payload, result: null };
+    const cachedResult = mapMusicApiResponse(
+      cached.payload,
+      endpoint,
+      String(query?.type || ''),
+      String(query?.server || ''),
+    );
+    if (!hasCriticalResult(cachedResult)) {
+      responseCache.delete(cacheKey);
+      const error = new Error('自定义音乐接口返回空关键结果');
+      error.countsForCircuit = false;
+      throw error;
+    }
     return {
       payload: cached.payload,
-      result: mapMusicApiResponse(
-        cached.payload,
-        endpoint,
-        String(query?.type || ''),
-        String(query?.server || ''),
-      ),
+      result: cachedResult,
     };
   }
 
@@ -417,6 +477,7 @@ async function requestEndpoint(endpoint, query, timeoutMs, fetchImpl, preview = 
       headers,
       body: endpoint.method === 'POST' ? renderTemplate(endpoint.body, variables) : undefined,
       signal: controller.signal,
+      redirect: 'error',
     });
     if (response.status >= 500) throw new Error(`自定义音乐接口返回 ${response.status}`);
     if (!response.ok) {
@@ -425,7 +486,11 @@ async function requestEndpoint(endpoint, query, timeoutMs, fetchImpl, preview = 
       error.countsForCircuit = response.status !== 404;
       throw error;
     }
-    const text = await response.text();
+    const contentLength = Number(response.headers.get('content-length') || 0);
+    if (Number.isFinite(contentLength) && contentLength > MAX_RESPONSE_BYTES) {
+      throw new Error(`自定义音乐接口响应过大（>${MAX_RESPONSE_BYTES} bytes）`);
+    }
+    const text = await readResponseTextLimited(response, MAX_RESPONSE_BYTES);
     let payload = text;
     try {
       payload = JSON.parse(text);
@@ -434,10 +499,13 @@ async function requestEndpoint(endpoint, query, timeoutMs, fetchImpl, preview = 
         throw new Error('自定义音乐接口未返回 JSON');
       }
     }
-    if (canShareResponse) {
-      responseCache.set(cacheKey, { payload, expires: Date.now() + RESPONSE_CACHE_TTL_MS });
+    if (preview) {
+      if (canShareResponse) {
+        responseCache.set(cacheKey, { payload, expires: Date.now() + RESPONSE_CACHE_TTL_MS });
+        pruneResponseCache();
+      }
+      return { payload, result: null };
     }
-    if (preview) return { payload, result: null };
     const result = mapMusicApiResponse(
       payload,
       endpoint,
@@ -448,6 +516,10 @@ async function requestEndpoint(endpoint, query, timeoutMs, fetchImpl, preview = 
       const error = new Error('自定义音乐接口返回空关键结果');
       error.countsForCircuit = false;
       throw error;
+    }
+    if (canShareResponse) {
+      responseCache.set(cacheKey, { payload, expires: Date.now() + RESPONSE_CACHE_TTL_MS });
+      pruneResponseCache();
     }
     return { payload, result };
   } finally {
@@ -474,6 +546,7 @@ function listJsonPaths(value, prefix = '', output = [], depth = 0) {
     });
     return output;
   }
+  if (!prefix && ['string', 'number', 'boolean'].includes(typeof value)) output.push('$');
   if (prefix) output.push(prefix);
   return output;
 }

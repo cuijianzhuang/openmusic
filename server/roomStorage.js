@@ -5,6 +5,8 @@ const roomKey = (id) => `openmusic:room:${id}`;
 
 let redisClient = null;
 let enabled = false;
+const pendingRoomWrites = new Map();
+let roomWriteFlushScheduled = false;
 
 function parseRedisDb(value) {
   const raw = String(value ?? '').trim();
@@ -141,8 +143,22 @@ export async function saveRoomToStorage(roomSnapshot) {
 export function queueSaveRoomToStorage(roomSnapshot) {
   if (!enabled || !redisClient) return;
 
+  const id = String(roomSnapshot?.id || '').trim().toUpperCase();
+  if (!id) return;
+  // 同一事件循环内只保留每个房间最新快照，避免播放/队列事件叠加 Redis 写入。
+  pendingRoomWrites.set(id, { ...roomSnapshot, id });
+  if (roomWriteFlushScheduled) return;
+  scheduleRoomWriteFlush();
+}
+
+function scheduleRoomWriteFlush() {
+  roomWriteFlushScheduled = true;
   setImmediate(() => {
-    void saveRoomToStorage(roomSnapshot);
+    roomWriteFlushScheduled = false;
+    const snapshots = [...pendingRoomWrites.values()];
+    pendingRoomWrites.clear();
+    for (const snapshot of snapshots) void saveRoomToStorage(snapshot);
+    if (pendingRoomWrites.size > 0) scheduleRoomWriteFlush();
   });
 }
 

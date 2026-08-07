@@ -1413,10 +1413,10 @@ function isTrustedMetingQishuiAudioUrl(rawUrl) {
 }
 
 /** OpenMusic 服务端解密汽水原始音频，浏览器只接触解密后的本地地址。 */
-async function fetchQishuiSourceDirect(rawUrl) {
+async function fetchQishuiSourceDirect(rawUrl, signal) {
   const sourceEndpoint = new URL(rawUrl);
   sourceEndpoint.searchParams.set('mode', 'source');
-  const metadataResponse = await fetchMeting(sourceEndpoint.toString(), {}, 15_000);
+  const metadataResponse = await fetchMeting(sourceEndpoint.toString(), { signal }, 15_000);
   if (!metadataResponse.ok) return metadataResponse;
 
   const metadata = await metadataResponse.json();
@@ -1436,6 +1436,7 @@ async function fetchQishuiSourceDirect(rawUrl) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 120_000);
   try {
+    signal?.addEventListener('abort', () => controller.abort(), { once: true });
     const response = await fetch(parsedSource, {
       signal: controller.signal,
       headers: {
@@ -1474,7 +1475,18 @@ app.get('/api/qishui-audio', async (req, res) => {
   }
 
   try {
-    const decrypted = await loadQishuiAudioCached(rawUrl, () => fetchQishuiSourceDirect(rawUrl));
+    const requestAbort = new AbortController();
+    let responseClosed = false;
+    const abortRequest = () => {
+      if (!responseClosed) requestAbort.abort();
+    };
+    req.on('aborted', abortRequest);
+    res.on('close', abortRequest);
+    const decrypted = await loadQishuiAudioCached(
+      rawUrl,
+      (signal) => fetchQishuiSourceDirect(rawUrl, signal),
+      requestAbort.signal,
+    );
     const total = decrypted.buffer.length;
     const match = /^bytes=(\d*)-(\d*)$/i.exec(String(req.headers.range || ''));
     let start = 0;
@@ -1498,9 +1510,14 @@ app.get('/api/qishui-audio', async (req, res) => {
       'Content-Length': String(end - start + 1),
     });
     if (status === 206) res.set('Content-Range', `bytes ${start}-${end}/${total}`);
+    responseClosed = true;
     return res.status(status).send(decrypted.buffer.subarray(start, end + 1));
   } catch (error) {
+    if (error?.name === 'AbortError') return;
     console.error('OpenMusic 汽水解密失败:', error?.message || error);
+    if (error?.code === 'QISHUI_BUSY') {
+      return res.status(429).json({ error: '汽水解密请求过多，请稍后重试' });
+    }
     return res.status(502).json({ error: '汽水音频解密失败' });
   }
 });

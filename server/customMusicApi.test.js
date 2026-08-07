@@ -13,6 +13,7 @@ test('JSON path 支持点号与数组下标', () => {
   const payload = { data: { songs: [{ url: 'https://cdn.example/song.mp3' }] } };
   assert.equal(getJsonPath(payload, 'data.songs[0].url'), 'https://cdn.example/song.mp3');
   assert.equal(getJsonPath(payload, 'data.songs[1].url'), undefined);
+  assert.equal(getJsonPath('https://cdn.example/root.mp3', '$'), 'https://cdn.example/root.mp3');
   assert.equal(getJsonPath(payload, 'data..songs'), undefined);
 });
 
@@ -155,6 +156,125 @@ test('一个接口可服务多个平台，响应 source 使用实际请求平台
     artist: '周杰伦',
     source: 'tencent',
   }]);
+});
+
+test('同一接口支持多个操作时缓存按操作隔离', async () => {
+  resetCustomMusicApiState();
+  const config = {
+    musicApis: normalizeMusicApis([{
+      id: 'multi-operation',
+      platform: 'netease',
+      operations: ['search', 'url'],
+      method: 'GET',
+      url: 'https://multi-operation.example/{id}',
+      mapping: {
+        items: 'songs',
+        id: 'id',
+        name: 'name',
+        value: 'url',
+      },
+    }]),
+  };
+  let calls = 0;
+  const fetchImpl = async () => {
+    calls += 1;
+    return new Response(JSON.stringify({
+      songs: [{ id: '1', name: '晴天' }],
+      url: 'https://cdn.example/qing-tian.mp3',
+    }));
+  };
+
+  const search = await fetchCustomMusicApi(
+    { server: 'netease', type: 'search', id: 'same-id' },
+    { config, fetchImpl },
+  );
+  assert.deepEqual(await search.json(), [{ id: '1', name: '晴天', source: 'netease' }]);
+
+  const url = await fetchCustomMusicApi(
+    { server: 'netease', type: 'url', id: 'same-id' },
+    { config, fetchImpl },
+  );
+  assert.equal(await url.text(), 'https://cdn.example/qing-tian.mp3');
+  assert.equal(calls, 2);
+});
+
+test('自定义接口不跟随重定向', async () => {
+  resetCustomMusicApiState();
+  const config = {
+    musicApis: normalizeMusicApis([{
+      id: 'redirecting',
+      platform: 'netease',
+      operation: 'url',
+      url: 'https://redirect.example/{id}',
+      mapping: { value: 'url' },
+    }]),
+  };
+  await assert.rejects(() => fetchCustomMusicApi(
+    { server: 'netease', type: 'url', id: '1' },
+    {
+      config,
+      fetchImpl: async (_url, options) => {
+        assert.equal(options.redirect, 'error');
+        throw new Error('redirect blocked');
+      },
+    },
+  ));
+});
+
+test('空关键结果不会进入可用缓存', async () => {
+  resetCustomMusicApiState();
+  const config = {
+    musicApis: normalizeMusicApis([{
+      id: 'empty-result',
+      platform: 'netease',
+      operations: ['search', 'url'],
+      url: 'https://empty.example/{id}',
+      mapping: { items: 'songs', id: 'id', name: 'name', value: 'url' },
+    }]),
+  };
+  let calls = 0;
+  await assert.rejects(() => fetchCustomMusicApi(
+    { server: 'netease', type: 'search', id: 'missing' },
+    {
+      config,
+      fetchImpl: async () => {
+        calls += 1;
+        return new Response(JSON.stringify({ songs: [] }));
+      },
+    },
+  ));
+  await assert.rejects(() => fetchCustomMusicApi(
+    { server: 'netease', type: 'search', id: 'missing' },
+    {
+      config,
+      fetchImpl: async () => {
+        calls += 1;
+        return new Response(JSON.stringify({ songs: [] }));
+      },
+    },
+  ));
+  assert.equal(calls, 2);
+});
+
+test('标量接口支持纯文本根值映射', async () => {
+  resetCustomMusicApiState();
+  const config = {
+    musicApis: normalizeMusicApis([{
+      id: 'plain-url',
+      platform: 'netease',
+      operation: 'url',
+      url: 'https://plain.example/{id}',
+      mapping: { value: '$' },
+    }]),
+  };
+  const response = await fetchCustomMusicApi(
+    { server: 'netease', type: 'url', id: '1' },
+    {
+      config,
+      fetchImpl: async () => new Response('https://cdn.example/plain.mp3'),
+    },
+  );
+  assert.equal(await response.text(), 'https://cdn.example/plain.mp3');
 });
 
 test('按权重进行确定性比例分流', async () => {

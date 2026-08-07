@@ -1,10 +1,50 @@
 import crypto from 'node:crypto';
 
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
-const MAX_CACHE_BYTES = 512 * 1024 * 1024;
+const MAX_CACHE_BYTES = 256 * 1024 * 1024;
+// 解密是整文件操作；默认允许 4 个房间同时首播，可用环境变量调整到 2~8。
+const configuredConcurrency = Number.parseInt(process.env.QISHUI_DECRYPT_CONCURRENCY || '', 10);
+const MAX_CONCURRENT_LOADS = Number.isFinite(configuredConcurrency)
+  ? Math.min(8, Math.max(2, configuredConcurrency))
+  : 4;
+const configuredPending = Number.parseInt(process.env.QISHUI_MAX_PENDING_LOADS || '', 10);
+const MAX_PENDING_LOADS = Number.isFinite(configuredPending)
+  ? Math.min(32, Math.max(4, configuredPending))
+  : 16;
+const MAX_SOURCE_BYTES = 96 * 1024 * 1024;
 const audioCache = new Map();
 const inflightLoads = new Map();
+const loadWaiters = [];
+let activeLoads = 0;
 let cacheBytes = 0;
+
+function createAbortError() {
+  const error = new Error('汽水播放请求已取消');
+  error.name = 'AbortError';
+  return error;
+}
+
+function acquireLoadSlot() {
+  if (activeLoads < MAX_CONCURRENT_LOADS) {
+    activeLoads += 1;
+    return Promise.resolve();
+  }
+  if (loadWaiters.length >= MAX_PENDING_LOADS) {
+    const error = new Error('汽水解密请求过多，请稍后重试');
+    error.code = 'QISHUI_BUSY';
+    return Promise.reject(error);
+  }
+  return new Promise((resolve) => loadWaiters.push(resolve));
+}
+
+function releaseLoadSlot() {
+  const next = loadWaiters.shift();
+  if (next) {
+    next();
+  } else {
+    activeLoads = Math.max(0, activeLoads - 1);
+  }
+}
 
 function cacheKeyForUrl(rawUrl) {
   try {
@@ -58,26 +98,80 @@ function writeCache(key, value) {
   pruneCache();
 }
 
-export async function loadQishuiAudioCached(rawUrl, fetchRaw) {
+function waitForInflight(entry, signal) {
+  entry.consumers += 1;
+  return new Promise((resolve, reject) => {
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      entry.consumers = Math.max(0, entry.consumers - 1);
+      signal?.removeEventListener('abort', onAbort);
+      // 客户端已经切歌且没有其它请求共享此任务，立即停止上游下载。
+      if (entry.consumers === 0 && !entry.settled) entry.controller.abort();
+    };
+    const onAbort = () => {
+      release();
+      reject(createAbortError());
+    };
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    signal?.addEventListener('abort', onAbort, { once: true });
+    entry.promise.then((value) => {
+      if (released) return;
+      release();
+      resolve(value);
+    }, (error) => {
+      if (released) return;
+      release();
+      reject(error);
+    });
+  });
+}
+
+export async function loadQishuiAudioCached(rawUrl, fetchRaw, signal) {
   const key = cacheKeyForUrl(rawUrl);
   const cached = readCache(key);
   if (cached) return { ...cached, cacheKey: key };
-  if (inflightLoads.has(key)) return { ...(await inflightLoads.get(key)), cacheHit: true, cacheKey: key };
+  const existing = inflightLoads.get(key);
+  if (existing) return { ...(await waitForInflight(existing, signal)), cacheHit: true, cacheKey: key };
 
+  const entry = {
+    controller: new AbortController(),
+    consumers: 0,
+    settled: false,
+    promise: null,
+  };
   const task = (async () => {
-    const upstream = await fetchRaw();
-    if (!upstream.ok) throw new Error(`汽水原始音频请求失败: ${upstream.status}`);
-    const auth = String(upstream.headers.get('x-qishui-auth') || '').trim();
-    if (!auth) throw new Error('汽水音频密钥缺失');
-    const decrypted = decryptQishuiAudio(Buffer.from(await upstream.arrayBuffer()), auth);
-    writeCache(key, decrypted);
-    return { ...decrypted, cacheHit: false, cacheKey: key };
+    await acquireLoadSlot();
+    try {
+      if (entry.controller.signal.aborted) throw createAbortError();
+      const upstream = await fetchRaw(entry.controller.signal);
+      if (!upstream.ok) throw new Error(`汽水原始音频请求失败: ${upstream.status}`);
+      const contentLength = Number(upstream.headers.get('content-length') || 0);
+      if (Number.isFinite(contentLength) && contentLength > MAX_SOURCE_BYTES) {
+        throw new Error('汽水原始音频文件过大');
+      }
+      const auth = String(upstream.headers.get('x-qishui-auth') || '').trim();
+      if (!auth) throw new Error('汽水音频密钥缺失');
+      const decrypted = decryptQishuiAudio(Buffer.from(await upstream.arrayBuffer()), auth);
+      writeCache(key, decrypted);
+      return { ...decrypted, cacheHit: false, cacheKey: key };
+    } finally {
+      releaseLoadSlot();
+      entry.settled = true;
+    }
   })();
-  inflightLoads.set(key, task);
+  entry.promise = task;
+  inflightLoads.set(key, entry);
+  // 即使所有客户端都断开，也要消费任务拒绝，避免产生未处理 rejection。
+  task.catch(() => {});
   try {
-    return await task;
+    return { ...(await waitForInflight(entry, signal)), cacheKey: key };
   } finally {
-    inflightLoads.delete(key);
+    if (inflightLoads.get(key) === entry) inflightLoads.delete(key);
   }
 }
 

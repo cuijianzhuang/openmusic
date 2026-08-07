@@ -180,12 +180,14 @@ const SONG_MAPPING_FIELDS: { key: keyof CustomMusicApi['mapping']; label: string
 function getByPath(value: unknown, path: string): unknown {
   const trimmed = String(path || '').trim();
   if (!trimmed) return value;
+  if (trimmed === '$') return value;
   const tokens: (string | number)[] = [];
   for (const match of trimmed.matchAll(/([A-Za-z_$][\w$]*)|\[(\d+)\]/g)) {
     tokens.push(match[1] ?? Number(match[2]));
   }
   let current: unknown = value;
   for (const token of tokens) {
+    if (token === '$') continue;
     if (current === null || current === undefined) return undefined;
     current = (current as Record<string | number, unknown>)[token];
   }

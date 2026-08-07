@@ -24,6 +24,13 @@ function requestOnce(url, options = {}, timeoutMs = 10000) {
   const transport = isHttps ? https : http;
 
   return new Promise((resolve, reject) => {
+    const signal = options.signal;
+    if (signal?.aborted) {
+      const error = new Error('请求已取消');
+      error.name = 'AbortError';
+      reject(error);
+      return;
+    }
     const req = transport.request({
       protocol: parsed.protocol,
       hostname: parsed.hostname,
@@ -53,6 +60,12 @@ function requestOnce(url, options = {}, timeoutMs = 10000) {
     });
 
     req.on('error', reject);
+    const abortRequest = () => {
+      const error = new Error('请求已取消');
+      error.name = 'AbortError';
+      req.destroy(error);
+    };
+    signal?.addEventListener('abort', abortRequest, { once: true });
     req.setTimeout(timeoutMs, () => {
       req.destroy(new Error('Meting 请求超时'));
     });
