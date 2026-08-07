@@ -23,6 +23,12 @@ const TOPLIST_LIMIT = 200;
 const PLATFORM_LIMIT = 100;
 const COMPACT_LIMIT = 30;
 const SOURCE_STORAGE_KEY = 'openmusic:hot-rank-source';
+type HotRankView = {
+  title: string;
+  songs: SearchResult[];
+  loading: boolean;
+  error: string;
+};
 
 function readStoredSource(): HotRankSource {
   try {
@@ -177,12 +183,21 @@ export default memo(function HotSongPanel({
 }: Props) {
   const [source, setSource] = useState<HotRankSource>(readStoredSource);
   const cached = source === 'netease' ? peekNeteaseHotToplist(TOPLIST_LIMIT) : null;
-  const [title, setTitle] = useState(
-    source === 'platform' ? '平台热榜' : cached?.name?.trim() || '网易热榜',
-  );
-  const [songs, setSongs] = useState<SearchResult[]>(() => cached?.songs ?? []);
-  const [loading, setLoading] = useState(() => !cached);
-  const [error, setError] = useState('');
+  const [views, setViews] = useState<Record<HotRankSource, HotRankView>>(() => ({
+    netease: {
+      title: cached?.name?.trim() || '网易热榜',
+      songs: cached?.songs ?? [],
+      loading: !cached,
+      error: '',
+    },
+    platform: {
+      title: '平台热榜',
+      songs: [],
+      loading: false,
+      error: '',
+    },
+  }));
+  const currentView = views[source];
 
   const handleSourceChange = useCallback((next: HotRankSource) => {
     setSource(next);
@@ -200,46 +215,50 @@ export default memo(function HotSongPanel({
       if (source === 'netease') {
         const hit = peekNeteaseHotToplist(TOPLIST_LIMIT);
         if (hit && !silent) {
-          setTitle(hit.name?.trim() || '网易热榜');
-          setSongs(hit.songs);
-          setError('');
-          setLoading(false);
+          setViews((prev) => ({
+            ...prev,
+            netease: { title: hit.name?.trim() || '网易热榜', songs: hit.songs, error: '', loading: false },
+          }));
           return;
         }
         if (!silent) {
-          setLoading(true);
-          setSongs([]);
-          setError('');
-          setTitle('网易热榜');
+          setViews((prev) => ({
+            ...prev,
+            netease: { ...prev.netease, loading: true, error: '', title: '网易热榜' },
+          }));
         }
         try {
           const data = await getNeteaseHotToplist(TOPLIST_LIMIT);
           if (cancelled) return;
-          setTitle(data.name?.trim() || '网易热榜');
-          setSongs(data.songs);
-          setError('');
+          setViews((prev) => ({
+            ...prev,
+            netease: { title: data.name?.trim() || '网易热榜', songs: data.songs, error: '', loading: false },
+          }));
         } catch (err: unknown) {
           if (cancelled) return;
-          if (!silent) setError(err instanceof Error ? err.message : '加载失败');
+          if (!silent) {
+            setViews((prev) => ({
+              ...prev,
+              netease: { ...prev.netease, error: err instanceof Error ? err.message : '加载失败', loading: false },
+            }));
+          }
         } finally {
-          if (!cancelled && !silent) setLoading(false);
+          // 成功/失败分支已更新对应平台状态。
         }
         return;
       }
 
       if (!silent) {
-        setLoading(true);
-        setSongs([]);
-        setError('');
-        setTitle('平台热榜');
+        setViews((prev) => ({
+          ...prev,
+          platform: { ...prev.platform, loading: true, error: '', title: '平台热榜' },
+        }));
       }
       try {
         const data = await getPlatformHotSongs(PLATFORM_LIMIT);
         if (cancelled) return;
-        setTitle('平台热榜');
         // 不展示 count，只复用热榜行布局
-        setSongs(
-          data.map((song) => ({
+        const nextSongs = data.map((song) => ({
             id: song.id,
             source: song.source,
             name: song.name,
@@ -247,14 +266,21 @@ export default memo(function HotSongPanel({
             album: song.album,
             pic: song.pic,
             duration: song.duration,
-          })),
-        );
-        setError('');
+          }));
+        setViews((prev) => ({
+          ...prev,
+          platform: { title: '平台热榜', songs: nextSongs, error: '', loading: false },
+        }));
       } catch (err: unknown) {
         if (cancelled) return;
-        if (!silent) setError(err instanceof Error ? err.message : '加载失败');
+        if (!silent) {
+          setViews((prev) => ({
+            ...prev,
+            platform: { ...prev.platform, error: err instanceof Error ? err.message : '加载失败', loading: false },
+          }));
+        }
       } finally {
-        if (!cancelled && !silent) setLoading(false);
+        // 成功/失败分支已更新对应平台状态。
       }
     };
 
@@ -275,48 +301,78 @@ export default memo(function HotSongPanel({
     };
   }, [source]);
 
-  const displaySongs = compact ? songs.slice(0, compactLimit) : songs;
+  const renderBody = (viewSource: HotRankSource) => {
+    const view = views[viewSource];
+    const displaySongs = compact ? view.songs.slice(0, compactLimit) : view.songs;
+    const emptyHint = viewSource === 'platform' ? '暂无平台热榜，播完点歌会出现在这里' : '暂无热榜歌曲';
+
+    if (view.loading && view.songs.length === 0) {
+      return compact ? (
+        <p className="py-3 text-center text-xs text-netease-muted">加载中...</p>
+      ) : (
+        <div className="flex flex-col items-center justify-center py-12 text-netease-muted">
+          <Loader2 className="mb-2 h-5 w-5 animate-spin" />
+          <p className="text-xs">加载热榜...</p>
+        </div>
+      );
+    }
+    if (view.error && view.songs.length === 0) {
+      return compact ? (
+        <p className="py-3 text-center text-xs text-netease-muted">{view.error}</p>
+      ) : (
+        <div className="flex flex-col items-center justify-center px-3 py-12 text-netease-muted">
+          <Flame className="mb-2 h-6 w-6 opacity-30" />
+          <p className="text-center text-xs">{view.error}</p>
+        </div>
+      );
+    }
+    if (displaySongs.length === 0) {
+      return compact ? (
+        <p className="py-3 text-center text-xs text-netease-muted">{emptyHint}</p>
+      ) : (
+        <div className="flex flex-col items-center justify-center px-3 py-12 text-netease-muted">
+          <Flame className="mb-2 h-6 w-6 opacity-30" />
+          <p className="text-center text-xs">{emptyHint}</p>
+        </div>
+      );
+    }
+    if (compact) {
+      return (
+        <div className="overflow-x-auto overscroll-x-contain touch-pan-x pb-0.5 [-webkit-overflow-scrolling:touch]">
+          <div className="flex w-max gap-2.5">
+            {displaySongs.map((song, i) => {
+              const key = songKey(song);
+              return <CompactToplistCard key={key} song={song} rank={i + 1} isAdding={addingId === key} onAdd={() => onAdd(song)} />;
+            })}
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div className="space-y-1">
+        {displaySongs.map((song, i) => {
+          const key = songKey(song);
+          return <ToplistRow key={key} song={song} rank={i + 1} isAdding={addingId === key} onAdd={() => onAdd(song)} />;
+        })}
+      </div>
+    );
+  };
 
   const header = (
     <div className="flex flex-shrink-0 items-center gap-1.5 px-3 py-2">
       <Flame className="h-3.5 w-3.5 flex-shrink-0 text-orange-400/90" />
-      <h2 className="min-w-0 flex-1 truncate text-sm font-medium text-white">{title}</h2>
+      <h2 className="min-w-0 flex-1 truncate text-sm font-medium text-white">{currentView.title}</h2>
       <SourceSwitch source={source} onChange={handleSourceChange} />
     </div>
   );
-
-  const emptyHint =
-    source === 'platform' ? '暂无平台热榜，播完点歌会出现在这里' : '暂无热榜歌曲';
 
   if (compact) {
     return (
       <div className="surface-panel room-main-panel room-main-panel--hot flex-shrink-0 overflow-hidden rounded-2xl">
         {header}
         <div className="room-panel-divider border-t px-2 pb-2 pt-1.5">
-          {loading && songs.length === 0 ? (
-            <p className="py-3 text-center text-xs text-netease-muted">加载中...</p>
-          ) : error && songs.length === 0 ? (
-            <p className="py-3 text-center text-xs text-netease-muted">{error}</p>
-          ) : songs.length === 0 ? (
-            <p className="py-3 text-center text-xs text-netease-muted">{emptyHint}</p>
-          ) : (
-            <div className="overflow-x-auto overscroll-x-contain touch-pan-x pb-0.5 [-webkit-overflow-scrolling:touch]">
-              <div className="flex w-max gap-2.5">
-                {displaySongs.map((song, i) => {
-                  const key = songKey(song);
-                  return (
-                    <CompactToplistCard
-                      key={key}
-                      song={song}
-                      rank={i + 1}
-                      isAdding={addingId === key}
-                      onAdd={() => onAdd(song)}
-                    />
-                  );
-                })}
-              </div>
-            </div>
-          )}
+          <div style={{ display: source === 'netease' ? undefined : 'none' }}>{renderBody('netease')}</div>
+          <div style={{ display: source === 'platform' ? undefined : 'none' }}>{renderBody('platform')}</div>
         </div>
       </div>
     );
@@ -333,37 +389,8 @@ export default memo(function HotSongPanel({
       <div className="room-panel-divider border-b">{header}</div>
 
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-1.5 py-1">
-        {loading && songs.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 text-netease-muted">
-            <Loader2 className="mb-2 h-5 w-5 animate-spin" />
-            <p className="text-xs">加载热榜...</p>
-          </div>
-        ) : error && songs.length === 0 ? (
-          <div className="flex flex-col items-center justify-center px-3 py-12 text-netease-muted">
-            <Flame className="mb-2 h-6 w-6 opacity-30" />
-            <p className="text-center text-xs">{error}</p>
-          </div>
-        ) : songs.length === 0 ? (
-          <div className="flex flex-col items-center justify-center px-3 py-12 text-netease-muted">
-            <Flame className="mb-2 h-6 w-6 opacity-30" />
-            <p className="text-center text-xs">{emptyHint}</p>
-          </div>
-        ) : (
-          <div className="space-y-1">
-            {displaySongs.map((song, i) => {
-              const key = songKey(song);
-              return (
-                <ToplistRow
-                  key={key}
-                  song={song}
-                  rank={i + 1}
-                  isAdding={addingId === key}
-                  onAdd={() => onAdd(song)}
-                />
-              );
-            })}
-          </div>
-        )}
+        <div style={{ display: source === 'netease' ? undefined : 'none' }}>{renderBody('netease')}</div>
+        <div style={{ display: source === 'platform' ? undefined : 'none' }}>{renderBody('platform')}</div>
       </div>
     </div>
   );

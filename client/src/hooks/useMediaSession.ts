@@ -146,10 +146,21 @@ export function useMediaSession({
     const handlePause = () => {
       const { room } = useRoomStore.getState();
       if (!room?.current) return;
+      // Safari 在切歌/替换 audio.src 时可能误发一次 Media Session pause。
+      // 这类 pause 不能被成员的“本地静音”兼容逻辑处理，否则会把音量持久化为 0。
+      const pauseTrackId = room.current.queueId;
+      const pauseDuringTrackLoad = useAudioStore.getState().trackLoading;
       // Windows 关媒体卡片有时先 pause 再 stop：短延迟，若收到 stop 则取消，避免进度条卡顿
       cancelPendingPause();
       pendingPauseTimer = window.setTimeout(() => {
         pendingPauseTimer = null;
+        const latestRoom = useRoomStore.getState().room;
+        const trackChanged = latestRoom?.current?.queueId !== pauseTrackId;
+        const trackIsLoading = useAudioStore.getState().trackLoading;
+        if (pauseDuringTrackLoad || trackChanged || trackIsLoading) {
+          softResumeOnly();
+          return;
+        }
         applyPauseOrMute();
       }, 120);
     };

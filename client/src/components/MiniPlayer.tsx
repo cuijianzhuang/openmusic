@@ -22,6 +22,7 @@ import TruncateTip from './TruncateTip';
 import ErrorReportModal from './ErrorReportModal';
 import PlayModeButton from './PlayModeButton';
 import { updateMediaSessionPlaybackState } from '../lib/mediaSession';
+import DesktopLyricsPiP from './DesktopLyricsPiP';
 
 interface Props {
   onExpand: () => void;
@@ -252,6 +253,7 @@ export default memo(function MiniPlayer({
               buttonClassName="mineradio-ctrl-btn"
               iconClassName="h-4 w-4"
             />
+            <DesktopLyricsPiP song={current} />
             <Tooltip content="上报错误/提交意见">
               <button
                 type="button"
@@ -450,6 +452,7 @@ export default memo(function MiniPlayer({
 
         <VolumeControl compact className="flex-shrink-0" />
             <FavoriteButton song={current} className="w-8 h-8 text-netease-muted hover:text-rose-300" />
+        <DesktopLyricsPiP song={current} />
         <Tooltip content="上报错误/提交意见">
           <button
             type="button"
@@ -474,5 +477,3 @@ export default memo(function MiniPlayer({
   );
 
 });
-
-
