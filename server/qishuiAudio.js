@@ -35,6 +35,9 @@ function pruneCache() {
   }
 }
 
+const cacheCleanupTimer = setInterval(pruneCache, 10 * 60 * 1000);
+cacheCleanupTimer.unref?.();
+
 function readCache(key) {
   const entry = audioCache.get(key);
   if (!entry) return null;

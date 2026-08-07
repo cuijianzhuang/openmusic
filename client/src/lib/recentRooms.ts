@@ -60,3 +60,13 @@ export function partitionRoomsByRecent<T extends { id: string }>(rooms: T[]): { 
   const others = rooms.filter((room) => !recentSet.has(room.id.toUpperCase()));
   return { recent, others };
 }
+
+/** 最近去过中固定按身份优先，再按实际最近访问时间排序。 */
+export function sortRecentRooms<T extends { id: string; isOwner?: boolean; isAdmin?: boolean }>(rooms: T[]): T[] {
+  const visitedAt = new Map(getRecentRoomEntries().map((entry) => [entry.id, entry.visitedAt]));
+  return [...rooms].sort((a, b) => {
+    const roleDiff = (b.isOwner ? 2 : b.isAdmin ? 1 : 0) - (a.isOwner ? 2 : a.isAdmin ? 1 : 0);
+    if (roleDiff !== 0) return roleDiff;
+    return (visitedAt.get(b.id.toUpperCase()) || 0) - (visitedAt.get(a.id.toUpperCase()) || 0);
+  });
+}

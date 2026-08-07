@@ -340,6 +340,9 @@ export interface PlaybackMediaShare {
 export interface RoomSummary {
   id: string;
   name: string;
+  /** 当前设备对应的身份是否为该房间房主/管理员 */
+  isOwner?: boolean;
+  isAdmin?: boolean;
   userCount: number;
   hasPassword: boolean;
   isLocked?: boolean;

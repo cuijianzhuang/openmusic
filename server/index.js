@@ -809,9 +809,47 @@ function requestPublicOrigin(req) {
   return `${protocol}://${host}${prefix}`;
 }
 
-function localizeQishuiPayload(payload, metingQuery, req) {
+// 与 Meting 汽水播放地址保持同级有效期，避免长时间暂停或慢速播放时失效。
+const QISHUI_SOURCE_TOKEN_TTL_MS = 10 * 60 * 1000;
+const qishuiSourceTokens = new Map();
+
+function pruneQishuiSourceTokens() {
+  const now = Date.now();
+  for (const [token, entry] of qishuiSourceTokens) {
+    if (entry.expiresAt <= now) qishuiSourceTokens.delete(token);
+  }
+  while (qishuiSourceTokens.size > 2048) {
+    const oldest = qishuiSourceTokens.keys().next().value;
+    if (!oldest) break;
+    qishuiSourceTokens.delete(oldest);
+  }
+}
+
+const qishuiSourceTokenCleanupTimer = setInterval(pruneQishuiSourceTokens, 60 * 1000);
+qishuiSourceTokenCleanupTimer.unref?.();
+
+function createQishuiSourceToken(rawUrl) {
+  pruneQishuiSourceTokens();
+  const token = randomBytes(24).toString('base64url');
+  qishuiSourceTokens.set(token, {
+    rawUrl,
+    expiresAt: Date.now() + QISHUI_SOURCE_TOKEN_TTL_MS,
+  });
+  return token;
+}
+
+function resolveQishuiSourceToken(token) {
+  pruneQishuiSourceTokens();
+  const normalized = String(token || '').trim();
+  const entry = qishuiSourceTokens.get(normalized);
+  if (!entry) return '';
+  return entry.rawUrl;
+}
+
+async function localizeQishuiPayload(payload, metingQuery, req) {
   if (metingQuery?.server !== 'qishui' || metingQuery?.type !== 'url' || !isQishuiPlayUrl(payload?.url)) return payload;
-  const path = `/api/qishui-audio?url=${encodeURIComponent(payload.url)}`;
+  const token = createQishuiSourceToken(payload.url);
+  const path = `/api/qishui-audio?t=${encodeURIComponent(token)}`;
   const origin = requestPublicOrigin(req);
   return { ...payload, url: origin ? `${origin}${path}` : path };
 }
@@ -882,7 +920,7 @@ async function proxyMetingResponse(metingQuery, res, thumbPx = 0, metingType = '
     if (location) {
       // type=url/lrc 必须返回文本/JSON，不能把浏览器重定向到第三方 CDN（fetch 会触发 CORS）
       if (metingType === 'url') {
-        const body = localizeQishuiPayload(await finalizeMetingTextResponse(location, metingType), metingQuery, req);
+        const body = await localizeQishuiPayload(await finalizeMetingTextResponse(location, metingType), metingQuery, req);
         if (!body.url) return res.status(403).json({ error: 'no url' });
         return res.json(body);
       }
@@ -904,7 +942,7 @@ async function proxyMetingResponse(metingQuery, res, thumbPx = 0, metingType = '
   const text = await response.text();
 
   if (metingType === 'url') {
-    const body = localizeQishuiPayload(await finalizeMetingTextResponse(text, metingType), metingQuery, req);
+    const body = await localizeQishuiPayload(await finalizeMetingTextResponse(text, metingType), metingQuery, req);
     if (!body.url) return res.status(403).json({ error: 'no url' });
     return res.json(body);
   }
@@ -1423,7 +1461,11 @@ app.get('/api/qishui-audio', async (req, res) => {
   const identity = requireSessionIdentity(req, res);
   if (!identity) return;
 
-  const rawUrl = String(req.query.url || '').trim();
+  const token = String(req.query.t || '').trim();
+  const rawUrl = token
+    ? resolveQishuiSourceToken(token)
+    : String(req.query.url || '').trim();
+  if (!rawUrl) return res.status(400).json({ error: '汽水播放会话无效或已过期' });
   if (!isQishuiPlayUrl(rawUrl) || !isConfiguredMetingUrl(rawUrl)) {
     return res.status(400).json({ error: '无效的汽水原始音频地址' });
   }
@@ -2113,8 +2155,9 @@ app.post('/api/permanent-decisions/:id/ack', async (req, res) => {
   res.json({ success: true });
 });
 
-app.get('/api/rooms', async (_req, res) => {
-  res.json(await listRooms());
+app.get('/api/rooms', async (req, res) => {
+  const identity = resolveIdentityFromRequest(req);
+  res.json(await listRooms(identity?.userId || ''));
 });
 
 app.post('/api/rooms', async (req, res) => {

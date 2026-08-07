@@ -43,6 +43,8 @@ function roomSummarySignature(room: RoomSummary): string {
   return [
     room.id,
     room.name,
+    room.isOwner ?? false,
+    room.isAdmin ?? false,
     room.userCount,
     room.hasPassword,
     room.isLocked ?? false,

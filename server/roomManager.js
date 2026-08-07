@@ -2038,10 +2038,10 @@ function scheduleLobbyCoverResolve(room) {
   });
 }
 
-export async function listRooms() {
+export async function listRooms(userId = '') {
   const now = Date.now();
   if (cachedListRooms && now - cachedListRoomsAt < LIST_ROOMS_CACHE_MS) {
-    return cachedListRooms;
+    return personalizeLobbyRooms(cachedListRooms, userId);
   }
 
   const visible = Array.from(rooms.values()).filter(isRoomVisibleInLobby);
@@ -2065,7 +2065,22 @@ export async function listRooms() {
       return b.userCount - a.userCount || b.createdAt - a.createdAt;
     });
   cachedListRoomsAt = Date.now();
-  return cachedListRooms;
+  return personalizeLobbyRooms(cachedListRooms, userId);
+}
+
+function personalizeLobbyRooms(list, userId) {
+  const normalizedUserId = String(userId || '').trim();
+  return list.map(({ ownerId, adminIds, ...room }) => ({
+    ...room,
+    ...(normalizedUserId
+      ? {
+          isOwner: ownerId === normalizedUserId,
+          isAdmin: Array.isArray(adminIds)
+            ? adminIds.includes(normalizedUserId)
+            : Boolean(adminIds?.has?.(normalizedUserId)),
+        }
+      : {}),
+  }));
 }
 
 export function listRoomIds() {
@@ -4960,6 +4975,8 @@ function serializeRoomSummary(room) {
       : null,
     queueLength: room.queue.length,
     createdAt: room.createdAt,
+    ownerId: room.creatorId || null,
+    adminIds: Array.from(room.adminIds || []),
   };
 }
 

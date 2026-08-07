@@ -3,14 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import {
   Users, ArrowRight, Lock, ListMusic,
   Loader2, RefreshCw, Plus, X, Disc3, Sparkles, Github, History, Download, HeartHandshake,
-  Play, Activity, Search, ShieldCheck
+  Play, Activity, Search, ShieldCheck, Crown
 } from 'lucide-react';
 import { createRoom, checkRoom, listRooms } from '../api/meting';
 import { useRoomStore } from '../stores/roomStore';
 import { useSocket } from '../hooks/useSocket';
 import type { RoomSummary } from '../types';
 import { usePageSeo } from '../lib/seo';
-import { partitionRoomsByRecent } from '../lib/recentRooms';
+import { partitionRoomsByRecent, sortRecentRooms } from '../lib/recentRooms';
 import { getStoredRoomPassword } from '../lib/roomPassword';
 import { areRoomListsEqual, isLobbyHardLocked, sortLobbyRooms } from '../lib/roomListCompare';
 import { ANDROID_APK_URL } from '../lib/androidDownload';
@@ -170,6 +170,16 @@ const RoomCard = memo(function RoomCard({
       {/* 顶部细亮线，增强边缘立体感 */}
       {!hardLocked && (
         <div className="pointer-events-none absolute inset-x-0 top-0 z-[11] h-px bg-gradient-to-r from-transparent via-white/25 to-transparent" />
+      )}
+
+      {(room.isOwner || room.isAdmin) && (
+        <div
+          className="absolute right-4 top-4 z-20 inline-flex items-center justify-center rounded-full border border-white/10 bg-black/45 p-2 text-amber-300 shadow-lg backdrop-blur-md"
+          title={room.isOwner ? '房主' : '管理员'}
+          aria-label={room.isOwner ? '房主' : '管理员'}
+        >
+          {room.isOwner ? <Crown className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4 text-sky-300" />}
+        </div>
       )}
 
       <div className="relative p-5 sm:p-6" style={{ transformStyle: 'preserve-3d' }}>
@@ -540,7 +550,7 @@ export default function Home() {
   const { recent: recentRooms, others: otherRooms } = useMemo(() => {
     const { recent, others } = partitionRoomsByRecent(rooms);
     return {
-      recent: sortLobbyRooms(recent),
+      recent: sortRecentRooms(recent),
       others: sortLobbyRooms(others),
     };
   }, [rooms]);
