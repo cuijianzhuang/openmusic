@@ -35,15 +35,11 @@
 
 <table>
   <tr>
-    <td align="center" width="33%">
+    <td align="center" width="50%">
       <a href="docs/screenshots/room.png"><img src="docs/screenshots/room.png" alt="房间点歌" width="100%" /></a>
       <br/><sub><b>房间点歌</b></sub>
     </td>
-    <td align="center" width="33%">
-      <a href="docs/screenshots/lyrics.png"><img src="docs/screenshots/lyrics.png" alt="歌词沉浸" width="100%" /></a>
-      <br/><sub><b>歌词沉浸</b></sub>
-    </td>
-    <td align="center" width="33%">
+    <td align="center" width="50%">
       <a href="docs/screenshots/admin.png"><img src="docs/screenshots/admin.png" alt="管理后台" width="100%" /></a>
       <br/><sub><b>管理后台</b></sub>
     </td>
@@ -60,7 +56,7 @@
 |------|:----:|------|
 | Node.js | 源码部署 | `>=20 <25`（见 `.nvmrc`） |
 | Redis | 是 | 房间、收藏、凭据、公告、封禁 |
-| Meting-API | 是 | 搜索 / 播放 / 歌词 / 封面 / 歌单；镜像 `w3126197382/meting-api` |
+| [Meting-API](https://github.com/qq01-hub/Meting-API) | 是 | 搜索 / 播放 / 歌词 / 封面 / 歌单；提供 Docker 镜像 |
 | 七牛 OSS | 否 | 聊天发图；可在管理后台配置 |
 
 > Docker 全量版已内置 Redis 与 Meting，打开站点后填域名即可。
@@ -114,14 +110,10 @@ npm run dev
 - 多音源搜索：网易云音乐、QQ 音乐、汽水音乐等（酷狗等可通过自定义 Music API 接入）
 - **账号与漫游**：网易、QQ、汽水统一支持扫码、手动 Cookie、账号状态展示与个性化漫游；房间账号优先，否则走共享会员池；无可用汽水账号时自动锁定汽水漫游
 - **本机音质**：自选偏好（含无损 / 臻音等档位，受平台与 SVIP 开关约束）；弱设备可自动降档；切换后当前曲继续播放，下一首起生效
-- **音质能力**：网易、QQ、汽水统一接入；按房间账号与共享会员池权益自动选质
 - 多人实时同步播放；顺序 / 随机 / 单曲 / 列表循环等播放模式；可授权成员暂停与拖进度
-- 歌词滚动、桌面歌词（Document PiP）
 - 网易云热歌榜（服务端缓存每 3 小时刷新）、推荐歌单、音乐电台
 - 歌单导入（网易 / QQ / 汽水链接）、个人收藏与点歌历史（JSON 导入 / 导出）
-- 音源直链播放；原平台无地址时跨源兜底取链；仍失败则自动换歌
 - 队列拖拽排序、插队、清空；系统媒体键（可分别开关，防误触）
-- TV 大屏：`/tv/:roomId`
 - 移动端后台播放（Flutter 原生客户端，见 [`mobile/`](mobile/)）
 
 ### 🏠 房间
@@ -142,7 +134,6 @@ npm run dev
 - 全员禁言 / 单人禁言；踢人、任命管理、贵宾管理
 - 房间违禁词（可自定义，含默认可删词表）
 - 微信表情包采集 / 表情包搜索
-- 昵称首字 / 无头像占位支持表情字符
 
 ### 🌌 视觉与客户端
 
@@ -245,6 +236,7 @@ CI：`flutter-android-apk.yml` / `flutter-ios-ipa.yml`。产物发布至 `/downl
 | 文档 | 说明 |
 |------|------|
 | [部署文档](docs/DEPLOY.md) | 环境变量、Nginx、Docker 细节、API 速查 |
+| [Meting-API](https://github.com/qq01-hub/Meting-API) | 音源 API（网易 / QQ / 汽水等），含 Docker 镜像 |
 | [宝塔部署](deploy/DEPLOY-BAOTA.md) | 面板 Docker / 源码部署步骤 |
 | [移动端](docs/MOBILE.md) | Flutter 工程结构与本地运行 |
 | [Nginx 示例](deploy/nginx.conf.example) | 通用反代配置 |
@@ -270,13 +262,17 @@ npm run package:build # 组装发版包
 
 <table>
   <tr>
-    <td align="center" width="50%">
-      <img src="docs/donate/alipay.png" alt="支付宝赞赏码" width="280" />
-      <br/><sub><b>支付宝</b></sub>
-    </td>
-    <td align="center" width="50%">
-      <img src="docs/donate/wechat.png" alt="微信赞赏码" width="280" />
+    <td align="center" width="50%" valign="middle">
+      <a href="docs/donate/wechat.png">
+        <img src="docs/donate/wechat.png" alt="微信赞赏码" height="400" />
+      </a>
       <br/><sub><b>微信</b></sub>
+    </td>
+    <td align="center" width="50%" valign="middle">
+      <a href="docs/donate/alipay.png">
+        <img src="docs/donate/alipay.png" alt="支付宝赞赏码" height="400" />
+      </a>
+      <br/><sub><b>支付宝</b></sub>
     </td>
   </tr>
 </table>

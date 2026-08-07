@@ -49,7 +49,7 @@ npm start   # http://0.0.0.0:4000
 | 依赖 | 必填 | 说明 |
 |------|:----:|------|
 | **Redis** | 必需 | 房间、收藏、管理凭据、公告、封禁均只存 Redis |
-| **Meting-API** | 必填 | 网易 / QQ搜索播放、歌词、封面、歌单导入。镜像：`w3126197382/meting-api:latest` |
+| **[Meting-API](https://github.com/qq01-hub/Meting-API)** | 必填 | 网易 / QQ 搜索播放、歌词、封面、歌单导入；提供 Docker 镜像 |
 | 七牛 OSS | 可选 | 聊天发图。管理后台填写 |
 
 ---
