@@ -65,6 +65,10 @@ export async function fetchWithTimeout(
 
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  const externalSignal = init.signal;
+  const abortFromCaller = () => controller.abort();
+  if (externalSignal?.aborted) controller.abort();
+  else externalSignal?.addEventListener('abort', abortFromCaller, { once: true });
 
   const url = resolveRequestUrl(input);
   const sameOriginApi = isSameOriginApiUrl(url);
@@ -80,6 +84,7 @@ export async function fetchWithTimeout(
     await ensureSessionBootstrap();
     if (isSiteAccessBlocked()) {
       window.clearTimeout(timer);
+      externalSignal?.removeEventListener('abort', abortFromCaller);
       return blockedSyntheticResponse();
     }
     const parsed = new URL(url, window.location.origin);
@@ -101,5 +106,6 @@ export async function fetchWithTimeout(
     return res;
   } finally {
     window.clearTimeout(timer);
+    externalSignal?.removeEventListener('abort', abortFromCaller);
   }
 }

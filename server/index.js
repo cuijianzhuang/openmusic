@@ -447,7 +447,8 @@ app.use((req, res, next) => {
   // 汽水解密播放地址由服务端随机句柄保护，音频元素的 Range 请求不保证携带
   // X-OM-* / om_* 签名；这里仍保留 HttpOnly 会话和句柄校验，不放宽其他 API。
   const isQishuiAudioRequest = req.path === '/api/qishui-audio' && req.method === 'GET';
-  if (isApiSignRequired() && requireRequestSign && !isQishuiAudioRequest) {
+  const isQishuiSourceRequest = req.path === '/api/qishui-source' && req.method === 'GET';
+  if (isApiSignRequired() && requireRequestSign && !isQishuiAudioRequest && !isQishuiSourceRequest) {
     const signKey = deriveApiSignKey(CLIENT_ID_SECRET, identity.userId, identity.iat);
     const result = verifyApiSign(req, signKey, identity.userId);
     if (!result.ok) {
@@ -1413,7 +1414,7 @@ function isTrustedMetingQishuiAudioUrl(rawUrl) {
 }
 
 /** OpenMusic 服务端解密汽水原始音频，浏览器只接触解密后的本地地址。 */
-async function fetchQishuiSourceDirect(rawUrl, signal) {
+async function resolveQishuiPlaybackSource(rawUrl, signal) {
   const sourceEndpoint = new URL(rawUrl);
   sourceEndpoint.searchParams.set('mode', 'source');
   const metadataResponse = await fetchMeting(sourceEndpoint.toString(), { signal }, 15_000);
@@ -1432,6 +1433,12 @@ async function fetchQishuiSourceDirect(rawUrl, signal) {
     throw new Error('汽水源地址不在允许范围');
   }
   if (!auth) throw new Error('汽水音频密钥缺失');
+  return { sourceUrl, auth };
+}
+
+async function fetchQishuiSourceDirect(rawUrl, signal) {
+  const { sourceUrl, auth } = await resolveQishuiPlaybackSource(rawUrl, signal);
+  const parsedSource = new URL(sourceUrl);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 120_000);
@@ -1449,6 +1456,7 @@ async function fetchQishuiSourceDirect(rawUrl, signal) {
     return {
       ok: response.ok,
       status: response.status,
+      body: response.body,
       headers: {
         get: (name) => String(name).toLowerCase() === 'x-qishui-auth'
           ? auth
@@ -1460,6 +1468,27 @@ async function fetchQishuiSourceDirect(rawUrl, signal) {
     clearTimeout(timer);
   }
 }
+
+/** 浏览器本地解密模式：只返回短时有效的汽水 CDN 地址和本次音频密钥。 */
+app.get('/api/qishui-source', async (req, res) => {
+  const identity = requireSessionIdentity(req, res);
+  if (!identity) return;
+
+  const token = String(req.query.t || '').trim();
+  const rawUrl = token ? resolveQishuiSourceToken(token) : '';
+  if (!rawUrl || !isQishuiPlayUrl(rawUrl) || !isConfiguredMetingUrl(rawUrl)) {
+    return res.status(400).json({ error: '汽水播放会话无效或已过期' });
+  }
+
+  try {
+    const { sourceUrl, auth } = await resolveQishuiPlaybackSource(rawUrl);
+    res.set('Cache-Control', 'no-store, private');
+    return res.json({ url: sourceUrl, auth });
+  } catch (error) {
+    console.error('OpenMusic 汽水本地解密取链失败:', error?.message || error);
+    return res.status(502).json({ error: '汽水本地解密取链失败' });
+  }
+});
 
 app.get('/api/qishui-audio', async (req, res) => {
   const identity = requireSessionIdentity(req, res);

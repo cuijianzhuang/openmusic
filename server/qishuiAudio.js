@@ -12,6 +12,7 @@ const MAX_PENDING_LOADS = Number.isFinite(configuredPending)
   ? Math.min(32, Math.max(4, configuredPending))
   : 16;
 const MAX_SOURCE_BYTES = 96 * 1024 * 1024;
+const MAX_SAMPLE_COUNT = 200_000;
 const audioCache = new Map();
 const inflightLoads = new Map();
 const loadWaiters = [];
@@ -98,6 +99,38 @@ function writeCache(key, value) {
   pruneCache();
 }
 
+async function readUpstreamBuffer(upstream) {
+  const contentLength = Number(upstream.headers.get('content-length') || 0);
+  if (Number.isFinite(contentLength) && contentLength > MAX_SOURCE_BYTES) {
+    throw new Error('汽水原始音频文件过大');
+  }
+
+  if (!upstream.body?.getReader) {
+    const buffer = Buffer.from(await upstream.arrayBuffer());
+    if (buffer.length > MAX_SOURCE_BYTES) throw new Error('汽水原始音频文件过大');
+    return buffer;
+  }
+
+  const reader = upstream.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_SOURCE_BYTES) {
+        await reader.cancel();
+        throw new Error('汽水原始音频文件过大');
+      }
+      chunks.push(Buffer.from(value));
+    }
+  } finally {
+    reader.releaseLock?.();
+  }
+  return Buffer.concat(chunks, total);
+}
+
 function waitForInflight(entry, signal) {
   entry.consumers += 1;
   return new Promise((resolve, reject) => {
@@ -150,13 +183,9 @@ export async function loadQishuiAudioCached(rawUrl, fetchRaw, signal) {
       if (entry.controller.signal.aborted) throw createAbortError();
       const upstream = await fetchRaw(entry.controller.signal);
       if (!upstream.ok) throw new Error(`汽水原始音频请求失败: ${upstream.status}`);
-      const contentLength = Number(upstream.headers.get('content-length') || 0);
-      if (Number.isFinite(contentLength) && contentLength > MAX_SOURCE_BYTES) {
-        throw new Error('汽水原始音频文件过大');
-      }
       const auth = String(upstream.headers.get('x-qishui-auth') || '').trim();
       if (!auth) throw new Error('汽水音频密钥缺失');
-      const decrypted = decryptQishuiAudio(Buffer.from(await upstream.arrayBuffer()), auth);
+      const decrypted = decryptQishuiAudio(await readUpstreamBuffer(upstream), auth);
       writeCache(key, decrypted);
       return { ...decrypted, cacheHit: false, cacheKey: key };
     } finally {
@@ -224,12 +253,16 @@ function findBox(buffer, wanted, start = 0, end = buffer.length) {
 function parseSampleSizes(data) {
   const size = data.readUInt32BE(4);
   const count = data.readUInt32BE(8);
+  if (count > MAX_SAMPLE_COUNT) throw new Error('汽水音频样本数量超过限制');
   if (size) return Array.from({ length: count }, () => size);
+  if (12 + count * 4 > data.length) throw new Error('汽水音频样本大小数据不完整');
   return Array.from({ length: count }, (_, index) => data.readUInt32BE(12 + index * 4));
 }
 
 function parseIvs(data) {
   const count = data.readUInt32BE(4);
+  if (count > MAX_SAMPLE_COUNT) throw new Error('汽水音频 IV 数量超过限制');
+  if (8 + count * 8 > data.length) throw new Error('汽水音频 IV 数据不完整');
   return Array.from({ length: count }, (_, index) => {
     const iv = Buffer.alloc(16);
     data.copy(iv, 0, 8 + index * 8, 16 + index * 8);
@@ -267,19 +300,32 @@ export function decryptQishuiAudio(source, spadeA) {
   const sizes = parseSampleSizes(stsz.data);
   const ivs = parseIvs(senc.data);
   if (sizes.length !== ivs.length) throw new Error('汽水音频样本与 IV 数量不一致');
-  const samples = [];
+  const payloadBytes = sizes.reduce((total, size) => total + size, 0);
+  if (payloadBytes > mdat.data.length) throw new Error('汽水音频样本数据超出 mdat 范围');
+  const metadata = flacMetadata(stsd);
   let offset = mdat.offset + 8;
-  for (let index = 0; index < sizes.length; index += 1) {
-    const decipher = crypto.createDecipheriv('aes-128-ctr', key, ivs[index]);
-    samples.push(Buffer.concat([decipher.update(encrypted.subarray(offset, offset + sizes[index])), decipher.final()]));
-    offset += sizes[index];
+  if (metadata.length) {
+    const samples = [];
+    for (let index = 0; index < sizes.length; index += 1) {
+      const decipher = crypto.createDecipheriv('aes-128-ctr', key, ivs[index]);
+      samples.push(Buffer.concat([decipher.update(encrypted.subarray(offset, offset + sizes[index])), decipher.final()]));
+      offset += sizes[index];
+    }
+    return { buffer: Buffer.concat([Buffer.from('fLaC'), metadata, ...samples]), contentType: 'audio/flac' };
   }
 
-  const metadata = flacMetadata(stsd);
-  if (metadata.length) return { buffer: Buffer.concat([Buffer.from('fLaC'), metadata, ...samples]), contentType: 'audio/flac' };
+  // AAC/MP4 样本长度不变，可以直接写回输出副本，避免额外保存所有 sample Buffer。
   const output = Buffer.from(encrypted);
   let writeAt = mdat.offset + 8;
-  samples.forEach((sample) => { sample.copy(output, writeAt); writeAt += sample.length; });
+  for (let index = 0; index < sizes.length; index += 1) {
+    const size = sizes[index];
+    const decipher = crypto.createDecipheriv('aes-128-ctr', key, ivs[index]);
+    const sample = decipher.update(encrypted.subarray(offset, offset + size));
+    decipher.final();
+    sample.copy(output, writeAt);
+    offset += size;
+    writeAt += sample.length;
+  }
   const marker = output.indexOf(Buffer.from('enca'), stsd.offset);
   if (marker >= stsd.offset && marker < stsd.offset + stsd.size) Buffer.from('mp4a').copy(output, marker);
   return { buffer: output, contentType: 'audio/mp4' };

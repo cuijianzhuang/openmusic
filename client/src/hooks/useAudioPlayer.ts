@@ -59,6 +59,7 @@ import {
   getTrackCrossSourceFrom,
 } from '../lib/songPreloadCache';
 import { refreshSignedApiUrl, stripApiSignParams } from '../lib/signedApiUrl';
+import { resolveQishuiLocalPlaybackUrl } from '../lib/qishuiLocalPlayback';
 import { isProxiedMediaUrl, toProxiedMediaUrl } from '../lib/mediaProxyUrl';
 import {
   classifyMediaPlaybackError,
@@ -353,6 +354,8 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
   const lastSkipAt = useRef(0);
   const wasLeaderRef = useRef(isPlaybackLeader);
   const resolveFailCountRef = useRef<{ queueId: string; count: number } | null>(null);
+  /** 当前曲目本地汽水解密任务；切歌时立即终止，避免旧曲继续占用浏览器 CPU/带宽。 */
+  const qishuiLocalAbortRef = useRef<AbortController | null>(null);
 
   const shouldSkipForEndedTrackKey = useCallback((song: QueueItem, audio: HTMLAudioElement): boolean => {
     if (isEndedWhileServerPlaying(audio, song)) return false;
@@ -1065,6 +1068,8 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
 
     const loadTrack = async () => {
       loadLockRef.current = { queueId, gen };
+      qishuiLocalAbortRef.current?.abort();
+      qishuiLocalAbortRef.current = null;
       tempRetries.current = 0;
       lowestFallbackAttempted.current = false;
       qishuiProxyAttempted.current = null;
@@ -1082,6 +1087,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
         setMediaDuration(null, null);
 
         let url: string;
+        let playbackUrl: string;
         let qualityLabel: string | undefined;
         let crossSource = false;
         let crossSourceFrom: ReturnType<typeof getTrackCrossSourceFrom>;
@@ -1100,6 +1106,16 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
             if (timeoutId) window.clearTimeout(timeoutId);
           });
           url = (await refreshSignedApiUrl(resolved.url)) || resolved.url;
+          playbackUrl = url;
+          // 汽水当前曲目优先在听众浏览器本地取 CDN 并解密，绕开海外服务器的整首音频中转。
+          // 该尝试有硬超时，且切歌时会中止；失败后继续使用服务端解密地址。
+          if (current.source === 'qishui') {
+            const localAbort = new AbortController();
+            qishuiLocalAbortRef.current = localAbort;
+            const localUrl = await resolveQishuiLocalPlaybackUrl(url, localAbort.signal);
+            if (gen !== loadGeneration.current) return;
+            if (localUrl) playbackUrl = localUrl;
+          }
           qualityLabel = resolved.qualityLabel;
           crossSource = Boolean(resolved.crossSource)
             || isTrackCrossSource(current)
@@ -1166,7 +1182,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
               : Math.max(0, Number(useRoomStore.getState().room?.currentTime) || 0);
             snapSmoothPlaybackTime(justSkippedRef.current ? 0 : previewTime);
           }
-          audio.src = url;
+          audio.src = playbackUrl;
           bindAudioQueueId(audio, current.queueId);
           audio.load();
         });
@@ -1196,6 +1212,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
         await waitForAudioMinimumReady(controller.audio);
         if (gen !== loadGeneration.current) return;
 
+        // 仅缓存/同步服务端地址；blob: 只属于当前浏览器，不能发给房间内其他用户。
         rememberSongUrl(trackKey, url, qualityLabel, crossSource, crossSourceFrom, loudness, duration);
         if (duration && duration > 0) {
           const live = useRoomStore.getState().room;
@@ -1729,6 +1746,8 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
   useEffect(() => {
     return () => {
       loadGeneration.current += 1;
+      qishuiLocalAbortRef.current?.abort();
+      qishuiLocalAbortRef.current = null;
       loadLockRef.current = EMPTY_LOAD_LOCK;
       if (readyRecoveryTimer.current) {
         window.clearTimeout(readyRecoveryTimer.current);

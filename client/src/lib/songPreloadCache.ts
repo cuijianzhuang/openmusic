@@ -45,6 +45,10 @@ type FetchUrlResult =
 
 const urlCache = loadUrlCacheFromStorage();
 const pendingFetches = new Map<string, Promise<FetchUrlResult>>();
+// queueId 会在歌曲重新入队时变化，但同一平台歌曲 ID 的短期播放链仍可复用。
+// 只放内存，不持久化，避免把签名地址长期写入 sessionStorage。
+const identityUrlCache = new Map<string, { expiresAt: number; entry: CachedUrlEntry }>();
+const IDENTITY_URL_CACHE_TTL_MS = 8 * 60_000;
 const sourceErrorKeys = new Set<string>();
 /** 原平台无链、已用其它平台 URL 兜底成功 */
 const crossSourceKeys = new Set<string>();
@@ -341,7 +345,7 @@ async function fetchCrossSourceFallback(song: QueueItem): Promise<CachedUrlEntry
   return promise;
 }
 
-function getEffectivePlaybackQuality(song: Pick<QueueItem, 'queueId' | 'id' | 'source'>): string | undefined {
+function getEffectivePlaybackQuality(song: Pick<QueueItem, 'id' | 'source'>): string | undefined {
   const source = songSourceOf(song);
   if (isPlaybackQualityLockedToLowest()) {
     return getLowestQuality(source) ?? getUserPlaybackQuality(source);
@@ -366,8 +370,18 @@ function urlCacheKey(
   return `${trackKeyOf(song)}:${effective || 'default'}:${proxyTag}`;
 }
 
+function identityUrlCacheKey(
+  song: Pick<QueueItem, 'id' | 'source' | 'url'>,
+  quality?: string,
+) {
+  const effective = quality ?? getEffectivePlaybackQuality(song);
+  const proxyTag = songLikelyNeedsPlaybackProxy(song) ? 'proxy' : 'direct';
+  return `${songSourceOf(song)}:${song.id}:${effective || 'default'}:${proxyTag}`;
+}
+
 export function clearSongUrlCache() {
   urlCache.clear();
+  identityUrlCache.clear();
   pendingFetches.clear();
   resetPlaybackQualityLock();
   try {
@@ -389,6 +403,9 @@ export function invalidateTrackUrlCache(song: Pick<QueueItem, 'queueId' | 'id' |
     }
   }
 
+  for (const key of identityUrlCache.keys()) {
+    if (key.startsWith(`${song.source || 'netease'}:${song.id}:`)) identityUrlCache.delete(key);
+  }
   if (changed) {
     pendingFetches.clear();
     persistUrlCacheToStorage();
@@ -405,6 +422,7 @@ export function invalidateUnloadedSongUrlCache(keepTrackKey?: string | null) {
   }
 
   pendingFetches.clear();
+  identityUrlCache.clear();
   resetPlaybackQualityLock();
   persistUrlCacheToStorage();
 }
@@ -424,9 +442,25 @@ async function fetchSongUrlOnce(
   options: { refresh?: boolean } = {},
 ): Promise<FetchUrlResult> {
   const key = urlCacheKey(song, quality);
+  const identityKey = identityUrlCacheKey(song, quality);
   if (options.refresh) {
     urlCache.delete(key);
   } else {
+    const shared = identityUrlCache.get(identityKey);
+    if (shared) {
+      if (shared.expiresAt > Date.now() && !isBlockedPlaybackUrl(shared.entry.url)) {
+        return {
+          ok: true,
+          url: shared.entry.url,
+          qualityLabel: shared.entry.qualityLabel,
+          crossSource: Boolean(shared.entry.crossSource),
+          crossSourceFrom: normalizeMusicSource(shared.entry.crossSourceFrom),
+          loudness: shared.entry.loudness,
+          duration: shared.entry.duration,
+        };
+      }
+      identityUrlCache.delete(identityKey);
+    }
     const cached = urlCache.get(key);
     if (cached) {
       // 旧缓存可能仍是汽水的 /audio/qishui 包装地址；带 auth 的地址必须保留，
@@ -467,7 +501,7 @@ async function fetchSongUrlOnce(
     }
   }
 
-  const pendingKey = options.refresh ? `${key}:refresh` : key;
+  const pendingKey = options.refresh ? `${key}:refresh` : identityKey;
   const pending = pendingFetches.get(pendingKey);
   if (pending) return pending;
 
@@ -495,7 +529,17 @@ async function fetchSongUrlOnce(
         return { ok: false, errorClass: classifySongUrlFetchFailure(url) };
       }
 
-      urlCache.set(key, { url, qualityLabel, loudness, duration });
+      const entry = { url, qualityLabel, loudness, duration };
+      urlCache.set(key, entry);
+      identityUrlCache.set(identityKey, {
+        expiresAt: Date.now() + IDENTITY_URL_CACHE_TTL_MS,
+        entry,
+      });
+      while (identityUrlCache.size > MAX_URL_CACHE) {
+        const oldest = identityUrlCache.keys().next().value;
+        if (!oldest) break;
+        identityUrlCache.delete(oldest);
+      }
       trimUrlCache();
       return { ok: true, url, qualityLabel, loudness, duration };
     } finally {
@@ -675,6 +719,10 @@ export function seedSharedSongUrl(
   const cached = { url, qualityLabel, crossSource: crossSource || undefined, crossSourceFrom, loudness: normalizeLoudness(entry.loudness), duration: normalizeDuration(entry.duration) };
   urlCache.set(key, cached);
   urlCache.set(trackKeyOf(song), cached);
+  identityUrlCache.set(identityUrlCacheKey(song, getEffectivePlaybackQuality(song)), {
+    expiresAt: Date.now() + IDENTITY_URL_CACHE_TTL_MS,
+    entry: cached,
+  });
   trimUrlCache();
   persistUrlCacheToStorage();
 
