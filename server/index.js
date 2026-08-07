@@ -1459,8 +1459,7 @@ app.get('/api/media-proxy', async (req, res) => {
     return res.status(400).json({ error: '不支持的协议' });
   }
 
-  const trustedQishuiAudio = isTrustedMetingQishuiAudioUrl(raw);
-  if (isBlockedMediaHostname(parsed.hostname) && !isMetingApiHostname(parsed.hostname) && !trustedQishuiAudio) {
+  if (isBlockedMediaHostname(parsed.hostname) && !isMetingApiHostname(parsed.hostname)) {
     return res.status(403).json({ error: '禁止访问内网地址' });
   }
   // 不再限制媒体域名白名单，仅拦截内网地址
@@ -1492,7 +1491,7 @@ app.get('/api/media-proxy', async (req, res) => {
     } catch {
       return res.status(400).json({ error: '无效地址' });
     }
-    if (isBlockedMediaHostname(finalHost) && !trustedQishuiAudio) {
+    if (isBlockedMediaHostname(finalHost)) {
       return res.status(403).json({ error: '禁止访问内网地址' });
     }
 
@@ -1500,8 +1499,6 @@ app.get('/api/media-proxy', async (req, res) => {
       range: req.headers.range,
       thumbPx,
       requireAllowlist: true,
-      trustedInitialUrl: trustedQishuiAudio ? fetchUrl : undefined,
-      timeoutMs: trustedQishuiAudio ? 90_000 : undefined,
     });
   } catch (err) {
     console.error('Media proxy error:', err.message);
