@@ -262,15 +262,15 @@ npm run package:build # 组装发版包
 
 <table>
   <tr>
-    <td align="center" width="50%" valign="middle">
+    <td align="center" width="50%" valign="top">
       <a href="docs/donate/wechat.png">
-        <img src="docs/donate/wechat.png" alt="微信赞赏码" height="400" />
+        <img src="docs/donate/wechat.png" alt="微信赞赏码" width="300" />
       </a>
       <br/><sub><b>微信</b></sub>
     </td>
-    <td align="center" width="50%" valign="middle">
+    <td align="center" width="50%" valign="top">
       <a href="docs/donate/alipay.png">
-        <img src="docs/donate/alipay.png" alt="支付宝赞赏码" height="400" />
+        <img src="docs/donate/alipay.png" alt="支付宝赞赏码" width="300" />
       </a>
       <br/><sub><b>支付宝</b></sub>
     </td>
