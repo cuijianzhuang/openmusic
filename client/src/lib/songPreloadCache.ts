@@ -812,7 +812,7 @@ export async function resolveSongUrl(
 export function prefetchCurrentSong(song: QueueItem | null | undefined) {
   if (!song) return;
   void fetchSongUrl(song, { allowQualityDowngrade: false }).then((result) => {
-    if (result.ok && songSourceOf(song) === 'qishui') {
+    if (result?.url && songSourceOf(song) === 'qishui') {
       prefetchQishuiLocalPlayback(result.url);
     }
   });
@@ -875,7 +875,7 @@ export function prefetchQueueSongs(
   for (const song of targets) {
     // 预取播放 URL；汽水额外提前拉 CDN 并本地解密，切到该曲时可直接用 blob 缓存
     void fetchSongUrl(song, { allowQualityDowngrade: false }).then((result) => {
-      if (result.ok && songSourceOf(song) === 'qishui') {
+      if (result?.url && songSourceOf(song) === 'qishui') {
         prefetchQishuiLocalPlayback(result.url);
       }
     });
