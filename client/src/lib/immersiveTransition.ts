@@ -219,7 +219,8 @@ export async function runImmersiveExitPrep(options: RunImmersiveExitPrepOptions)
     if (kind === 'cover-bg') {
       const prevNeedsProxy = shouldProxySongPlaybackUrl(visualMode);
       const nextNeedsProxy = shouldProxySongPlaybackUrl('cover-bg');
-      if (prevNeedsProxy !== nextNeedsProxy && song) {
+      const currentIsQishui = (song?.source || '') === 'qishui';
+      if (prevNeedsProxy !== nextNeedsProxy && song && !currentIsQishui) {
         // 只做一次 reload，避免和 applyVisualMode 内部的 reload 叠加造成二次等待
         resetSharedAudioElement();
         useAudioStore.getState().requestTrackReload();

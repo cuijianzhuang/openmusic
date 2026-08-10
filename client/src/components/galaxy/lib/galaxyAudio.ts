@@ -37,11 +37,13 @@ function currentAudioSrc(): string {
   return audio.currentSrc || audio.src || '';
 }
 
-/** 当前曲目已走同源/代理地址时，才接入 Web Audio，避免切背景时劫持直链导致无声 */
+/** 当前曲目已走同源/代理/本地解密 blob 时，才接入 Web Audio，避免切背景时劫持直链导致无声 */
 function canWireGalaxyAudioNow(): boolean {
   if (!shouldProxySongPlaybackUrl()) return false;
   const src = currentAudioSrc();
   if (!src) return false;
+  // 汽水解密后的 blob: 同源，沉浸频谱必须接这个，不能再去拉服务端解密流
+  if (src.startsWith('blob:')) return true;
   return isProxiedMediaUrl(src) || isSameOriginMediaUrl(src);
 }
 

@@ -355,6 +355,8 @@ function getEffectivePlaybackQuality(song: Pick<QueueItem, 'id' | 'source'>): st
 }
 
 function songLikelyNeedsPlaybackProxy(song: Pick<QueueItem, 'source' | 'url'>): boolean {
+  // 汽水始终本地解密，缓存键不要跟沉浸模式 proxy 标签绑在一起
+  if (songSourceOf(song) === 'qishui') return false;
   if (shouldProxySongPlaybackUrl()) return true;
   if (!isHttpsPageContext()) return false;
   // 酷狗播放链多为 http://，HTTPS 站点必须走 media-proxy（不可升 https）
@@ -811,11 +813,8 @@ export async function resolveSongUrl(
 /** 加入房间后立即预取当前歌曲 URL，缩短刷新后的加载等待 */
 export function prefetchCurrentSong(song: QueueItem | null | undefined) {
   if (!song) return;
-  void fetchSongUrl(song, { allowQualityDowngrade: false }).then((result) => {
-    if (result?.url && songSourceOf(song) === 'qishui') {
-      prefetchQishuiLocalPlayback(result.url);
-    }
-  });
+  // 汽水整曲解密占内存大：当前曲交给播放路径解密，这里只预取签名 URL
+  void fetchSongUrl(song, { allowQualityDowngrade: false });
 }
 
 type UrlPrefetchSong = Pick<QueueItem, 'queueId' | 'id' | 'source' | 'url'>;
@@ -872,12 +871,12 @@ export function prefetchQueueSongs(
   else if (options.nextRandom?.id) retain.push(options.nextRandom);
   pruneSourceErrors(retain);
 
+  // 汽水只预解密「即将播放的第一首」，避免当前曲+多首队列并行整曲驻留内存
+  const firstQishui = targets.find((song) => songSourceOf(song) === 'qishui') || null;
   for (const song of targets) {
-    // 预取播放 URL；汽水额外提前拉 CDN 并本地解密，切到该曲时可直接用 blob 缓存
     void fetchSongUrl(song, { allowQualityDowngrade: false }).then((result) => {
-      if (result?.url && songSourceOf(song) === 'qishui') {
-        prefetchQishuiLocalPlayback(result.url);
-      }
+      if (!result?.url || !firstQishui || song.queueId !== firstQishui.queueId) return;
+      prefetchQishuiLocalPlayback(result.url);
     });
   }
 }

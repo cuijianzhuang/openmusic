@@ -440,7 +440,7 @@ app.use((req, res, next) => {
 
   // 仅当管理员显式允许时，HTTP 才降级为只校验会话；HTTPS 始终校验请求签名。
   const requireRequestSign = req.secure || !ALLOW_INSECURE_HTTP_API;
-  // 汽水客户端解密取链不要求音频 Range 请求携带 API 签名；仍保留会话和句柄校验。
+  // 汽水取链接口由客户端用 session 调用；签名在拼接 token 时已校验上游会话，这里免二次签名以免 Worker 取链失败。
   const isQishuiSourceRequest = req.path === '/api/qishui-source' && req.method === 'GET';
   if (isApiSignRequired() && requireRequestSign && !isQishuiSourceRequest) {
     const signKey = deriveApiSignKey(CLIENT_ID_SECRET, identity.userId, identity.iat);
@@ -1531,6 +1531,11 @@ app.get('/api/media-proxy', async (req, res) => {
     return res.status(400).json({ error: '不支持的协议' });
   }
 
+  // 汽水 /audio/qishui 是 Meting 服务端解密流，禁止经 OpenMusic 代理（解密只允许浏览器本地）
+  if (/(?:^|\/)audio\/qishui\/?$/i.test(parsed.pathname)) {
+    return res.status(403).json({ error: '汽水音频仅支持本地解密' });
+  }
+
   if (isBlockedMediaHostname(parsed.hostname) && !isMetingApiHostname(parsed.hostname)) {
     return res.status(403).json({ error: '禁止访问内网地址' });
   }
@@ -1559,7 +1564,11 @@ app.get('/api/media-proxy', async (req, res) => {
     // 解析后的最终 URL 必须落在音乐 CDN 白名单（不再允许任意公网 / 内网 Meting）
     let finalHost = '';
     try {
-      finalHost = new URL(fetchUrl).hostname;
+      const finalParsed = new URL(fetchUrl);
+      finalHost = finalParsed.hostname;
+      if (/(?:^|\/)audio\/qishui\/?$/i.test(finalParsed.pathname)) {
+        return res.status(403).json({ error: '汽水音频仅支持本地解密' });
+      }
     } catch {
       return res.status(400).json({ error: '无效地址' });
     }

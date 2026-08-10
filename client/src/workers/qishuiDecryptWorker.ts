@@ -58,6 +58,14 @@ function resolveKey(value: string): Uint8Array {
   return Uint8Array.from(hex.match(/../g)!, (part) => parseInt(part, 16));
 }
 
+/** 仅拷贝视图自身字节，避免 new Uint8Array(view).buffer 在已独立 buffer 上再复制一次。 */
+function toArrayBuffer(value: Uint8Array): ArrayBuffer {
+  if (value.byteOffset === 0 && value.byteLength === value.buffer.byteLength) {
+    return value.buffer as ArrayBuffer;
+  }
+  return value.slice().buffer as ArrayBuffer;
+}
+
 async function readResponse(response: Response): Promise<Uint8Array> {
   const declared = Number(response.headers.get('content-length') || 0);
   if (Number.isFinite(declared) && declared > MAX_SOURCE_BYTES) throw new Error('汽水音频文件过大');
@@ -85,24 +93,18 @@ async function readResponse(response: Response): Promise<Uint8Array> {
     output.set(chunk, offset);
     offset += chunk.length;
   }
+  chunks.length = 0;
   return output;
 }
 
-function sampleSizes(stsz: Box): number[] {
+function sampleSizes(stsz: Box): Uint32Array {
   const fixed = u32(stsz.data, 4);
   const count = u32(stsz.data, 8);
   if (count > 200_000 || (!fixed && 12 + count * 4 > stsz.data.length)) throw new Error('汽水音频样本数据无效');
-  return fixed ? Array.from({ length: count }, () => fixed) : Array.from({ length: count }, (_, i) => u32(stsz.data, 12 + i * 4));
-}
-
-function sampleIvs(senc: Box): Uint8Array[] {
-  const count = u32(senc.data, 4);
-  if (count > 200_000 || 8 + count * 8 > senc.data.length) throw new Error('汽水音频 IV 数据无效');
-  return Array.from({ length: count }, (_, index) => {
-    const iv = new Uint8Array(16);
-    iv.set(senc.data.subarray(8 + index * 8, 16 + index * 8));
-    return iv;
-  });
+  if (fixed) return new Uint32Array(count).fill(fixed);
+  const sizes = new Uint32Array(count);
+  for (let i = 0; i < count; i += 1) sizes[i] = u32(stsz.data, 12 + i * 4);
+  return sizes;
 }
 
 function findFlacMetadata(stsd: Box): Uint8Array | null {
@@ -114,21 +116,6 @@ function findFlacMetadata(stsd: Box): Uint8Array | null {
     if (size >= 8 && index - 4 + size <= stsd.data.length) return stsd.data.subarray(index + 4, index - 4 + size);
   }
   return null;
-}
-
-function concat(parts: Uint8Array[]): Uint8Array {
-  const total = parts.reduce((sum, part) => sum + part.length, 0);
-  const output = new Uint8Array(total);
-  let offset = 0;
-  for (const part of parts) {
-    output.set(part, offset);
-    offset += part.length;
-  }
-  return output;
-}
-
-function cryptoBuffer(value: Uint8Array): ArrayBuffer {
-  return new Uint8Array(value).buffer as ArrayBuffer;
 }
 
 async function decryptAudio(data: Uint8Array, rawKey: string): Promise<{ data: Uint8Array; contentType: string }> {
@@ -146,29 +133,61 @@ async function decryptAudio(data: Uint8Array, rawKey: string): Promise<{ data: U
   if (!trak || !mdia || !minf || !stbl || !stsd || !stsz || !senc || !mdat) throw new Error('汽水音频容器不完整');
 
   const sizes = sampleSizes(stsz);
-  const ivs = sampleIvs(senc);
-  if (sizes.length !== ivs.length || sizes.reduce((sum, size) => sum + size, 0) > mdat.data.length) throw new Error('汽水音频样本范围无效');
-  const key = await crypto.subtle.importKey('raw', cryptoBuffer(resolveKey(rawKey)), { name: 'AES-CTR' }, false, ['decrypt']);
+  const ivCount = u32(senc.data, 4);
+  if (ivCount > 200_000 || 8 + ivCount * 8 > senc.data.length) throw new Error('汽水音频 IV 数据无效');
+  if (sizes.length !== ivCount) throw new Error('汽水音频样本范围无效');
+
+  let samplesBytes = 0;
+  for (let i = 0; i < sizes.length; i += 1) samplesBytes += sizes[i];
+  if (samplesBytes > mdat.data.length) throw new Error('汽水音频样本范围无效');
+
+  const key = await crypto.subtle.importKey(
+    'raw',
+    toArrayBuffer(resolveKey(rawKey)),
+    { name: 'AES-CTR' },
+    false,
+    ['decrypt'],
+  );
   const metadata = findFlacMetadata(stsd);
-  let offset = mdat.offset + 8;
+  // 复用 16 字节 counter，避免为每个 sample 分配独立 IV Uint8Array（高采样数时对象开销巨大）
+  const counter = new Uint8Array(16);
+  let mdatOffset = mdat.offset + 8;
 
   if (metadata) {
-    const samples: Uint8Array[] = [];
+    const header = new TextEncoder().encode('fLaC');
+    const output = new Uint8Array(header.length + metadata.length + samplesBytes);
+    output.set(header, 0);
+    output.set(metadata, header.length);
+    let writeAt = header.length + metadata.length;
     for (let index = 0; index < sizes.length; index += 1) {
       const size = sizes[index];
-      const decrypted = await crypto.subtle.decrypt({ name: 'AES-CTR', counter: cryptoBuffer(ivs[index]), length: 64 }, key, cryptoBuffer(data.subarray(offset, offset + size)));
-      samples.push(new Uint8Array(decrypted));
-      offset += size;
+      counter.fill(0);
+      counter.set(senc.data.subarray(8 + index * 8, 16 + index * 8));
+      const decrypted = await crypto.subtle.decrypt(
+        { name: 'AES-CTR', counter: toArrayBuffer(counter), length: 64 },
+        key,
+        toArrayBuffer(data.subarray(mdatOffset, mdatOffset + size)),
+      );
+      output.set(new Uint8Array(decrypted), writeAt);
+      writeAt += size;
+      mdatOffset += size;
     }
-    return { data: concat([new TextEncoder().encode('fLaC'), metadata, ...samples]), contentType: 'audio/flac' };
+    return { data: output, contentType: 'audio/flac' };
   }
 
+  // MP4：就地解密到拷贝上，避免「密文 + 明文 samples 数组 + concat」三倍峰值
   const output = data.slice();
   for (let index = 0; index < sizes.length; index += 1) {
     const size = sizes[index];
-    const decrypted = await crypto.subtle.decrypt({ name: 'AES-CTR', counter: cryptoBuffer(ivs[index]), length: 64 }, key, cryptoBuffer(data.subarray(offset, offset + size)));
-    output.set(new Uint8Array(decrypted), offset);
-    offset += size;
+    counter.fill(0);
+    counter.set(senc.data.subarray(8 + index * 8, 16 + index * 8));
+    const decrypted = await crypto.subtle.decrypt(
+      { name: 'AES-CTR', counter: toArrayBuffer(counter), length: 64 },
+      key,
+      toArrayBuffer(data.subarray(mdatOffset, mdatOffset + size)),
+    );
+    output.set(new Uint8Array(decrypted), mdatOffset);
+    mdatOffset += size;
   }
   const enca = new TextEncoder().encode('enca');
   const mp4a = new TextEncoder().encode('mp4a');
@@ -193,7 +212,7 @@ workerScope.onmessage = async (event: MessageEvent<{ id: number; url: string; au
     if (!response.ok) throw new Error(`汽水 CDN 请求失败: ${response.status}`);
     const encrypted = await readResponse(response);
     const decrypted = await decryptAudio(encrypted, auth);
-    const transferable = cryptoBuffer(decrypted.data);
+    const transferable = toArrayBuffer(decrypted.data);
     workerScope.postMessage({ id, data: transferable, contentType: decrypted.contentType }, [transferable]);
   } catch (error) {
     workerScope.postMessage({ id, error: error instanceof Error ? error.message : '汽水本地解密失败' });

@@ -11,7 +11,7 @@ export function isProxiedMediaUrl(url: string): boolean {
   return url.startsWith(`${MEDIA_PROXY_PATH}?`);
 }
 
-/** 汽水鉴权端点本身就是 Meting 的媒体流，禁止普通场景重复套代理。 */
+/** 汽水鉴权解密端点禁止套 media-proxy：解密只能在浏览器本地完成。 */
 function isQishuiAudioEndpoint(url: string): boolean {
   let current = String(url || '').trim();
   for (let depth = 0; depth < 3 && current; depth += 1) {

@@ -18,30 +18,9 @@ function getProvider(source: MusicSource) {
   return providers[source];
 }
 
-/** 汽水部分音源返回 video_mp4，浏览器会按跨域视频响应拦截它，必须先走本站媒体代理。 */
-function shouldProxyQishuiVideoUrl(source: MusicSource, url: string): boolean {
-  if (source !== 'qishui' || !url) return false;
-  try {
-    const mimeType = new URL(url).searchParams.get('mime_type') || '';
-    return /(?:^|_)video_mp4$/i.test(mimeType) || /^video\/mp4$/i.test(mimeType);
-  } catch {
-    return false;
-  }
-}
-
-/** Meting 汽水适配器可能返回自己的鉴权流地址，不能再套 media-proxy，否则会被 SSRF 防护拦截。 */
-function isMetingQishuiAudioUrl(source: MusicSource, url: string): boolean {
-  if (source !== 'qishui' || !url) return false;
-  try {
-    return /\/audio\/qishui\/?$/i.test(new URL(url).pathname);
-  } catch {
-    return false;
-  }
-}
-
 /**
- * 汽水带 auth 的 `/audio/qishui` 是解密端点，不能拆成原始 CDN 地址。
- * 原始 audio_mp4 可能仍是 `enca` 加密轨道，浏览器直接加载会卡在 0 秒。
+ * 汽水带 auth 的 `/audio/qishui` 是 Meting 服务端解密端点，禁止拆成原始 CDN，
+ * 也禁止套 media-proxy（否则会把整曲解密流量打回 OpenMusic/Meting）。
  * 没有 auth 的历史包装地址才允许还原为普通音频直链。
  */
 export function unwrapQishuiAudioUrl(source: MusicSource, url: string): string {
@@ -141,16 +120,23 @@ export async function getSongUrlInfo(
     throw new SourceUnavailableError('no url');
   }
   const playbackUrl = unwrapQishuiAudioUrl(source, result.url);
+  // 汽水只允许浏览器本地解密：沉浸/Web Audio 也用解密后的 blob:（同源），
+  // 严禁把 /audio/qishui 或 CDN 密文套进 media-proxy（会炸 OpenMusic 内存并变成服务端解密）。
+  if (source === 'qishui') {
+    let resolved = playbackUrl;
+    if (resolved.startsWith('/api/')) {
+      resolved = await signApiUrl(resolved);
+    }
+    return {
+      url: resolved,
+      qualityLabel: result.qualityLabel?.trim() || undefined,
+      loudness: result.loudness,
+      duration: result.duration,
+    };
+  }
   const wantsProxy = options?.proxy
-    ?? (shouldProxyQishuiVideoUrl(source, playbackUrl)
-      || shouldProxyPlaybackUrl(playbackUrl, shouldProxySongPlaybackUrl()));
-  // 汽水鉴权端点普通播放直连公网域名；沉浸/Web Audio 时再走同源媒体代理。
-  const qishuiAuthProxy = source === 'qishui'
-    && isMetingQishuiAudioUrl(source, playbackUrl)
-    && wantsProxy
-    ? `/api/media-proxy?url=${encodeURIComponent(playbackUrl)}`
-    : null;
-  let resolved = qishuiAuthProxy || (wantsProxy ? toProxiedMediaUrl(playbackUrl) : playbackUrl);
+    ?? shouldProxyPlaybackUrl(playbackUrl, shouldProxySongPlaybackUrl());
+  let resolved = wantsProxy ? toProxiedMediaUrl(playbackUrl) : playbackUrl;
   if (resolved.startsWith('/api/')) {
     resolved = await signApiUrl(resolved);
   }

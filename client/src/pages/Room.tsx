@@ -1679,7 +1679,9 @@ export default function Room() {
       setVisualMode(mode);
       writeRoomVisualMode(mode);
       const shouldReloadAudio = options?.reloadAudio !== false;
-      if (shouldReloadAudio && prevNeedsProxy !== nextNeedsProxy && room?.current) {
+      // 汽水始终本地解密为 blob:，沉浸开关不改变代理需求，避免无谓重解密占内存
+      const currentIsQishui = (room?.current?.source || '') === 'qishui';
+      if (shouldReloadAudio && prevNeedsProxy !== nextNeedsProxy && room?.current && !currentIsQishui) {
         resetSharedAudioElement();
         useAudioStore.getState().requestTrackReload();
         if (options?.notifyProxyChange !== false) {
@@ -1787,6 +1789,7 @@ export default function Room() {
     const needsModeSwitch = visualMode === 'cover-bg';
     const needsProxyReload =
       Boolean(currentSong)
+      && (currentSong?.source || '') !== 'qishui'
       && shouldProxySongPlaybackUrl(targetMode)
       && !shouldProxySongPlaybackUrl(visualMode);
     const needsCover = Boolean(currentSong);

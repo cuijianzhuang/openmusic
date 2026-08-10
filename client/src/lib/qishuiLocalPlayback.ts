@@ -10,10 +10,15 @@ export type QishuiLocalPlaybackResult =
 
 const LOCAL_DECRYPT_TIMEOUT_MS = 20_000;
 const LOCAL_SOURCE_FETCH_TIMEOUT_MS = 5_000;
-const MAX_LOCAL_AUDIO_CACHE = 3;
+/** 只保留当前/下一首 blob；多缓存会让整曲明文长期驻留主线程堆。 */
+const MAX_LOCAL_AUDIO_CACHE = 1;
 const blobCache = new Map<string, string>();
 const pending = new Map<string, Promise<QishuiLocalPlaybackResult>>();
+/** 串行解密：并行 Worker 会同时持有多首「密文+明文」峰值。 */
+let decryptChain: Promise<void> = Promise.resolve();
 let requestId = 0;
+let prefetchAbort: AbortController | null = null;
+let prefetchToken = '';
 
 function sourceToken(wrappedUrl: string): string {
   try {
@@ -35,6 +40,8 @@ function remember(key: string, url: string): string {
   while (blobCache.size > MAX_LOCAL_AUDIO_CACHE) {
     const oldest = blobCache.keys().next().value;
     if (!oldest) break;
+    // 正在写入的 key 不能清：否则刚解密完就被 revoke
+    if (oldest === key) break;
     const oldUrl = blobCache.get(oldest);
     if (oldUrl) URL.revokeObjectURL(oldUrl);
     blobCache.delete(oldest);
@@ -43,7 +50,7 @@ function remember(key: string, url: string): string {
 }
 
 function runWorker(sourceUrl: string, auth: string, signal?: AbortSignal): Promise<string> {
-  return new Promise((resolve, reject) => {
+  const run = () => new Promise<string>((resolve, reject) => {
     const id = ++requestId;
     const worker = new Worker(new URL('../workers/qishuiDecryptWorker.ts', import.meta.url), { type: 'module' });
     const abort = () => {
@@ -79,6 +86,11 @@ function runWorker(sourceUrl: string, auth: string, signal?: AbortSignal): Promi
     };
     worker.postMessage({ id, url: sourceUrl, auth });
   });
+
+  const queued = decryptChain.then(run, run);
+  // 无论成败都放行队列；错误留给调用方
+  decryptChain = queued.then(() => undefined, () => undefined);
+  return queued;
 }
 
 async function resolveLocalPlaybackUrl(
@@ -113,6 +125,7 @@ async function resolveLocalPlaybackUrl(
 
   const task = (async (): Promise<QishuiLocalPlaybackResult> => {
     if (signal?.aborted) return { status: 'aborted' };
+    let blobUrl: string | null = null;
     try {
       const response = await fetchWithTimeout(
         `/api/qishui-source?t=${encodeURIComponent(token)}`,
@@ -125,10 +138,14 @@ async function resolveLocalPlaybackUrl(
       const sourceUrl = typeof payload.url === 'string' ? payload.url : '';
       const auth = typeof payload.auth === 'string' ? payload.auth : '';
       if (!sourceUrl || !auth) return { status: 'failed' };
-      const blobUrl = await runWorker(sourceUrl, auth, signal);
-      if (signal?.aborted) return { status: 'aborted' };
+      blobUrl = await runWorker(sourceUrl, auth, signal);
+      if (signal?.aborted) {
+        URL.revokeObjectURL(blobUrl);
+        return { status: 'aborted' };
+      }
       return { status: 'ok', url: remember(cacheKey, blobUrl) };
     } catch (err) {
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
       if (signal?.aborted || isAbortError(err)) return { status: 'aborted' };
       return { status: 'failed' };
     }
@@ -144,14 +161,38 @@ export async function resolveQishuiLocalPlaybackUrl(
   url: string,
   signal?: AbortSignal,
 ): Promise<QishuiLocalPlaybackResult> {
-  if (!url || !/\/api\/(?:qishui-source|qishui-audio)(?:\?|$)/i.test(url)) {
+  if (!url || !/\/api\/qishui-source(?:\?|$)/i.test(url)) {
     return { status: 'failed' };
+  }
+  // 正式播放优先：取消仅预取任务，避免和当前曲抢 Worker/内存
+  const token = sourceToken(url);
+  if (token && prefetchToken && prefetchToken !== token) {
+    prefetchAbort?.abort();
+    prefetchAbort = null;
+    prefetchToken = '';
   }
   return resolveLocalPlaybackUrl(url, signal);
 }
 
-/** 预取阶段提前解密；与播放路径共用 blob 缓存，命中则切歌可秒开 */
+/**
+ * 仅预取下一首解密结果；同时只保留一个预取任务。
+ * 不要对当前曲+多首队列并行整曲解密，否则内存会线性叠加。
+ */
 export function prefetchQishuiLocalPlayback(url: string | null | undefined): void {
-  if (!url || !/\/api\/(?:qishui-source|qishui-audio)(?:\?|$)/i.test(url)) return;
-  void resolveLocalPlaybackUrl(url);
+  if (!url || !/\/api\/qishui-source(?:\?|$)/i.test(url)) return;
+  const token = sourceToken(url);
+  if (!token) return;
+  if (blobCache.has(token) || pending.has(token)) return;
+  if (prefetchToken === token) return;
+
+  prefetchAbort?.abort();
+  const controller = new AbortController();
+  prefetchAbort = controller;
+  prefetchToken = token;
+  void resolveLocalPlaybackUrl(url, controller.signal).finally(() => {
+    if (prefetchAbort === controller) {
+      prefetchAbort = null;
+      prefetchToken = '';
+    }
+  });
 }

@@ -15,11 +15,12 @@ interface Props {
   isPlaying: boolean;
 }
 
-function currentProxiedAudioUrl(): string | null {
+function currentAnalyzableAudioUrl(): string | null {
   const audio = getSharedAudio();
   const src = audio.currentSrc || audio.src || '';
   if (!src) return null;
-  if (isProxiedMediaUrl(src) || isSameOriginMediaUrl(src)) return src;
+  // blob:（汽水解密结果）与同源/代理地址均可离线分析；外链直链会 CORS 失败
+  if (src.startsWith('blob:') || isProxiedMediaUrl(src) || isSameOriginMediaUrl(src)) return src;
   return null;
 }
 
@@ -45,8 +46,9 @@ export default function GalaxyBeatMapDriver({ song, isPlaying }: Props) {
     let cancelled = false;
 
     const attach = async () => {
-      let audioUrl = currentProxiedAudioUrl();
-      if (!audioUrl && song) {
+      let audioUrl = currentAnalyzableAudioUrl();
+      // 汽水只能等本地解密后的 blob:；禁止 getSongUrl(proxy:true) 把解密打回服务器
+      if (!audioUrl && song && (song.source || 'netease') !== 'qishui') {
         try {
           audioUrl = await getSongUrl(song, undefined, { proxy: true });
         } catch {

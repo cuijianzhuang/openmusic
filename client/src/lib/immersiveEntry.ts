@@ -143,6 +143,12 @@ export interface PrepareImmersiveEnterOptions {
 
 /** 代理音源切换与播放对齐（进入沉浸专用） */
 export async function reloadImmersiveTrackProxy(song: QueueItem): Promise<void> {
+  // 汽水只用本地解密 blob:，沉浸模式直接接 Web Audio，禁止触发代理重载
+  if ((song.source || '') === 'qishui') {
+    await waitForCurrentTrackReady(song);
+    ensureGalaxyAudioOutput();
+    return;
+  }
   invalidateTrackUrlCache(song);
   useAudioStore.getState().requestTrackReload();
   await new Promise<void>((resolve) => {

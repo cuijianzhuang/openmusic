@@ -58,9 +58,8 @@ import {
   getCachedUrlCrossSourceFrom,
   getTrackCrossSourceFrom,
 } from '../lib/songPreloadCache';
-import { refreshSignedApiUrl, stripApiSignParams } from '../lib/signedApiUrl';
 import { resolveQishuiLocalPlaybackUrl } from '../lib/qishuiLocalPlayback';
-import { isProxiedMediaUrl, toProxiedMediaUrl } from '../lib/mediaProxyUrl';
+import { refreshSignedApiUrl, stripApiSignParams } from '../lib/signedApiUrl';
 import {
   classifyMediaPlaybackError,
   isSourceUnavailableMessage,
@@ -229,7 +228,6 @@ interface AudioRuntime {
   suppressAutoResumeRef: MutableRefObject<boolean>;
   tempRetries: MutableRefObject<number>;
   lowestFallbackAttempted: MutableRefObject<boolean>;
-  qishuiProxyAttempted: MutableRefObject<string | null>;
   successRecordedTrackKey: MutableRefObject<string | null>;
   stallRetryTimer: MutableRefObject<number | null>;
   /** 首次解密较慢时，metadata 到达后补一次播放和进度对齐 */
@@ -347,7 +345,6 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
   const prevQueueIdRef = useRef<string | null>(null);
   const tempRetries = useRef(0);
   const lowestFallbackAttempted = useRef(false);
-  const qishuiProxyAttempted = useRef<string | null>(null);
   const successRecordedTrackKey = useRef<string | null>(null);
   const stallRetryTimer = useRef<number | null>(null);
   const readyRecoveryTimer = useRef<number | null>(null);
@@ -644,7 +641,6 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
       invalidateTrackUrlCache(live);
       tempRetries.current = 0;
       lowestFallbackAttempted.current = false;
-      qishuiProxyAttempted.current = null;
       loadLockRef.current = EMPTY_LOAD_LOCK;
       setLoadRetryNonce((n) => n + 1);
     }, delayMs);
@@ -660,7 +656,6 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
       suppressAutoResumeRef,
       tempRetries,
       lowestFallbackAttempted,
-      qishuiProxyAttempted,
       successRecordedTrackKey,
       stallRetryTimer,
       readyRecoveryTimer,
@@ -765,29 +760,16 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
 
         recordSongPlaybackFailure();
 
-        const failedUrl = audio.currentSrc || audio.src;
-        if (
-          (song.source || 'netease') === 'qishui'
-          && /^https?:\/\//i.test(failedUrl)
-          && !isProxiedMediaUrl(failedUrl)
-          // /audio/qishui 是 Meting 自己的鉴权解密端点，不能再套
-          // /api/media-proxy；否则 SSRF 防护会把 localhost 当内网地址拦掉。
-          && !/(?:^|\/)audio\/qishui(?:[/?]|$)/i.test(failedUrl)
-          && runtime.qishuiProxyAttempted.current !== song.queueId
-        ) {
-          runtime.qishuiProxyAttempted.current = song.queueId;
-          const proxied = toProxiedMediaUrl(failedUrl);
-          void refreshSignedApiUrl(proxied).then((signedProxy) => {
-            const liveNow = useRoomStore.getState().room?.current;
-            if (!signedProxy || liveNow?.queueId !== song.queueId) return;
-            controller.enqueue(async () => {
-              const target = controller.audio;
-              target.pause();
-              target.src = signedProxy;
-              bindAudioQueueId(target, song.queueId);
-              target.load();
-              await target.play().catch(() => {});
-            });
+        // 汽水严禁回退到 media-proxy（那是服务端拉密文/解密路径）；只走本地解密或恢复逻辑。
+        if ((song.source || 'netease') === 'qishui') {
+          void classifyMediaPlaybackError(audio).then((errorClass) => {
+            if (errorClass === 'temporary' && runtime.tempRetries.current < MAX_TEMP_PLAYBACK_RETRIES) {
+              runtime.tempRetries.current += 1;
+              invalidateTrackUrlCache(song);
+              runtime.scheduleLocalRecovery(song, 'qishui_temp_retry');
+              return;
+            }
+            runtime.scheduleLocalRecovery(song, 'qishui_playback_failed');
           });
           return;
         }
@@ -1074,7 +1056,6 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     const loadTrack = async () => {
       tempRetries.current = 0;
       lowestFallbackAttempted.current = false;
-      qishuiProxyAttempted.current = null;
       successRecordedTrackKey.current = null;
       setTrackLoading(true);
 
