@@ -342,9 +342,10 @@ export async function bindRoomMusicAccount({ roomId, platform, cookie, shared, n
 
 /** 一次性漫游：Cookie 不入库 */
 export async function fetchEphemeralFmSong(cookie, mode = '', platform = 'netease', excludeIds = []) {
+  const plat = platform === 'qishui' ? 'qishui' : platform === 'tencent' ? 'tencent' : 'netease';
   const result = await metingAdminFetch('/admin/fm', {
     method: 'POST',
-    body: { cookie, mode, platform: platform === 'qishui' ? 'qishui' : 'netease', excludeIds },
+    body: { cookie, mode, platform: plat, excludeIds },
   });
   if (!result.ok) return result;
   return { ok: true, data: result.data?.data ?? result.data };

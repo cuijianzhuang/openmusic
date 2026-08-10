@@ -1,6 +1,6 @@
 {
   "notes": [
-    "移除导致服务器性能的汽水音频解密逻辑"
+    "QQ音乐漫游上线"
   ],
-  "forcePrompt": false
+  "forcePrompt": true
 }

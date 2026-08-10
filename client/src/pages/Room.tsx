@@ -389,7 +389,6 @@ export default function Room() {
   const [announcementPopupOpen, setAnnouncementPopupOpen] = useState(false);
   const [memberOpen, setMemberOpen] = useState(false);
   const [qualityOpen, setQualityOpen] = useState(false);
-  const qishuiServerVip = useSiteFeaturesStore((s) => s.qishuiVip);
   const sharedMembershipEnabled = useSiteFeaturesStore((s) => s.sharedMembershipEnabled);
   const [memberSaving, setMemberSaving] = useState(false);
   const [songRequestSaving, setSongRequestSaving] = useState(false);
@@ -1363,7 +1362,7 @@ export default function Room() {
     }
   }, [addingPage, addSong, showToast, isOwner, isAdmin]);
 
-  const handleSaveFmMode = useCallback(async (mode: string, source?: 'netease' | 'qishui') => {
+  const handleSaveFmMode = useCallback(async (mode: string, source?: 'netease' | 'tencent' | 'qishui') => {
     if (fmSaving) return;
     setFmSaving(true);
     const res = await setRoomFmMode(mode, source);
@@ -2687,7 +2686,6 @@ export default function Room() {
           value={normalizeFmMode(room?.neteaseFmMode)}
           source={room?.fmSource || 'netease'}
           saving={fmSaving}
-          qishuiLocked={!room?.musicAccounts?.qishui && !qishuiServerVip}
           onClose={() => setFmModeOpen(false)}
           onSave={handleSaveFmMode}
         />

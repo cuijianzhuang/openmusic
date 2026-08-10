@@ -391,7 +391,9 @@ function normalizeMusicAccountSecrets(input) {
 }
 
 function normalizeFmSource(value) {
-  return value === "qishui" ? "qishui" : "netease";
+  if (value === "qishui") return "qishui";
+  if (value === "tencent") return "tencent";
+  return "netease";
 }
 
 const rooms = new Map();
@@ -2705,8 +2707,12 @@ export function setRoomFmMode(roomId, actorId, mode, connectionId = null, source
   if (!room) return { error: "房间不存在" };
   if (!isOwnerConnection(room, actorId, connectionId)) return { error: "仅房主可调整漫游模式" };
 
-  const nextMode = normalizeFmMode(mode);
+  let nextMode = normalizeFmMode(mode);
   const nextSource = normalizeFmSource(source ?? room.fmSource);
+  // QQ 官方仅猜你喜欢，无其它模式；切到 QQ 时强制 DEFAULT
+  if (nextSource === "tencent" && nextMode !== FM_MODE_OFF) {
+    nextMode = DEFAULT_FM_MODE;
+  }
   if (room.neteaseFmMode === nextMode && normalizeFmSource(room.fmSource) === nextSource) {
     return { room: serializeRoom(room) };
   }
@@ -2734,7 +2740,7 @@ export function setRoomMusicAccountsCache(roomId, accounts) {
   const next = normalizeMusicAccounts(accounts);
   // 刷新 VIP 列表时保留本地无 VIP 漫游账号元数据
   const prev = normalizeMusicAccounts(room.musicAccounts);
-  for (const platform of ["netease", "qishui"]) {
+  for (const platform of ["netease", "tencent", "qishui"]) {
     if (prev[platform]?.usage === "fm" && !next[platform]) {
       next[platform] = prev[platform];
     }
@@ -2784,7 +2790,7 @@ export function getRoomNeteaseFmCookie(roomId) {
 export function getRoomFmCookie(roomId, platform) {
   const room = rooms.get(String(roomId || "").toUpperCase());
   if (!room) return null;
-  const plat = platform === "qishui" ? "qishui" : "netease";
+  const plat = platform === "qishui" ? "qishui" : platform === "tencent" ? "tencent" : "netease";
   const secret = normalizeMusicAccountSecrets(room.musicAccountSecrets)[plat];
   if (!secret) return null;
   const meta = normalizeMusicAccounts(room.musicAccounts)[plat];
@@ -2797,6 +2803,7 @@ export function clearRoomMusicAccountSecret(roomId, platform = "netease") {
   if (!room) return { error: "房间不存在" };
   const secrets = normalizeMusicAccountSecrets(room.musicAccountSecrets);
   if (platform === "netease" || platform === "all") secrets.netease = null;
+  if (platform === "tencent" || platform === "all") secrets.tencent = null;
   if (platform === "qishui" || platform === "all") secrets.qishui = null;
   room.musicAccountSecrets = secrets;
   persistRoom(room);

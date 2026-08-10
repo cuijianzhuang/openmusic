@@ -27,7 +27,6 @@ const FM_MODES = new Set([
   FM_MODE_OFF,
 ]);
 
-
 export function normalizeFmMode(input) {
   const raw = String(input || '').trim();
   if (!raw) return DEFAULT_FM_MODE;
@@ -35,10 +34,19 @@ export function normalizeFmMode(input) {
   return DEFAULT_FM_MODE;
 }
 
+export function normalizeFmSource(input) {
+  const raw = String(input || '').trim();
+  if (raw === 'qishui') return 'qishui';
+  if (raw === 'tencent') return 'tencent';
+  return 'netease';
+}
+
 function buildFmQuery(mode, source = 'netease') {
-  const query = { server: source === 'qishui' ? 'qishui' : 'netease', type: 'fm' };
+  const server = normalizeFmSource(source);
+  const query = { server, type: 'fm' };
   const normalized = normalizeFmMode(mode);
-  if (query.server === 'netease' && normalized && normalized !== 'DEFAULT') {
+  // QQ 官方固定 radio id=99（猜你喜欢），忽略模式；网易 / 汽水通过 id 传模式
+  if (server !== 'tencent' && normalized && normalized !== 'DEFAULT' && normalized !== FM_MODE_OFF) {
     query.id = normalized;
   }
   return query;
@@ -80,7 +88,7 @@ function normalizeFmSong(raw, source = 'netease', excludedIds = new Set()) {
     : undefined;
   return {
     id,
-    source: source === 'qishui' ? 'qishui' : 'netease',
+    source: normalizeFmSource(source),
     name,
     artist: artistStr,
     album: String(item.album || item.album_name || ''),
@@ -116,9 +124,10 @@ function sleep(ms) {
 }
 
 /**
- * 网易云私人漫游。
+ * 私人漫游（网易 / QQ / 汽水）。
  * - 传入 ephemeralCookie（无 VIP 本地账号）：走 Meting /admin/fm，不入库
  * - 否则走 type=fm；有 roomId 时房间账号优先，否则用 Meting 原有 Cookie 池
+ * - QQ 仅支持猜你喜欢，无熟悉/探索等模式
  */
 export async function fetchMetingFmSongs(fmMode = DEFAULT_FM_MODE, options = {}) {
   if (normalizeFmMode(fmMode) === FM_MODE_OFF) return [];
@@ -128,8 +137,9 @@ export async function fetchMetingFmSongs(fmMode = DEFAULT_FM_MODE, options = {})
   const roomName = String(options.roomName || '私人漫游');
   const ephemeralCookie = String(options.ephemeralCookie || '').trim();
   const mode = normalizeFmMode(fmMode);
-  const source = options.source === 'qishui' ? 'qishui' : 'netease';
-  const modeId = mode === 'DEFAULT' ? '' : mode;
+  const source = normalizeFmSource(options.source);
+  // QQ 无模式参数；其余平台 DEFAULT 不传 id
+  const modeId = source === 'tencent' || mode === 'DEFAULT' ? '' : mode;
   const excludedIds = new Set(Array.isArray(options.excludeIds) ? options.excludeIds.map((id) => String(id).trim()).filter(Boolean) : []);
 
   for (let i = 0; i < MAX_FM_RETRIES; i += 1) {

@@ -48,11 +48,11 @@ function roomNeedsScopedProxy(roomId, server, type = '') {
   if (account.hasVip === true || normalizedType === 'fm') return true;
 
   // 无会员房间账号只允许当前房间的私人漫游取链，不能接管搜索/点播。
-  if (normalizedType === 'url' && server === 'qishui' && resolveRoomInternal) {
+  if (normalizedType === 'url' && (server === 'qishui' || server === 'tencent') && resolveRoomInternal) {
     try {
       const room = resolveRoomInternal(String(roomId).trim().toUpperCase());
       const current = room?.current;
-      return current?.source === 'qishui'
+      return current?.source === server
         && current?.requestedBy === '私人漫游'
         && String(current.id || '').trim() === String(getMetingRequestContext().songId || '').trim();
     } catch {

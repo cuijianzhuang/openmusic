@@ -1223,7 +1223,7 @@ export function useSocket() {
     });
   }, []);
 
-  const setRoomFmMode = useCallback((mode: string, source?: 'netease' | 'qishui'): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
+  const setRoomFmMode = useCallback((mode: string, source?: 'netease' | 'tencent' | 'qishui'): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
     return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
       'set_room_fm_mode',
       { mode, source },

@@ -234,7 +234,7 @@ export interface RoomState {
   /** 队列为空时私人漫游推荐模式 */
   neteaseFmMode?: string;
   /** 私人漫游使用的推荐平台 */
-  fmSource?: 'netease' | 'qishui';
+  fmSource?: 'netease' | 'tencent' | 'qishui';
   /** 漫游关闭前的模式，重新开启时恢复 */
   fmModeBeforeOff?: string;
   /** 房主扫码绑定的音源账号（公开信息；Cookie 在 Meting） */

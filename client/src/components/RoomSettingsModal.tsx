@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Crown, Minus, Plus, Sparkles, ShieldCheck, Trash2, X } from 'lucide-react';
-import { NETEASE_FM_MODE_OPTIONS, getFmModeLabel, normalizeFmMode, FM_MODE_OFF, DEFAULT_FM_MODE } from '../api/music/fmMode';
+import { getFmModeOptions, getFmModeLabel, normalizeFmMode, FM_MODE_OFF, DEFAULT_FM_MODE, type FmSource } from '../api/music/fmMode';
 import type { BannedSong, ForbiddenWord, RoomUser, RoomMusicAccounts } from '../types';
 import type { DislikeSkipMode } from '../lib/dislikeSkip';
 import SourceBadge from './SourceBadge';
@@ -78,7 +78,7 @@ interface Props {
   isOwner: boolean;
   canModerate: boolean;
   fmMode: string;
-  fmSource: 'netease' | 'qishui';
+  fmSource: FmSource;
   fmModeBeforeOff?: string;
   fmSaving?: boolean;
   announcementEnabled: boolean;
@@ -129,7 +129,7 @@ interface Props {
   onMusicAccountSetShared?: (platform: 'netease' | 'tencent' | 'qishui', shared: boolean) => Promise<{ success: boolean; error?: string }>;
   onMusicAccountUnbind?: (platform: 'netease' | 'tencent' | 'qishui') => Promise<{ success: boolean; error?: string }>;
   onClose: () => void;
-  onSaveFmMode: (mode: string, source?: 'netease' | 'qishui') => void;
+  onSaveFmMode: (mode: string, source?: FmSource) => void;
   onOpenMemberModal: () => void;
   onSaveAnnouncement: (options: { enabled: boolean; text: string }) => void;
   onSaveChatHistory: (enabled: boolean) => void;
@@ -586,25 +586,32 @@ export default function RoomSettingsModal({
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           {activeTab === 'fm' && isOwner && (
             <section>
-              <div className="mb-4 grid grid-cols-2 gap-1 rounded-lg border border-white/10 bg-black/20 p-1" role="tablist" aria-label="选择漫游来源">
+              <div className="mb-4 grid grid-cols-3 gap-1 rounded-lg border border-white/10 bg-black/20 p-1" role="tablist" aria-label="选择漫游来源">
                 {([
-                  { value: 'netease', label: '网易云' },
-                  { value: 'qishui', label: '汽水音乐' },
-                ] as const).map((item) => (
+                  { value: 'netease' as const, label: '网易云' },
+                  { value: 'tencent' as const, label: 'QQ 音乐' },
+                  { value: 'qishui' as const, label: '汽水音乐' },
+                ]).map((item) => {
+                  const options = getFmModeOptions(item.value);
+                  const modeForSource = currentFm === FM_MODE_OFF
+                    ? FM_MODE_OFF
+                    : (options.some((opt) => opt.value === currentFm) ? currentFm : DEFAULT_FM_MODE);
+                  return (
                   <button
                     key={item.value}
                     type="button"
                     role="tab"
                     aria-selected={fmSource === item.value}
                     disabled={fmSaving}
-                    onClick={() => onSaveFmMode(currentFm, item.value)}
+                    onClick={() => onSaveFmMode(modeForSource, item.value)}
                     className={`min-h-9 rounded-md px-3 py-2 text-xs font-medium transition-colors disabled:opacity-50 ${
                       fmSource === item.value ? 'bg-white/10 text-white' : 'text-netease-muted hover:bg-white/[0.05] hover:text-white'
                     }`}
                   >
                     {item.label}
                   </button>
-                ))}
+                  );
+                })}
               </div>
               <Toggle
                 checked={currentFm !== FM_MODE_OFF}
@@ -617,9 +624,7 @@ export default function RoomSettingsModal({
                 description="队列为空时通过私人漫游自动推荐下一首"
               />
               <div className={`mt-3 space-y-1.5 ${currentFm === FM_MODE_OFF ? 'opacity-40' : ''}`}>
-                {(fmSource === 'qishui'
-                  ? [{ value: DEFAULT_FM_MODE, label: '汽水推荐', description: '使用汽水音乐账号的个性化推荐' }]
-                  : NETEASE_FM_MODE_OPTIONS).map((opt) => (
+                {getFmModeOptions(fmSource).map((opt) => (
                   <button
                     key={opt.value}
                     type="button"
@@ -644,7 +649,7 @@ export default function RoomSettingsModal({
                 ))}
               </div>
               <p className="mt-2 text-[10px] text-netease-muted">
-                当前：{fmSource === 'qishui' ? '汽水推荐' : getFmModeLabel(currentFm)}
+                当前：{getFmModeLabel(currentFm)}
               </p>
             </section>
           )}

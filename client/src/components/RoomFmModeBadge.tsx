@@ -1,9 +1,9 @@
-import { getFmModeLabel, normalizeFmMode } from '../api/music/fmMode';
+import { getFmModeLabel, getFmSourceLabel, normalizeFmMode, type FmSource } from '../api/music/fmMode';
 import Tooltip from './Tooltip';
 
 interface Props {
   fmMode?: string | null;
-  fmSource?: 'netease' | 'qishui' | null;
+  fmSource?: FmSource | null;
   clickable?: boolean;
   onClick?: () => void;
   className?: string;
@@ -22,7 +22,7 @@ export default function RoomFmModeBadge({ fmMode, fmSource = 'netease', clickabl
         className={`inline-flex h-5 items-center gap-1.5 whitespace-nowrap rounded-md border border-white/10 bg-white/[0.04] px-1.5 text-[10px] font-medium leading-none text-netease-muted transition-colors hover:border-white/20 hover:bg-white/[0.07] disabled:opacity-100 ${className}`}
       >
         <span className="font-medium text-[#ec4141]">漫游</span>
-        <span>{label} / {fmSource === 'qishui' ? '汽水' : '网易'}</span>
+        <span>{label} / {getFmSourceLabel(fmSource)}</span>
       </button>
     </Tooltip>
   );
