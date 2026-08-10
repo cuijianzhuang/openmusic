@@ -56,7 +56,7 @@ import { Server } from 'socket.io';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { isIP } from 'net';
 import {
   deriveApiSignKey,
@@ -172,7 +172,7 @@ import {
 import { importNeteasePlaylist, importQqPlaylist, importQishuiPlaylist, fetchNeteasePlaylistMetas } from './playlistImport.js';
 import { fetchNeteaseHotToplist } from './neteaseToplist.js';
 import { getHotSongs } from './songHotRank.js';
-import { hasRedisEnvConfig, importFavoriteSongs, listFavoriteSongs, setFavoriteSong } from './roomStorage.js';
+import { hasRedisEnvConfig, importFavoriteSongs, listFavoriteSongs, setFavoriteSong, getRedisClient } from './roomStorage.js';
 import {
   createChatImageUploadToken,
   isQiniuConfigured,
@@ -809,6 +809,7 @@ function requestPublicOrigin(req) {
 
 // 与 Meting 汽水播放地址保持同级有效期，避免长时间暂停或慢速播放时失效。
 const QISHUI_SOURCE_TOKEN_TTL_MS = 10 * 60 * 1000;
+const QISHUI_SOURCE_REDIS_PREFIX = 'openmusic:qishui-src:';
 const qishuiSourceTokens = new Map();
 
 function isQishuiPlayUrl(rawUrl) {
@@ -835,22 +836,93 @@ function pruneQishuiSourceTokens() {
 const qishuiSourceTokenCleanupTimer = setInterval(pruneQishuiSourceTokens, 60 * 1000);
 qishuiSourceTokenCleanupTimer.unref?.();
 
+/** 优先用持久密钥，保证进程重启后仍可校验已发出的汽水播放会话。 */
+function getQishuiSourceSigningKey() {
+  const roomKey = String(
+    getRuntimeConfig().roomCredentialEncryptionKey
+    || process.env.ROOM_CREDENTIAL_ENCRYPTION_KEY
+    || '',
+  ).trim();
+  const material = roomKey || CLIENT_ID_SECRET;
+  return createHmac('sha256', 'openmusic:qishui-source').update(material).digest();
+}
+
+function qishuiSourceRedisKey(token) {
+  return `${QISHUI_SOURCE_REDIS_PREFIX}${createHash('sha256').update(token).digest('hex')}`;
+}
+
+async function persistQishuiSourceToken(token, rawUrl, expiresAt) {
+  try {
+    const redis = getRedisClient();
+    if (!redis) return;
+    const ttl = Math.max(1000, expiresAt - Date.now());
+    await redis.set(qishuiSourceRedisKey(token), rawUrl, { PX: ttl });
+  } catch (err) {
+    console.warn('汽水播放会话 Redis 写入失败:', err?.message || err);
+  }
+}
+
+function rememberQishuiSourceToken(token, rawUrl, expiresAt) {
+  qishuiSourceTokens.set(token, { rawUrl, expiresAt });
+  void persistQishuiSourceToken(token, rawUrl, expiresAt);
+}
+
 function createQishuiSourceToken(rawUrl) {
   pruneQishuiSourceTokens();
-  const token = randomBytes(24).toString('base64url');
-  qishuiSourceTokens.set(token, {
-    rawUrl,
-    expiresAt: Date.now() + QISHUI_SOURCE_TOKEN_TTL_MS,
-  });
+  const expiresAt = Date.now() + QISHUI_SOURCE_TOKEN_TTL_MS;
+  const body = Buffer.from(JSON.stringify({ u: String(rawUrl), e: expiresAt }), 'utf8').toString('base64url');
+  const sig = createHmac('sha256', getQishuiSourceSigningKey()).update(body).digest('base64url');
+  const token = `v2.${body}.${sig}`;
+  rememberQishuiSourceToken(token, String(rawUrl), expiresAt);
   return token;
 }
 
-function resolveQishuiSourceToken(token) {
+function verifySignedQishuiSourceToken(token) {
+  const match = /^v2\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)$/.exec(String(token || '').trim());
+  if (!match) return '';
+  const body = match[1];
+  const sig = match[2];
+  try {
+    const expected = Buffer.from(createHmac('sha256', getQishuiSourceSigningKey()).update(body).digest('base64url'));
+    const actual = Buffer.from(sig);
+    if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) return '';
+    const parsed = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+    const rawUrl = String(parsed?.u || '').trim();
+    const expiresAt = Number(parsed?.e) || 0;
+    if (!rawUrl || expiresAt <= Date.now()) return '';
+    return rawUrl;
+  } catch {
+    return '';
+  }
+}
+
+async function resolveQishuiSourceToken(token) {
   pruneQishuiSourceTokens();
   const normalized = String(token || '').trim();
+  if (!normalized) return '';
+
+  const signed = verifySignedQishuiSourceToken(normalized);
+  if (signed) return signed;
+
   const entry = qishuiSourceTokens.get(normalized);
-  if (!entry) return '';
-  return entry.rawUrl;
+  if (entry && entry.expiresAt > Date.now()) return entry.rawUrl;
+
+  try {
+    const redis = getRedisClient();
+    if (redis) {
+      const rawUrl = String(await redis.get(qishuiSourceRedisKey(normalized)) || '').trim();
+      if (rawUrl) {
+        const ttl = await redis.pTTL(qishuiSourceRedisKey(normalized)).catch(() => -1);
+        const expiresAt = ttl > 0 ? Date.now() + ttl : Date.now() + QISHUI_SOURCE_TOKEN_TTL_MS;
+        qishuiSourceTokens.set(normalized, { rawUrl, expiresAt });
+        return rawUrl;
+      }
+    }
+  } catch (err) {
+    console.warn('汽水播放会话 Redis 读取失败:', err?.message || err);
+  }
+
+  return '';
 }
 
 async function localizeQishuiPayload(payload, metingQuery, req) {
@@ -1423,7 +1495,7 @@ app.get('/api/qishui-source', async (req, res) => {
   if (!identity) return;
 
   const token = String(req.query.t || '').trim();
-  const rawUrl = token ? resolveQishuiSourceToken(token) : '';
+  const rawUrl = token ? await resolveQishuiSourceToken(token) : '';
   if (!rawUrl || !isQishuiPlayUrl(rawUrl) || !isConfiguredMetingUrl(rawUrl)) {
     return res.status(400).json({ error: '汽水播放会话无效或已过期' });
   }

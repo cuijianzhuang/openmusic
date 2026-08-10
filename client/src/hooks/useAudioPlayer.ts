@@ -1111,11 +1111,21 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
           url = (await refreshSignedApiUrl(resolved.url)) || resolved.url;
           if (gen !== loadGeneration.current) return;
           playbackUrl = url;
+          let resolvedMeta = resolved;
           // 汽水只允许在听众浏览器本地取 CDN 并解密，服务端不再提供整首音频回退。
           if (current.source === 'qishui') {
             const localAbort = new AbortController();
             qishuiLocalAbortRef.current = localAbort;
-            const localResult = await resolveQishuiLocalPlaybackUrl(url, localAbort.signal);
+            let localResult = await resolveQishuiLocalPlaybackUrl(url, localAbort.signal);
+            // 服务重启后旧的汽水播放会话会失效；清掉缓存地址后重取一次。
+            if (localResult.status === 'failed' && !localAbort.signal.aborted) {
+              invalidateTrackUrlCache(current);
+              const refreshed = await resolveSongUrl(current);
+              if (gen !== loadGeneration.current) return;
+              resolvedMeta = refreshed;
+              url = (await refreshSignedApiUrl(refreshed.url)) || refreshed.url;
+              localResult = await resolveQishuiLocalPlaybackUrl(url, localAbort.signal);
+            }
             if (gen !== loadGeneration.current || localAbort.signal.aborted || localResult.status === 'aborted') {
               return;
             }
@@ -1124,15 +1134,15 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
             }
             playbackUrl = localResult.url;
           }
-          qualityLabel = resolved.qualityLabel;
-          crossSource = Boolean(resolved.crossSource)
+          qualityLabel = resolvedMeta.qualityLabel;
+          crossSource = Boolean(resolvedMeta.crossSource)
             || isTrackCrossSource(current)
             || isCachedUrlCrossSource(current);
-          crossSourceFrom = resolved.crossSourceFrom
+          crossSourceFrom = resolvedMeta.crossSourceFrom
             || getCachedUrlCrossSourceFrom(current)
             || getTrackCrossSourceFrom(current);
-          loudness = resolved.loudness;
-          duration = resolved.duration;
+          loudness = resolvedMeta.loudness;
+          duration = resolvedMeta.duration;
           if (crossSource) markTrackCrossSource(current, crossSourceFrom);
           if (resolveFailCountRef.current?.queueId === queueId) {
             resolveFailCountRef.current = null;
