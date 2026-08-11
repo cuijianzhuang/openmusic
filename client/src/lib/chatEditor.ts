@@ -53,6 +53,23 @@ export function getActiveMentionDeleteCount(editor: HTMLElement): number {
   return before.length - atIndex;
 }
 
+/** / 命令查询（行首或空白后触发，类 TG Bot） */
+export function getSlashQueryBeforeCursor(editor: HTMLElement): string | null {
+  const before = getTextBeforeCursorSerialized(editor);
+  const slashIndex = before.lastIndexOf('/');
+  if (slashIndex < 0) return null;
+  if (slashIndex > 0 && !/\s/.test(before[slashIndex - 1] || '')) return null;
+  return before.slice(slashIndex + 1);
+}
+
+export function getActiveSlashDeleteCount(editor: HTMLElement): number {
+  const before = getTextBeforeCursorSerialized(editor);
+  const slashIndex = before.lastIndexOf('/');
+  if (slashIndex < 0) return 0;
+  if (slashIndex > 0 && !/\s/.test(before[slashIndex - 1] || '')) return 0;
+  return before.length - slashIndex;
+}
+
 export function editorPlainIncludesAt(editor: HTMLElement): boolean {
   return (editor.innerText || editor.textContent || '').includes('@');
 }

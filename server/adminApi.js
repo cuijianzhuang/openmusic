@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
 import {
   listRoomsForAdmin,
   listRoomsForAdminDetailed,
@@ -49,6 +49,7 @@ import {
 } from './errorReports.js';
 import { sanitizeDeviceId } from './deviceIdentity.js';
 import { getRuntimeConfigForAdmin, setRuntimeConfig, getRuntimeConfig } from './runtimeConfig.js';
+import { testAiModelChat, testAiModelVision, getAiModelConfig, isAiModelConfigured } from './aiModelService.js';
 import { patchClientIndexHtml } from './seoIndexHtml.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -236,6 +237,7 @@ function clearAdminSessionCookie(res) {
 /** 写入管理端「操作审计」+ 控制台；建房/进房拦截等防护事件也可调用 */
 export function appendAdminAudit(action, detail = {}, ip = '') {
   const entry = {
+    id: randomUUID(),
     at: Date.now(),
     action,
     ip: String(ip || ''),
@@ -278,6 +280,7 @@ const AUDIT_ACTION_GROUPS = {
     'reset_music_api_circuit',
     'meting_reset_cooldown',
     'meting_set_disabled',
+    'ai_test',
   ],
   notify: ['set_announcement', 'broadcast'],
   room: [
@@ -315,9 +318,13 @@ async function listAuditLogPage({ offset = 0, limit = 10, q = '', action = '' } 
     await pruneExpiredAdminAudit(client);
     const cutoff = auditCutoffMs();
     const rows = await client.lRange(ADMIN_AUDIT_KEY, 0, -1);
-    const all = rows.map((raw) => {
+    const all = rows.map((raw, index) => {
       try {
-        return JSON.parse(raw);
+        const entry = JSON.parse(raw);
+        // 历史审计记录没有 ID，读取时补一个与 Redis 列表位置绑定的兼容键。
+        return entry && typeof entry === 'object'
+          ? { ...entry, id: entry.id || `legacy-${index}` }
+          : null;
       } catch {
         return null;
       }
@@ -922,6 +929,53 @@ export function mountAdminApi(app, {
 
   app.get('/api/admin/runtime-config', requireAdmin, (_req, res) => {
     res.json({ config: getRuntimeConfigForAdmin() });
+  });
+
+  app.get('/api/admin/ai/status', requireAdmin, (_req, res) => {
+    const cfg = getAiModelConfig();
+    res.json({
+      configured: isAiModelConfigured(),
+      enabled: cfg.enabled,
+      botName: cfg.botName,
+      textModel: cfg.textModel,
+      visionModel: cfg.visionModel,
+    });
+  });
+
+  app.post('/api/admin/ai/test', requireAdminOrigin, requireAdmin, requireAdminSetupComplete, async (req, res) => {
+    const ip = getClientIp?.(req) || req.ip || '';
+    const message = String(req.body?.message || '你好').trim().slice(0, 500) || '你好';
+    // 允许测试未保存的草稿配置（不落盘）
+    const draftKey = String(req.body?.apiKey || '').trim();
+    const draftModel = String(req.body?.model || '').trim();
+    const draftBaseUrl = String(req.body?.apiBaseUrl || '').trim();
+    const draftProtocol = String(req.body?.apiProtocol || '').trim();
+    const draftMaxRequestsPerMinute = Number(req.body?.maxRequestsPerMinute);
+    const draftMaxTokensPerMinute = Number(req.body?.maxTokensPerMinute);
+    const poolId = String(req.body?.poolId || '').trim();
+    const savedPool = getRuntimeConfig().aiModelPools.find((pool) => pool.id === poolId);
+    const overrides = {
+      apiKey: draftKey || savedPool?.apiKey || undefined,
+      model: draftModel || savedPool?.model || undefined,
+      apiBaseUrl: draftBaseUrl || savedPool?.apiBaseUrl || undefined,
+      apiProtocol: draftProtocol || savedPool?.apiProtocol || undefined,
+      maxRequestsPerMinute: Number.isFinite(draftMaxRequestsPerMinute) ? draftMaxRequestsPerMinute : savedPool?.maxRequestsPerMinute,
+      maxTokensPerMinute: Number.isFinite(draftMaxTokensPerMinute) ? draftMaxTokensPerMinute : savedPool?.maxTokensPerMinute,
+    };
+    const isVisionPool = req.body?.type === 'vision' || savedPool?.type === 'vision';
+    const result = isVisionPool
+      ? await testAiModelVision(overrides)
+      : await testAiModelChat(message, overrides);
+    audit('ai_test', {
+      success: result.success,
+      model: result.model,
+      latencyMs: result.latencyMs,
+      error: result.success ? undefined : result.error,
+    }, ip);
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+    res.json(result);
   });
 
   app.get('/api/admin/runtime-config/music-api-status', requireAdmin, (_req, res) => {

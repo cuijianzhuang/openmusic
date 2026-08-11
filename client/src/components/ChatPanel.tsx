@@ -22,6 +22,7 @@ import { fetchStickerSearchEnabled } from '../api/stickerSearch';
 export default function ChatPanel({ className = '' }: { className?: string }) {
   const chatRoomSlice = useChatRoomSlice();
   const roomMeta = useChatRoomMeta();
+  const roomAi = useRoomStore((s) => s.room?.roomAi);
   const nickname = useRoomStore((s) => s.nickname);
   const mySocketId = useRoomStore((s) => s.mySocketId);
   const isOwner = useRoomStore((s) => s.isOwner);
@@ -299,6 +300,7 @@ export default function ChatPanel({ className = '' }: { className?: string }) {
       <ChatInputBar
         ref={inputBarRef}
         roomMeta={roomMeta}
+        roomAi={roomAi}
         nickname={nickname}
         mySocketId={mySocketId}
         canControlPlayback={canControlPlayback}

@@ -1,5 +1,6 @@
 import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Check, Loader2, Plus, Reply, Smile } from 'lucide-react';
+import { isVerifiedAiBotMessage } from '../lib/chatAi';
 import type { ChatMessage, ChatReplyRef, RoomMemberTier, RoomUser } from '../types';
 import QFaceImage from './QFaceImage';
 import Tooltip from './Tooltip';
@@ -122,6 +123,72 @@ function renderMessageText(
   });
 }
 
+function normalizeAiRichText(value: string) {
+  return String(value || '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/你可以把喜欢的歌用\s*`?request_song`?\s*点上(?:哦)?/gi, '喜欢哪首直接告诉我，我来帮你点上')
+    .replace(/([^\n])\s+(?=\d{1,2}[.、]\s+\*\*)/g, '$1\n');
+}
+
+function renderAiInlineText(
+  text: string,
+  keyPrefix: string,
+  chatScrollRoot: HTMLDivElement | null,
+  nicknames: string[],
+) {
+  return text.split(/(\*\*[^*\n]+\*\*)/g).filter(Boolean).map((part, index) => {
+    const isBold = part.startsWith('**') && part.endsWith('**');
+    const content = isBold ? part.slice(2, -2) : part;
+    const node = renderMessageText(content, 'message', chatScrollRoot, nicknames);
+    return isBold ? (
+      <strong key={`${keyPrefix}-strong-${index}`} className="font-semibold text-white">
+        {node}
+      </strong>
+    ) : (
+      <span key={`${keyPrefix}-text-${index}`}>{node}</span>
+    );
+  });
+}
+
+function renderAiMessageText(
+  messageText: string,
+  chatScrollRoot: HTMLDivElement | null,
+  nicknames: string[],
+) {
+  const lines = normalizeAiRichText(messageText).split('\n');
+  return (
+    <div className="space-y-1.5 text-[15px] leading-7 tracking-[0.005em] text-white/95">
+      {lines.map((rawLine, index) => {
+        const line = rawLine.trim();
+        if (!line) return <div key={`ai-gap-${index}`} className="h-1" aria-hidden />;
+        const numbered = line.match(/^(\d{1,2})[.、]\s+(.+)$/);
+        const bullet = line.match(/^[-•]\s+(.+)$/);
+        if (numbered) {
+          return (
+            <div key={`ai-item-${index}`} className="grid grid-cols-[1.4rem_minmax(0,1fr)] gap-1.5 py-0.5">
+              <span className="pt-0.5 text-xs font-semibold tabular-nums text-sky-200/75">{numbered[1]}</span>
+              <span className="min-w-0">{renderAiInlineText(numbered[2], `ai-item-${index}`, chatScrollRoot, nicknames)}</span>
+            </div>
+          );
+        }
+        if (bullet) {
+          return (
+            <div key={`ai-bullet-${index}`} className="grid grid-cols-[0.75rem_minmax(0,1fr)] gap-1.5 py-0.5">
+              <span className="pt-0.5 text-sky-200/70">•</span>
+              <span className="min-w-0">{renderAiInlineText(bullet[1], `ai-bullet-${index}`, chatScrollRoot, nicknames)}</span>
+            </div>
+          );
+        }
+        return (
+          <p key={`ai-paragraph-${index}`} className="m-0">
+            {renderAiInlineText(line, `ai-paragraph-${index}`, chatScrollRoot, nicknames)}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
 function renderReplyRefContent(
   reply: ChatReplyRef,
   chatScrollRoot: HTMLDivElement | null,
@@ -155,6 +222,7 @@ export interface ChatMessageRowProps {
   myUserId: string;
   pureMode: boolean;
   pureImageRevealed: boolean;
+  aiProcessing?: { status: 'queued' | 'processing' | 'error'; queuePosition: number; pendingCount: number; attempt: number; maxAttempts: number; error?: string } | null;
   reactionPickerOpen: boolean;
   chatMuted: boolean;
   canModerate?: boolean;
@@ -176,6 +244,7 @@ function ChatMessageRow({
   myUserId,
   pureMode,
   pureImageRevealed,
+  aiProcessing = null,
   reactionPickerOpen,
   chatMuted,
   canModerate = false,
@@ -230,12 +299,22 @@ function ChatMessageRow({
   }
 
   const isMe = msg.userId === myUserId;
+  const isAiBot = isVerifiedAiBotMessage(msg);
   const isRoomCreator = msg.userId === room.creatorId;
   const isRoomAdmin = room.adminIds.includes(msg.userId)
     || (room.autoPromotedAdminIds || []).includes(msg.userId)
     || (Boolean(room.ownerId) && room.ownerId === msg.userId && !isRoomCreator);
   const userMemberTier = room.memberTiers?.[msg.userId];
   const user = userMap.get(msg.userId);
+  const handleMention = useCallback(() => {
+    if (user) {
+      onMentionUser(user);
+      return;
+    }
+    if (isAiBot) {
+      onMentionUser({ id: msg.userId, nickname: msg.nickname } as RoomUser);
+    }
+  }, [isAiBot, msg.nickname, msg.userId, onMentionUser, user]);
   const showAvatars = Boolean(room.chatShowAvatars);
   const avatarUrl = isMe
     ? (myAvatarUrl || room.userAvatarUrls?.[msg.userId] || '')
@@ -245,7 +324,7 @@ function ChatMessageRow({
   const isPhotoOnly = Boolean(
     msg.imageUrl && !msg.text && !isStickerImage && (!pureMode || pureImageRevealed),
   );
-  const bubbleClass = `min-w-0 max-w-full rounded-2xl text-sm leading-7 break-words [overflow-wrap:anywhere] ${isPhotoOnly ? 'p-1' : 'px-3 py-1.5'} ${isMe ? 'rounded-tr-none bg-netease-red/20 text-white' : 'rounded-tl-none bg-netease-dark/80 text-white/90'}`;
+  const bubbleClass = `min-w-0 max-w-full rounded-2xl text-sm leading-7 break-words [overflow-wrap:anywhere] ${isPhotoOnly ? 'p-1' : 'px-3 py-1.5'} ${isMe ? 'rounded-tr-none bg-netease-red/20 text-white' : isAiBot ? 'rounded-tl-none border border-white/[0.09] bg-gradient-to-br from-slate-800/95 via-slate-800/90 to-rose-950/25 text-white/95 shadow-[0_8px_22px_-16px_rgba(0,0,0,0.9)]' : 'rounded-tl-none bg-netease-dark/80 text-white/90'}`;
   const replyBubbleClass = `min-w-0 max-w-full rounded-2xl px-3 py-1.5 text-sm ${isMe ? 'rounded-tr-none bg-netease-red/20 text-white' : 'rounded-tl-none bg-netease-dark/80 text-white/90'}`;
 
   const renderReplyPreview = () => {
@@ -339,7 +418,7 @@ function ChatMessageRow({
   const avatarNode = showAvatars ? (
     <button
       type="button"
-      onClick={() => user && onMentionUser(user)}
+      onClick={handleMention}
       className={`mt-0.5 inline-flex h-8 w-8 flex-shrink-0 items-center justify-center overflow-hidden rounded-full text-[11px] font-bold text-white ${
         avatarUrl
           ? ''
@@ -366,11 +445,21 @@ function ChatMessageRow({
         <div className={`mb-0.5 flex max-w-full min-w-0 items-center gap-1.5 ${isMe ? 'flex-row-reverse' : ''}`}>
           <button
             type="button"
-            onClick={() => user && onMentionUser(user)}
-            className={`min-w-0 truncate text-[10px] ${isMe ? 'text-netease-red/80' : 'text-netease-muted'} hover:text-sky-300`}
+            onClick={handleMention}
+            className={`min-w-0 truncate text-[10px] ${isMe ? 'text-netease-red/80' : isAiBot ? 'text-sky-200/90' : 'text-netease-muted'} hover:text-sky-300`}
           >
             {msg.nickname}
           </button>
+          {isAiBot && (
+            <button
+              type="button"
+              onClick={handleMention}
+              className="rounded border border-sky-300/15 bg-sky-400/[0.08] px-1 py-px text-[9px] font-medium text-sky-200/90 transition-colors hover:bg-sky-400/[0.16]"
+              aria-label={`@${msg.nickname}`}
+            >
+              AI
+            </button>
+          )}
           <UserRoleMarks
             isOwner={isRoomCreator}
             isAdmin={isRoomAdmin && !isRoomCreator}
@@ -408,7 +497,21 @@ function ChatMessageRow({
                   </div>
                 )}
                 {renderPhotoContent()}
-                {msg.text ? renderMessageText(msg.text, 'message', chatScrollRoot, nicknames) : null}
+                {msg.text
+                  ? isAiBot
+                    ? renderAiMessageText(msg.text, chatScrollRoot, nicknames)
+                    : renderMessageText(msg.text, 'message', chatScrollRoot, nicknames)
+                  : null}
+              </div>
+            )}
+            {aiProcessing && (
+              <div className={`mt-1 inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-medium shadow-sm backdrop-blur-sm ${aiProcessing.status === 'error' ? 'border-amber-400/25 bg-amber-500/[0.09] text-amber-100' : 'border-sky-300/15 bg-slate-800/85 text-white/85'} ${isMe ? 'self-end' : 'self-start'}`}>
+                {aiProcessing.status !== 'error' && <Loader2 className="h-3.5 w-3.5 animate-spin text-sky-300" aria-hidden="true" />}
+                <span>{aiProcessing.status === 'error'
+                  ? `AI 连续重试失败：${aiProcessing.error || '请稍后再试'}`
+                  : aiProcessing.status === 'queued'
+                    ? `${aiProcessing.attempt > 0 ? `AI 重试中（${aiProcessing.attempt + 1}/${aiProcessing.maxAttempts}）` : 'AI 排队中'}${aiProcessing.queuePosition > 0 ? `（第 ${aiProcessing.queuePosition} 位）` : ''}${aiProcessing.pendingCount > 0 ? ` · 待处理 ${aiProcessing.pendingCount}` : ''}`
+                    : `AI 正在处理中${aiProcessing.attempt > 0 ? `（第 ${aiProcessing.attempt + 1}/${aiProcessing.maxAttempts} 次）` : ''}${aiProcessing.pendingCount > 1 ? ` · 待处理 ${aiProcessing.pendingCount}` : ''}`}</span>
               </div>
             )}
             <ChatMessageReactions
@@ -528,6 +631,7 @@ export default memo(ChatMessageRow, (prev, next) => (
   && reactionsKey(prev.msg.reactions) === reactionsKey(next.msg.reactions)
   && prev.pureMode === next.pureMode
   && prev.pureImageRevealed === next.pureImageRevealed
+  && prev.aiProcessing === next.aiProcessing
   && prev.reactionPickerOpen === next.reactionPickerOpen
   && prev.chatMuted === next.chatMuted
   && prev.canModerate === next.canModerate

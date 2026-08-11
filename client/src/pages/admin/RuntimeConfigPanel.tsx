@@ -24,6 +24,7 @@ import SettingsSection from './SettingsSection';
 import type {
   CustomMusicApi,
   CustomMusicApiStatus,
+  AiModelPool,
   MusicApiOperation,
   MusicApiPlatform,
   RuntimeConfig,
@@ -39,6 +40,11 @@ type RuntimeTextField = Exclude<
   | 'roomCreateIpLooseCooldownMs'
   | 'svipQualityEnabled'
   | 'sharedMembershipEnabled'
+  | 'aiEnabled'
+  | 'aiApiProtocol'
+  | 'aiMaxRequestsPerMinute'
+  | 'aiMaxTokensPerMinute'
+  | 'aiModelPools'
   | 'configuredSecrets'
   | 'metingApiUrl'
   | 'metingApiAuth'
@@ -71,6 +77,8 @@ interface RuntimeFieldGroup {
   purpose: ReactNode;
   fields: RuntimeFieldDef[];
   includeQiniuZone?: boolean;
+  includeAiProtocol?: boolean;
+  includeAiLimits?: boolean;
 }
 
 const RUNTIME_FIELD_GROUPS: RuntimeFieldGroup[] = [
@@ -135,6 +143,18 @@ const RUNTIME_FIELD_GROUPS: RuntimeFieldGroup[] = [
       { key: 'apihzBaseUrl', label: 'API 地址', placeholder: 'https://cn.apihz.cn/api' },
       { key: 'apihzId', label: '用户 ID', secret: true },
       { key: 'apihzKey', label: '密钥', secret: true },
+    ],
+  },
+  {
+    id: 'aiModel',
+    title: 'AI 模型服务',
+    purpose: (
+      <>
+        聊天室助手；兼容 OpenAI 风格的 Chat Completions 与 Responses API。文本模型负责对话和工具调用，视觉模型用于识图。
+      </>
+    ),
+    fields: [
+      { key: 'aiBotName', label: '助手昵称', placeholder: '小音' },
     ],
   },
   {
@@ -239,6 +259,31 @@ function createMusicApi(): CustomMusicApi {
   };
 }
 
+function createAiModelPool(): AiModelPool {
+  return {
+    id: globalThis.crypto?.randomUUID?.() || `ai-pool-${Date.now()}`,
+    enabled: true,
+    type: 'text',
+    name: '',
+    apiBaseUrl: '',
+    apiProtocol: 'chat_completions',
+    apiKey: '',
+    configuredApiKey: false,
+    model: '',
+    maxRequestsPerMinute: 1000,
+    maxTokensPerMinute: 50_000,
+    priority: 100,
+  };
+}
+
+function formatJsonResponse(value: string): string {
+  try {
+    return JSON.stringify(JSON.parse(value), null, 2);
+  } catch {
+    return value;
+  }
+}
+
 export default function RuntimeConfigPanel({
   onError,
   securityTab,
@@ -259,12 +304,33 @@ export default function RuntimeConfigPanel({
   const [musicApiStatus, setMusicApiStatus] = useState<CustomMusicApiStatus | null>(null);
   const [previewPlatforms, setPreviewPlatforms] = useState<Record<string, MusicApiPlatform>>({});
   const [picking, setPicking] = useState<{ apiId: string; field: string } | null>(null);
+  const [aiTestLoading, setAiTestLoading] = useState(false);
+  const [aiTestingPoolId, setAiTestingPoolId] = useState('');
+  const [aiTestResult, setAiTestResult] = useState<{
+    success?: boolean;
+    reply?: string;
+    model?: string;
+    latencyMs?: number;
+    error?: string;
+    usage?: unknown;
+    rawResponse?: string;
+    curl?: string;
+  } | null>(null);
 
   const applyLoadedConfig = (config: RuntimeConfig) => {
     setDraft({
       ...config,
       svipQualityEnabled: Boolean(config.svipQualityEnabled),
       sharedMembershipEnabled: config.sharedMembershipEnabled !== false,
+      aiEnabled: Boolean(config.aiEnabled),
+      aiApiBaseUrl: config.aiApiBaseUrl || 'https://api.siliconflow.cn/v1',
+      aiApiProtocol: config.aiApiProtocol || 'chat_completions',
+      aiBotName: config.aiBotName || '小音',
+      aiTextModel: config.aiTextModel || 'Qwen/Qwen3-8B',
+      aiVisionModel: config.aiVisionModel || 'Qwen/Qwen3.5-4B',
+      aiMaxRequestsPerMinute: Number(config.aiMaxRequestsPerMinute) || 1000,
+      aiMaxTokensPerMinute: Number(config.aiMaxTokensPerMinute) || 50_000,
+      aiModelPools: Array.isArray(config.aiModelPools) ? config.aiModelPools : [],
       seoTitle: config.seoTitle || '',
       seoDescription: config.seoDescription || '',
       seoKeywords: config.seoKeywords || '',
@@ -538,7 +604,7 @@ export default function RuntimeConfigPanel({
         title="房间"
         description="0 表示关闭对应限制"
       >
-        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+        <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
           <Space wrap>
             <InputNumber
               min={0}
@@ -640,7 +706,7 @@ export default function RuntimeConfigPanel({
         title="Meting 音源"
         description="多源轮询，故障自动切换；API Token 与 Meting 后台「API Token 管理」中创建的令牌一致"
       >
-        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+        <Space orientation="vertical" style={{ width: '100%' }} size="middle">
           {draft.metingSources.length === 0 && (
             <Empty description="暂无音源，点击下方按钮添加" image={Empty.PRESENTED_IMAGE_SIMPLE} />
           )}
@@ -748,7 +814,7 @@ export default function RuntimeConfigPanel({
         title="自定义音乐接口"
         description="留空则网易/QQ 走上方 Meting；多接口自动轮询切换"
       >
-        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+        <Space orientation="vertical" style={{ width: '100%' }} size="middle">
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
             先「解析响应」，再点字段旁「选择」映射；URL/参数支持 {'{id}'} {'{keyword}'} {'{quality}'} 等变量
           </Typography.Text>
@@ -1103,6 +1169,62 @@ export default function RuntimeConfigPanel({
             </Typography.Text>
           </Col>
         )}
+        {group.includeAiProtocol && (
+          <Col xs={24} sm={12}>
+            <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
+              上游协议
+            </Typography.Text>
+            <Select
+              value={draft.aiApiProtocol}
+              aria-label="AI 上游协议"
+              style={{ width: '100%' }}
+              options={[
+                { value: 'chat_completions', label: 'Chat Completions' },
+                { value: 'responses', label: 'Responses API' },
+              ]}
+              onChange={(aiApiProtocol) => setDraft({ ...draft, aiApiProtocol })}
+            />
+            <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>
+              系统会自动拼接对应的接口路径
+            </Typography.Text>
+          </Col>
+        )}
+        {group.includeAiLimits && (
+          <>
+            <Col xs={24} sm={12}>
+              <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
+                最高 RPM
+              </Typography.Text>
+              <InputNumber
+                value={draft.aiMaxRequestsPerMinute}
+                min={1}
+                max={10_000}
+                precision={0}
+                aria-label="AI 最高 RPM"
+                style={{ width: '100%' }}
+                onChange={(value) => setDraft({ ...draft, aiMaxRequestsPerMinute: Number(value) || 1 })}
+              />
+            </Col>
+            <Col xs={24} sm={12}>
+              <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
+                最高 TPM
+              </Typography.Text>
+              <InputNumber
+                value={draft.aiMaxTokensPerMinute}
+                min={1_000}
+                max={2_000_000}
+                precision={0}
+                step={1_000}
+                aria-label="AI 最高 TPM"
+                style={{ width: '100%' }}
+                onChange={(value) => setDraft({ ...draft, aiMaxTokensPerMinute: Number(value) || 1_000 })}
+              />
+              <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>
+                全站共享额度；请求队列会按同时活跃的房间数动态分配并发。
+              </Typography.Text>
+            </Col>
+          </>
+        )}
       </Row>
     </SettingsSection>
   );
@@ -1111,6 +1233,138 @@ export default function RuntimeConfigPanel({
     const group = RUNTIME_FIELD_GROUPS.find((item) => item.id === id);
     return group ? renderFieldGroup(group) : null;
   };
+
+  const runAiTest = async (pool: AiModelPool) => {
+    if (aiTestLoading) return;
+    setAiTestLoading(true);
+    setAiTestingPoolId(pool.id);
+    setAiTestResult(null);
+    try {
+      const payload: {
+        message: string;
+        poolId: string;
+        type: 'text' | 'vision';
+        apiKey?: string;
+        model?: string;
+        apiBaseUrl?: string;
+        apiProtocol?: 'chat_completions' | 'responses';
+        maxRequestsPerMinute?: number;
+        maxTokensPerMinute?: number;
+      } = {
+        message: '你好',
+        poolId: pool.id,
+        type: pool.type,
+        model: pool.model,
+        apiBaseUrl: pool.apiBaseUrl,
+        apiProtocol: pool.apiProtocol,
+        maxRequestsPerMinute: pool.maxRequestsPerMinute,
+        maxTokensPerMinute: pool.maxTokensPerMinute,
+      };
+      // 仅当用户正在编辑密钥时，把草稿 Key 带给测试接口（不落盘）
+      if (String(pool.apiKey || '').trim()) {
+        payload.apiKey = pool.apiKey.trim();
+      }
+      setAiTestResult({
+        success: undefined,
+        rawResponse: '',
+      });
+      const response = await fetch('/api/admin/ai/test', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const res = await response.json().catch(() => ({
+        success: false,
+        error: `请求失败（${response.status}）`,
+      })) as {
+        success: boolean;
+        reply?: string;
+        model?: string;
+        latencyMs?: number;
+        error?: string;
+        usage?: unknown;
+        rawResponse?: string;
+        curl?: string;
+      };
+      setAiTestResult(res);
+      if (res.success) message.success('测试成功');
+      else onError(res.error || '测试失败');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '测试失败';
+      setAiTestResult({ success: false, error: msg });
+      onError(msg);
+    } finally {
+      setAiTestLoading(false);
+      setAiTestingPoolId('');
+    }
+  };
+
+  const aiModelSection = (
+    <>
+      <SettingsSection title="聊天室 AI" description={`开启后可用「@${draft.aiBotName || '小音'}」「/${draft.aiBotName || '小音'}」唤醒；图片识图走视觉模型。改完后点下方保存。`}>
+        <Switch
+          checked={Boolean(draft.aiEnabled)}
+          checkedChildren="已启用"
+          unCheckedChildren="未启用"
+          onChange={(checked) => setDraft({ ...draft, aiEnabled: checked })}
+          aria-label="启用聊天室 AI"
+        />
+      </SettingsSection>
+      {fieldGroup('aiModel')}
+      <SettingsSection title="模型池" description="文本与识图分别调度；同优先级模型按当前并发负载均衡。">
+        <Space orientation="vertical" style={{ width: '100%' }} size="middle">
+          {draft.aiModelPools.map((pool, index) => (
+            <Card
+              key={pool.id}
+              size="small"
+              title={`模型 ${index + 1}`}
+              extra={<Space size={0}><Button type="text" loading={aiTestLoading && aiTestingPoolId === pool.id} onClick={() => void runAiTest(pool)}>测试</Button><Button type="text" danger icon={<DeleteOutlined />} aria-label={`删除模型 ${index + 1}`} onClick={() => setDraft({ ...draft, aiModelPools: draft.aiModelPools.filter((_, poolIndex) => poolIndex !== index) })} /></Space>}
+            >
+              <Row gutter={[12, 12]}>
+                <Col xs={24} sm={8}><Select value={pool.type} style={{ width: '100%' }} options={[{ value: 'text', label: '文本处理' }, { value: 'vision', label: '图片处理' }]} onChange={(type) => setDraft({ ...draft, aiModelPools: draft.aiModelPools.map((item, poolIndex) => poolIndex === index ? { ...item, type } : item) })} /></Col>
+                <Col xs={24} sm={8}><Input placeholder="名称（可选）" value={pool.name} onChange={(e) => setDraft({ ...draft, aiModelPools: draft.aiModelPools.map((item, poolIndex) => poolIndex === index ? { ...item, name: e.target.value } : item) })} /></Col>
+                <Col xs={24} sm={8}><Switch checked={pool.enabled} checkedChildren="启用" unCheckedChildren="停用" onChange={(enabled) => setDraft({ ...draft, aiModelPools: draft.aiModelPools.map((item, poolIndex) => poolIndex === index ? { ...item, enabled } : item) })} /></Col>
+                <Col xs={24} sm={12}><Input placeholder="Base URL" value={pool.apiBaseUrl} onChange={(e) => setDraft({ ...draft, aiModelPools: draft.aiModelPools.map((item, poolIndex) => poolIndex === index ? { ...item, apiBaseUrl: e.target.value } : item) })} /></Col>
+                <Col xs={24} sm={12}><Input.Password placeholder={pool.configuredApiKey ? '已保存；留空保持不变' : 'API Key'} value={pool.apiKey} onChange={(e) => setDraft({ ...draft, aiModelPools: draft.aiModelPools.map((item, poolIndex) => poolIndex === index ? { ...item, apiKey: e.target.value } : item) })} /></Col>
+                <Col xs={24} sm={12}><Input placeholder="模型 ID" value={pool.model} onChange={(e) => setDraft({ ...draft, aiModelPools: draft.aiModelPools.map((item, poolIndex) => poolIndex === index ? { ...item, model: e.target.value } : item) })} /></Col>
+                <Col xs={24} sm={12}><Select value={pool.apiProtocol} style={{ width: '100%' }} options={[{ value: 'chat_completions', label: 'Chat Completions' }, { value: 'responses', label: 'Responses API' }]} onChange={(apiProtocol) => setDraft({ ...draft, aiModelPools: draft.aiModelPools.map((item, poolIndex) => poolIndex === index ? { ...item, apiProtocol } : item) })} /></Col>
+                <Col xs={12} sm={8}><Space.Compact style={{ width: '100%' }}><Typography.Text style={{ padding: '4px 8px', border: '1px solid #d9d9d9', whiteSpace: 'nowrap' }}>RPM</Typography.Text><InputNumber value={pool.maxRequestsPerMinute} min={1} max={10_000} style={{ width: '100%' }} onChange={(maxRequestsPerMinute) => setDraft({ ...draft, aiModelPools: draft.aiModelPools.map((item, poolIndex) => poolIndex === index ? { ...item, maxRequestsPerMinute: Number(maxRequestsPerMinute) || 1 } : item) })} /></Space.Compact></Col>
+                <Col xs={12} sm={8}><Space.Compact style={{ width: '100%' }}><Typography.Text style={{ padding: '4px 8px', border: '1px solid #d9d9d9', whiteSpace: 'nowrap' }}>TPM</Typography.Text><InputNumber value={pool.maxTokensPerMinute} min={1_000} max={2_000_000} step={1_000} style={{ width: '100%' }} onChange={(maxTokensPerMinute) => setDraft({ ...draft, aiModelPools: draft.aiModelPools.map((item, poolIndex) => poolIndex === index ? { ...item, maxTokensPerMinute: Number(maxTokensPerMinute) || 1_000 } : item) })} /></Space.Compact></Col>
+                <Col xs={24} sm={8}><Space.Compact style={{ width: '100%' }}><Typography.Text style={{ padding: '4px 8px', border: '1px solid #d9d9d9', whiteSpace: 'nowrap' }}>优先级</Typography.Text><InputNumber value={pool.priority} min={1} max={1000} style={{ width: '100%' }} onChange={(priority) => setDraft({ ...draft, aiModelPools: draft.aiModelPools.map((item, poolIndex) => poolIndex === index ? { ...item, priority: Number(priority) || 100 } : item) })} /></Space.Compact></Col>
+              </Row>
+            </Card>
+          ))}
+          <Button type="dashed" icon={<PlusOutlined />} disabled={draft.aiModelPools.length >= 20} onClick={() => setDraft({ ...draft, aiModelPools: [...draft.aiModelPools, createAiModelPool()] })}>添加模型</Button>
+        </Space>
+      </SettingsSection>
+      {aiTestResult && (
+        <SettingsSection title="测试结果">
+          {aiTestResult.success !== true && (
+            <Typography.Paragraph type={aiTestResult.success === false ? 'danger' : undefined} style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
+              {aiTestResult.success === undefined ? '正在测试…' : (aiTestResult.error || '未知错误')}
+            </Typography.Paragraph>
+          )}
+          {(aiTestResult.curl || aiTestResult.rawResponse) && (
+            <Row gutter={[12, 12]} style={{ marginTop: aiTestResult.success === true ? 0 : 12 }}>
+              <Col xs={24} lg={12}>
+                <Typography.Text strong>cURL 请求</Typography.Text>
+                <pre style={{ margin: '6px 0 0', padding: 12, overflow: 'auto', maxHeight: 360, whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: '#fafafa', border: '1px solid #f0f0f0', borderRadius: 4 }}>
+                  {aiTestResult.curl || '请求尚未发出'}
+                </pre>
+              </Col>
+              <Col xs={24} lg={12}>
+                <Typography.Text strong>响应原文</Typography.Text>
+                <pre style={{ margin: '6px 0 0', padding: 12, overflow: 'auto', maxHeight: 360, whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: '#fafafa', border: '1px solid #f0f0f0', borderRadius: 4 }}>
+                  {aiTestResult.rawResponse ? formatJsonResponse(aiTestResult.rawResponse) : '等待上游响应'}
+                </pre>
+              </Col>
+            </Row>
+          )}
+        </SettingsSection>
+      )}
+    </>
+  );
 
   const seoSection = (
     <SettingsSection
@@ -1271,6 +1525,11 @@ export default function RuntimeConfigPanel({
           {fieldGroup('github')}
         </>
       ),
+    },
+    {
+      key: 'ai',
+      label: '聊天室 AI',
+      children: aiModelSection,
     },
     {
       key: 'integration',

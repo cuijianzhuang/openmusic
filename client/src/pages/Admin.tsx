@@ -1325,7 +1325,7 @@ function AdminPage() {
               </Space>
             )}
           >
-            <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Space orientation="vertical" size={12} style={{ width: '100%' }}>
               <Space wrap size={8} style={{ width: '100%' }}>
                 <Input.Search
                   placeholder="搜索房间、成员、IP、歌曲"
@@ -1610,7 +1610,7 @@ function AdminPage() {
 
       case 'bans':
         return (
-          <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          <Space orientation="vertical" size={16} style={{ width: '100%' }}>
             <Card title="添加封禁" size="small">
               <Form layout="vertical" style={{ marginBottom: 0 }}>
                 <Row gutter={16}>
@@ -1758,7 +1758,7 @@ function AdminPage() {
 
       case 'notify':
         return (
-          <Space direction="vertical" size="large" style={{ width: '100%' }}>
+          <Space orientation="vertical" size="large" style={{ width: '100%' }}>
             <Card
               title="首页站点公告"
               extra={<Switch checked={annEnabled} onChange={setAnnEnabled} checkedChildren="启用" unCheckedChildren="停用" />}
@@ -1849,28 +1849,43 @@ function AdminPage() {
               securityTab={(
                 <>
                   <SettingsSection title="登录地址" description="修改后旧地址失效，请收藏新链接">
-                    <Space direction="vertical" style={{ width: '100%' }}>
-                      <Input
-                        addonBefore={typeof window !== 'undefined' ? window.location.origin : ''}
-                        value={entryPathDraft}
-                        onChange={(e) => {
-                          setEntryPathDraft(e.target.value);
-                          setPathHint('');
-                        }}
-                        spellCheck={false}
-                        placeholder="/随机路径"
-                        suffix={(
-                          <Button
-                            type="text"
-                            size="small"
-                            icon={<ReloadOutlined />}
-                            onClick={randomizeEntryPath}
-                            title="随机生成登录地址"
-                            aria-label="随机生成登录地址"
-                          />
-                        )}
-                        style={{ fontFamily: 'monospace' }}
-                      />
+                    <Space orientation="vertical" style={{ width: '100%' }}>
+                      <Space.Compact style={{ width: '100%' }}>
+                        <Typography.Text
+                          type="secondary"
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            padding: '0 11px',
+                            background: '#fafafa',
+                            border: '1px solid #d9d9d9',
+                            borderRight: 0,
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {typeof window !== 'undefined' ? window.location.origin : ''}
+                        </Typography.Text>
+                        <Input
+                          value={entryPathDraft}
+                          onChange={(e) => {
+                            setEntryPathDraft(e.target.value);
+                            setPathHint('');
+                          }}
+                          spellCheck={false}
+                          placeholder="/随机路径"
+                          suffix={(
+                            <Button
+                              type="text"
+                              size="small"
+                              icon={<ReloadOutlined />}
+                              onClick={randomizeEntryPath}
+                              title="随机生成登录地址"
+                              aria-label="随机生成登录地址"
+                            />
+                          )}
+                          style={{ fontFamily: 'monospace' }}
+                        />
+                      </Space.Compact>
                       <Button
                         type="primary"
                         loading={savingPath}
@@ -1909,7 +1924,7 @@ function AdminPage() {
       case 'audit':
         return (
           <Card title="操作审计">
-            <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Space orientation="vertical" size={12} style={{ width: '100%' }}>
               <Space wrap size={8} style={{ width: '100%' }}>
                 <Input.Search
                   placeholder="搜索 IP、房间、用户、原因…"
@@ -1939,7 +1954,7 @@ function AdminPage() {
                 />
               </Space>
               <Table
-                rowKey={(entry, idx) => `${entry.at}-${entry.action}-${idx}`}
+                rowKey="id"
                 size="small"
                 loading={auditLoading}
                 columns={auditColumns}
@@ -2031,7 +2046,7 @@ function AdminPage() {
         open={mobileMenuOpen}
         onClose={() => setMobileMenuOpen(false)}
         styles={{ body: { padding: 0 } }}
-        width={260}
+        size={260}
       >
         <Menu
           mode="inline"
@@ -2178,7 +2193,7 @@ function AdminPage() {
         {reportDetailLoading || !reportDetail ? (
           <AdminLoading tip="加载上报详情…" minHeight={180} />
         ) : (
-          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Space orientation="vertical" size={12} style={{ width: '100%' }}>
             <Space wrap size={8} align="center">
               <Tag color={reportDetail.type === 'feedback' ? 'blue' : 'default'} style={{ margin: 0 }}>
                 {reportDetail.type === 'feedback' ? '意见' : '错误'}
@@ -2252,9 +2267,9 @@ function AdminPage() {
         okButtonProps={{ loading: nicknameSaving, disabled: !editingNicknameDraft.trim() }}
         cancelText="取消"
         cancelButtonProps={{ disabled: nicknameSaving }}
-        destroyOnClose
+        destroyOnHidden
       >
-        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+        <Space orientation="vertical" size={12} style={{ width: '100%' }}>
           <Typography.Text type="secondary" style={{ fontSize: 13 }}>
             房间「{editingNicknameTarget?.roomName}」中的用户昵称会立即同步到当前房间。
           </Typography.Text>
@@ -2280,9 +2295,9 @@ function AdminPage() {
         okText="确认拒绝"
         okButtonProps={{ danger: true, loading: Boolean(permanentReviewingId) }}
         cancelText="取消"
-        destroyOnClose
+        destroyOnHidden
       >
-        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+        <Space orientation="vertical" size={12} style={{ width: '100%' }}>
           <Typography.Text type="secondary" style={{ fontSize: 13 }}>
             房间「{rejectPermanentRoom?.name}」的申请将被拒绝，原因会弹窗通知房主。
           </Typography.Text>
@@ -2310,9 +2325,9 @@ function AdminPage() {
         okButtonProps={{ danger: true, loading: quickBanSaving }}
         cancelText="取消"
         cancelButtonProps={{ disabled: quickBanSaving }}
-        destroyOnClose
+        destroyOnHidden
       >
-        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+        <Space orientation="vertical" size={12} style={{ width: '100%' }}>
           <Typography.Text type="secondary" style={{ fontSize: 13 }}>
             {quickBanDraft?.nickname ? `成员「${quickBanDraft.nickname}」· ` : ''}
             {quickBanDraft?.mode === 'both'

@@ -2,7 +2,6 @@ export interface MetingUpstreamRecentError {
   at: number;
   message: string;
   type?: string;
-  id?: string;
   server?: string;
   userId?: string;
   userNickname?: string;
@@ -27,6 +26,7 @@ export interface MetingUpstreamStatus {
 }
 
 export interface AdminAuditEntry {
+  id: string;
   at: number;
   action: string;
   ip: string;
@@ -50,7 +50,6 @@ export interface AdminAuditEntry {
   linuxdoUsername?: string;
   githubUsername?: string;
   approved?: boolean;
-  id?: string;
   reason?: string;
   code?: string;
   recoverable?: boolean;
@@ -63,6 +62,9 @@ export interface AdminAuditEntry {
   maxOwnedRooms?: number;
   source?: string;
   trigger?: string;
+  success?: boolean;
+  model?: string;
+  latencyMs?: number;
 }
 
 export interface SiteAnnouncementConfig {
@@ -115,6 +117,25 @@ export interface RuntimeConfig {
   apihzBaseUrl: string;
   apihzId: string;
   apihzKey: string;
+  /** 硅基流动 API Key（密钥字段，回显掩码） */
+  aiApiKey: string;
+  /** AI 服务 Base URL，例如 https://api.siliconflow.cn/v1 */
+  aiApiBaseUrl: string;
+  /** 上游协议 */
+  aiApiProtocol: 'chat_completions' | 'responses';
+  /** 是否启用聊天室 AI */
+  aiEnabled: boolean;
+  /** AI 昵称 */
+  aiBotName: string;
+  /** 文本 / Agent 模型，默认 Qwen/Qwen3-8B，可自填 */
+  aiTextModel: string;
+  /** 视觉识图模型，默认 Qwen/Qwen3.5-4B，可自填 */
+  aiVisionModel: string;
+  /** 全站共享的 AI 上游每分钟请求上限 */
+  aiMaxRequestsPerMinute: number;
+  /** 全站共享的 AI 上游每分钟 Token 上限 */
+  aiMaxTokensPerMinute: number;
+  aiModelPools: AiModelPool[];
   /** SEO：留空则前端/公开接口回退内置默认 */
   seoTitle: string;
   seoDescription: string;
@@ -128,6 +149,21 @@ export interface RuntimeConfig {
   seoAboutTitle: string;
   seoAboutText: string;
   configuredSecrets: Record<string, boolean>;
+}
+
+export interface AiModelPool {
+  id: string;
+  enabled: boolean;
+  type: 'text' | 'vision';
+  name: string;
+  apiBaseUrl: string;
+  apiProtocol: 'chat_completions' | 'responses';
+  apiKey: string;
+  configuredApiKey: boolean;
+  model: string;
+  maxRequestsPerMinute: number;
+  maxTokensPerMinute: number;
+  priority: number;
 }
 
 export type MusicApiPlatform = 'netease' | 'tencent' | 'kugou' | 'qishui';

@@ -97,6 +97,7 @@ import {
   setRoomMemberSettings,
   postMemberWelcomeMessage,
   setRoomJoinNotice,
+  setRoomAiSettings,
   setRoomMaxAdmins,
   postJoinNoticeMessage,
   shouldMuteJoinAnnouncements,
@@ -142,6 +143,7 @@ import {
   approveSkip,
   rejectSkip,
   addChatMessage,
+  postBotChatMessage,
   recallChatMessage,
   toggleChatReaction,
   getChatHistoryForUser,
@@ -164,6 +166,7 @@ import {
   findUserRoomPresence,
   requestRoomPermanent,
   cancelRoomPermanentRequest,
+  getRoomAiSnapshot,
 } from './roomManager.js';
 import {
   listPendingPermanentNoticesForUser,
@@ -177,6 +180,8 @@ import {
   createChatImageUploadToken,
   isQiniuConfigured,
 } from './qiniuOss.js';
+import { enqueueRoomAiChat } from './roomAiAgent.js';
+import { getPublicRoomAiConfig, getAiModelConfig, isRoomAiEnabledForRoom, isAiModelEnabled, resolveRoomAiBotName, shouldTriggerRoomAi } from './aiModelService.js';
 import {
   isApihzStickerConfigured,
   searchApihzStickers,
@@ -634,6 +639,7 @@ const limitSocketAction = createRateLimiter({ windowMs: 60_000, max: 90 });
 const limitContributionQr = createRateLimiter({ windowMs: 60_000, max: 45 });
 const limitContributionBind = createRateLimiter({ windowMs: 10 * 60_000, max: 8 });
 const limitSocketChat = createRateLimiter({ windowMs: 60_000, max: 30 });
+const limitSocketRoomAi = createRateLimiter({ windowMs: 60_000, max: 8 });
 const limitOwnerDestroyRoom = createRateLimiter({ windowMs: 60_000, max: 3 });
 const limitErrorReport = createRateLimiter({ windowMs: 10 * 60_000, max: 5 });
 const limitSessionBootstrap = createRateLimiter({ windowMs: 60_000, max: 90 });
@@ -2290,6 +2296,10 @@ app.get('/api/chat/sticker-search-config', (_req, res) => {
   res.json({ enabled: isApihzStickerConfigured() });
 });
 
+app.get('/api/chat/ai-config', (_req, res) => {
+  res.json(getPublicRoomAiConfig());
+});
+
 app.get('/api/chat/sticker-search', async (req, res) => {
   if (!isApihzStickerConfigured()) {
     return res.status(503).json({ error: '未配置表情包搜索' });
@@ -2558,6 +2568,16 @@ function getViewerRoomPayload(socket, roomId) {
 function emitSystemChat(roomId, message) {
   if (!roomId || !message) return;
   io.to(roomId).emit('chat_message', message);
+}
+
+function roomAiSocketHelpers(roomId) {
+  return {
+    emitChat: (message) => {
+      if (message) io.to(roomId).emit('chat_message', message);
+    },
+    emitSystem: (message) => emitSystemChat(roomId, message),
+    broadcastRoom: () => broadcastRoomUpdate(roomId, { immediate: true }),
+  };
 }
 
 /** 合并同房短时间内的多次 room_update，减轻人多时 O(N) 风暴 */
@@ -3033,6 +3053,7 @@ io.on('connection', (socket) => {
       messages: chatHistory.messages || [],
       chatHasMore: Boolean(chatHistory.hasMore),
       playbackState,
+      roomAi: getPublicRoomAiConfig(getRuntimeConfig(), joinInternal),
       socketId: userId,
       connectionId: socket.id,
       nickname: joinUser?.nickname
@@ -3667,6 +3688,34 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
+  socket.on('set_room_ai_settings', ({ enabled, botName } = {}, callback) => {
+    if (rejectReadOnly(socket, callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, 'set_room_ai_settings', callback)) return;
+
+    const roomId = socketToRoom.get(socket.id);
+    if (!roomId) {
+      callback?.({ success: false, error: '未加入房间' });
+      return;
+    }
+
+    const result = setRoomAiSettings(
+      roomId,
+      getSocketUserId(socket),
+      { enabled, botName },
+      socket.id,
+    );
+    if (result.error) {
+      callback?.({ success: false, error: result.error });
+      return;
+    }
+
+    const room = getRoomInternal(roomId);
+    const roomAi = getPublicRoomAiConfig(getRuntimeConfig(), room);
+    io.to(roomId).emit('room_ai_update', roomAi);
+    broadcastRoomUpdate(roomId);
+    callback?.({ success: true, room: getViewerRoomPayload(socket, roomId), roomAi });
+  });
+
   socket.on('set_room_max_admins', ({ maxAdmins } = {}, callback) => {
     if (rejectReadOnly(socket, callback)) return;
     if (rejectRateLimited(socket, limitSocketAction, 'set_room_max_admins', callback)) return;
@@ -4009,6 +4058,8 @@ io.on('connection', (socket) => {
       return;
     }
 
+    callback?.({ success: true, message: '房间已解散' });
+
     for (const sid of sidsToKick) {
       const s = io.sockets.sockets.get(sid);
       socketToRoom.delete(sid);
@@ -4023,8 +4074,6 @@ io.on('connection', (socket) => {
       userId: actorId,
       kicked: sidsToKick.length,
     }, clientIp);
-
-    callback?.({ success: true, message: '房间已解散' });
   });
 
   socket.on('set_room_admin', ({ userId: targetUserId, admin }, callback) => {
@@ -4099,6 +4148,7 @@ io.on('connection', (socket) => {
     emitRoomAndPlayback(roomId, result.room);
     emitSystemChat(roomId, result.systemMessage);
     callback?.({ success: true });
+
   });
 
   socket.on('remove_song', ({ queueId }, callback) => {
@@ -4457,6 +4507,51 @@ io.on('connection', (socket) => {
     } else {
       io.to(roomId).emit('chat_message', result.message);
     }
+
+    // 聊天室 AI：触发词 /小音、@小音 等；有图时先视觉识图再文本工具调用
+    const userId = getSocketUserId(socket);
+    const nickname = String(result.message?.nickname || '').trim() || '用户';
+    const triggerText = String(result.message?.text || '').trim();
+    const hasImage = Boolean(result.message?.imageUrl) && !result.message?.asSticker;
+    const chatRoom = getRoomInternal(roomId);
+    const botName = resolveRoomAiBotName(chatRoom);
+    setImmediate(() => {
+      if (!isRoomAiEnabledForRoom(chatRoom)) return;
+      if (!shouldTriggerRoomAi(triggerText, botName, [], { hasImage })) return;
+      if (!limitSocketRoomAi(`room-ai:${socket.id}`)) {
+        const posted = postBotChatMessage(roomId, {
+          text: '问得太快啦，稍等一下再叫我～',
+          replyTo: result.message,
+        });
+        if (posted.message) io.to(roomId).emit('chat_message', posted.message);
+        return;
+      }
+      const requestId = `${result.message.id}:ai`;
+      enqueueRoomAiChat({
+        requestId,
+        roomId,
+        triggerMessage: result.message,
+        userId,
+        userNickname: nickname,
+        emitChat: (message) => {
+          if (message) io.to(roomId).emit('chat_message', message);
+        },
+        emitSystem: (message) => emitSystemChat(roomId, message),
+        broadcastRoom: () => broadcastRoomUpdate(roomId, { immediate: true }),
+      }, ({ status, queuePosition, pendingCount, attempt, maxAttempts, error }) => io.to(roomId).emit('room_ai_processing', {
+        status,
+        requestId,
+        sourceMessageId: result.message.id,
+        userId,
+        nickname,
+        queuePosition,
+        pendingCount,
+        attempt,
+        maxAttempts,
+        error,
+        startedAt: Date.now(),
+      }));
+    });
   });
 
   socket.on('recall_chat', ({ messageId }, callback) => {

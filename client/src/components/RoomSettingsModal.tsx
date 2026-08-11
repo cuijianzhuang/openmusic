@@ -91,6 +91,11 @@ interface Props {
   joinNoticeEnabled: boolean;
   joinNoticeCooldownMinutes: number;
   joinNoticeSaving?: boolean;
+  roomAiEnabled: boolean;
+  roomAiBotName: string;
+  globalAiEnabled: boolean;
+  defaultAiBotName: string;
+  roomAiSaving?: boolean;
   songRequest: SongRequestSettings;
   songRequestSaving?: boolean;
   bannedSongs?: BannedSong[];
@@ -135,6 +140,7 @@ interface Props {
   onSaveChatHistory: (enabled: boolean) => void;
   onSaveChatShowAvatars: (enabled: boolean) => void;
   onSaveJoinNotice: (settings: { enabled: boolean; cooldownMinutes: number }) => void;
+  onSaveRoomAi: (settings: { enabled: boolean; botName: string }) => void;
   onSaveSongRequest: (settings: SongRequestSettings) => void;
   onTransferOwner?: (userId: string) => void | Promise<void>;
   onDestroyRoom?: () => void | Promise<void>;
@@ -270,6 +276,11 @@ export default function RoomSettingsModal({
   joinNoticeEnabled,
   joinNoticeCooldownMinutes,
   joinNoticeSaving = false,
+  roomAiEnabled,
+  roomAiBotName,
+  globalAiEnabled,
+  defaultAiBotName,
+  roomAiSaving = false,
   songRequest,
   songRequestSaving = false,
   bannedSongs = [],
@@ -306,6 +317,7 @@ export default function RoomSettingsModal({
   onSaveChatHistory,
   onSaveChatShowAvatars,
   onSaveJoinNotice,
+  onSaveRoomAi,
   onSaveSongRequest,
   onTransferOwner,
   onDestroyRoom,
@@ -320,6 +332,8 @@ export default function RoomSettingsModal({
   const [draftAnnouncementText, setDraftAnnouncementText] = useState(announcementText);
   const [draftJoinNoticeEnabled, setDraftJoinNoticeEnabled] = useState(joinNoticeEnabled);
   const [draftJoinNoticeCooldownMinutes, setDraftJoinNoticeCooldownMinutes] = useState(joinNoticeCooldownMinutes);
+  const [draftRoomAiEnabled, setDraftRoomAiEnabled] = useState(roomAiEnabled);
+  const [draftRoomAiBotName, setDraftRoomAiBotName] = useState(roomAiBotName);
   const [draftSongRequest, setDraftSongRequest] = useState(songRequest);
   const [draftForbiddenWord, setDraftForbiddenWord] = useState('');
   const [showDefaultForbiddenWords, setShowDefaultForbiddenWords] = useState(false);
@@ -390,6 +404,8 @@ export default function RoomSettingsModal({
     setDraftAnnouncementText(announcementText);
     setDraftJoinNoticeEnabled(joinNoticeEnabled);
     setDraftJoinNoticeCooldownMinutes(joinNoticeCooldownMinutes);
+    setDraftRoomAiEnabled(roomAiEnabled);
+    setDraftRoomAiBotName(roomAiBotName);
     setDraftSongRequest(songRequest);
     setDraftForbiddenWord('');
     setShowDefaultForbiddenWords(false);
@@ -417,6 +433,8 @@ export default function RoomSettingsModal({
     announcementText,
     joinNoticeEnabled,
     joinNoticeCooldownMinutes,
+    roomAiEnabled,
+    roomAiBotName,
     songRequest,
     isOwner,
     canModerate,
@@ -515,6 +533,8 @@ export default function RoomSettingsModal({
     || draftAnnouncementText.trim() !== announcementText.trim();
   const joinNoticeDirty = draftJoinNoticeEnabled !== joinNoticeEnabled
     || draftJoinNoticeCooldownMinutes !== joinNoticeCooldownMinutes;
+  const roomAiDirty = draftRoomAiEnabled !== roomAiEnabled
+    || draftRoomAiBotName.trim() !== roomAiBotName.trim();
   const songRequestDirty = draftSongRequest.enabled !== songRequest.enabled
     || draftSongRequest.memberJumpEnabled !== songRequest.memberJumpEnabled
     || draftSongRequest.memberSeekEnabled !== songRequest.memberSeekEnabled
@@ -1077,6 +1097,55 @@ export default function RoomSettingsModal({
                           className="rounded-xl bg-netease-red px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-netease-red/90 disabled:opacity-50"
                         >
                           {joinNoticeSaving ? '保存中…' : '保存进房提醒'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {isOwner && (
+                  <div className="space-y-3 rounded-xl border border-white/10 bg-white/[0.02] p-3">
+                    <Toggle
+                      checked={draftRoomAiEnabled}
+                      disabled={roomAiSaving || !globalAiEnabled}
+                      onChange={setDraftRoomAiEnabled}
+                      label="聊天室 AI 助手"
+                      description={
+                        globalAiEnabled
+                          ? '关闭后本房无法 @ 助手、无主动搭话与 emo 关心'
+                          : '站点尚未开启 AI，请联系管理员在后台启用'
+                      }
+                    />
+                    <div className={draftRoomAiEnabled && globalAiEnabled ? '' : 'opacity-50'}>
+                      <label htmlFor="settings-room-ai-name" className="text-sm font-medium text-white">
+                        助手昵称
+                      </label>
+                      <p className="mt-0.5 text-xs text-netease-muted">
+                        留空则使用站点默认「{defaultAiBotName || '小音'}」；设置后本房优先用此昵称唤醒（@昵称 / /昵称）
+                      </p>
+                      <input
+                        id="settings-room-ai-name"
+                        type="text"
+                        maxLength={20}
+                        value={draftRoomAiBotName}
+                        disabled={roomAiSaving || !globalAiEnabled || !draftRoomAiEnabled}
+                        onChange={(e) => setDraftRoomAiBotName(e.target.value)}
+                        placeholder={defaultAiBotName || '小音'}
+                        className="mt-2 w-full rounded-xl border border-netease-border/60 bg-netease-dark px-3 py-2 text-sm text-white outline-none focus:border-netease-red/50 disabled:opacity-50"
+                      />
+                    </div>
+                    {roomAiDirty && (
+                      <div className="flex justify-end">
+                        <button
+                          type="button"
+                          disabled={roomAiSaving || !globalAiEnabled}
+                          onClick={() => onSaveRoomAi({
+                            enabled: draftRoomAiEnabled,
+                            botName: draftRoomAiBotName.trim(),
+                          })}
+                          className="rounded-xl bg-netease-red px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-netease-red/90 disabled:opacity-50"
+                        >
+                          {roomAiSaving ? '保存中…' : '保存 AI 设置'}
                         </button>
                       </div>
                     )}

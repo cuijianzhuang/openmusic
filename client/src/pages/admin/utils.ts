@@ -110,6 +110,10 @@ export function formatAuditAction(entry: AdminAuditEntry) {
       return `重置上游冷却 ${entry.url || ''}`;
     case 'meting_set_disabled':
       return `${entry.disabled ? '禁用' : '启用'}上游 ${entry.url || ''}`;
+    case 'ai_test':
+      return `测试硅基流动 AI${entry.model ? `（${entry.model}）` : ''}${
+        entry.success === false ? ` 失败${entry.error ? `：${entry.error}` : ''}` : ' 成功'
+      }`;
     case 'broadcast':
       return `全局广播（${entry.roomCount ?? 0} 个房间）`;
     case 'site_ban_add':
@@ -240,8 +244,12 @@ function roomMatchesKeyword(room: AdminRoom, keyword: string): boolean {
   ));
 }
 
-/** 常驻优先 → 人数多优先 → 最后进房新优先 */
+/** 待审常驻申请优先 → 已常驻优先 → 人数多优先 → 最后进房新优先 */
 function compareAdminRooms(a: AdminRoom, b: AdminRoom): number {
+  const aPending = a.permanentApplication?.status === 'pending' ? 0 : 1;
+  const bPending = b.permanentApplication?.status === 'pending' ? 0 : 1;
+  if (aPending !== bPending) return aPending - bPending;
+
   const aProtected = a.protectedFromDestroy ? 0 : 1;
   const bProtected = b.protectedFromDestroy ? 0 : 1;
   if (aProtected !== bProtected) return aProtected - bProtected;

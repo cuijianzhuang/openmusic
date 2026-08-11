@@ -78,6 +78,7 @@ type VirtualRowData = {
   chatScrollRoot: HTMLDivElement | null;
   chatPanelRef: React.RefObject<HTMLDivElement | null>;
   reactionPickerMessageId: string | null;
+  processingMessages: Map<string, { status: 'queued' | 'processing' | 'error'; queuePosition: number; pendingCount: number; attempt: number; maxAttempts: number; error?: string }>;
   revealedPureImages: Set<string>;
   onReply: (msg: ChatMessage) => void;
   onRecall?: (msg: ChatMessage) => void;
@@ -141,6 +142,7 @@ function VirtualChatRow({ index, style, data }: ListChildComponentProps<VirtualR
           myUserId={data.myUserId}
           pureMode={data.pureMode}
           pureImageRevealed={data.revealedPureImages.has(msg.id)}
+          aiProcessing={data.processingMessages.get(msg.id) || null}
           reactionPickerOpen={data.reactionPickerMessageId === msg.id}
           chatMuted={data.chatMuted}
           canModerate={data.canModerate}
@@ -180,6 +182,18 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
   onScrollRootChange,
 }, ref) {
   const messages = useChatStore((s) => s.messages);
+  const aiProcessing = useChatStore((s) => s.aiProcessing);
+  const processingMessages = useMemo(
+    () => new Map(aiProcessing.map((task) => [task.sourceMessageId, {
+      status: task.status,
+      queuePosition: task.queuePosition,
+      pendingCount: task.pendingCount,
+      attempt: task.attempt,
+      maxAttempts: task.maxAttempts,
+      error: task.error,
+    }])),
+    [aiProcessing],
+  );
   const hasMoreOlder = useChatStore((s) => s.hasMoreOlder);
   const loadingOlder = useChatStore((s) => s.loadingOlder);
 
@@ -606,6 +620,7 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
     chatScrollRoot,
     chatPanelRef,
     reactionPickerMessageId,
+    processingMessages,
     revealedPureImages,
     onReply,
     onRecall,
@@ -625,6 +640,7 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
     chatScrollRoot,
     chatPanelRef,
     reactionPickerMessageId,
+    processingMessages,
     revealedPureImages,
     onReply,
     onRecall,
@@ -649,6 +665,7 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
           myUserId={myUserId}
           pureMode={pureMode}
           pureImageRevealed={revealedPureImages.has(msg.id)}
+          aiProcessing={processingMessages.get(msg.id) || null}
           reactionPickerOpen={reactionPickerMessageId === msg.id}
           chatMuted={chatMuted}
           canModerate={canModerate}

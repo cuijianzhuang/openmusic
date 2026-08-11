@@ -17,6 +17,7 @@ const SECRET_FIELDS = new Set([
   'linuxdoClientSecret',
   'githubClientSecret',
   'roomCredentialEncryptionKey',
+  'aiApiKey',
 ]);
 const QINIU_ZONES = new Set(['z0', 'z1', 'z2', 'na0', 'as0']);
 const ENC_PREFIX = 'enc:v1:';
@@ -35,6 +36,12 @@ export function maskSecret(value) {
 
 function envText(name, fallback = '') {
   return String(process.env[name] ?? fallback).trim();
+}
+
+function envNumber(name, fallback, min, max) {
+  const value = Number(process.env[name]);
+  if (!Number.isFinite(value)) return fallback;
+  return Math.max(min, Math.min(Math.round(value), max));
 }
 
 function envRoomEmptyTtlMs() {
@@ -107,6 +114,16 @@ function envDefaults() {
     seoHeroSubline: '',
     seoAboutTitle: '',
     seoAboutText: '',
+    // AI 模型服务（聊天室助手）
+    aiApiKey: envText('AI_API_KEY'),
+    aiApiBaseUrl: envText('AI_API_BASE_URL', envText('AI_API_URL', 'https://api.siliconflow.cn/v1')),
+    aiApiProtocol: envText('AI_API_PROTOCOL', 'chat_completions'),
+    aiEnabled: false,
+    aiBotName: '小音',
+    aiTextModel: envText('AI_TEXT_MODEL', 'Qwen/Qwen3-8B'),
+    aiVisionModel: envText('AI_VISION_MODEL', 'Qwen/Qwen3.5-4B'),
+    aiMaxRequestsPerMinute: envNumber('AI_MAX_RPM', 1000, 1, 10_000),
+    aiMaxTokensPerMinute: envNumber('AI_MAX_TPM', 50_000, 1_000, 2_000_000),
   };
 }
 
@@ -171,6 +188,13 @@ function decodePersisted(raw) {
       out.musicApis = [];
     }
   }
+  if (typeof out.aiModelPools === 'string' && out.aiModelPools.startsWith(ENC_PREFIX)) {
+    try {
+      out.aiModelPools = JSON.parse(decryptSecret(out.aiModelPools));
+    } catch {
+      out.aiModelPools = [];
+    }
+  }
   return out;
 }
 
@@ -197,6 +221,14 @@ function encodeForDisk(config) {
     } else {
       // URL、参数、请求头和 Body 都可能含第三方密钥，整体加密避免遗漏。
       out.musicApis = encrypted;
+    }
+  }
+  if (Array.isArray(out.aiModelPools) && out.aiModelPools.length > 0) {
+    const encrypted = encryptSecret(JSON.stringify(out.aiModelPools));
+    if (encrypted === null) {
+      out.aiModelPools = out.aiModelPools.map(({ apiKey: _apiKey, ...pool }) => pool);
+    } else {
+      out.aiModelPools = encrypted;
     }
   }
   return out;
@@ -243,6 +275,7 @@ function normalize(config) {
   } catch {
     // 旧文件或手工编辑产生的非法配置不进入运行时；保存时会返回明确校验错误。
   }
+  const aiModelPools = normalizeAiModelPools(config.aiModelPools);
   return {
     roomEmptyTtlMs: Number.isFinite(roomEmptyTtlMs)
       ? Math.max(0, Math.min(Math.round(roomEmptyTtlMs), 24 * 60 * 60 * 1000))
@@ -301,7 +334,73 @@ function normalize(config) {
     seoHeroSubline: String(config.seoHeroSubline || '').trim().slice(0, 80),
     seoAboutTitle: String(config.seoAboutTitle || '').trim().slice(0, 80),
     seoAboutText: String(config.seoAboutText || '').trim().slice(0, 800),
+    aiApiKey: String(config.aiApiKey || '').trim(),
+    aiApiBaseUrl: normalizeAiApiBaseUrl(config.aiApiBaseUrl || config.aiApiUrl),
+    aiApiProtocol: normalizeAiApiProtocol(config.aiApiProtocol),
+    aiEnabled: config.aiEnabled === true
+      || config.aiEnabled === 1
+      || String(config.aiEnabled || '').trim().toLowerCase() === 'true'
+      || String(config.aiEnabled || '').trim() === '1',
+    aiBotName: String(config.aiBotName || '小音').trim().slice(0, 20) || '小音',
+    aiTextModel: normalizeAiModelField(config.aiTextModel || config.aiModel, 'Qwen/Qwen3-8B'),
+    aiVisionModel: normalizeAiModelField(config.aiVisionModel, 'Qwen/Qwen3.5-4B'),
+    aiMaxRequestsPerMinute: normalizeAiRateLimit(config.aiMaxRequestsPerMinute, 1000, 1, 10_000),
+    aiMaxTokensPerMinute: normalizeAiRateLimit(config.aiMaxTokensPerMinute, 50_000, 1_000, 2_000_000),
+    aiModelPools,
   };
+}
+
+function normalizeAiRateLimit(value, fallback, min, max) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.max(min, Math.min(Math.round(numeric), max));
+}
+
+function normalizeAiModelPools(value) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 20).map((item, index) => ({
+    id: String(item?.id || `pool-${index + 1}`).trim().slice(0, 80) || `pool-${index + 1}`,
+    enabled: item?.enabled !== false,
+    type: item?.type === 'vision' ? 'vision' : 'text',
+    name: String(item?.name || '').trim().slice(0, 40),
+    apiBaseUrl: normalizeAiApiBaseUrl(item?.apiBaseUrl || item?.apiUrl, ''),
+    apiProtocol: normalizeAiApiProtocol(item?.apiProtocol),
+    apiKey: String(item?.apiKey || '').trim(),
+    model: normalizeAiModelField(item?.model, item?.type === 'vision' ? 'Qwen/Qwen3.5-4B' : 'Qwen/Qwen3-8B'),
+    maxRequestsPerMinute: normalizeAiRateLimit(item?.maxRequestsPerMinute, 1000, 1, 10_000),
+    maxTokensPerMinute: normalizeAiRateLimit(item?.maxTokensPerMinute, 50_000, 1_000, 2_000_000),
+    priority: normalizeAiRateLimit(item?.priority, 100, 1, 1000),
+  }));
+}
+
+function normalizeAiModelField(value, fallback) {
+  const model = String(value || '').trim();
+  if (!model) return fallback;
+  if (model.length > 64) return fallback;
+  if (!/^[A-Za-z0-9._+\-/]+$/.test(model)) return fallback;
+  return model;
+}
+
+function normalizeAiApiBaseUrl(value, fallback = 'https://api.siliconflow.cn/v1') {
+  const url = String(value || '').trim();
+  if (!url) return fallback;
+  try {
+    const parsed = new URL(url);
+    if (!['http:', 'https:'].includes(parsed.protocol)) return fallback;
+    const pathname = parsed.pathname.replace(/\/(?:chat\/completions|responses)\/?$/i, '').replace(/\/$/, '');
+    parsed.pathname = pathname || '/';
+    parsed.search = '';
+    parsed.hash = '';
+    return parsed.toString().replace(/\/$/, '');
+  } catch {
+    return fallback;
+  }
+}
+
+function normalizeAiApiProtocol(value) {
+  return String(value || '').trim().toLowerCase() === 'responses'
+    ? 'responses'
+    : 'chat_completions';
 }
 
 export function getRuntimeConfig() {
@@ -312,6 +411,9 @@ export function getRuntimeConfig() {
   // 便于从后台配置故障中恢复，且不会被旧的加密配置覆盖。
   if (env.roomCredentialEncryptionKey) {
     merged.roomCredentialEncryptionKey = env.roomCredentialEncryptionKey;
+  }
+  if (env.aiApiKey) {
+    merged.aiApiKey = env.aiApiKey;
   }
   return normalize(merged);
 }
@@ -410,6 +512,11 @@ export function getRuntimeConfigForAdmin() {
     result.configuredSecrets[field] = Boolean(config[field]);
     result[field] = config[field] ? maskSecret(config[field]) : '';
   }
+  result.aiModelPools = config.aiModelPools.map(({ apiKey, ...pool }) => ({
+    ...pool,
+    apiKey: '',
+    configuredApiKey: Boolean(apiKey),
+  }));
   return result;
 }
 
@@ -445,6 +552,13 @@ export function setRuntimeConfig(raw = {}) {
       return { success: false, error: err?.message || 'musicApis 配置无效' };
     }
   }
+  if (Array.isArray(raw.aiModelPools)) {
+    const existingById = new Map(current.aiModelPools.map((pool) => [pool.id, pool]));
+    next.aiModelPools = raw.aiModelPools.map((pool) => ({
+      ...pool,
+      apiKey: String(pool?.apiKey || '').trim() || existingById.get(String(pool?.id || ''))?.apiKey || '',
+    }));
+  }
 
   for (const field of Object.keys(current)) {
     // 管理后台提交结构化音源列表时，旧的扁平字段只是回显兼容值，
@@ -452,6 +566,7 @@ export function setRuntimeConfig(raw = {}) {
     if (Array.isArray(raw.metingSources) && (field === 'metingApiUrl' || field === 'metingApiAuth')) {
       continue;
     }
+    if (field === 'aiModelPools') continue;
     if (SECRET_FIELDS.has(field)) {
       if (clearSecrets.has(field)) next[field] = '';
       else if (typeof raw[field] === 'string' && raw[field].trim()) next[field] = raw[field].trim();
@@ -472,6 +587,7 @@ export function setRuntimeConfig(raw = {}) {
     validateHttpUrl(normalized.qiniuDomain, '七牛云域名', { allowEmpty: true }),
     validateHttpUrl(normalized.apihzBaseUrl, '接口盒子地址'),
     validateHttpUrl(normalized.seoCanonicalUrl, 'SEO 规范域名', { allowEmpty: true }),
+    validateHttpUrl(normalized.aiApiBaseUrl, 'AI Base URL', { allowPrivate: true }),
   ].filter(Boolean);
   if (urlChecks.length) return { success: false, error: urlChecks[0] };
 

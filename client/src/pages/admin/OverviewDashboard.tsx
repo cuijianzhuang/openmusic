@@ -67,7 +67,7 @@ function MetricCard({
 }) {
   return (
     <Card
-      bordered={false}
+      variant="borderless"
       styles={{ body: { padding: '20px 22px' } }}
       style={{
         height: '100%',
@@ -225,9 +225,9 @@ export default function OverviewDashboard({
   const heroOk = systemOk && !systemWarn;
 
   return (
-    <Space direction="vertical" size={20} style={{ width: '100%' }}>
+    <Space orientation="vertical" size={20} style={{ width: '100%' }}>
       <Card
-        bordered={false}
+        variant="borderless"
         styles={{ body: { padding: '24px 26px' } }}
         style={{
           borderRadius: 16,
@@ -346,7 +346,7 @@ export default function OverviewDashboard({
                   <Progress
                     percent={playPct}
                     strokeColor={{ from: '#38bdf8', to: '#2563eb' }}
-                    trailColor="rgba(255,255,255,0.12)"
+                    railColor="rgba(255,255,255,0.12)"
                     style={{ marginTop: 6, marginBottom: 0 }}
                     format={(p) => <span style={{ color: '#fff', fontSize: 12 }}>{p}%</span>}
                   />
@@ -365,7 +365,7 @@ export default function OverviewDashboard({
                         ? { from: '#4ade80', to: '#16a34a' }
                         : { from: '#fbbf24', to: '#d97706' }
                     }
-                    trailColor="rgba(255,255,255,0.12)"
+                    railColor="rgba(255,255,255,0.12)"
                     style={{ marginTop: 6, marginBottom: 0 }}
                     format={(p) => <span style={{ color: '#fff', fontSize: 12 }}>{p}%</span>}
                   />
@@ -462,7 +462,7 @@ export default function OverviewDashboard({
       {/* 音源上游 */}
       {upstreams.length > 0 && (
         <Card
-          bordered={false}
+          variant="borderless"
           title={(
             <Space size={10}>
               <CloudServerOutlined style={{ color: '#2563eb' }} />
@@ -493,7 +493,7 @@ export default function OverviewDashboard({
                     : []);
                 if (errors.length === 0) return null;
                 return (
-                  <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                  <Space orientation="vertical" size={6} style={{ width: '100%' }}>
                     <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                       最近失败记录（最多 {errors.length} 条）
                     </Typography.Text>

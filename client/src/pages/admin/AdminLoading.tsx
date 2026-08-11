@@ -19,7 +19,7 @@ export default function AdminLoading({ tip, size = 'large', minHeight = 240 }: P
         minHeight,
       }}
     >
-      <Spin size={size} tip={tip} />
+      <Spin size={size} description={tip} />
     </div>
   );
 }

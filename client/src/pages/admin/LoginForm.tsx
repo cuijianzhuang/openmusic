@@ -79,8 +79,8 @@ export default function LoginForm({ onLoggedIn }: { onLoggedIn: () => void }) {
           padding: 24,
         }}
       >
-        <Card style={{ width: '100%', maxWidth: 400 }} bordered={false}>
-          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+        <Card style={{ width: '100%', maxWidth: 400 }} variant="borderless">
+          <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
             <Space>
               <SafetyCertificateOutlined style={{ fontSize: 22, color: '#1677ff' }} />
               <Typography.Title level={4} style={{ margin: 0 }}>

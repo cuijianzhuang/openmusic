@@ -58,7 +58,7 @@ export default function InitialSetupGate({
       width={560}
       centered
     >
-      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
         <Space>
           <SafetyCertificateOutlined style={{ fontSize: 20, color: '#faad14' }} />
           <Typography.Title level={4} style={{ margin: 0 }}>
@@ -93,22 +93,37 @@ export default function InitialSetupGate({
             <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>
               请改成随机路径并收藏；默认 /admin 将无法再作为入口
             </Typography.Paragraph>
-            <Space direction="vertical" style={{ width: '100%' }}>
-              <Input
-                addonBefore={typeof window !== 'undefined' ? window.location.origin : ''}
-                value={entryPathDraft}
-                onChange={(e) => setEntryPathDraft(e.target.value)}
-                spellCheck={false}
-                suffix={(
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<ReloadOutlined />}
-                    onClick={() => setEntryPathDraft(createRandomEntryPath())}
-                    aria-label="随机生成"
-                  />
-                )}
-              />
+            <Space orientation="vertical" style={{ width: '100%' }}>
+              <Space.Compact style={{ width: '100%' }}>
+                <Typography.Text
+                  type="secondary"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    padding: '0 11px',
+                    background: '#fafafa',
+                    border: '1px solid #d9d9d9',
+                    borderRight: 0,
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {typeof window !== 'undefined' ? window.location.origin : ''}
+                </Typography.Text>
+                <Input
+                  value={entryPathDraft}
+                  onChange={(e) => setEntryPathDraft(e.target.value)}
+                  spellCheck={false}
+                  suffix={(
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<ReloadOutlined />}
+                      onClick={() => setEntryPathDraft(createRandomEntryPath())}
+                      aria-label="随机生成"
+                    />
+                  )}
+                />
+              </Space.Compact>
               <Button
                 type="primary"
                 onClick={() => void saveEntryPath()}

@@ -10,7 +10,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { ImagePlus, Loader2, Search, Send, Smile, X } from 'lucide-react';
-import type { ChatMention, ChatReplyRef, RoomUser } from '../types';
+import type { ChatMention, ChatReplyRef, RoomAiConfig, RoomUser } from '../types';
 import Tooltip from './Tooltip';
 import UserRoleMarks from './UserRoleMarks';
 import QFaceImage from './QFaceImage';
@@ -24,7 +24,9 @@ import {
   editorHasDraft,
   editorPlainIncludesAt,
   getActiveMentionDeleteCount,
+  getActiveSlashDeleteCount,
   getMentionQueryBeforeCursor,
+  getSlashQueryBeforeCursor,
   getSelectedTextLength,
   serializeEditorElement,
 } from '../lib/chatEditor';
@@ -56,6 +58,7 @@ import { readClipboardImageFile } from '../lib/compressChatImage';
 import { getClientId } from '../lib/clientId';
 type MentionOption =
   | { type: 'all' }
+  | { type: 'bot'; botName: string }
   | { type: 'user'; user: RoomUser };
 
 type SendProgress = 'idle' | 'uploading' | 'sending';
@@ -79,6 +82,7 @@ export type PendingChatImage = {
 
 interface Props {
   roomMeta: ChatRoomMeta;
+  roomAi?: RoomAiConfig | null;
   nickname: string;
   mySocketId: string | null;
   canControlPlayback: boolean;
@@ -112,6 +116,7 @@ export interface ChatInputBarHandle {
 
 const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar({
   roomMeta,
+  roomAi,
   nickname,
   mySocketId,
   canControlPlayback,
@@ -133,8 +138,11 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
   const [error, setError] = useState('');
   const [showEmoji, setShowEmoji] = useState(false);
   const [showMentionPicker, setShowMentionPicker] = useState(false);
+  const [showSlashPicker, setShowSlashPicker] = useState(false);
   const [mentionIndex, setMentionIndex] = useState(0);
+  const [slashIndex, setSlashIndex] = useState(0);
   const [mentionQuery, setMentionQuery] = useState('');
+  const [slashQuery, setSlashQuery] = useState('');
   const [qqFaces, setQQFaces] = useState<QFaceItem[]>(() => getInitialQQFaces());
   const [loadingFaces, setLoadingFaces] = useState(() => !hasFullQQFaces());
   const [emojiGridRoot, setEmojiGridRoot] = useState<HTMLDivElement | null>(null);
@@ -149,6 +157,7 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
   const emojiPickerPortalRef = useRef<HTMLDivElement>(null);
   const composingRef = useRef(false);
   const mentionQueryRef = useRef('');
+  const slashQueryRef = useRef('');
 
   const mentionNicknames = useMemo(
     () => roomMeta.users.map((user) => user.nickname),
@@ -164,6 +173,14 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
       options.push({ type: 'all' });
     }
 
+    if (roomAi?.enabled && roomAi.botName) {
+      const botName = roomAi.botName;
+      const botLower = botName.toLowerCase();
+      if (!query || botLower.startsWith(query) || botLower.includes(query)) {
+        options.push({ type: 'bot', botName });
+      }
+    }
+
     const userLimit = options.length > 0 ? 7 : 8;
     const users = roomMeta.users
       .filter((user) => user.id !== uid)
@@ -173,7 +190,17 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
 
     options.push(...users.map((user) => ({ type: 'user' as const, user })));
     return options.slice(0, 8);
-  }, [mentionQuery, mySocketId, roomMeta.users, canControlPlayback]);
+  }, [mentionQuery, mySocketId, roomMeta.users, canControlPlayback, roomAi]);
+
+  const slashOptions = useMemo(() => {
+    if (!roomAi?.enabled || !roomAi.commands?.length) return [];
+    const query = slashQuery.trim().toLowerCase();
+    return roomAi.commands.filter((cmd) => {
+      if (!query) return true;
+      const hay = `${cmd.label} ${cmd.description} ${cmd.insert}`.toLowerCase();
+      return hay.includes(query);
+    }).slice(0, 8);
+  }, [roomAi, slashQuery]);
 
   const clearSendProgressTimer = useCallback(() => {
     if (sendProgressTimerRef.current !== null) {
@@ -244,6 +271,23 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
     if (!editor) return;
     const draft = editorHasDraft(editor);
     setHasDraft((prev) => (prev === draft ? prev : draft));
+
+    const activeSlash = roomAi?.enabled ? getSlashQueryBeforeCursor(editor) : null;
+    if (activeSlash !== null) {
+      const queryChanged = slashQueryRef.current !== activeSlash;
+      slashQueryRef.current = activeSlash;
+      setSlashQuery(activeSlash);
+      setShowSlashPicker(Boolean(roomAi?.commands?.length));
+      setShowMentionPicker(false);
+      setMentionQuery('');
+      mentionQueryRef.current = '';
+      if (queryChanged) setSlashIndex(0);
+      return;
+    }
+    setShowSlashPicker(false);
+    setSlashQuery('');
+    slashQueryRef.current = '';
+
     const activeQuery = getMentionQueryBeforeCursor(editor);
     if (activeQuery === null) {
       if (!editorPlainIncludesAt(editor)) {
@@ -269,9 +313,13 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
       .filter((user) => !user.readOnly)
       .filter((user) => mentionQueryMatchesNickname(activeQuery, user.nickname));
     const showAll = canControlPlayback && matchesMentionAllQuery(activeQuery);
-    setShowMentionPicker(filtered.length > 0 || showAll);
+    const showBot = Boolean(roomAi?.enabled && roomAi.botName && (
+      !activeQuery.trim()
+      || roomAi.botName.toLowerCase().includes(activeQuery.trim().toLowerCase())
+    ));
+    setShowMentionPicker(filtered.length > 0 || showAll || showBot);
     if (queryChanged) setMentionIndex(0);
-  }, [canControlPlayback, mentionNicknames, mySocketId, roomMeta.users]);
+  }, [canControlPlayback, mentionNicknames, mySocketId, roomMeta.users, roomAi]);
 
   const focusEditor = useCallback((editor?: HTMLElement | null) => {
     const el = editor ?? inputRef.current;
@@ -314,9 +362,13 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
     if (inputRef.current) inputRef.current.textContent = '';
     setHasDraft(false);
     setShowMentionPicker(false);
+    setShowSlashPicker(false);
     setMentionQuery('');
+    setSlashQuery('');
     mentionQueryRef.current = '';
+    slashQueryRef.current = '';
     setMentionIndex(0);
+    setSlashIndex(0);
   }, []);
 
   const buildMentions = useCallback((messageText: string) => {
@@ -485,12 +537,28 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
     }
     const token = option.type === 'all'
       ? `@${MENTION_ALL_LABEL} `
-      : `@${option.user.nickname} `;
+      : option.type === 'bot'
+        ? `@${option.botName} `
+        : `@${option.user.nickname} `;
     insertPlainText(token);
     setShowMentionPicker(false);
     setMentionQuery('');
     mentionQueryRef.current = '';
     setMentionIndex(0);
+    requestAnimationFrame(() => focusEditor());
+  };
+
+  const handleSlashOption = (insert: string) => {
+    const editor = inputRef.current;
+    if (editor) {
+      const deleteCount = getActiveSlashDeleteCount(editor);
+      if (deleteCount > 0) deleteTextBeforeCursor(deleteCount);
+    }
+    insertPlainText(insert);
+    setShowSlashPicker(false);
+    setSlashQuery('');
+    slashQueryRef.current = '';
+    setSlashIndex(0);
     requestAnimationFrame(() => focusEditor());
   };
 
@@ -775,6 +843,27 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
             </Tooltip>
           )}
           <div className="relative min-w-0 flex-1">
+            {showSlashPicker && slashOptions.length > 0 && (
+              <div className="absolute bottom-full left-0 z-20 mb-2 w-72 overflow-hidden rounded-2xl border border-netease-border/70 bg-netease-dark/95 p-1.5 shadow-2xl backdrop-blur">
+                <p className="px-2 py-1 text-[10px] text-netease-muted/80">
+                  {roomAi?.botName ? `${roomAi.botName} · 命令` : 'AI 命令'}
+                </p>
+                {slashOptions.map((cmd, index) => (
+                  <button
+                    key={cmd.id}
+                    type="button"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onMouseEnter={() => setSlashIndex(index)}
+                    onClick={() => handleSlashOption(cmd.insert)}
+                    className={`flex w-full flex-col rounded-xl px-3 py-2 text-left transition-colors ${index === slashIndex ? 'bg-white/10 text-white' : 'text-white/85 hover:bg-white/10'}`}
+                  >
+                    <span className="text-sm text-sky-300">{cmd.label}</span>
+                    <span className="text-[11px] text-netease-muted">{cmd.description}</span>
+                    <span className="mt-0.5 truncate text-[10px] text-white/40">{cmd.example}</span>
+                  </button>
+                ))}
+              </div>
+            )}
             {showMentionPicker && (
               <div className="absolute bottom-full left-0 z-20 mb-2 w-56 overflow-hidden rounded-2xl border border-netease-border/70 bg-netease-dark/95 p-1.5 shadow-2xl backdrop-blur">
                 {mentionOptions.map((option, index) => (
@@ -789,6 +878,18 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
                     >
                       <span className="min-w-0 truncate text-sky-300">@{MENTION_ALL_LABEL}</span>
                       <span className="ml-2 flex-shrink-0 text-[10px] text-sky-400/80">全员</span>
+                    </button>
+                  ) : option.type === 'bot' ? (
+                    <button
+                      key={`mention-bot-${option.botName}`}
+                      type="button"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onMouseEnter={() => setMentionIndex(index)}
+                      onClick={() => handleMentionOption(option)}
+                      className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm transition-colors ${index === mentionIndex ? 'bg-white/10 text-white' : 'text-white/85 hover:bg-white/10'}`}
+                    >
+                      <span className="min-w-0 truncate text-emerald-300">@{option.botName}</span>
+                      <span className="ml-2 flex-shrink-0 text-[10px] text-emerald-400/80">AI</span>
                     </button>
                   ) : (
                     <button
@@ -858,7 +959,29 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
               onCompositionStart={() => { composingRef.current = true; }}
               onCompositionEnd={() => { composingRef.current = false; syncEditorState(); }}
               onKeyDown={(event) => {
-                if (showMentionPicker && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+                const hasSlashOptions = showSlashPicker && slashOptions.length > 0;
+                const hasMentionOptions = showMentionPicker && mentionOptions.length > 0;
+                if (hasSlashOptions && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+                  event.preventDefault();
+                  setSlashIndex((current) => {
+                    const delta = event.key === 'ArrowDown' ? 1 : -1;
+                    return (current + delta + slashOptions.length) % slashOptions.length;
+                  });
+                  return;
+                }
+                if (hasSlashOptions && (event.key === 'Tab' || event.key === 'Enter')) {
+                  event.preventDefault();
+                  const cmd = slashOptions[slashIndex];
+                  if (cmd) handleSlashOption(cmd.insert);
+                  return;
+                }
+                if (event.key === 'Escape' && showSlashPicker) {
+                  event.preventDefault();
+                  setShowSlashPicker(false);
+                  setSlashIndex(0);
+                  return;
+                }
+                if (hasMentionOptions && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
                   event.preventDefault();
                   setMentionIndex((current) => {
                     const delta = event.key === 'ArrowDown' ? 1 : -1;
@@ -866,7 +989,7 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
                   });
                   return;
                 }
-                if (showMentionPicker && (event.key === 'Tab' || event.key === 'Enter')) {
+                if (hasMentionOptions && (event.key === 'Tab' || event.key === 'Enter')) {
                   event.preventDefault();
                   const option = mentionOptions[mentionIndex];
                   if (option) handleMentionOption(option);

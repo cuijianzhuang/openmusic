@@ -133,7 +133,7 @@ export default function CredentialsPanel({
   };
 
   const body = (
-    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+    <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
       <Row gutter={[16, 16]}>
         <Col xs={24} sm={12}>
           <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>

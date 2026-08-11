@@ -9,7 +9,8 @@ import { useSongHistoryStore } from '../stores/songHistoryStore';
 import { useAudioStore } from '../stores/audioStore';
 import { songKey } from '../api/music';
 
-import type { ChatMention, ChatReplyRef, ChatMessage, FavoriteSong, PlaybackMediaShare, PlaybackState, RoomState, Song, SongHistoryItem } from '../types';
+import type { ChatMention, ChatReplyRef, ChatMessage, FavoriteSong, PlaybackMediaShare, PlaybackState, RoomAiConfig, RoomState, Song, SongHistoryItem } from '../types';
+import { sanitizeIncomingChatMessage } from '../lib/chatAi';
 
 import { stopSharedAudio } from '../lib/audioElement';
 import { resetDriftController } from '../lib/driftController';
@@ -231,6 +232,7 @@ type JoinAckResponse = {
   messages?: ChatMessage[];
   chatHasMore?: boolean;
   playbackState?: PlaybackState;
+  roomAi?: RoomAiConfig;
   socketId?: string;
   connectionId?: string;
   clientId?: string;
@@ -242,19 +244,21 @@ type JoinAckResponse = {
 function applyJoinResponse(session: JoinSession, res: JoinAckResponse) {
   if (!res.success || !res.room) return;
 
+  const room = res.roomAi ? { ...res.room, roomAi: res.roomAi } : res.room;
+
   // 先写入身份，再应用房间快照（角色只从 room 字段推导，不读 ACK 特权布尔）
   if (res.socketId) {
     const connectionId = res.connectionId || getSocket().id || null;
     useRoomStore.getState().setConnectionInfo(res.socketId, connectionId);
   }
 
-  applyRoomSnapshot(res.room, true);
-  applyJoinSnapshot(res.room, res.playbackState);
-  applyJoinExtras(res.room, { messages: res.messages, chatHasMore: res.chatHasMore });
+  applyRoomSnapshot(room, true);
+  applyJoinSnapshot(room, res.playbackState);
+  applyJoinExtras(room, { messages: res.messages, chatHasMore: res.chatHasMore });
 
   // 进房优先注入房间已分享的当前曲链接，再预取（命中缓存则免打上游）
   if (res.playbackState) {
-    applySharedPlaybackMediaFromState(res.room, res.playbackState);
+    applySharedPlaybackMediaFromState(room, res.playbackState);
   }
 
   const isTvSession = Boolean(session.readOnly);
@@ -269,14 +273,14 @@ function applyJoinResponse(session: JoinSession, res: JoinAckResponse) {
   }
 
   const resolvedNickname = res.nickname?.trim()
-    || res.room.users.find((user) => user.id === res.socketId)?.nickname?.trim();
+    || room.users.find((user) => user.id === res.socketId)?.nickname?.trim();
   if (!isTvSession && resolvedNickname) {
     useRoomStore.getState().setNickname(resolvedNickname);
     lastJoinSession = { ...session, nickname: resolvedNickname };
   }
 
-  if (res.room.current || res.room.nextRandom || (res.room.queue?.length ?? 0) > 0) {
-    prefetchUpcomingFromRoom(res.room);
+  if (room.current || room.nextRandom || (room.queue?.length ?? 0) > 0) {
+    prefetchUpcomingFromRoom(room);
   }
 
   clearReconnectSchedule();
@@ -622,7 +626,44 @@ export function useSocket() {
         useChatSystemToastStore.getState().show(message.text);
         return;
       }
-      useChatStore.getState().append(message);
+      useChatStore.getState().append(sanitizeIncomingChatMessage(message));
+    };
+
+    const onRoomAiProcessing = (payload: {
+      status?: 'queued' | 'start' | 'end' | 'error';
+      requestId?: string;
+      sourceMessageId?: string;
+      userId?: string;
+      nickname?: string;
+      startedAt?: number;
+      queuePosition?: number;
+      pendingCount?: number;
+      attempt?: number;
+      maxAttempts?: number;
+      error?: string;
+    }) => {
+      const requestId = String(payload.requestId || '').trim();
+      if (!requestId) return;
+      const store = useChatStore.getState();
+      if (payload.status === 'queued' || payload.status === 'start' || payload.status === 'error') {
+        const sourceMessageId = String(payload.sourceMessageId || '').trim();
+        if (!sourceMessageId) return;
+        store.startAiProcessing({
+          requestId,
+          sourceMessageId,
+          userId: String(payload.userId || '').trim(),
+          nickname: String(payload.nickname || '').trim(),
+          startedAt: Number(payload.startedAt) || Date.now(),
+          status: payload.status === 'error' ? 'error' : payload.status === 'queued' ? 'queued' : 'processing',
+          queuePosition: Math.max(0, Number(payload.queuePosition) || 0),
+          pendingCount: Math.max(0, Number(payload.pendingCount) || 0),
+          attempt: Math.max(0, Number(payload.attempt) || 0),
+          maxAttempts: Math.max(1, Number(payload.maxAttempts) || 3),
+          error: String(payload.error || '').trim() || undefined,
+        });
+      } else if (payload.status === 'end') {
+        store.endAiProcessing(requestId);
+      }
     };
 
     const onChatMessageRecall = ({ messageId }: { messageId: string }) => {
@@ -694,6 +735,18 @@ export function useSocket() {
 
     s.on('room_update', onRoomUpdate);
 
+    const onRoomAiUpdate = (roomAi: RoomAiConfig) => {
+      const { room } = useRoomStore.getState();
+      if (!room || !roomAi) return;
+      useRoomStore.getState().setRoom({
+        ...room,
+        roomAi,
+        roomAiEnabled: roomAi.roomAiEnabled !== false,
+        roomAiBotName: roomAi.roomAiBotName || '',
+      });
+    };
+    s.on('room_ai_update', onRoomAiUpdate);
+
     s.on('presence_update', onPresenceUpdate);
 
     s.on('playback_state', onPlaybackState);
@@ -703,6 +756,8 @@ export function useSocket() {
     s.on('queue_snapshot', onQueueSnapshot);
 
     s.on('chat_message', onChatMessage);
+
+    s.on('room_ai_processing', onRoomAiProcessing);
 
     s.on('chat_message_recall', onChatMessageRecall);
 
@@ -1399,6 +1454,23 @@ export function useSocket() {
     });
   }, []);
 
+  const setRoomAiSettings = useCallback((options: {
+    enabled: boolean;
+    botName: string;
+  }): Promise<{ success: boolean; error?: string; room?: RoomState; roomAi?: RoomAiConfig }> => {
+    return emitWithAck<{ success: boolean; error?: string; room?: RoomState; roomAi?: RoomAiConfig }>(
+      'set_room_ai_settings',
+      options,
+      { success: false, error: '连接超时，请重试' },
+    ).then((res) => {
+      if (res.success && res.room) {
+        const merged = res.roomAi ? { ...res.room, roomAi: res.roomAi } : res.room;
+        applyRoomSnapshot(merged);
+      }
+      return res;
+    });
+  }, []);
+
   const setRoomMaxAdmins = useCallback((maxAdmins: number): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
     return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
       'set_room_max_admins',
@@ -1697,6 +1769,7 @@ export function useSocket() {
     setChatShowAvatars,
 
     setRoomJoinNotice,
+    setRoomAiSettings,
     setRoomMaxAdmins,
 
     setSongRequestEnabled,

@@ -132,6 +132,30 @@ export interface ChatReactionGroup {
   users: ChatReactionUser[];
 }
 
+export interface RoomAiCommandHint {
+  id: string;
+  label: string;
+  description: string;
+  insert: string;
+  example: string;
+  botName: string;
+}
+
+export interface RoomAiConfig {
+  enabled: boolean;
+  botName: string;
+  wakePrefixes: string[];
+  commands: RoomAiCommandHint[];
+  /** 站点是否已开启 AI */
+  globalEnabled?: boolean;
+  /** 房主是否允许本房 AI */
+  roomAiEnabled?: boolean;
+  /** 本房自定义昵称（有值时 botName 即为此） */
+  roomAiBotName?: string;
+  /** 站点默认昵称 */
+  defaultBotName?: string;
+}
+
 export interface ChatMessage {
   id: string;
   userId: string;
@@ -140,7 +164,9 @@ export interface ChatMessage {
   imageUrl?: string | null;
   imageKey?: string | null;
   asSticker?: boolean;
-  kind?: 'chat' | 'welcome' | 'system' | 'notice' | 'recall';
+  kind?: 'chat' | 'welcome' | 'system' | 'notice' | 'recall' | 'ai_bot';
+  /** 服务端 HMAC 签名，仅 AI 助手消息携带 */
+  aiBotSig?: string;
   mentions?: ChatMention[];
   replyTo?: ChatReplyRef | null;
   timestamp: number;
@@ -262,6 +288,10 @@ export interface RoomState {
   joinNoticeEnabled?: boolean;
   /** 同一用户进房提醒的防重复间隔（秒），默认 180 */
   joinNoticeCooldownSec?: number;
+  /** 房主是否允许本房 AI（默认 true） */
+  roomAiEnabled?: boolean;
+  /** 本房 AI 昵称；有值时优先于站点默认 */
+  roomAiBotName?: string;
   /** 是否允许成员点歌（关闭后仅房主/管理员可点） */
   songRequestEnabled?: boolean;
   /** 是否允许成员为自己的点歌插队（默认关闭，房主/管理员始终可插队） */
@@ -300,6 +330,8 @@ export interface RoomState {
   memberTiers?: Record<string, RoomMemberTier>;
   /** 贵宾欢迎语等房间级设置 */
   memberSettings?: RoomMemberSettings;
+  /** 房间 AI 助手公开配置（进房时下发） */
+  roomAi?: RoomAiConfig;
 }
 
 /** CRDT 播放状态（服务端唯一时间源） */

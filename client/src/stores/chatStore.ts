@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { ChatMessage } from '../types';
+import { sanitizeIncomingChatMessage } from '../lib/chatAi';
 import { useRoomStore } from './roomStore';
 import {
   DEFAULT_MEMBER_SETTINGS,
@@ -49,9 +50,10 @@ function prependMessages(existing: ChatMessage[], older: ChatMessage[]): ChatMes
   const merged: ChatMessage[] = [];
   for (const message of older) {
     if (message.kind === 'system') continue;
-    if (!ids.has(message.id)) {
-      merged.push(message);
-      ids.add(message.id);
+    const safe = sanitizeIncomingChatMessage(message);
+    if (!ids.has(safe.id)) {
+      merged.push(safe);
+      ids.add(safe.id);
     }
   }
   merged.push(...existing);
@@ -59,9 +61,26 @@ function prependMessages(existing: ChatMessage[], older: ChatMessage[]): ChatMes
   return merged;
 }
 
+export interface AiProcessingTask {
+  requestId: string;
+  sourceMessageId: string;
+  userId: string;
+  nickname: string;
+  startedAt: number;
+  status: 'queued' | 'processing' | 'error';
+  queuePosition: number;
+  pendingCount: number;
+  attempt: number;
+  maxAttempts: number;
+  error?: string;
+}
+
 interface ChatStore {
   roomId: string | null;
   messages: ChatMessage[];
+  aiProcessing: AiProcessingTask[];
+  startAiProcessing: (task: AiProcessingTask) => void;
+  endAiProcessing: (requestId: string) => void;
   chatVisibleSince: number | null;
   hasMoreOlder: boolean;
   loadingOlder: boolean;
@@ -84,9 +103,27 @@ interface ChatStore {
 export const useChatStore = create<ChatStore>((set, get) => ({
   roomId: null,
   messages: [],
+  aiProcessing: [],
   chatVisibleSince: null,
   hasMoreOlder: false,
   loadingOlder: false,
+
+  startAiProcessing: (task) => {
+    set((state) => {
+      const index = state.aiProcessing.findIndex((item) => item.requestId === task.requestId);
+      if (index < 0) return { aiProcessing: [...state.aiProcessing, task] };
+      const aiProcessing = state.aiProcessing.slice();
+      aiProcessing[index] = { ...aiProcessing[index], ...task };
+      return { aiProcessing };
+    });
+  },
+
+  endAiProcessing: (requestId) => {
+    if (!requestId) return;
+    set((state) => ({
+      aiProcessing: state.aiProcessing.filter((task) => task.requestId !== requestId),
+    }));
+  },
 
   reset: (roomId, messages, hasMoreOlder, chatVisibleSince = null) => {
     const sorted = [...messages].sort((a, b) => a.timestamp - b.timestamp);
@@ -100,11 +137,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       ) {
         continue;
       }
-      deduped.push(message);
+      deduped.push(sanitizeIncomingChatMessage(message));
     }
     set({
       roomId,
       messages: deduped,
+      aiProcessing: [],
       hasMoreOlder,
       chatVisibleSince,
       loadingOlder: false,
@@ -112,28 +150,29 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   },
 
   append: (message) => {
-    if (message.kind === 'system') return;
+    const safe = sanitizeIncomingChatMessage(message);
+    if (safe.kind === 'system') return;
     const state = get();
-    if (state.chatVisibleSince != null && message.timestamp < state.chatVisibleSince) return;
-    const existingIndex = state.messages.findIndex((m) => m.id === message.id);
+    if (state.chatVisibleSince != null && safe.timestamp < state.chatVisibleSince) return;
+    const existingIndex = state.messages.findIndex((m) => m.id === safe.id);
     if (existingIndex >= 0) {
       const existing = state.messages[existingIndex];
       // 允许后到的完整图片补全此前占位消息
-      if (!existing.imageUrl && message.imageUrl) {
+      if (!existing.imageUrl && safe.imageUrl) {
         const next = state.messages.slice();
-        next[existingIndex] = { ...existing, ...message };
+        next[existingIndex] = { ...existing, ...safe };
         set({ messages: next });
       }
       return;
     }
     if (
-      message.kind === 'welcome'
-      && message.targetUserId
-      && hasRecentWelcomeForUser(state.messages, message.targetUserId)
+      safe.kind === 'welcome'
+      && safe.targetUserId
+      && hasRecentWelcomeForUser(state.messages, safe.targetUserId)
     ) {
       return;
     }
-    const nextMessages = [...state.messages, message];
+    const nextMessages = [...state.messages, safe];
     // 人多刷屏时限制内存与虚拟列表高度计算压力
     const trimmed = nextMessages.length > 400
       ? nextMessages.slice(nextMessages.length - 400)
@@ -180,6 +219,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   clear: () => set({
     roomId: null,
     messages: [],
+    aiProcessing: [],
     chatVisibleSince: null,
     hasMoreOlder: false,
     loadingOlder: false,

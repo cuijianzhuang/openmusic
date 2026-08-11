@@ -297,7 +297,7 @@ export default function Room() {
     noindex: true,
   });
 
-  const { joinRoom, addSong, leaveRoom, listFavorites, setFavorite, importFavorites, renameRoomName, setRoomLock, setRoomFmMode, setRoomAnnouncement, setRoomCustomCover, setChatHistoryVisibleOnJoin, setChatShowAvatars, setRoomJoinNotice, setRoomMaxAdmins, setSongRequestEnabled, unbanRoomSong, addRoomForbiddenWord, removeRoomForbiddenWord, setRoomMemberTier, removeRoomMemberTier, setRoomMemberSettings, loadSongHistory, transferOwner, destroyRoom, applyRoomPermanent, cancelRoomPermanent, clearQueue, createMusicAccountQr, checkMusicAccountQr, bindMusicAccount, listMusicAccounts, setMusicAccountShared, unbindMusicAccount } = useSocket();
+  const { joinRoom, addSong, leaveRoom, listFavorites, setFavorite, importFavorites, renameRoomName, setRoomLock, setRoomFmMode, setRoomAnnouncement, setRoomCustomCover, setChatHistoryVisibleOnJoin, setChatShowAvatars, setRoomJoinNotice, setRoomAiSettings, setRoomMaxAdmins, setSongRequestEnabled, unbanRoomSong, addRoomForbiddenWord, removeRoomForbiddenWord, setRoomMemberTier, removeRoomMemberTier, setRoomMemberSettings, loadSongHistory, transferOwner, destroyRoom, applyRoomPermanent, cancelRoomPermanent, clearQueue, createMusicAccountQr, checkMusicAccountQr, bindMusicAccount, listMusicAccounts, setMusicAccountShared, unbindMusicAccount } = useSocket();
   const { applyFavorites } = useFavorites();
   const { queueKeys, playedKeys } = useRoomSongKeySets();
 
@@ -395,6 +395,7 @@ export default function Room() {
   const [chatHistorySaving, setChatHistorySaving] = useState(false);
   const [chatAvatarsSaving, setChatAvatarsSaving] = useState(false);
   const [joinNoticeSaving, setJoinNoticeSaving] = useState(false);
+  const [roomAiSaving, setRoomAiSaving] = useState(false);
   const [maxAdminsSaving, setMaxAdminsSaving] = useState(false);
   const [forbiddenWordSaving, setForbiddenWordSaving] = useState(false);
   const lastSongRequestAtRef = useRef(0);
@@ -1477,6 +1478,24 @@ export default function Room() {
       showToast(res.error || '进房提醒设置失败', 'error');
     }
   }, [joinNoticeSaving, setRoomJoinNotice, showToast]);
+
+  const handleSaveRoomAi = useCallback(async (settings: {
+    enabled: boolean;
+    botName: string;
+  }) => {
+    if (roomAiSaving) return;
+    setRoomAiSaving(true);
+    const res = await setRoomAiSettings({
+      enabled: settings.enabled,
+      botName: settings.botName,
+    });
+    setRoomAiSaving(false);
+    if (res.success) {
+      showToast('AI 设置已更新', 'success');
+    } else {
+      showToast(res.error || 'AI 设置失败', 'error');
+    }
+  }, [roomAiSaving, setRoomAiSettings, showToast]);
 
   const handleSaveMaxAdmins = useCallback(async (next: number) => {
     if (maxAdminsSaving) return;
@@ -2612,6 +2631,11 @@ export default function Room() {
         joinNoticeEnabled={room?.joinNoticeEnabled !== false}
         joinNoticeCooldownMinutes={Math.floor((room?.joinNoticeCooldownSec ?? 180) / 60)}
         joinNoticeSaving={joinNoticeSaving}
+        roomAiEnabled={room?.roomAiEnabled !== false}
+        roomAiBotName={room?.roomAiBotName || ''}
+        globalAiEnabled={Boolean(room?.roomAi?.globalEnabled)}
+        defaultAiBotName={room?.roomAi?.defaultBotName || '小音'}
+        roomAiSaving={roomAiSaving}
         songRequest={songRequestSettings}
         songRequestSaving={songRequestSaving}
         bannedSongs={room?.bannedSongs ?? []}
@@ -2648,6 +2672,7 @@ export default function Room() {
         onSaveChatHistory={handleSaveChatHistory}
         onSaveChatShowAvatars={handleSaveChatShowAvatars}
         onSaveJoinNotice={handleSaveJoinNotice}
+        onSaveRoomAi={handleSaveRoomAi}
         onSaveSongRequest={handleSaveSongRequestSettings}
         onTransferOwner={handleTransferOwner}
         onDestroyRoom={handleDestroyRoom}
