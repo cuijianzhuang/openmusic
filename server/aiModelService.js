@@ -18,12 +18,56 @@ const SILICONFLOW_WINDOW_MS = 60_000;
 const AI_CONCURRENCY_TARGET_LATENCY_MS = 10_000;
 const AI_CONCURRENCY_ESTIMATED_TOKENS = 1_500;
 const AI_CONCURRENCY_HARD_MAX = 64;
+const DEFAULT_AI_CONTEXT_WINDOW_TOKENS = 256 * 1024;
+const AI_CONTEXT_SAFETY_TOKENS = 256;
 const siliconFlowQueue = [];
 const siliconFlowUsage = [];
 const siliconFlowActiveByRoom = new Map();
 const siliconFlowActiveByPool = new Map();
+const aiPoolHealth = new Map();
 let siliconFlowActiveRequests = 0;
 let siliconFlowDrainTimer = null;
+
+const AI_POOL_BACKOFF_BASE_MS = 5_000;
+const AI_POOL_BACKOFF_MAX_MS = 5 * 60_000;
+
+function getAiPoolHealth(poolId) {
+  return aiPoolHealth.get(String(poolId || '')) || {
+    consecutiveFailures: 0,
+    cooldownUntil: 0,
+    lastError: '',
+  };
+}
+
+function markAiPoolSuccess(poolId) {
+  if (poolId) aiPoolHealth.delete(String(poolId));
+}
+
+function markAiPoolFailure(poolId, error) {
+  if (!poolId) return;
+  const previous = getAiPoolHealth(poolId);
+  const failures = Math.min(previous.consecutiveFailures + 1, 10);
+  const authFailure = [401, 403, 404].includes(Number(error?.status));
+  const backoffMs = authFailure
+    ? AI_POOL_BACKOFF_MAX_MS
+    : Math.min(AI_POOL_BACKOFF_BASE_MS * (2 ** (failures - 1)), AI_POOL_BACKOFF_MAX_MS);
+  aiPoolHealth.set(String(poolId), {
+    consecutiveFailures: failures,
+    cooldownUntil: Date.now() + backoffMs,
+    lastError: String(error?.message || '调用失败').slice(0, 200),
+  });
+}
+
+function isAiPoolCoolingDown(pool) {
+  return getAiPoolHealth(pool?.poolId).cooldownUntil > Date.now();
+}
+
+function isAiPoolFailoverError(error) {
+  if (error?.code === 'TIMEOUT' || error?.code === 'MALFORMED_RESPONSE') return true;
+  const status = Number(error?.status);
+  if (!Number.isFinite(status)) return true;
+  return status === 401 || status === 403 || status === 404 || status === 408 || status === 409 || status === 429 || status >= 500;
+}
 
 function getAiRateLimits(options = {}) {
   const config = getRuntimeConfig();
@@ -43,10 +87,110 @@ function getPoolConcurrencyLimit(rateLimits) {
   return Math.max(1, Math.min(Math.floor(Math.min(rpmCapacity, tpmCapacity) * 0.8), AI_CONCURRENCY_HARD_MAX));
 }
 
-function estimateSiliconFlowTokens(messages, tools, maxTokens, maxTokensPerMinute) {
-  const messageChars = messages.reduce((total, message) => total + JSON.stringify(message).length, 0);
-  const toolChars = Array.isArray(tools) ? JSON.stringify(tools).length : 0;
-  const inputTokens = Math.ceil((messageChars + toolChars) / 2) + 128;
+function estimateJsonTokens(value) {
+  const json = JSON.stringify(value, (_key, item) => {
+    if (typeof item === 'string' && (item.startsWith('data:image/') || /^https?:\/\/\S+$/i.test(item))) {
+      return item.startsWith('data:image/') ? '[image-data]' : item.slice(0, 512);
+    }
+    return item;
+  });
+  return Math.ceil(String(json || '').length / 2);
+}
+
+function estimateAiInputTokens(messages, tools) {
+  const messageTokens = messages.reduce((total, message) => total + estimateJsonTokens(message) + 4, 0);
+  const toolTokens = Array.isArray(tools) ? estimateJsonTokens(tools) : 0;
+  return messageTokens + toolTokens + 128;
+}
+
+function groupConversationMessages(messages) {
+  const systemMessages = [];
+  const batches = [];
+  let current = [];
+  for (const message of messages) {
+    if (message?.role === 'system' || message?.role === 'developer') {
+      systemMessages.push(message);
+      continue;
+    }
+    if (message?.role === 'user' && current.length) {
+      batches.push(current);
+      current = [];
+    }
+    current.push(message);
+  }
+  if (current.length) batches.push(current);
+  return { systemMessages, batches };
+}
+
+function truncateMessageToTokenBudget(message, tokenBudget) {
+  const content = message?.content;
+  if (typeof content !== 'string') return null;
+  const safeBudget = Math.max(32, tokenBudget);
+  const maxChars = safeBudget * 2;
+  if (content.length <= maxChars) return message;
+  return {
+    ...message,
+    content: `[上下文过长，已保留末尾内容]\n${content.slice(-maxChars)}`,
+  };
+}
+
+function fitBatchToBudget(systemMessages, batch, tools, inputBudget) {
+  const fixed = [...systemMessages, ...batch];
+  if (estimateAiInputTokens(fixed, tools) <= inputBudget) return fixed;
+  const result = batch.map((message) => ({ ...message }));
+  for (let index = 0; index < result.length; index += 1) {
+    const currentTokens = estimateAiInputTokens([...systemMessages, ...result], tools);
+    const remaining = inputBudget - currentTokens;
+    if (remaining >= 0) continue;
+    const content = result[index]?.content;
+    if (typeof content !== 'string') continue;
+    const other = [...systemMessages, ...result].filter((_item, itemIndex) => itemIndex !== systemMessages.length + index);
+    const otherTokens = estimateAiInputTokens(other, tools);
+    result[index] = truncateMessageToTokenBudget(result[index], inputBudget - otherTokens - 8) || result[index];
+  }
+  while (result.length > 1 && estimateAiInputTokens([...systemMessages, ...result], tools) > inputBudget) {
+    result.shift();
+  }
+  return [...systemMessages, ...result];
+}
+
+/** 按完整对话轮次装入上下文窗口，旧轮次优先淘汰，最新单条过大时保留末尾。 */
+export function fitAiMessagesToContextWindow(messages, tools, contextWindowTokens, desiredMaxTokens) {
+  const windowTokens = Math.max(4 * 1024, Math.min(Math.round(Number(contextWindowTokens)) || DEFAULT_AI_CONTEXT_WINDOW_TOKENS, 2048 * 1024));
+  const desiredOutputTokens = Math.max(16, Math.min(Math.round(Number(desiredMaxTokens)) || 1024, windowTokens - AI_CONTEXT_SAFETY_TOKENS));
+  const inputBudget = Math.max(256, windowTokens - desiredOutputTokens - AI_CONTEXT_SAFETY_TOKENS);
+  const source = Array.isArray(messages) ? messages : [];
+  const { systemMessages, batches } = groupConversationMessages(source);
+  const selectedBatches = [];
+  let fittedMessages = [...systemMessages];
+
+  for (let index = batches.length - 1; index >= 0; index -= 1) {
+    const candidateBatches = [batches[index], ...selectedBatches];
+    const candidate = [...systemMessages, ...candidateBatches.flat()];
+    if (estimateAiInputTokens(candidate, tools) <= inputBudget) {
+      selectedBatches.unshift(batches[index]);
+      fittedMessages = candidate;
+      continue;
+    }
+    if (selectedBatches.length) break;
+
+    const latestBatch = batches[index];
+    fittedMessages = fitBatchToBudget(systemMessages, latestBatch, tools, inputBudget);
+    break;
+  }
+
+  const inputTokens = estimateAiInputTokens(fittedMessages, tools);
+  const availableOutputTokens = Math.max(16, windowTokens - inputTokens - AI_CONTEXT_SAFETY_TOKENS);
+  return {
+    messages: fittedMessages,
+    inputTokens,
+    maxTokens: Math.min(desiredOutputTokens, availableOutputTokens),
+    contextWindowTokens: windowTokens,
+    droppedMessages: Math.max(0, source.length - fittedMessages.length),
+  };
+}
+
+function estimateSiliconFlowTokens(inputTokens, maxTokens, maxTokensPerMinute) {
   return Math.min(maxTokensPerMinute, inputTokens + maxTokens);
 }
 
@@ -205,8 +349,17 @@ function getAiModelPools(taskType, config = getRuntimeConfig()) {
 }
 
 function selectAiModelPool(taskType, config = getRuntimeConfig()) {
-  return getAiModelPools(taskType, config)
-    .sort((a, b) => a.priority - b.priority || getPoolRequestCount(a.poolId) - getPoolRequestCount(b.poolId))[0];
+  const pools = getAiModelPools(taskType, config)
+    .sort((a, b) => a.priority - b.priority || getPoolRequestCount(a.poolId) - getPoolRequestCount(b.poolId));
+  return pools.find((pool) => !isAiPoolCoolingDown(pool)) || pools[0];
+}
+
+function getAiFailoverPools(taskType, config = getRuntimeConfig()) {
+  const pools = getAiModelPools(taskType, config)
+    .sort((a, b) => a.priority - b.priority || getPoolRequestCount(a.poolId) - getPoolRequestCount(b.poolId));
+  const available = pools.filter((pool) => !isAiPoolCoolingDown(pool));
+  if (available.length) return available;
+  return pools.length ? [pools.sort((a, b) => getAiPoolHealth(a.poolId).cooldownUntil - getAiPoolHealth(b.poolId).cooldownUntil)[0]] : [];
 }
 
 export function getAiModelConfig(config = getRuntimeConfig()) {
@@ -337,15 +490,13 @@ function normalizeResponsesCompletion(data) {
  * @param {number} [options.maxTokensPerMinute] 仅供未保存配置的管理端测试覆盖
  * @param {number} [options.max_tokens]
  * @param {number} [options.temperature]
- * @param {boolean} [options.thinking] 默认关闭，聊天室要低延迟
+ * @param {boolean} [options.enableThinking] 仅文字 Chat Completions 请求有效
+ * @param {boolean} [options.thinking] @deprecated 使用 enableThinking
  * @param {number} [options.timeoutMs]
  * @param {{request?: object, response?: object}} [options.debugTrace] 仅管理端测试使用，不含密钥
  */
-export async function aiChatCompletions(options = {}) {
+async function requestAiChatCompletion(options = {}, selectedPool = null) {
   const taskType = options.taskType === 'vision' ? 'vision' : 'text';
-  const selectedPool = options.apiKey
-    ? null
-    : selectAiModelPool(taskType);
   const apiKey = String(options.apiKey || selectedPool?.apiKey || '').trim();
   if (!apiKey) {
     const err = new Error('未配置 AI API Key');
@@ -371,25 +522,39 @@ export async function aiChatCompletions(options = {}) {
     throw err;
   }
   const apiUrl = resolveAiApiUrl(apiBaseUrl, protocol);
-  const maxTokens = Math.max(16, Math.min(Number(options.max_tokens) || 1024, 8192));
   const temperature = Number.isFinite(Number(options.temperature))
     ? Math.max(0, Math.min(Number(options.temperature), 2))
     : 0.7;
+  const enableThinking = taskType === 'text'
+    && (options.enableThinking === true
+      || (options.enableThinking === undefined && options.thinking === true)
+      || (options.enableThinking === undefined && options.thinking === undefined && selectedPool?.enableThinking === true));
+  const requestedMaxTokens = Math.max(16, Math.min(Number(options.max_tokens) || 1024, 8192));
+  const desiredMaxTokens = enableThinking ? Math.max(requestedMaxTokens, 2048) : requestedMaxTokens;
+  const contextWindowTokens = options.contextWindowTokens ?? selectedPool?.contextWindowTokens ?? DEFAULT_AI_CONTEXT_WINDOW_TOKENS;
+  const fittedContext = fitAiMessagesToContextWindow(
+    messages,
+    options.tools,
+    contextWindowTokens,
+    desiredMaxTokens,
+  );
+  const requestMessages = fittedContext.messages;
+  const maxTokens = fittedContext.maxTokens;
   const body = protocol === 'responses'
     ? {
       model,
-      input: toResponsesInput(messages),
+      input: toResponsesInput(requestMessages),
       max_output_tokens: maxTokens,
       temperature,
     }
     : {
       model,
-      messages,
+      messages: requestMessages,
       max_tokens: maxTokens,
       temperature,
     };
-  if (protocol === 'chat_completions' && options.thinking === true) {
-    body.enable_thinking = true;
+  if (protocol === 'chat_completions' && taskType === 'text') {
+    body.enable_thinking = enableThinking;
   }
 
   if (Array.isArray(options.tools) && options.tools.length) {
@@ -405,6 +570,12 @@ export async function aiChatCompletions(options = {}) {
       url: apiUrl,
       method: 'POST',
       body,
+      context: {
+        inputTokens: fittedContext.inputTokens,
+        maxTokens,
+        contextWindowTokens: fittedContext.contextWindowTokens,
+        droppedMessages: fittedContext.droppedMessages,
+      },
     };
   }
 
@@ -432,7 +603,7 @@ export async function aiChatCompletions(options = {}) {
     response = await enqueueSiliconFlowRequest({
       roomId: options.roomId,
       poolId: selectedPool?.poolId,
-      tokens: estimateSiliconFlowTokens(messages, options.tools, maxTokens, rateLimits.maxTokensPerMinute),
+      tokens: estimateSiliconFlowTokens(fittedContext.inputTokens, maxTokens, rateLimits.maxTokensPerMinute),
       rateLimits,
       execute: sendRequest,
     });
@@ -469,7 +640,44 @@ export async function aiChatCompletions(options = {}) {
     throw err;
   }
 
-  return protocol === 'responses' ? normalizeResponsesCompletion(data) : data;
+  const completion = protocol === 'responses' ? normalizeResponsesCompletion(data) : data;
+  if (!completion || !Array.isArray(completion?.choices)) {
+    const err = new Error('AI 上游响应格式无效');
+    err.code = 'MALFORMED_RESPONSE';
+    throw err;
+  }
+  return completion;
+}
+
+export async function aiChatCompletions(options = {}) {
+  if (options.apiKey) return requestAiChatCompletion(options, null);
+
+  const taskType = options.taskType === 'vision' ? 'vision' : 'text';
+  const pools = getAiFailoverPools(taskType);
+  if (!pools.length) return requestAiChatCompletion(options, null);
+
+  const failures = [];
+  for (const pool of pools) {
+    try {
+      const completion = await requestAiChatCompletion(options, pool);
+      markAiPoolSuccess(pool.poolId);
+      return completion;
+    } catch (error) {
+      if (!isAiPoolFailoverError(error)) throw error;
+      markAiPoolFailure(pool.poolId, error);
+      failures.push({ pool, error });
+    }
+  }
+
+  const last = failures.at(-1)?.error || new Error('所有 AI 模型均不可用');
+  const summary = failures
+    .map(({ pool, error }) => `${pool.name || pool.model || pool.poolId}: ${error?.message || '调用失败'}`)
+    .join('；');
+  const err = new Error(summary ? `所有 AI 模型均不可用：${summary}` : last.message);
+  err.code = 'ALL_AI_POOLS_UNAVAILABLE';
+  err.status = last.status;
+  err.cause = last;
+  throw err;
 }
 
 export function extractAssistantText(completion) {
@@ -484,6 +692,16 @@ export function extractAssistantText(completion) {
       .trim();
   }
   return '';
+}
+
+function describeEmptyAssistantResponse(completion, fallback = '模型返回为空') {
+  const choice = completion?.choices?.[0];
+  const reasoning = String(choice?.message?.reasoning_content || '').trim();
+  if (reasoning && choice?.finish_reason === 'length') {
+    return '深度思考已生成，但输出额度已耗尽，模型未能生成最终回答；请提高 max_tokens 或关闭深度思考';
+  }
+  if (reasoning) return '模型仅返回了 reasoning_content，未生成最终回答';
+  return fallback;
 }
 
 /**
@@ -811,7 +1029,7 @@ export async function testAiModelChat(message = '你好', overrides = {}) {
       ],
       max_tokens: 256,
       temperature: 0.2,
-      thinking: false,
+      enableThinking: overrides.enableThinking === true,
       timeoutMs: 45000,
       debugTrace,
     });
@@ -820,7 +1038,7 @@ export async function testAiModelChat(message = '你好', overrides = {}) {
     if (!reply) {
       return {
         success: false,
-        error: '模型返回为空',
+        error: describeEmptyAssistantResponse(completion),
         model: completion?.model || model,
         latencyMs: Date.now() - started,
         raw: completion,
@@ -913,7 +1131,7 @@ export async function testAiModelVision(overrides = {}) {
     if (!reply) {
       return {
         success: false,
-        error: '视觉模型返回为空',
+        error: describeEmptyAssistantResponse(completion, '视觉模型返回为空'),
         model: completion?.model || model,
         latencyMs: Date.now() - started,
         raw: completion,
@@ -1414,11 +1632,14 @@ export async function describeImageWithVision(imageUrl, hint = '', roomId = '') 
       ],
       max_tokens: 800,
       temperature: 0.2,
-      thinking: false,
       timeoutMs: 60000,
     });
     const description = extractAssistantText(completion);
-    if (!description) return { success: false, error: '视觉模型返回为空', model: cfg.visionModel };
+    if (!description) return {
+      success: false,
+      error: describeEmptyAssistantResponse(completion, '视觉模型返回为空'),
+      model: cfg.visionModel,
+    };
     return {
       success: true,
       description,

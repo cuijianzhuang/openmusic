@@ -270,6 +270,8 @@ function createAiModelPool(): AiModelPool {
     apiKey: '',
     configuredApiKey: false,
     model: '',
+    enableThinking: false,
+    contextWindowTokens: 256 * 1024,
     maxRequestsPerMinute: 1000,
     maxTokensPerMinute: 50_000,
     priority: 100,
@@ -330,7 +332,13 @@ export default function RuntimeConfigPanel({
       aiVisionModel: config.aiVisionModel || 'Qwen/Qwen3.5-4B',
       aiMaxRequestsPerMinute: Number(config.aiMaxRequestsPerMinute) || 1000,
       aiMaxTokensPerMinute: Number(config.aiMaxTokensPerMinute) || 50_000,
-      aiModelPools: Array.isArray(config.aiModelPools) ? config.aiModelPools : [],
+      aiModelPools: Array.isArray(config.aiModelPools)
+        ? config.aiModelPools.map((pool) => ({
+            ...pool,
+            ...(pool.type === 'text' ? { enableThinking: pool.enableThinking === true } : {}),
+            contextWindowTokens: Number(pool.contextWindowTokens) || 256 * 1024,
+          }))
+        : [],
       seoTitle: config.seoTitle || '',
       seoDescription: config.seoDescription || '',
       seoKeywords: config.seoKeywords || '',
@@ -1250,6 +1258,8 @@ export default function RuntimeConfigPanel({
         apiProtocol?: 'chat_completions' | 'responses';
         maxRequestsPerMinute?: number;
         maxTokensPerMinute?: number;
+        enableThinking?: boolean;
+        contextWindowTokens?: number;
       } = {
         message: '你好',
         poolId: pool.id,
@@ -1259,6 +1269,8 @@ export default function RuntimeConfigPanel({
         apiProtocol: pool.apiProtocol,
         maxRequestsPerMinute: pool.maxRequestsPerMinute,
         maxTokensPerMinute: pool.maxTokensPerMinute,
+        ...(pool.type === 'text' ? { enableThinking: pool.enableThinking === true } : {}),
+        contextWindowTokens: pool.contextWindowTokens,
       };
       // 仅当用户正在编辑密钥时，把草稿 Key 带给测试接口（不落盘）
       if (String(pool.apiKey || '').trim()) {
@@ -1322,13 +1334,22 @@ export default function RuntimeConfigPanel({
               extra={<Space size={0}><Button type="text" loading={aiTestLoading && aiTestingPoolId === pool.id} onClick={() => void runAiTest(pool)}>测试</Button><Button type="text" danger icon={<DeleteOutlined />} aria-label={`删除模型 ${index + 1}`} onClick={() => setDraft({ ...draft, aiModelPools: draft.aiModelPools.filter((_, poolIndex) => poolIndex !== index) })} /></Space>}
             >
               <Row gutter={[12, 12]}>
-                <Col xs={24} sm={8}><Select value={pool.type} style={{ width: '100%' }} options={[{ value: 'text', label: '文本处理' }, { value: 'vision', label: '图片处理' }]} onChange={(type) => setDraft({ ...draft, aiModelPools: draft.aiModelPools.map((item, poolIndex) => poolIndex === index ? { ...item, type } : item) })} /></Col>
+                <Col xs={24} sm={8}><Select value={pool.type} style={{ width: '100%' }} options={[{ value: 'text', label: '文本处理' }, { value: 'vision', label: '图片处理' }]} onChange={(type) => setDraft({ ...draft, aiModelPools: draft.aiModelPools.map((item, poolIndex) => poolIndex === index ? { ...item, type, ...(type === 'text' ? { enableThinking: item.enableThinking === true } : { enableThinking: undefined }) } : item) })} /></Col>
                 <Col xs={24} sm={8}><Input placeholder="名称（可选）" value={pool.name} onChange={(e) => setDraft({ ...draft, aiModelPools: draft.aiModelPools.map((item, poolIndex) => poolIndex === index ? { ...item, name: e.target.value } : item) })} /></Col>
                 <Col xs={24} sm={8}><Switch checked={pool.enabled} checkedChildren="启用" unCheckedChildren="停用" onChange={(enabled) => setDraft({ ...draft, aiModelPools: draft.aiModelPools.map((item, poolIndex) => poolIndex === index ? { ...item, enabled } : item) })} /></Col>
                 <Col xs={24} sm={12}><Input placeholder="Base URL" value={pool.apiBaseUrl} onChange={(e) => setDraft({ ...draft, aiModelPools: draft.aiModelPools.map((item, poolIndex) => poolIndex === index ? { ...item, apiBaseUrl: e.target.value } : item) })} /></Col>
                 <Col xs={24} sm={12}><Input.Password placeholder={pool.configuredApiKey ? '已保存；留空保持不变' : 'API Key'} value={pool.apiKey} onChange={(e) => setDraft({ ...draft, aiModelPools: draft.aiModelPools.map((item, poolIndex) => poolIndex === index ? { ...item, apiKey: e.target.value } : item) })} /></Col>
                 <Col xs={24} sm={12}><Input placeholder="模型 ID" value={pool.model} onChange={(e) => setDraft({ ...draft, aiModelPools: draft.aiModelPools.map((item, poolIndex) => poolIndex === index ? { ...item, model: e.target.value } : item) })} /></Col>
                 <Col xs={24} sm={12}><Select value={pool.apiProtocol} style={{ width: '100%' }} options={[{ value: 'chat_completions', label: 'Chat Completions' }, { value: 'responses', label: 'Responses API' }]} onChange={(apiProtocol) => setDraft({ ...draft, aiModelPools: draft.aiModelPools.map((item, poolIndex) => poolIndex === index ? { ...item, apiProtocol } : item) })} /></Col>
+                {pool.type === 'text' && (
+                  <Col xs={24} sm={8}>
+                    <Space size="small">
+                      <Switch checked={pool.enableThinking === true} onChange={(enableThinking) => setDraft({ ...draft, aiModelPools: draft.aiModelPools.map((item, poolIndex) => poolIndex === index ? { ...item, enableThinking } : item) })} aria-label="启用深度思考" />
+                      <Typography.Text>深度思考</Typography.Text>
+                    </Space>
+                  </Col>
+                )}
+                <Col xs={24} sm={8}><Space.Compact style={{ width: '100%' }}><Typography.Text style={{ padding: '4px 8px', border: '1px solid #d9d9d9', whiteSpace: 'nowrap' }}>上下文</Typography.Text><InputNumber value={Math.round(pool.contextWindowTokens / 1024)} min={4} max={2048} step={1} precision={0} addonAfter="K" style={{ width: '100%' }} onChange={(contextWindowK) => setDraft({ ...draft, aiModelPools: draft.aiModelPools.map((item, poolIndex) => poolIndex === index ? { ...item, contextWindowTokens: (Number(contextWindowK) || 256) * 1024 } : item) })} /></Space.Compact></Col>
                 <Col xs={12} sm={8}><Space.Compact style={{ width: '100%' }}><Typography.Text style={{ padding: '4px 8px', border: '1px solid #d9d9d9', whiteSpace: 'nowrap' }}>RPM</Typography.Text><InputNumber value={pool.maxRequestsPerMinute} min={1} max={10_000} style={{ width: '100%' }} onChange={(maxRequestsPerMinute) => setDraft({ ...draft, aiModelPools: draft.aiModelPools.map((item, poolIndex) => poolIndex === index ? { ...item, maxRequestsPerMinute: Number(maxRequestsPerMinute) || 1 } : item) })} /></Space.Compact></Col>
                 <Col xs={12} sm={8}><Space.Compact style={{ width: '100%' }}><Typography.Text style={{ padding: '4px 8px', border: '1px solid #d9d9d9', whiteSpace: 'nowrap' }}>TPM</Typography.Text><InputNumber value={pool.maxTokensPerMinute} min={1_000} max={2_000_000} step={1_000} style={{ width: '100%' }} onChange={(maxTokensPerMinute) => setDraft({ ...draft, aiModelPools: draft.aiModelPools.map((item, poolIndex) => poolIndex === index ? { ...item, maxTokensPerMinute: Number(maxTokensPerMinute) || 1_000 } : item) })} /></Space.Compact></Col>
                 <Col xs={24} sm={8}><Space.Compact style={{ width: '100%' }}><Typography.Text style={{ padding: '4px 8px', border: '1px solid #d9d9d9', whiteSpace: 'nowrap' }}>优先级</Typography.Text><InputNumber value={pool.priority} min={1} max={1000} style={{ width: '100%' }} onChange={(priority) => setDraft({ ...draft, aiModelPools: draft.aiModelPools.map((item, poolIndex) => poolIndex === index ? { ...item, priority: Number(priority) || 100 } : item) })} /></Space.Compact></Col>

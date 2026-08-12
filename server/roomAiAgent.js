@@ -416,7 +416,6 @@ async function analyzeRoomAiIntent({ cfg, roomId, botName, userPrompt, history, 
     ],
     max_tokens: 600,
     temperature: 0.1,
-    thinking: false,
     timeoutMs: 45000,
   });
   const analysis = extractAssistantText(completion).trim();
@@ -866,7 +865,6 @@ export async function handleRoomAiChat(params = {}) {
         tool_choice: 'auto',
         max_tokens: 1024,
         temperature: 0.6,
-        thinking: false,
         timeoutMs: 45000,
       });
 

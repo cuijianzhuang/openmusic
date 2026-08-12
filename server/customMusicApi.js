@@ -680,11 +680,3 @@ export function resetCustomMusicApiCircuit(endpointId = '') {
   }
   return getCustomMusicApiStatus();
 }
-
-export function resetCustomMusicApiState() {
-  endpointStates.clear();
-  endpointFingerprints.clear();
-  roundRobinCursors.clear();
-  responseCache.clear();
-  configSignature = '';
-}

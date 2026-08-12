@@ -952,6 +952,8 @@ export function mountAdminApi(app, {
     const draftProtocol = String(req.body?.apiProtocol || '').trim();
     const draftMaxRequestsPerMinute = Number(req.body?.maxRequestsPerMinute);
     const draftMaxTokensPerMinute = Number(req.body?.maxTokensPerMinute);
+    const draftEnableThinking = req.body?.enableThinking;
+    const draftContextWindowTokens = Number(req.body?.contextWindowTokens);
     const poolId = String(req.body?.poolId || '').trim();
     const savedPool = getRuntimeConfig().aiModelPools.find((pool) => pool.id === poolId);
     const overrides = {
@@ -961,6 +963,8 @@ export function mountAdminApi(app, {
       apiProtocol: draftProtocol || savedPool?.apiProtocol || undefined,
       maxRequestsPerMinute: Number.isFinite(draftMaxRequestsPerMinute) ? draftMaxRequestsPerMinute : savedPool?.maxRequestsPerMinute,
       maxTokensPerMinute: Number.isFinite(draftMaxTokensPerMinute) ? draftMaxTokensPerMinute : savedPool?.maxTokensPerMinute,
+      enableThinking: typeof draftEnableThinking === 'boolean' ? draftEnableThinking : savedPool?.enableThinking === true,
+      contextWindowTokens: Number.isFinite(draftContextWindowTokens) ? draftContextWindowTokens : savedPool?.contextWindowTokens,
     };
     const isVisionPool = req.body?.type === 'vision' || savedPool?.type === 'vision';
     const result = isVisionPool

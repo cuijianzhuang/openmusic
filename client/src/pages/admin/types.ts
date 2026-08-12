@@ -2,6 +2,7 @@ export interface MetingUpstreamRecentError {
   at: number;
   message: string;
   type?: string;
+  id?: string;
   server?: string;
   userId?: string;
   userNickname?: string;
@@ -161,6 +162,10 @@ export interface AiModelPool {
   apiKey: string;
   configuredApiKey: boolean;
   model: string;
+  /** 文本模型是否开启深度思考；视觉模型不使用该字段 */
+  enableThinking?: boolean;
+  /** 模型上下文窗口 Token 数，默认 256K */
+  contextWindowTokens: number;
   maxRequestsPerMinute: number;
   maxTokensPerMinute: number;
   priority: number;

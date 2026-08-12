@@ -358,19 +358,24 @@ function normalizeAiRateLimit(value, fallback, min, max) {
 
 function normalizeAiModelPools(value) {
   if (!Array.isArray(value)) return [];
-  return value.slice(0, 20).map((item, index) => ({
-    id: String(item?.id || `pool-${index + 1}`).trim().slice(0, 80) || `pool-${index + 1}`,
-    enabled: item?.enabled !== false,
-    type: item?.type === 'vision' ? 'vision' : 'text',
-    name: String(item?.name || '').trim().slice(0, 40),
-    apiBaseUrl: normalizeAiApiBaseUrl(item?.apiBaseUrl || item?.apiUrl, ''),
-    apiProtocol: normalizeAiApiProtocol(item?.apiProtocol),
-    apiKey: String(item?.apiKey || '').trim(),
-    model: normalizeAiModelField(item?.model, item?.type === 'vision' ? 'Qwen/Qwen3.5-4B' : 'Qwen/Qwen3-8B'),
-    maxRequestsPerMinute: normalizeAiRateLimit(item?.maxRequestsPerMinute, 1000, 1, 10_000),
-    maxTokensPerMinute: normalizeAiRateLimit(item?.maxTokensPerMinute, 50_000, 1_000, 2_000_000),
-    priority: normalizeAiRateLimit(item?.priority, 100, 1, 1000),
-  }));
+  return value.slice(0, 20).map((item, index) => {
+    const type = item?.type === 'vision' ? 'vision' : 'text';
+    return {
+      id: String(item?.id || `pool-${index + 1}`).trim().slice(0, 80) || `pool-${index + 1}`,
+      enabled: item?.enabled !== false,
+      type,
+      name: String(item?.name || '').trim().slice(0, 40),
+      apiBaseUrl: normalizeAiApiBaseUrl(item?.apiBaseUrl || item?.apiUrl, ''),
+      apiProtocol: normalizeAiApiProtocol(item?.apiProtocol),
+      apiKey: String(item?.apiKey || '').trim(),
+      model: normalizeAiModelField(item?.model, type === 'vision' ? 'Qwen/Qwen3.5-4B' : 'Qwen/Qwen3-8B'),
+      ...(type === 'text' ? { enableThinking: item?.enableThinking === true } : {}),
+      contextWindowTokens: normalizeAiRateLimit(item?.contextWindowTokens, 256 * 1024, 4 * 1024, 2048 * 1024),
+      maxRequestsPerMinute: normalizeAiRateLimit(item?.maxRequestsPerMinute, 1000, 1, 10_000),
+      maxTokensPerMinute: normalizeAiRateLimit(item?.maxTokensPerMinute, 50_000, 1_000, 2_000_000),
+      priority: normalizeAiRateLimit(item?.priority, 100, 1, 1000),
+    };
+  });
 }
 
 function normalizeAiModelField(value, fallback) {

@@ -24,7 +24,7 @@ import {
   Typography,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import type { AdminOverview, MetingUpstreamStatus } from './types';
+import type { AdminOverview, MetingUpstreamRecentError, MetingUpstreamStatus } from './types';
 import AdminLoading from './AdminLoading';
 import { formatUptime } from './utils';
 
@@ -486,7 +486,7 @@ export default function OverviewDashboard({
             scroll={{ x: 700 }}
             expandable={{
               expandedRowRender: (up) => {
-                const errors = up.recentErrors?.length
+                const errors: MetingUpstreamRecentError[] = up.recentErrors?.length
                   ? up.recentErrors
                   : (up.lastError
                     ? [{ at: up.lastErrorAt || 0, message: up.lastError, type: '', id: '', server: '' }]
