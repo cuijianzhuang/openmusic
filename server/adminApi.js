@@ -38,6 +38,7 @@ import {
   mustChangeAdminEntryPath,
 } from './adminConfig.js';
 import { getSiteAnnouncementForAdmin, setSiteAnnouncement } from './siteAnnouncement.js';
+import { addDonation, listDonationsForAdmin, removeDonation, updateDonation } from './donations.js';
 import { listSiteBans, addSiteBan, removeSiteBan } from './siteBan.js';
 import { kickConnectionsMatchingBan } from './kickSiteBan.js';
 import {
@@ -283,6 +284,7 @@ const AUDIT_ACTION_GROUPS = {
     'ai_test',
   ],
   notify: ['set_announcement', 'broadcast'],
+  donation: ['donation_add', 'donation_update', 'donation_delete'],
   room: [
     'set_room_protection',
     'view_room_password',
@@ -1048,6 +1050,31 @@ export function mountAdminApi(app, {
       announcementId: result.announcement.id,
     }, ip);
     res.json({ ok: true, announcement: result.announcement });
+  });
+
+  app.get('/api/admin/donations', requireAdmin, (_req, res) => {
+    res.json({ donations: listDonationsForAdmin() });
+  });
+
+  app.post('/api/admin/donations', requireAdminOrigin, requireAdmin, requireAdminSetupComplete, async (req, res) => {
+    const result = await addDonation({ name: req.body?.name, date: req.body?.date, amount: req.body?.amount });
+    if (!result.success) return res.status(400).json({ error: result.error });
+    audit('donation_add', { name: result.donation.name }, getClientIp?.(req) || req.ip || '');
+    res.json({ success: true, donation: result.donation });
+  });
+
+  app.put('/api/admin/donations/:id', requireAdminOrigin, requireAdmin, requireAdminSetupComplete, async (req, res) => {
+    const result = await updateDonation(req.params.id, { name: req.body?.name, date: req.body?.date, amount: req.body?.amount });
+    if (!result.success) return res.status(404).json({ error: result.error });
+    audit('donation_update', { name: result.donation.name }, getClientIp?.(req) || req.ip || '');
+    res.json({ success: true, donation: result.donation });
+  });
+
+  app.delete('/api/admin/donations/:id', requireAdminOrigin, requireAdmin, requireAdminSetupComplete, async (req, res) => {
+    const result = await removeDonation(req.params.id);
+    if (!result.success) return res.status(404).json({ error: result.error });
+    audit('donation_delete', { donationId: req.params.id }, getClientIp?.(req) || req.ip || '');
+    res.json({ success: true });
   });
 
   app.get('/api/admin/rooms', requireAdmin, async (_req, res) => {

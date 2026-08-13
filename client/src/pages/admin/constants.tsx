@@ -3,6 +3,7 @@ import {
   BugOutlined,
   DashboardOutlined,
   FileTextOutlined,
+  HeartOutlined,
   NotificationOutlined,
   SettingOutlined,
   SoundOutlined,
@@ -23,6 +24,7 @@ export const AUDIT_ACTION_OPTIONS: { value: string; label: string }[] = [
   { value: 'account', label: '账号与入口' },
   { value: 'config', label: '系统配置' },
   { value: 'notify', label: '公告 / 广播' },
+  { value: 'donation', label: '捐赠名单' },
   { value: 'room', label: '房间管理' },
   { value: 'ban', label: '全站封禁' },
   { value: 'guard', label: '防护拦截' },
@@ -35,6 +37,7 @@ export const ADMIN_TABS: { id: AdminTabId; label: string; icon: ReactNode }[] = 
   { id: 'bans', label: '全站封禁', icon: <StopOutlined /> },
   { id: 'reports', label: '错误上报', icon: <BugOutlined /> },
   { id: 'notify', label: '公告广播', icon: <NotificationOutlined /> },
+  { id: 'donations', label: '捐赠名单', icon: <HeartOutlined /> },
   { id: 'settings', label: '系统设置', icon: <SettingOutlined /> },
   { id: 'audit', label: '操作审计', icon: <FileTextOutlined /> },
 ];
@@ -45,6 +48,7 @@ export const TAB_META: Record<AdminTabId, { title: string; description: string }
   bans: { title: '全站封禁', description: '' },
   reports: { title: '错误上报', description: '' },
   notify: { title: '公告广播', description: '' },
+  donations: { title: '捐赠名单', description: '仅管理员维护；首页只公开署名与日期，不展示金额。' },
   settings: { title: '系统设置', description: '' },
   audit: { title: '操作审计', description: '保留 15 天' },
 };

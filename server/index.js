@@ -189,6 +189,7 @@ import {
   searchApihzStickers,
 } from './apihzSticker.js';
 import { getSiteAnnouncement, initSiteAnnouncement } from './siteAnnouncement.js';
+import { initDonations, listDonations } from './donations.js';
 import { initSiteBans, isSiteBanned } from './siteBan.js';
 import {
   checkRoomCreateCooldown,
@@ -716,24 +717,45 @@ function extractMetingLyricText(raw) {
   if (text.startsWith('{')) {
     try {
       const payload = JSON.parse(text);
-      const candidates = [
-        payload?.lyric,
+      const lyric = String(payload?.lyric || payload?.data?.lyric || '').trim();
+      const translation = String(payload?.tlyric || payload?.data?.tlyric || '').trim();
+      // 仅在字段确实是带时间轴的 LRC 时解包；其它 JSON 保持旧的文本返回行为。
+      if (/\[\d{1,3}:\d{2}(?:[.:]\d{1,3})?\]/.test(lyric)) {
+        return translation ? `${lyric}\n${translation}` : lyric;
+      }
+
+      const fallbackCandidates = [
         payload?.lrc,
-        payload?.tlyric,
-        payload?.data?.lyric,
         payload?.data?.lrc?.lyric,
         payload?.data?.tlyric?.lyric,
       ];
-      for (const candidate of candidates) {
-        const lyric = String(candidate || '').trim();
-        // 仅在字段确实是带时间轴的 LRC 时解包；其它 JSON 保持旧的文本返回行为。
-        if (/\[\d{1,3}:\d{2}(?:[.:]\d{1,3})?\]/.test(lyric)) return lyric;
+      for (const candidate of fallbackCandidates) {
+        const fallback = String(candidate || '').trim();
+        if (/\[\d{1,3}:\d{2}(?:[.:]\d{1,3})?\]/.test(fallback)) return fallback;
       }
     } catch {
       // 非 JSON 时按纯 LRC 继续处理
     }
   }
   return text;
+}
+
+function normalizeMetingSongIds(data) {
+  const list = Array.isArray(data)
+    ? data
+    : (data && Array.isArray(data.data) ? data.data : (data && Array.isArray(data.list) ? data.list : []));
+
+  for (const item of list) {
+    if (!item || typeof item !== 'object') continue;
+    if (item.id !== undefined && item.id !== null && String(item.id).trim() !== '') continue;
+
+    const url = item.url;
+    if (typeof url === 'number' || (typeof url === 'string' && /^\d{4,}$/.test(url.trim()))) {
+      item.id = String(url).trim();
+    }
+  }
+
+  return data;
 }
 
 function normalizeMetingLoudness(raw) {
@@ -1024,6 +1046,10 @@ async function resolveMediaProxyFetchUrl(fetchUrl, thumbPx = 0) {
 }
 
 async function finalizeMetingTextResponse(body, metingType) {
+  if (metingType === 'lrc') {
+    return { url: extractMetingLyricText(body), quality: '' };
+  }
+
   if (metingType === 'url') {
     const payload = parseMetingUrlPayload(body);
     if (payload?.url) {
@@ -1091,9 +1117,9 @@ async function proxyMetingResponse(metingQuery, res, thumbPx = 0, metingType = '
         if (!body.url) return res.status(403).json({ error: 'no url' });
         return res.json(body);
       }
-  if (metingType === 'lrc') {
-    const body = extractMetingLyricText(location);
-    return res.type('text').send(body);
+      if (metingType === 'lrc') {
+        const body = await finalizeMetingTextResponse(location, metingType);
+        return res.type('text').send(body.url);
       }
       if (metingType === 'pic' && /^https?:\/\//i.test(location)) {
         return serveUpstreamMedia(location, res, fetchWithTimeout, {
@@ -1115,13 +1141,13 @@ async function proxyMetingResponse(metingQuery, res, thumbPx = 0, metingType = '
   }
 
   if (metingType === 'lrc') {
-    const body = extractMetingLyricText(text);
-    return res.type('text').send(body);
+    const body = await finalizeMetingTextResponse(text, metingType);
+    return res.type('text').send(body.url);
   }
 
   if (contentType.includes('application/json') || text.startsWith('[') || text.startsWith('{')) {
     try {
-      return res.json(JSON.parse(text));
+      return res.json(normalizeMetingSongIds(JSON.parse(text)));
     } catch {
       return res.type('text').send(text);
     }
@@ -1139,6 +1165,13 @@ app.get('/api/site-announcement', (_req, res) => {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
   res.set('Pragma', 'no-cache');
   res.json(getSiteAnnouncement());
+});
+
+/** 首页捐赠名单：仅公开管理员录入的署名与日期，不处理支付信息。 */
+app.get('/api/donations', (_req, res) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+  res.set('Pragma', 'no-cache');
+  res.json({ donations: listDonations() });
 });
 
 /** 站点 SEO：管理后台可覆盖标题/描述等；空字段回退内置默认 */
@@ -5000,6 +5033,7 @@ if (!isRedisEnabled()) {
   }
 } else {
   await initSiteAnnouncement();
+  await initDonations();
   await initSiteBans();
   if (!setupRequired) {
     await initAdminCredentials();

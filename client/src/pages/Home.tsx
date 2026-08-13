@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useMemo, memo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { AndroidOutlined } from '@ant-design/icons';
 import {
   Users, ArrowRight, Lock, ListMusic,
-  Loader2, RefreshCw, Plus, X, Disc3, Sparkles, Github, History, Download, HeartHandshake,
+  Loader2, RefreshCw, Plus, X, Disc3, Sparkles, Github, History, HeartHandshake, Heart,
   Play, Activity, Search, ShieldCheck, Crown
 } from 'lucide-react';
 import { createRoom, checkRoom, listRooms } from '../api/meting';
@@ -38,6 +39,7 @@ import BorderGlow from '../components/react-bits/BorderGlow';
 import { getRememberedAdminEntryPath } from '../lib/adminEntryShortcut';
 import { markGuideFeatureUsed } from '../lib/userGuide';
 import { useSiteFeaturesStore } from '../stores/siteFeaturesStore';
+import { fetchDonations, type DonationEntry } from '../lib/donations';
 
 /** 大厅只用接口带回的 CDN 直链，不走 meting type=pic 再查 */
 function lobbyDirectCoverUrl(pic?: string): string | null {
@@ -322,6 +324,67 @@ function Modal({
   );
 }
 
+function DonationModal({ open, onClose, donations }: { open: boolean; onClose: () => void; donations: DonationEntry[] }) {
+  if (!open) return null;
+  const sortedDonations = [...donations].sort((a, b) => {
+    const dateDiff = String(a.date).localeCompare(String(b.date));
+    if (dateDiff !== 0) return dateDiff;
+    return Number(b.amount || 0) - Number(a.amount || 0);
+  });
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button type="button" className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={onClose} aria-label="关闭赞赏弹窗" />
+      <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto bg-[#171016]/95 backdrop-blur-xl rounded-[28px] border border-pink-300/20 shadow-[0_24px_80px_rgba(236,72,153,0.18)] p-6 sm:p-8 animate-fade-in">
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 inline-flex h-9 w-9 items-center justify-center rounded-full border border-pink-300/25 bg-pink-400/15 text-pink-200">
+              <Heart className="w-4 h-4 fill-current" />
+            </span>
+            <div>
+            <h2 className="text-xl font-bold text-pink-50">支持 OpenMusic</h2>
+            <p className="text-sm text-white/45 mt-1">感谢每一份支持与心意，让 OpenMusic 能继续陪大家听喜欢的歌，走过更多美好的时光 🎵</p>
+            </div>
+          </div>
+          <button type="button" onClick={onClose} className="p-2 rounded-full text-pink-100/50 bg-pink-300/10 hover:text-pink-50 hover:bg-pink-300/20" aria-label="关闭">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-6">
+          {[
+            { name: '微信', src: '/donate-wechat.png' },
+            { name: '支付宝', src: '/donate-alipay.png' },
+          ].map((item) => (
+            <div key={item.name} className="rounded-2xl border border-pink-300/15 bg-pink-300/[0.05] p-4 text-center">
+              <img src={item.src} alt={`${item.name}赞赏二维码`} className="mx-auto w-full max-w-[240px] aspect-square object-contain rounded-xl bg-white" />
+              <div className="mt-3 text-sm font-semibold text-pink-100/85">{item.name}</div>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-7 border-t border-pink-300/15 pt-5">
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-semibold text-pink-100">捐赠名单</div>
+            <div className="text-xs text-pink-100/35">按捐赠时间排序</div>
+          </div>
+          {donations.length > 0 ? (
+            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {sortedDonations.map((entry, index) => (
+                <div key={entry.id} className="flex items-center justify-between rounded-xl border border-pink-300/10 bg-pink-300/[0.04] px-3 py-2 text-sm">
+                  <span className="flex min-w-0 items-center gap-2 text-pink-50/80 truncate"><span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-pink-300/10 text-[11px] tabular-nums text-pink-200/70">{index + 1}</span>{entry.name}</span>
+                  <span className="text-pink-100/35 ml-3 shrink-0">{entry.date}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-3 text-sm text-pink-100/40">感谢第一位支持者。</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Home() {
   const sharedMembershipEnabled = useSiteFeaturesStore((state) => state.sharedMembershipEnabled);
   const navigate = useNavigate();
@@ -346,6 +409,8 @@ export default function Home() {
   const [modalError, setModalError] = useState('');
   const [downloadModalOpen, setDownloadModalOpen] = useState(false);
   const [contributionOpen, setContributionOpen] = useState(false);
+  const [donationOpen, setDonationOpen] = useState(false);
+  const [donations, setDonations] = useState<DonationEntry[]>([]);
   const [siteAnnouncement, setSiteAnnouncement] = useState<SiteAnnouncement | null>(null);
   const [siteAnnouncementOpen, setSiteAnnouncementOpen] = useState(false);
 
@@ -460,6 +525,10 @@ export default function Home() {
       if (idleId && cic) cic(idleId);
       if (timeoutId) window.clearTimeout(timeoutId);
     };
+  }, []);
+
+  useEffect(() => {
+    void fetchDonations().then(setDonations);
   }, []);
 
   useEffect(() => {
@@ -586,15 +655,18 @@ export default function Home() {
           </div>
 
           <div className="flex items-center gap-2 sm:gap-2.5">
-            <div className="hidden lg:flex items-center gap-2 mr-1">
-              <Tooltip content="下载 Android 客户端">
-                <a href={ANDROID_APK_URL} download="openmusic.apk" className={headerPillCls}>
-                  <Download className="home-header-pill__dl w-4 h-4" />
-                  Android
-                </a>
-              </Tooltip>
-            </div>
             <div className="flex items-center gap-1.5 sm:gap-2">
+              <Tooltip content="支持 OpenMusic">
+                <button type="button" onClick={() => setDonationOpen(true)} className={`hidden sm:inline-flex ${headerPillCls}`} aria-label="支持 OpenMusic">
+                  <Heart className="h-4 w-4 text-pink-300 fill-current" />
+                  <span>赞赏</span>
+                </button>
+              </Tooltip>
+              <Tooltip content="支持 OpenMusic">
+                <button type="button" onClick={() => setDonationOpen(true)} className={`inline-flex sm:hidden ${headerIconCls}`} aria-label="支持 OpenMusic">
+                  <Heart className="h-5 w-5 text-pink-300 fill-current" />
+                </button>
+              </Tooltip>
               {sharedMembershipEnabled && (
                 <>
                   <Tooltip content="把会员能力分享给大家">
@@ -610,6 +682,16 @@ export default function Home() {
                   </Tooltip>
                 </>
               )}
+              <Tooltip content="下载 Android 客户端">
+                <a href={ANDROID_APK_URL} download="openmusic.apk" className={`hidden sm:inline-flex ${headerIconCls}`} aria-label="下载 Android 客户端">
+                  <AndroidOutlined className="home-header-icon__download text-[20px]" />
+                </a>
+              </Tooltip>
+              <Tooltip content="下载 Android 客户端">
+                <button type="button" onClick={() => setDownloadModalOpen(true)} className={`inline-flex sm:hidden ${headerIconCls}`} aria-label="下载 Android 客户端">
+                  <AndroidOutlined className="home-header-icon__download text-[20px]" />
+                </button>
+              </Tooltip>
               {adminEntryPath && (
                 <Tooltip content="管理后台（仅本机可见）">
                   <a href={adminEntryPath} className={`hidden sm:inline-flex ${headerIconCls}`} aria-label="管理后台">
@@ -638,11 +720,6 @@ export default function Home() {
                 >
                   <Github className="w-5 h-5" />
                 </a>
-              </Tooltip>
-              <Tooltip content="下载 Android 客户端">
-                <button type="button" onClick={() => setDownloadModalOpen(true)} className={`sm:hidden ${headerIconCls}`} aria-label="下载 Android 客户端">
-                  <Download className="home-header-icon__download h-5 w-5 text-emerald-300" />
-                </button>
               </Tooltip>
             </div>
           </div>
@@ -1061,6 +1138,7 @@ export default function Home() {
 
       <ClientDownloadModal open={downloadModalOpen} onClose={() => setDownloadModalOpen(false)} />
       <MusicContributionModal open={contributionOpen} onClose={() => setContributionOpen(false)} defaultProvider={nickname} />
+      <DonationModal open={donationOpen} onClose={() => setDonationOpen(false)} donations={donations} />
 
       <SiteAnnouncementPopup
         open={siteAnnouncementOpen}

@@ -152,6 +152,14 @@ export interface RuntimeConfig {
   configuredSecrets: Record<string, boolean>;
 }
 
+export interface DonationEntry {
+  id: string;
+  name: string;
+  date: string;
+  amount?: number;
+  createdAt?: number;
+}
+
 export interface AiModelPool {
   id: string;
   enabled: boolean;
@@ -318,4 +326,4 @@ export interface AdminRoom {
   } | null;
 }
 
-export type AdminTabId = 'overview' | 'rooms' | 'bans' | 'reports' | 'notify' | 'settings' | 'audit';
+export type AdminTabId = 'overview' | 'rooms' | 'bans' | 'reports' | 'notify' | 'donations' | 'settings' | 'audit';

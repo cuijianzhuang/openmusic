@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useNavigate } from 'react-router-dom';
+import dayjs from 'dayjs';
 import {
   CheckCircleOutlined,
   CheckOutlined,
@@ -25,10 +26,12 @@ import {
   Checkbox,
   Col,
   Collapse,
+  DatePicker,
   Divider,
   Drawer,
   Form,
   Input,
+  InputNumber,
   Layout,
   Menu,
   Modal,
@@ -61,6 +64,7 @@ import type {
   ErrorReportSummary,
   MetingUpstreamStatus,
   SiteAnnouncementConfig,
+  DonationEntry,
   SiteBanEntry,
 } from './admin/types';
 import {
@@ -195,6 +199,13 @@ function AdminPage() {
   const [annText, setAnnText] = useState('');
   const [annBumpId, setAnnBumpId] = useState(false);
   const [annSaving, setAnnSaving] = useState(false);
+  const [donations, setDonations] = useState<DonationEntry[]>([]);
+  const [donationName, setDonationName] = useState('');
+  const [donationDate, setDonationDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [donationAmount, setDonationAmount] = useState<number | null>(null);
+  const [donationSaving, setDonationSaving] = useState(false);
+  const [donationsPage, setDonationsPage] = useState(1);
+  const [donationsPageSize, setDonationsPageSize] = useState(LIST_PAGE_SIZE);
   const [broadcastText, setBroadcastText] = useState('');
   const [broadcastRoomIds, setBroadcastRoomIds] = useState<string[]>([]);
   const [broadcasting, setBroadcasting] = useState(false);
@@ -393,6 +404,79 @@ function AdminPage() {
       }
     })();
   }, [loggedIn]);
+
+  const loadDonations = useCallback(async () => {
+    const res = await adminFetch<{ donations: DonationEntry[] }>('/api/admin/donations');
+    setDonations(Array.isArray(res.donations) ? res.donations : []);
+  }, []);
+
+  useEffect(() => {
+    if (!loggedIn || activeTab !== 'donations') return;
+    void loadDonations().catch(() => {});
+  }, [activeTab, loadDonations, loggedIn]);
+
+  useEffect(() => {
+    const maxPage = Math.max(1, Math.ceil(donations.length / donationsPageSize));
+    if (donationsPage > maxPage) setDonationsPage(maxPage);
+  }, [donations.length, donationsPage, donationsPageSize]);
+
+  const addDonationRecord = useCallback(async () => {
+    if (!donationName.trim() || donationSaving) return;
+    setDonationSaving(true);
+    try {
+      await adminFetch('/api/admin/donations', {
+        method: 'POST',
+        body: JSON.stringify({ name: donationName.trim(), date: donationDate, amount: donationAmount }),
+      });
+      setDonationName('');
+      setDonationAmount(null);
+      message.success('已添加捐赠名单');
+      await loadDonations();
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '添加捐赠名单失败');
+    } finally {
+      setDonationSaving(false);
+    }
+  }, [donationAmount, donationDate, donationName, donationSaving, loadDonations, message]);
+
+  const editDonationRecord = useCallback((entry: DonationEntry) => {
+    let name = entry.name;
+    let date = entry.date;
+    let amount: number | null = entry.amount ?? null;
+    Modal.confirm({
+      title: '编辑捐赠署名',
+      content: (
+        <Space orientation="vertical" style={{ width: '100%' }}>
+          <Input defaultValue={name} onChange={(e) => { name = e.target.value; }} maxLength={40} />
+          <DatePicker defaultValue={dayjs(date, 'YYYY-MM-DD')} format="YYYY-MM-DD" style={{ width: '100%' }} onChange={(_, value) => { date = String(value || ''); }} />
+          <InputNumber min={0} step={0.01} prefix="¥" defaultValue={amount ?? undefined} onChange={(value) => { amount = typeof value === 'number' ? value : null; }} placeholder="金额（仅后台可见）" style={{ width: '100%' }} />
+        </Space>
+      ),
+      onOk: async () => {
+        if (!name.trim()) throw new Error('署名不能为空');
+        await adminFetch(`/api/admin/donations/${entry.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({ name: name.trim(), date, amount }),
+        });
+        await loadDonations();
+        message.success('已更新捐赠名单');
+      },
+    });
+  }, [loadDonations, message]);
+
+  const deleteDonationRecord = useCallback((entry: DonationEntry) => {
+    Modal.confirm({
+      title: '删除捐赠记录？',
+      content: `将删除「${entry.name}」的公开名单记录。`,
+      okText: '删除',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        await adminFetch(`/api/admin/donations/${entry.id}`, { method: 'DELETE' });
+        await loadDonations();
+        message.success('已删除捐赠记录');
+      },
+    });
+  }, [loadDonations, message]);
 
   const saveAnnouncement = useCallback(async () => {
     if (annSaving) return;
@@ -1806,6 +1890,76 @@ function AdminPage() {
                   </Button>
                 </Space>
               </Form>
+            </Card>
+          </Space>
+        );
+
+      case 'donations':
+        return (
+          <Space orientation="vertical" size="large" style={{ width: '100%' }}>
+            <Card title="添加捐赠记录" extra={<Typography.Text type="secondary">金额仅后台可见，用于同日排序</Typography.Text>}>
+              <Form layout="vertical" onFinish={() => void addDonationRecord()}>
+                <Row gutter={12}>
+                  <Col xs={24} md={10}>
+                    <Form.Item label="付款备注署名" required>
+                      <Input value={donationName} onChange={(e) => setDonationName(e.target.value)} maxLength={40} placeholder="从微信 / 支付宝到账备注中填写" />
+                    </Form.Item>
+                  </Col>
+                  <Col xs={12} md={7}>
+                    <Form.Item label="捐赠日期">
+                      <DatePicker value={dayjs(donationDate, 'YYYY-MM-DD')} format="YYYY-MM-DD" style={{ width: '100%' }} onChange={(_, value) => setDonationDate(String(value || ''))} />
+                    </Form.Item>
+                  </Col>
+                  <Col xs={12} md={7}>
+                    <Form.Item label="捐赠金额">
+                      <InputNumber min={0} step={0.01} prefix="¥" value={donationAmount} onChange={(value) => setDonationAmount(typeof value === 'number' ? value : null)} placeholder="仅后台可见" style={{ width: '100%' }} />
+                    </Form.Item>
+                  </Col>
+                </Row>
+                <Button type="primary" htmlType="submit" loading={donationSaving} disabled={!donationName.trim()}>
+                  添加到名单
+                </Button>
+              </Form>
+            </Card>
+            <Card title={`已录入名单（${donations.length}）`}>
+              <Table
+                rowKey="id"
+                size="middle"
+                dataSource={[...donations].sort((a, b) => String(a.date).localeCompare(String(b.date)) || Number(b.amount || 0) - Number(a.amount || 0))}
+                locale={{ emptyText: '暂无捐赠名单' }}
+                pagination={{
+                  current: donationsPage,
+                  pageSize: donationsPageSize,
+                  total: donations.length,
+                  hideOnSinglePage: false,
+                  showQuickJumper: true,
+                  showSizeChanger: true,
+                  pageSizeOptions: [10, 15, 30, 50],
+                  showTotal: (total) => `共 ${total} 条`,
+                  onChange: (page, pageSize) => {
+                    setDonationsPage(page);
+                    if (pageSize !== donationsPageSize) {
+                      setDonationsPageSize(pageSize);
+                      setDonationsPage(1);
+                    }
+                  },
+                }}
+                columns={[
+                  { title: '署名', dataIndex: 'name' },
+                  { title: '日期', dataIndex: 'date', width: 140 },
+                  { title: '金额', dataIndex: 'amount', width: 130, render: (amount) => `¥${Number(amount || 0).toFixed(2)}` },
+                  {
+                    title: '操作',
+                    width: 150,
+                    render: (_, entry: DonationEntry) => (
+                      <Space size={4}>
+                        <Button size="small" icon={<EditOutlined />} onClick={() => editDonationRecord(entry)}>编辑</Button>
+                        <Button size="small" danger icon={<DeleteOutlined />} onClick={() => deleteDonationRecord(entry)}>删除</Button>
+                      </Space>
+                    ),
+                  },
+                ]}
+              />
             </Card>
           </Space>
         );
