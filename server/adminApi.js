@@ -948,6 +948,12 @@ export function mountAdminApi(app, {
     // 允许测试未保存的草稿配置（不落盘）
     const draftKey = String(req.body?.apiKey || '').trim();
     const draftModel = String(req.body?.model || '').trim();
+    if (!draftModel) {
+      return res.status(400).json({ success: false, error: '请先填写模型 ID，再进行测试' });
+    }
+    if (/\s/.test(draftModel)) {
+      return res.status(400).json({ success: false, error: '模型 ID 不支持空格，请删除空格后再进行测试' });
+    }
     const draftBaseUrl = String(req.body?.apiBaseUrl || '').trim();
     const draftProtocol = String(req.body?.apiProtocol || '').trim();
     const draftMaxRequestsPerMinute = Number(req.body?.maxRequestsPerMinute);
@@ -958,7 +964,7 @@ export function mountAdminApi(app, {
     const savedPool = getRuntimeConfig().aiModelPools.find((pool) => pool.id === poolId);
     const overrides = {
       apiKey: draftKey || savedPool?.apiKey || undefined,
-      model: draftModel || savedPool?.model || undefined,
+      model: draftModel,
       apiBaseUrl: draftBaseUrl || savedPool?.apiBaseUrl || undefined,
       apiProtocol: draftProtocol || savedPool?.apiProtocol || undefined,
       maxRequestsPerMinute: Number.isFinite(draftMaxRequestsPerMinute) ? draftMaxRequestsPerMinute : savedPool?.maxRequestsPerMinute,

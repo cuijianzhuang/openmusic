@@ -844,24 +844,26 @@ const ChatInputBar = forwardRef<ChatInputBarHandle, Props>(function ChatInputBar
           )}
           <div className="relative min-w-0 flex-1">
             {showSlashPicker && slashOptions.length > 0 && (
-              <div className="absolute bottom-full left-0 z-20 mb-2 w-72 overflow-hidden rounded-2xl border border-netease-border/70 bg-netease-dark/95 p-1.5 shadow-2xl backdrop-blur">
+              <div className="absolute bottom-full left-0 z-20 mb-2 box-border flex max-h-[min(70vh,32rem)] w-full max-w-full flex-col overflow-hidden rounded-2xl border border-netease-border/70 bg-netease-dark/95 p-1.5 shadow-2xl backdrop-blur">
                 <p className="px-2 py-1 text-[10px] text-netease-muted/80">
                   {roomAi?.botName ? `${roomAi.botName} · 命令` : 'AI 命令'}
                 </p>
-                {slashOptions.map((cmd, index) => (
-                  <button
-                    key={cmd.id}
-                    type="button"
-                    onMouseDown={(event) => event.preventDefault()}
-                    onMouseEnter={() => setSlashIndex(index)}
-                    onClick={() => handleSlashOption(cmd.insert)}
-                    className={`flex w-full flex-col rounded-xl px-3 py-2 text-left transition-colors ${index === slashIndex ? 'bg-white/10 text-white' : 'text-white/85 hover:bg-white/10'}`}
-                  >
-                    <span className="text-sm text-sky-300">{cmd.label}</span>
-                    <span className="text-[11px] text-netease-muted">{cmd.description}</span>
-                    <span className="mt-0.5 truncate text-[10px] text-white/40">{cmd.example}</span>
-                  </button>
-                ))}
+                <div className="min-h-0 overflow-y-auto overscroll-contain">
+                  {slashOptions.map((cmd, index) => (
+                    <button
+                      key={cmd.id}
+                      type="button"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onMouseEnter={() => setSlashIndex(index)}
+                      onClick={() => handleSlashOption(cmd.insert)}
+                      className={`flex w-full flex-col rounded-xl px-3 py-2 text-left transition-colors ${index === slashIndex ? 'bg-white/10 text-white' : 'text-white/85 hover:bg-white/10'}`}
+                    >
+                      <span className="text-sm text-sky-300">{cmd.label}</span>
+                      <span className="text-[11px] text-netease-muted">{cmd.description}</span>
+                      <span className="mt-0.5 truncate text-[10px] text-white/40">{cmd.example}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
             {showMentionPicker && (

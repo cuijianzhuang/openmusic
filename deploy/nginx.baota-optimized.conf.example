@@ -227,10 +227,10 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # ★ 静态直出（本项目 assets 固定文件名，禁止长期缓存）
+    # ★ 静态直出（构建文件名带 hash，可长期缓存）
     location ^~ /assets/ {
-    expires 1d;
-    add_header Cache-Control "public, max-age=86400" always;
+    expires 1y;
+    add_header Cache-Control "public, max-age=31536000, immutable" always;
     access_log off;
     try_files $uri =404;
     }

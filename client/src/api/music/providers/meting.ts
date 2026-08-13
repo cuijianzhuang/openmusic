@@ -110,6 +110,15 @@ function extractIdFromUrl(url: string): string {
   }
 }
 
+function extractSongId(raw: Record<string, unknown>, url: string): string {
+  const rawId = raw.id ?? raw.songId ?? raw.mid;
+  if (rawId !== undefined && rawId !== null && String(rawId).trim()) {
+    return String(rawId).trim();
+  }
+  if (url && !/^https?:\/\//i.test(url)) return url;
+  return extractIdFromUrl(url).trim();
+}
+
 function normalizeSong(raw: Record<string, unknown>, source: MusicSource): SearchResult {
   const artist = raw.artist ?? raw.author;
   const artistStr = Array.isArray(artist)
@@ -118,7 +127,7 @@ function normalizeSong(raw: Record<string, unknown>, source: MusicSource): Searc
 
   const urlStr = raw.url ? String(raw.url) : '';
   const lrcStr = raw.lrc ? String(raw.lrc) : '';
-  const id = String(raw.id || extractIdFromUrl(urlStr) || '');
+  const id = extractSongId(raw, urlStr);
 
   return {
     id,
@@ -215,7 +224,8 @@ function createMetingProvider(
       return metingText(song.source, { type: 'lrc', id: song.id });
     },
     getCoverUrl(song) {
-      if (song.pic) return song.pic;
+      const pic = String(song.pic || '');
+      if (isDirectPlayableUrl(pic)) return pic;
       return `${API_BASE}?server=${song.source}&type=pic&id=${song.id}`;
     },
   };

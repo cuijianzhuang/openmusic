@@ -18,7 +18,6 @@ import {
   SyncOutlined,
 } from '@ant-design/icons';
 import {
-  Alert,
   App,
   Badge,
   Button,
@@ -182,7 +181,6 @@ function AdminPage() {
   const [activeTab, setActiveTab] = useState<AdminTabId>('overview');
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [rooms, setRooms] = useState<AdminRoom[]>([]);
-  const [error, setError] = useState('');
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [protectingId, setProtectingId] = useState<string | null>(null);
   const [permanentReviewingId, setPermanentReviewingId] = useState<string | null>(null);
@@ -192,23 +190,19 @@ function AdminPage() {
     () => (typeof window !== 'undefined' ? window.location.pathname : ''),
   );
   const [savingPath, setSavingPath] = useState(false);
-  const [pathHint, setPathHint] = useState('');
   const [annEnabled, setAnnEnabled] = useState(false);
   const [annTitle, setAnnTitle] = useState('站点公告');
   const [annText, setAnnText] = useState('');
   const [annBumpId, setAnnBumpId] = useState(false);
   const [annSaving, setAnnSaving] = useState(false);
-  const [annHint, setAnnHint] = useState('');
   const [broadcastText, setBroadcastText] = useState('');
   const [broadcastRoomIds, setBroadcastRoomIds] = useState<string[]>([]);
   const [broadcasting, setBroadcasting] = useState(false);
-  const [broadcastHint, setBroadcastHint] = useState('');
   const [bans, setBans] = useState<SiteBanEntry[]>([]);
   const [banType, setBanType] = useState<'ip' | 'device'>('ip');
   const [banValue, setBanValue] = useState('');
   const [banReason, setBanReason] = useState('');
   const [banSaving, setBanSaving] = useState(false);
-  const [banHint, setBanHint] = useState('');
   const [quickBanDraft, setQuickBanDraft] = useState<{
     mode: 'single' | 'both';
     type?: 'ip' | 'device';
@@ -324,11 +318,10 @@ function AdminPage() {
           });
           if (savedEntryPathRef.current === null) savedEntryPathRef.current = ov.entryPath;
         }
-        setError('');
       } catch (err) {
         if (gen !== refreshGenRef.current) continue;
         const errMessage = err instanceof Error ? err.message : '加载失败';
-        setError(errMessage);
+        message.error(errMessage);
         const status = err && typeof err === 'object' && 'status' in err
           ? Number((err as { status?: number }).status)
           : 0;
@@ -374,9 +367,8 @@ function AdminPage() {
       setAuditItems(res.items);
       setAuditTotal(res.total);
       setAuditPage(res.page);
-      setError('');
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载审计日志失败');
+      message.error(err instanceof Error ? err.message : '加载审计日志失败');
     } finally {
       setAuditLoading(false);
     }
@@ -405,7 +397,6 @@ function AdminPage() {
   const saveAnnouncement = useCallback(async () => {
     if (annSaving) return;
     setAnnSaving(true);
-    setAnnHint('');
     try {
       const res = await adminFetch<{ announcement: SiteAnnouncementConfig }>('/api/admin/announcement', {
         method: 'PUT',
@@ -423,10 +414,9 @@ function AdminPage() {
       const hint = res.announcement.enabled
         ? (annBumpId ? '已保存并作为新公告发布（所有用户重新弹窗）' : '已保存')
         : '已保存（公告处于停用状态）';
-      setAnnHint(hint);
       message.success(hint);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '保存公告失败');
+      message.error(err instanceof Error ? err.message : '保存公告失败');
     } finally {
       setAnnSaving(false);
     }
@@ -440,7 +430,7 @@ function AdminPage() {
       message.success(`已解散房间 ${room.name}`);
       await refresh({ force: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : '解散失败');
+      message.error(err instanceof Error ? err.message : '解散失败');
     } finally {
       setDeletingId(null);
     }
@@ -474,7 +464,7 @@ function AdminPage() {
         message.warning('该房间密码为升级前设置，明文不可恢复；请房主重新设置密码');
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : '查看密码失败');
+      message.error(err instanceof Error ? err.message : '查看密码失败');
     } finally {
       setRevealingPasswordId(null);
     }
@@ -511,7 +501,7 @@ function AdminPage() {
       setEditingNicknameDraft('');
       await refresh({ force: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : '修改昵称失败');
+      message.error(err instanceof Error ? err.message : '修改昵称失败');
     } finally {
       setNicknameSaving(false);
     }
@@ -528,7 +518,7 @@ function AdminPage() {
       message.success(`已将「${nickname}」重置为「${res.nickname}」`);
       await refresh({ force: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : '违规重置失败');
+      message.error(err instanceof Error ? err.message : '违规重置失败');
     } finally {
       setViolatingUserKey(null);
     }
@@ -548,7 +538,7 @@ function AdminPage() {
       message.success(room.protectedFromDestroy ? '已取消房间常驻' : '已设为常驻');
       await refresh({ force: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : '更新房间常驻状态失败');
+      message.error(err instanceof Error ? err.message : '更新房间常驻状态失败');
     } finally {
       setProtectingId(null);
     }
@@ -578,7 +568,7 @@ function AdminPage() {
       setRejectPermanentReason('');
       await refresh({ force: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : '审核常驻申请失败');
+      message.error(err instanceof Error ? err.message : '审核常驻申请失败');
     } finally {
       setPermanentReviewingId(null);
     }
@@ -604,7 +594,7 @@ function AdminPage() {
       message.success('已重置上游冷却');
       await refresh({ force: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : '重置冷却失败');
+      message.error(err instanceof Error ? err.message : '重置冷却失败');
     } finally {
       setUpstreamBusyUrl(null);
     }
@@ -620,7 +610,7 @@ function AdminPage() {
       message.success(up.disabled ? '已启用上游' : '已临时禁用上游');
       await refresh({ force: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : '更新上游状态失败');
+      message.error(err instanceof Error ? err.message : '更新上游状态失败');
     } finally {
       setUpstreamBusyUrl(null);
     }
@@ -629,7 +619,6 @@ function AdminPage() {
   const sendBroadcast = useCallback(async () => {
     if (broadcasting || !broadcastText.trim()) return;
     setBroadcasting(true);
-    setBroadcastHint('');
     try {
       const res = await adminFetch<{ roomCount: number }>('/api/admin/broadcast', {
         method: 'POST',
@@ -641,11 +630,10 @@ function AdminPage() {
       setBroadcastText('');
       setBroadcastRoomIds([]);
       const hint = `已发送到 ${res.roomCount} 个房间`;
-      setBroadcastHint(hint);
       message.success(hint);
       await refresh({ force: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : '广播失败');
+      message.error(err instanceof Error ? err.message : '广播失败');
     } finally {
       setBroadcasting(false);
     }
@@ -654,7 +642,6 @@ function AdminPage() {
   const addBan = useCallback(async () => {
     if (banSaving || !banValue.trim()) return;
     setBanSaving(true);
-    setBanHint('');
     try {
       const res = await adminFetch<{ kicked: number }>('/api/admin/bans', {
         method: 'POST',
@@ -667,11 +654,10 @@ function AdminPage() {
       setBanValue('');
       setBanReason('');
       const hint = `已封禁${typeof res.kicked === 'number' && res.kicked > 0 ? `，踢出 ${res.kicked} 个在线连接` : ''}`;
-      setBanHint(hint);
       message.success(hint);
       await refresh({ force: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : '封禁失败');
+      message.error(err instanceof Error ? err.message : '封禁失败');
     } finally {
       setBanSaving(false);
     }
@@ -748,7 +734,7 @@ function AdminPage() {
       setQuickBanReason('');
       await refresh({ force: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : '封禁失败');
+      message.error(err instanceof Error ? err.message : '封禁失败');
     } finally {
       setQuickBanSaving(false);
     }
@@ -760,7 +746,7 @@ function AdminPage() {
       message.success('已解封');
       await refresh({ force: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : '解封失败');
+      message.error(err instanceof Error ? err.message : '解封失败');
     }
   }, [message, refresh]);
 
@@ -771,7 +757,7 @@ function AdminPage() {
       setReportDetail(res.report);
       setReportNoteDraft(res.report.note || '');
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载上报详情失败');
+          message.error(err instanceof Error ? err.message : '加载上报详情失败');
     } finally {
       setReportDetailLoading(false);
     }
@@ -807,7 +793,7 @@ function AdminPage() {
       }
       await refresh({ force: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : '更新上报失败');
+          message.error(err instanceof Error ? err.message : '更新上报失败');
     } finally {
       setReportBusyId(null);
     }
@@ -827,7 +813,7 @@ function AdminPage() {
           message.success('已删除');
           await refresh({ force: true });
         } catch (err) {
-          setError(err instanceof Error ? err.message : '删除上报失败');
+          message.error(err instanceof Error ? err.message : '删除上报失败');
         } finally {
           setReportBusyId(null);
         }
@@ -837,13 +823,12 @@ function AdminPage() {
 
   const randomizeEntryPath = useCallback(() => {
     setEntryPathDraft(createRandomEntryPath());
-    setPathHint('已生成随机地址，点击保存后生效');
+    message.success('已生成随机地址，点击保存后生效');
   }, []);
 
   const saveEntryPath = useCallback(async () => {
     if (savingPath) return;
     setSavingPath(true);
-    setPathHint('');
     try {
       const res = await adminFetch<{ entryPath: string }>('/api/admin/entry-path', {
         method: 'PUT',
@@ -852,14 +837,13 @@ function AdminPage() {
       savedEntryPathRef.current = res.entryPath;
       setEntryPathDraft(res.entryPath);
       setOverview((prev) => (prev ? { ...prev, entryPath: res.entryPath } : prev));
-      setPathHint('已保存，请收藏新地址');
       message.success('已保存，请收藏新地址');
       if (window.location.pathname !== res.entryPath) {
         navigate(res.entryPath, { replace: true });
       }
       await refresh({ force: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : '保存登录地址失败');
+      message.error(err instanceof Error ? err.message : '保存登录地址失败');
     } finally {
       setSavingPath(false);
     }
@@ -1665,9 +1649,6 @@ function AdminPage() {
                   </Col>
                 </Row>
               </Form>
-              {banHint && (
-                <Alert type="success" showIcon message={banHint} style={{ marginBottom: 8 }} />
-              )}
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                 封禁后无法进房 / 建房；房间成员可一键拉黑
               </Typography.Text>
@@ -1783,7 +1764,6 @@ function AdminPage() {
                     保存公告
                   </Button>
                 </Space>
-                {annHint && <Typography.Text type="success" style={{ display: 'block', marginTop: 8 }}>{annHint}</Typography.Text>}
               </Form>
             </Card>
             <Card title="广播">
@@ -1825,7 +1805,6 @@ function AdminPage() {
                     发送广播
                   </Button>
                 </Space>
-                {broadcastHint && <Typography.Text type="success" style={{ display: 'block', marginTop: 8 }}>{broadcastHint}</Typography.Text>}
               </Form>
             </Card>
           </Space>
@@ -1845,7 +1824,7 @@ function AdminPage() {
             }}
           >
             <RuntimeConfigPanel
-              onError={setError}
+              onError={(text) => message.error(text)}
               securityTab={(
                 <>
                   <SettingsSection title="登录地址" description="修改后旧地址失效，请收藏新链接">
@@ -1869,7 +1848,6 @@ function AdminPage() {
                           value={entryPathDraft}
                           onChange={(e) => {
                             setEntryPathDraft(e.target.value);
-                            setPathHint('');
                           }}
                           spellCheck={false}
                           placeholder="/随机路径"
@@ -1894,7 +1872,6 @@ function AdminPage() {
                       >
                         保存
                       </Button>
-                      {pathHint && <Typography.Text type="success">{pathHint}</Typography.Text>}
                     </Space>
                   </SettingsSection>
                   <Divider style={{ margin: 0 }} />
@@ -1911,7 +1888,7 @@ function AdminPage() {
                       bare
                       adminUsername={overview?.adminUsername || ''}
                       persisted={overview?.credentialsPersisted ?? true}
-                      onError={setError}
+                      onError={(text) => message.error(text)}
                       onSaved={() => void refresh()}
                     />
                   </SettingsSection>
@@ -1995,7 +1972,7 @@ function AdminPage() {
   return (
     <Layout style={{ height: '100vh', overflow: 'hidden' }}>
       {overview?.setupRequired && (
-        <InitialSetupGate overview={overview} onError={setError} onUpdated={() => void refresh()} />
+        <InitialSetupGate overview={overview} onError={(text) => message.error(text)} onUpdated={() => void refresh()} />
       )}
 
       <Sider
@@ -2126,16 +2103,6 @@ function AdminPage() {
               {TAB_META[activeTab].description}
             </Typography.Paragraph>
           ) : null}
-          {error && (
-            <Alert
-              type="error"
-              message={error}
-              showIcon
-              closable
-              onClose={() => setError('')}
-              style={{ marginBottom: 16, flexShrink: 0 }}
-            />
-          )}
           <div
             className={activeTab === 'settings' ? 'admin-settings-fill' : undefined}
             style={

@@ -2815,7 +2815,8 @@ export function getRoomFmCookie(roomId, platform) {
   const secret = normalizeMusicAccountSecrets(room.musicAccountSecrets)[plat];
   if (!secret) return null;
   const meta = normalizeMusicAccounts(room.musicAccounts)[plat];
-  if (meta && meta.hasVip) return null;
+  // 未共享账号统一走一次性私人漫游接口，避免使用公共账号池。
+  if (meta?.shared === true) return null;
   return secret;
 }
 
@@ -4028,7 +4029,7 @@ async function fetchRandomForRoom(room) {
     .filter((key) => key.startsWith(`${source}:`))
     .map((key) => key.slice(source.length + 1));
   const songs = await fetchMetingFmSongs(room.neteaseFmMode || DEFAULT_FM_MODE, {
-    roomId: ephemeralCookie ? '' : room.id,
+    roomId: room.id,
     roomName: room.name || room.id,
     ephemeralCookie: ephemeralCookie || '',
     source,
@@ -4343,6 +4344,7 @@ export async function skipSong(roomId, socketId, connectionId = null, options = 
 
   const user = room.users.get(socketId);
   const currentSong = room.current;
+  if (!currentSong) return { error: "当前没有正在播放的歌曲" };
   const songTitle = currentSong ? formatSongTitle(currentSong) : "";
   const reason = String(options.reason || "manual");
 

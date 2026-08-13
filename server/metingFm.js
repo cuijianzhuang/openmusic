@@ -61,13 +61,23 @@ function extractIdFromUrl(url) {
   }
 }
 
+function extractSongId(item) {
+  if (!item || typeof item !== 'object') return '';
+  const rawUrl = String(item.url || '').trim();
+  const rawId = item.id ?? item.songId ?? item.mid;
+  if (rawId !== undefined && rawId !== null && String(rawId).trim()) {
+    return String(rawId).trim();
+  }
+  if (rawUrl && !/^https?:\/\//i.test(rawUrl)) return rawUrl;
+  return extractIdFromUrl(rawUrl).trim();
+}
+
 function normalizeFmSong(raw, source = 'netease', excludedIds = new Set()) {
   const candidates = Array.isArray(raw)
     ? raw.filter((item) => item && typeof item === 'object')
     : [raw];
   const item = candidates.find((candidate) => {
-    const url = candidate.url ? String(candidate.url) : '';
-    const id = String(candidate.id || extractIdFromUrl(url) || '').trim();
+    const id = extractSongId(candidate);
     return id && !excludedIds.has(id);
   }) || null;
   if (!item || typeof item !== 'object') return null;
@@ -78,7 +88,7 @@ function normalizeFmSong(raw, source = 'netease', excludedIds = new Set()) {
     : String(artist || '未知歌手');
 
   const urlStr = item.url ? String(item.url) : '';
-  const id = String(item.id || extractIdFromUrl(urlStr) || '').trim();
+  const id = extractSongId(item);
   const name = String(item.name || item.title || '').trim();
   if (!id || !name) return null;
 
@@ -100,7 +110,14 @@ function normalizeFmSong(raw, source = 'netease', excludedIds = new Set()) {
 }
 
 function normalizeFmSongs(raw, source = 'netease', excludedIds = new Set()) {
-  const candidates = Array.isArray(raw) ? raw : [raw];
+  let payload = raw;
+  for (let i = 0; i < 4; i += 1) {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) break;
+    const next = payload.data ?? payload.songs ?? payload.results ?? payload.list;
+    if (next === undefined || next === payload) break;
+    payload = next;
+  }
+  const candidates = Array.isArray(payload) ? payload : [payload];
   const usedIds = new Set(excludedIds);
   const songs = [];
   for (const candidate of candidates) {
@@ -147,15 +164,42 @@ export async function fetchMetingFmSongs(fmMode = DEFAULT_FM_MODE, options = {})
     try {
       if (ephemeralCookie) {
         const result = await fetchEphemeralFmSong(ephemeralCookie, modeId, source, [...excludedIds]);
-        if (!result.ok) {
-          console.error('Ephemeral FM error:', result.error);
-          continue;
-        }
-        const songs = normalizeFmSongs(result.data, source, excludedIds);
+        const songs = result.ok ? normalizeFmSongs(result.data, source, excludedIds) : [];
         if (songs.length) {
           fmFailureCooldownUntil = 0;
           return songs;
         }
+
+        // 账号漫游接口无结果时，尝试房间专属漫游接口。
+        if (roomId) {
+          const fallbackResponse = await runWithMetingRequestContext(
+            {
+              userId: '',
+              userNickname: '系统',
+              roomId,
+              roomName,
+            },
+            () => fetchMetingApi(buildFmQuery(fmMode, source), {}, 12000),
+          );
+          if (fallbackResponse.ok) {
+            const fallbackText = await fallbackResponse.text();
+            if (fallbackText.trim()) {
+              let fallbackData;
+              try {
+                fallbackData = JSON.parse(fallbackText);
+              } catch {
+                fallbackData = null;
+              }
+              const fallbackSongs = normalizeFmSongs(fallbackData, source, excludedIds);
+              if (fallbackSongs.length) {
+                fmFailureCooldownUntil = 0;
+                return fallbackSongs;
+              }
+            }
+          }
+        }
+
+        console.error('账号漫游无可用歌曲:', result.error || '返回为空');
         continue;
       }
 

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { measureCoverLuminance, tuneCoverBackdrop, type CoverBackdropTuning } from '../lib/coverBackdrop';
 import { getCoverPixelSize } from '../lib/coverUrl';
-import { resolveSignedApiUrl, useSignedApiUrl } from '../lib/signedApiUrl';
+import { useSignedApiUrl } from '../lib/signedApiUrl';
+import { loadSharedCoverResource } from '../lib/sharedCoverResource';
 
 interface Props {
   coverUrl: string;
@@ -13,6 +14,7 @@ type LoadStage = 'primary' | 'proxy';
 export default function AmbientCoverLayers({ coverUrl, className = 'absolute inset-0' }: Props) {
   const [stageFor, setStageFor] = useState<{ id: string; stage: LoadStage } | null>(null);
   const [loadedFor, setLoadedFor] = useState<string | null>(null);
+  const [resourceUrl, setResourceUrl] = useState('');
   const [tuning, setTuning] = useState<CoverBackdropTuning>(() => tuneCoverBackdrop(null));
 
   const stage: LoadStage = stageFor?.id === coverUrl ? stageFor.stage : 'primary';
@@ -20,6 +22,7 @@ export default function AmbientCoverLayers({ coverUrl, className = 'absolute ins
   useEffect(() => {
     setStageFor(null);
     setLoadedFor(null);
+    setResourceUrl('');
     setTuning(tuneCoverBackdrop(null));
   }, [coverUrl]);
 
@@ -31,45 +34,31 @@ export default function AmbientCoverLayers({ coverUrl, className = 'absolute ins
   const target = stage === 'proxy' && proxyUrl ? proxyUrl : coverUrl;
   const signedCover = useSignedApiUrl(target);
   const displayUrl = signedCover || '';
-  const loaded = Boolean(displayUrl) && loadedFor === displayUrl;
+  const loaded = Boolean(resourceUrl) && loadedFor === resourceUrl;
 
   useEffect(() => {
-    if (!displayUrl) return;
-
-    // 亮度采样单独走代理，避免给展示用 <img> 加 crossOrigin 导致部分 CDN 不显示
+    if (!displayUrl) return undefined;
     let cancelled = false;
-    const probeTarget = proxyUrl || (displayUrl.startsWith('/api/') ? displayUrl : null);
-    if (!probeTarget) {
-      setTuning(tuneCoverBackdrop(null));
-      return;
-    }
-
-    void resolveSignedApiUrl(probeTarget).then((signedProbe) => {
-      if (cancelled || !signedProbe) return;
-      const probe = new Image();
-      probe.crossOrigin = 'anonymous';
-      probe.onload = () => {
-        if (!cancelled) setTuning(tuneCoverBackdrop(measureCoverLuminance(probe)));
-      };
-      probe.onerror = () => {
-        if (!cancelled) setTuning(tuneCoverBackdrop(null));
-      };
-      probe.src = signedProbe;
-    });
-
+    void loadSharedCoverResource(displayUrl)
+      .then((sharedUrl) => {
+        if (!cancelled) setResourceUrl(sharedUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setResourceUrl('');
+      });
     return () => {
       cancelled = true;
     };
-  }, [displayUrl, proxyUrl]);
+  }, [displayUrl]);
 
   return (
     <div className={`${className} overflow-hidden`} aria-hidden>
       <div className="absolute inset-0 bg-surface-canvas" />
 
-      {displayUrl ? (
+      {resourceUrl ? (
         <img
-          key={displayUrl}
-          src={displayUrl}
+          key={resourceUrl}
+          src={resourceUrl}
           alt=""
           referrerPolicy="no-referrer"
           decoding="async"
@@ -81,11 +70,14 @@ export default function AmbientCoverLayers({ coverUrl, className = 'absolute ins
           }}
           ref={(img) => {
             // 缓存命中时浏览器可能不再触发 onLoad，需主动检测 complete
-            if (img?.complete && img.naturalWidth > 0 && loadedFor !== displayUrl) {
-              queueMicrotask(() => setLoadedFor(displayUrl));
+            if (img?.complete && img.naturalWidth > 0 && loadedFor !== resourceUrl) {
+              queueMicrotask(() => setLoadedFor(resourceUrl));
             }
           }}
-          onLoad={() => setLoadedFor(displayUrl)}
+          onLoad={(event) => {
+            setLoadedFor(resourceUrl);
+            setTuning(tuneCoverBackdrop(measureCoverLuminance(event.currentTarget)));
+          }}
           onError={() => {
             if (stage === 'primary' && proxyUrl) {
               setStageFor({ id: coverUrl, stage: 'proxy' });

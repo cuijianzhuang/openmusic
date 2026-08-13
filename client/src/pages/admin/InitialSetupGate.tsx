@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LinkOutlined, ReloadOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
-import { Button, Card, Input, Modal, Space, Tag, Typography } from 'antd';
+import { App, Button, Card, Input, Modal, Space, Tag, Typography } from 'antd';
 import CredentialsPanel from './CredentialsPanel';
 import type { AdminOverview } from './types';
 import { adminFetch, createRandomEntryPath } from './utils';
@@ -16,12 +16,12 @@ export default function InitialSetupGate({
   onUpdated: () => void;
 }) {
   const navigate = useNavigate();
+  const { message } = App.useApp();
   const [entryPathDraft, setEntryPathDraft] = useState(() => {
     if (overview.entryPath && overview.entryPath !== '/admin') return overview.entryPath;
     return createRandomEntryPath();
   });
   const [savingPath, setSavingPath] = useState(false);
-  const [pathHint, setPathHint] = useState('');
 
   const saveEntryPath = async () => {
     if (savingPath) return;
@@ -31,19 +31,18 @@ export default function InitialSetupGate({
       return;
     }
     setSavingPath(true);
-    setPathHint('');
     try {
       const res = await adminFetch<{ entryPath: string }>('/api/admin/entry-path', {
         method: 'PUT',
         body: JSON.stringify({ path }),
       });
-      setPathHint('登录地址已保存');
+      message.success('登录地址已保存');
       if (window.location.pathname !== res.entryPath) {
         navigate(res.entryPath, { replace: true });
       }
       onUpdated();
     } catch (err) {
-      onError(err instanceof Error ? err.message : '保存登录地址失败');
+      message.error(err instanceof Error ? err.message : '保存登录地址失败');
     } finally {
       setSavingPath(false);
     }
@@ -132,7 +131,6 @@ export default function InitialSetupGate({
               >
                 保存地址
               </Button>
-              {pathHint && <Typography.Text type="success">{pathHint}</Typography.Text>}
             </Space>
           </Card>
         )}

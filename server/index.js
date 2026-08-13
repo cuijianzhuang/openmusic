@@ -167,6 +167,8 @@ import {
   requestRoomPermanent,
   cancelRoomPermanentRequest,
   getRoomAiSnapshot,
+  skipSongOnBehalfOfUser,
+  requestSkipOnBehalfOfUser,
 } from './roomManager.js';
 import {
   listPendingPermanentNoticesForUser,
@@ -181,7 +183,7 @@ import {
   isQiniuConfigured,
 } from './qiniuOss.js';
 import { enqueueRoomAiChat } from './roomAiAgent.js';
-import { getPublicRoomAiConfig, getAiModelConfig, isRoomAiEnabledForRoom, isAiModelEnabled, resolveRoomAiBotName, shouldTriggerRoomAi } from './aiModelService.js';
+import { getPublicRoomAiConfig, getAiModelConfig, isRoomAiEnabledForRoom, isAiModelEnabled, resolveRoomAiBotName, shouldTriggerRoomAi, stripAiTriggerPrefix } from './aiModelService.js';
 import {
   isApihzStickerConfigured,
   searchApihzStickers,
@@ -703,6 +705,37 @@ function normalizeMetingResolvedUrl(raw) {
   return text.startsWith('@') ? text.slice(1).trim() : text;
 }
 
+function isMetingNoUrlMessage(raw) {
+  const text = String(raw || '').trim().toLowerCase();
+  return text === 'no url' || text.includes('no url') || text.includes('空播放');
+}
+
+function extractMetingLyricText(raw) {
+  const text = normalizeMetingResolvedUrl(raw);
+  if (!text) return '';
+  if (text.startsWith('{')) {
+    try {
+      const payload = JSON.parse(text);
+      const candidates = [
+        payload?.lyric,
+        payload?.lrc,
+        payload?.tlyric,
+        payload?.data?.lyric,
+        payload?.data?.lrc?.lyric,
+        payload?.data?.tlyric?.lyric,
+      ];
+      for (const candidate of candidates) {
+        const lyric = String(candidate || '').trim();
+        // 仅在字段确实是带时间轴的 LRC 时解包；其它 JSON 保持旧的文本返回行为。
+        if (/\[\d{1,3}:\d{2}(?:[.:]\d{1,3})?\]/.test(lyric)) return lyric;
+      }
+    } catch {
+      // 非 JSON 时按纯 LRC 继续处理
+    }
+  }
+  return text;
+}
+
 function normalizeMetingLoudness(raw) {
   if (!raw || typeof raw !== 'object') return undefined;
   const result = {};
@@ -802,6 +835,40 @@ async function resolveMetingMediaUrl(query, depth = 0) {
   }
 
   return resolved;
+}
+
+const metingCoverCache = new Map();
+const metingCoverInflight = new Map();
+const METING_COVER_CACHE_TTL_MS = 10 * 60 * 1000;
+const METING_COVER_CACHE_MAX = 512;
+
+async function resolveCachedMetingCover(query) {
+  const key = `${String(query.server || 'netease')}:${String(query.id || '')}`;
+  const now = Date.now();
+  const cached = metingCoverCache.get(key);
+  if (cached && cached.expiresAt > now) return cached.url;
+  if (cached) metingCoverCache.delete(key);
+
+  const pending = metingCoverInflight.get(key);
+  if (pending) return pending;
+
+  const request = resolveMetingMediaUrl(query)
+    .then((url) => {
+      const value = String(url || '').trim();
+      if (!/^https?:\/\//i.test(value)) throw new Error('Meting 未返回有效封面地址');
+      metingCoverCache.set(key, { url: value, expiresAt: Date.now() + METING_COVER_CACHE_TTL_MS });
+      while (metingCoverCache.size > METING_COVER_CACHE_MAX) {
+        const oldest = metingCoverCache.keys().next().value;
+        if (!oldest) break;
+        metingCoverCache.delete(oldest);
+      }
+      return value;
+    })
+    .finally(() => {
+      metingCoverInflight.delete(key);
+    });
+  metingCoverInflight.set(key, request);
+  return request;
 }
 
 function requestPublicOrigin(req) {
@@ -995,6 +1062,21 @@ async function finalizeMetingTextResponse(body, metingType) {
 }
 
 async function proxyMetingResponse(metingQuery, res, thumbPx = 0, metingType = '', req = null) {
+  if (metingType === 'pic') {
+    try {
+      const resolved = await resolveCachedMetingCover(metingQuery);
+      return serveUpstreamMedia(
+        thumbPx > 0 ? resizeCoverForThumb(resolved, thumbPx) : resolved,
+        res,
+        fetchWithTimeout,
+        { thumbPx: 0, requireAllowlist: true },
+      );
+    } catch (err) {
+      console.error('Meting pic resolve error:', err?.message || err);
+      return res.status(404).json({ error: 'no cover' });
+    }
+  }
+
   const response = await fetchMetingApi(metingQuery, { redirect: 'manual' });
 
   if (response.status >= 300 && response.status < 400) {
@@ -1009,9 +1091,9 @@ async function proxyMetingResponse(metingQuery, res, thumbPx = 0, metingType = '
         if (!body.url) return res.status(403).json({ error: 'no url' });
         return res.json(body);
       }
-      if (metingType === 'lrc') {
-        const body = await finalizeMetingTextResponse(location, metingType);
-        return res.type('text').send(body.url);
+  if (metingType === 'lrc') {
+    const body = extractMetingLyricText(location);
+    return res.type('text').send(body);
       }
       if (metingType === 'pic' && /^https?:\/\//i.test(location)) {
         return serveUpstreamMedia(location, res, fetchWithTimeout, {
@@ -1033,8 +1115,8 @@ async function proxyMetingResponse(metingQuery, res, thumbPx = 0, metingType = '
   }
 
   if (metingType === 'lrc') {
-    const body = await finalizeMetingTextResponse(text, metingType);
-    return res.type('text').send(body.url);
+    const body = extractMetingLyricText(text);
+    return res.type('text').send(body);
   }
 
   if (contentType.includes('application/json') || text.startsWith('[') || text.startsWith('{')) {
@@ -1477,11 +1559,23 @@ async function resolveQishuiPlaybackSource(rawUrl, signal) {
   const sourceEndpoint = new URL(rawUrl);
   sourceEndpoint.searchParams.set('mode', 'source');
   const metadataResponse = await fetchMeting(sourceEndpoint.toString(), { signal }, 15_000);
-  if (!metadataResponse.ok) return metadataResponse;
+  if (!metadataResponse.ok) {
+    const body = await metadataResponse.text().catch(() => '');
+    if (isMetingNoUrlMessage(body)) throw new Error('no url');
+    throw new Error(`汽水源信息请求失败 (${metadataResponse.status})`);
+  }
 
-  const metadata = await metadataResponse.json();
+  const rawMetadata = await metadataResponse.text();
+  if (isMetingNoUrlMessage(rawMetadata)) throw new Error('no url');
+  let metadata;
+  try {
+    metadata = JSON.parse(rawMetadata);
+  } catch {
+    throw new Error('汽水源信息格式无效');
+  }
   const sourceUrl = String(metadata?.url || '').trim();
   const auth = String(metadata?.auth || '').trim();
+  if (isMetingNoUrlMessage(sourceUrl)) throw new Error('no url');
   let parsedSource;
   try {
     parsedSource = new URL(sourceUrl);
@@ -1511,7 +1605,11 @@ app.get('/api/qishui-source', async (req, res) => {
     res.set('Cache-Control', 'no-store, private');
     return res.json({ url: sourceUrl, auth });
   } catch (error) {
-    console.error('OpenMusic 汽水本地解密取链失败:', error?.message || error);
+    const message = String(error?.message || error);
+    if (isMetingNoUrlMessage(message)) {
+      return res.status(403).json({ error: 'no url' });
+    }
+    console.error('OpenMusic 汽水本地解密取链失败:', message);
     return res.status(502).json({ error: '汽水本地解密取链失败' });
   }
 });
@@ -2238,9 +2336,15 @@ app.post('/api/rooms', async (req, res) => {
       retryAfterSec: cooldown.retryAfterSec || 0,
     }, createIp);
     setSoftBlockHeaders(res, code);
-    return res.status(500).json(softBlockPayload(code, {
-      retryAfterSec: cooldown.retryAfterSec || 0,
-    }));
+    const retryAfterSec = cooldown.retryAfterSec || 0;
+    const message = code === SOFT_BLOCK_CODES.ROOM_CREATE_COOLDOWN_IP
+      ? `刚刚已经创建过房间啦，请 ${retryAfterSec} 秒后再试～`
+      : `你创建房间有点频繁啦，请 ${retryAfterSec} 秒后再试～`;
+    return res.status(429).json({
+      error: message,
+      code,
+      retryAfterSec,
+    });
   }
 
   // 每人最多同时保留 N 个自建房（runtimeConfig.roomCreateMaxOwned；0 = 不限制）
@@ -2466,6 +2570,40 @@ try {
 
 app.get(['/', '/index.html'], sendSpaIndexHtml);
 
+// Node 直出时复用构建期预压缩文件，避免未经过 Nginx 的部署退化为原始大包传输。
+app.use('/assets', (req, res, next) => {
+  const relative = decodeURIComponent(req.path).replace(/^\/+/, '');
+  if (!relative || relative.includes('..') || !/-[a-z0-9_-]{6,}\.(?:js|css|json|svg|map)$/i.test(relative)) {
+    next();
+    return;
+  }
+  const originalPath = path.join(clientDist, 'assets', relative);
+  const acceptEncoding = String(req.headers['accept-encoding'] || '').toLowerCase();
+  const candidates = acceptEncoding.includes('br')
+    ? [[`${originalPath}.br`, 'br'], [`${originalPath}.gz`, 'gzip']]
+    : acceptEncoding.includes('gzip')
+      ? [[`${originalPath}.gz`, 'gzip']]
+      : [];
+  const selected = candidates.find(([filePath]) => fs.existsSync(filePath));
+  if (!selected || !fs.existsSync(originalPath)) {
+    next();
+    return;
+  }
+  const [compressedPath, encoding] = selected;
+  const contentType = relative.endsWith('.css')
+    ? 'text/css; charset=utf-8'
+    : relative.endsWith('.json')
+      ? 'application/json; charset=utf-8'
+      : relative.endsWith('.svg')
+        ? 'image/svg+xml'
+      : 'application/javascript; charset=utf-8';
+  res.setHeader('Content-Type', contentType);
+  res.setHeader('Content-Encoding', encoding);
+  res.setHeader('Vary', 'Accept-Encoding');
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  fs.createReadStream(compressedPath).on('error', next).pipe(res);
+});
+
 app.use(express.static(clientDist, {
   index: false,
   setHeaders(res, filePath) {
@@ -2476,8 +2614,8 @@ app.use(express.static(clientDist, {
       return;
     }
     if (rel.startsWith('assets/')) {
-      // 固定文件名：允许短缓存；发版后清 EO /assets 即可
-      res.setHeader('Cache-Control', 'public, max-age=86400');
+      // 构建文件名带 hash，版本更新会生成新 URL，可安全长期缓存。
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
       return;
     }
     if (rel.startsWith('qface/') || rel.startsWith('vendor/')) {
@@ -2794,6 +2932,19 @@ function emitRoomAndPlayback(roomId, room) {
       console.error('Ensure playback after loading state failed:', err.message);
     });
   }
+}
+
+/** 房间音源账号变更后，空房间需要立即重新尝试私人漫游。 */
+function refreshRoomPlaybackAfterMusicAccountChange(roomId) {
+  const internal = getRoomInternal(roomId);
+  if (!internal || internal.current || internal.queue.length > 0) return;
+  if (internal.neteaseFmMode === 'OFF') return;
+
+  void ensurePlayback(roomId).then((nextRoom) => {
+    if (nextRoom) emitRoomAndPlayback(roomId, nextRoom);
+  }).catch((err) => {
+    console.error('Ensure playback after music account change failed:', err?.message || err);
+  });
 }
 
 /** 仅播放时钟变化（暂停/播放/seek）：只推 playback_state，避免全量 users+queue 风暴 */
@@ -3408,6 +3559,7 @@ io.on('connection', (socket) => {
         localCookie: result.cookie || credential.cookie,
       });
       broadcastRoomUpdate(roomId);
+      refreshRoomPlaybackAfterMusicAccountChange(roomId);
       await finalizeManagedMusicQrCredential(context);
       callback?.({
         success: true,
@@ -3519,6 +3671,7 @@ io.on('connection', (socket) => {
       localCookie: credential || null,
     });
     broadcastRoomUpdate(roomId);
+    refreshRoomPlaybackAfterMusicAccountChange(roomId);
     callback?.({
       success: true,
       account: nextAccount,
@@ -3550,6 +3703,7 @@ io.on('connection', (socket) => {
     }
     patchRoomMusicAccountCache(roomId, plat, null, { localCookie: null });
     broadcastRoomUpdate(roomId);
+    refreshRoomPlaybackAfterMusicAccountChange(roomId);
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
@@ -4516,6 +4670,27 @@ io.on('connection', (socket) => {
     const chatRoom = getRoomInternal(roomId);
     const botName = resolveRoomAiBotName(chatRoom);
     setImmediate(() => {
+      // 明确的普通“切歌/下一首”控制词直接执行，不要求 AI 开启或昵称触发。
+      if (!hasImage) {
+        const commandText = stripAiTriggerPrefix(triggerText, botName)
+          .replace(/[，,。.!！?？：:;；、\s]+$/g, '')
+          .trim();
+        const isDirectSkip = /^(?:切歌|下一首|下首|跳过(?:这首|当前歌曲)?|换一首|换首歌|skip)$/i.test(commandText);
+        if (isDirectSkip) {
+          void (async () => {
+            const direct = await skipSongOnBehalfOfUser(roomId, userId, { botName, reason: 'ai_direct_command' });
+            const requested = direct?.error && direct.canRequestSkip;
+            const result = requested ? requestSkipOnBehalfOfUser(roomId, userId) : direct;
+            const text = result?.error
+              || result?.message
+              || (requested ? '已提交切歌申请，等待房主或管理员处理' : '已处理切歌请求');
+            const posted = postBotChatMessage(roomId, { text });
+            if (posted.message) io.to(roomId).emit('chat_message', posted.message);
+            if (!result?.error) emitRoomAndPlayback(roomId, result.room);
+          })();
+          return;
+        }
+      }
       if (!isRoomAiEnabledForRoom(chatRoom)) return;
       if (!shouldTriggerRoomAi(triggerText, botName, [], { hasImage })) return;
       if (!limitSocketRoomAi(`room-ai:${socket.id}`)) {
@@ -4537,7 +4712,7 @@ io.on('connection', (socket) => {
           if (message) io.to(roomId).emit('chat_message', message);
         },
         emitSystem: (message) => emitSystemChat(roomId, message),
-        broadcastRoom: () => broadcastRoomUpdate(roomId, { immediate: true }),
+        broadcastRoom: () => emitRoomAndPlayback(roomId, getRoomInternal(roomId)),
       }, ({ status, queuePosition, pendingCount, attempt, maxAttempts, error }) => io.to(roomId).emit('room_ai_processing', {
         status,
         requestId,

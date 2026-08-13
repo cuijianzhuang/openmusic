@@ -129,6 +129,19 @@ function initMineradioControlGlassSurface() {
     requestAnimationFrame(updateSearchPillGlassDisplacementMap);
   };
 
+  // Replacing an feImage data URL makes DevTools register a new resource load.
+  // Wait for a resize gesture to settle so dragging a panel does not reload it every frame.
+  let resizeRefreshTimer: number | undefined;
+  const refreshAfterResizeSettles = () => {
+    if (resizeRefreshTimer !== undefined) {
+      window.clearTimeout(resizeRefreshTimer);
+    }
+    resizeRefreshTimer = window.setTimeout(() => {
+      resizeRefreshTimer = undefined;
+      refreshAll();
+    }, 180);
+  };
+
   if (supportsControlGlassSvgFilter()) {
     document.documentElement.classList.add('control-glass-svg-ok');
   }
@@ -142,7 +155,7 @@ function initMineradioControlGlassSurface() {
 
   if (window.ResizeObserver && (bottomBar || searchBox || searchTabs || searchResults)) {
     const observer = new ResizeObserver(() => {
-      refreshAll();
+      refreshAfterResizeSettles();
     });
     if (bottomBar) observer.observe(bottomBar);
     if (searchBox) observer.observe(searchBox);
@@ -159,7 +172,7 @@ function initMineradioControlGlassSurface() {
   }
 
   window.addEventListener('resize', () => {
-    refreshAll();
+    refreshAfterResizeSettles();
   });
 
   [0, 80, 240, 800, 1600].forEach((delay) => {

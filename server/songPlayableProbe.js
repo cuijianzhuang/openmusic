@@ -43,6 +43,19 @@ function parseUrlPayload(raw) {
   return normalizeUrl(text);
 }
 
+function parseQishuiSourcePayload(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return false;
+  try {
+    const data = JSON.parse(text);
+    const url = normalizeUrl(data?.url);
+    const auth = String(data?.auth || '').trim();
+    return isPlayableHttpUrl(url) && Boolean(auth);
+  } catch {
+    return false;
+  }
+}
+
 async function probeMetingUrl(source, id) {
   const response = await fetchMetingApi(
     { server: source, type: 'url', id },
@@ -60,7 +73,23 @@ async function probeMetingUrl(source, id) {
 
   const text = await response.text();
   const url = parseUrlPayload(text);
-  return isPlayableHttpUrl(url);
+  if (!isPlayableHttpUrl(url)) return false;
+
+  // 汽水第一层 URL 只是播放会话；必须继续取 mode=source，确认真正的
+  // CDN 地址和音频密钥仍存在，否则 no url 会被误判成「服务端可播」。
+  if (source === 'qishui') {
+    const sourceEndpoint = new URL(url);
+    sourceEndpoint.searchParams.set('mode', 'source');
+    const sourceResponse = await fetchMetingApi(
+      sourceEndpoint.toString(),
+      { redirect: 'manual' },
+      12000,
+    );
+    if (!sourceResponse.ok) return false;
+    return parseQishuiSourcePayload(await sourceResponse.text());
+  }
+
+  return true;
 }
 
 async function probeKugouUrl(id) {

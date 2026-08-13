@@ -416,6 +416,18 @@ export default function RuntimeConfigPanel({
 
   const save = async () => {
     if (!draft || saving) return;
+    const invalidModelIndex = draft.aiModelPools.findIndex((pool) => {
+      const model = pool.model.trim();
+      return !model || /\s/.test(model);
+    });
+    if (invalidModelIndex >= 0) {
+      const model = draft.aiModelPools[invalidModelIndex].model;
+      onError(model.trim()
+        ? `第 ${invalidModelIndex + 1} 个模型的模型 ID 不支持空格`
+        : `请填写第 ${invalidModelIndex + 1} 个模型的模型 ID 后再保存`);
+      setActiveTab('ai');
+      return;
+    }
     setSaving(true);
     try {
       const clearSecrets: string[] = [];
@@ -1244,6 +1256,15 @@ export default function RuntimeConfigPanel({
 
   const runAiTest = async (pool: AiModelPool) => {
     if (aiTestLoading) return;
+    const model = pool.model.trim();
+    if (!model) {
+      onError('请先填写模型 ID，再进行测试');
+      return;
+    }
+    if (/\s/.test(model)) {
+      onError('模型 ID 不支持空格，请删除空格后再测试');
+      return;
+    }
     setAiTestLoading(true);
     setAiTestingPoolId(pool.id);
     setAiTestResult(null);
@@ -1264,7 +1285,7 @@ export default function RuntimeConfigPanel({
         message: '你好',
         poolId: pool.id,
         type: pool.type,
-        model: pool.model,
+        model,
         apiBaseUrl: pool.apiBaseUrl,
         apiProtocol: pool.apiProtocol,
         maxRequestsPerMinute: pool.maxRequestsPerMinute,

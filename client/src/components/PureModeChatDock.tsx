@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronLeft, MessageCircle } from 'lucide-react';
+import { ChevronLeft, MessageCircle, Pin, PinOff } from 'lucide-react';
 import ChatPanel from './ChatPanel';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 
@@ -8,6 +8,7 @@ const PANEL_WIDTH = 360;
 
 export default function PureModeChatDock() {
   const [open, setOpen] = useState(false);
+  const [pinned, setPinned] = useState(false);
   const closeTimerRef = useRef<number | null>(null);
   const isLgUp = useMediaQuery('(min-width: 1024px)');
 
@@ -19,12 +20,13 @@ export default function PureModeChatDock() {
   }, []);
 
   const scheduleClose = useCallback(() => {
+    if (pinned) return;
     cancelClose();
     closeTimerRef.current = window.setTimeout(() => {
       setOpen(false);
       closeTimerRef.current = null;
     }, CLOSE_DELAY_MS);
-  }, [cancelClose]);
+  }, [cancelClose, pinned]);
 
   const handleOpen = useCallback(() => {
     cancelClose();
@@ -32,13 +34,25 @@ export default function PureModeChatDock() {
   }, [cancelClose]);
 
   const handleClose = useCallback(() => {
+    if (pinned) return;
     cancelClose();
     setOpen(false);
-  }, [cancelClose]);
+  }, [cancelClose, pinned]);
 
   const handleToggle = useCallback(() => {
     setOpen((prev) => !prev);
   }, []);
+
+  const handlePinToggle = useCallback(() => {
+    setPinned((prev) => {
+      const next = !prev;
+      if (next) {
+        cancelClose();
+        setOpen(true);
+      }
+      return next;
+    });
+  }, [cancelClose]);
 
   useEffect(() => () => cancelClose(), [cancelClose]);
 
@@ -67,7 +81,7 @@ export default function PureModeChatDock() {
         onMouseEnter={isLgUp ? handleOpen : undefined}
         onClick={!isLgUp ? handleToggle : undefined}
         className={`fixed right-0 top-1/2 z-50 flex -translate-y-1/2 items-center gap-1 rounded-l-xl border border-r-0 border-white/10 bg-netease-card/90 py-3 pl-2 pr-1.5 text-netease-muted shadow-lg backdrop-blur-md transition-all duration-200 hover:bg-netease-card hover:text-white ${
-          open ? 'pointer-events-none translate-x-full opacity-0' : 'translate-x-0 opacity-100'
+          open || pinned ? 'pointer-events-none translate-x-full opacity-0' : 'translate-x-0 opacity-100'
         }`}
         aria-label={open ? '聊天室已展开' : '展开聊天室'}
         aria-expanded={open}
@@ -89,6 +103,18 @@ export default function PureModeChatDock() {
         onMouseLeave={isLgUp ? scheduleClose : undefined}
         aria-hidden={!open}
       >
+        <div className="flex h-10 shrink-0 items-center justify-end border-b border-white/10 px-2">
+          <button
+            type="button"
+            onClick={handlePinToggle}
+            className="flex h-7 w-7 items-center justify-center rounded-md text-white/55 transition-colors hover:bg-white/10 hover:text-white"
+            aria-label={pinned ? '取消固定聊天室' : '固定聊天室'}
+            aria-pressed={pinned}
+            title={pinned ? '取消固定聊天室' : '固定聊天室'}
+          >
+            {pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
+          </button>
+        </div>
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <ChatPanel className="rounded-none border-0 bg-transparent" />
         </div>

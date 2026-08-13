@@ -368,7 +368,9 @@ function normalizeAiModelPools(value) {
       apiBaseUrl: normalizeAiApiBaseUrl(item?.apiBaseUrl || item?.apiUrl, ''),
       apiProtocol: normalizeAiApiProtocol(item?.apiProtocol),
       apiKey: String(item?.apiKey || '').trim(),
-      model: normalizeAiModelField(item?.model, type === 'vision' ? 'Qwen/Qwen3.5-4B' : 'Qwen/Qwen3-8B'),
+      // 模型池是用户显式添加的配置；空模型必须保留为空，不能悄悄写入默认模型。
+      // 否则后台新增模型后尚未填写模型 ID 即保存，会被错误变成 Qwen/Qwen3-8B。
+      model: normalizeAiModelField(item?.model, ''),
       ...(type === 'text' ? { enableThinking: item?.enableThinking === true } : {}),
       contextWindowTokens: normalizeAiRateLimit(item?.contextWindowTokens, 256 * 1024, 4 * 1024, 2048 * 1024),
       maxRequestsPerMinute: normalizeAiRateLimit(item?.maxRequestsPerMinute, 1000, 1, 10_000),
@@ -558,6 +560,16 @@ export function setRuntimeConfig(raw = {}) {
     }
   }
   if (Array.isArray(raw.aiModelPools)) {
+    const invalidIndex = raw.aiModelPools.findIndex((pool) => {
+      const model = String(pool?.model || '').trim();
+      return !model || /\s/.test(model) || model.length > 64 || !/^[A-Za-z0-9._+\-/]+$/.test(model);
+    });
+    if (invalidIndex >= 0) {
+      const model = String(raw.aiModelPools[invalidIndex]?.model || '').trim();
+      return { success: false, error: model
+        ? `第 ${invalidIndex + 1} 个 AI 模型的模型 ID 不支持空格或其它非法字符`
+        : `第 ${invalidIndex + 1} 个 AI 模型的模型 ID 不能为空` };
+    }
     const existingById = new Map(current.aiModelPools.map((pool) => [pool.id, pool]));
     next.aiModelPools = raw.aiModelPools.map((pool) => ({
       ...pool,

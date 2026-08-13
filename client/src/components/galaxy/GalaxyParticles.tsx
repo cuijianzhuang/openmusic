@@ -17,6 +17,7 @@ import {
 } from './lib/shaders';
 import { roomVisualFxLive } from '../../lib/roomVisualFxLive';
 import { toProxiedMediaUrl } from '../../lib/mediaProxyUrl';
+import { loadSharedCoverResource } from '../../lib/sharedCoverResource';
 import { useSignedApiUrl } from '../../lib/signedApiUrl';
 import { cacheCoverImage, getCachedCoverImage } from '../../lib/coverImageCache';
 import { scheduleVisualApply } from '../../lib/scheduleVisualApply';
@@ -717,7 +718,13 @@ export default function GalaxyParticles({
       uniforms.uHasDepth.value = 0;
       invalidate();
     };
-    img.src = signedCover;
+    void loadSharedCoverResource(signedCover)
+      .then((sharedUrl) => {
+        if (!cancelled) img.src = sharedUrl;
+      })
+      .catch(() => {
+        img.onerror?.(new Event('error'));
+      });
 
     return () => {
       cancelled = true;

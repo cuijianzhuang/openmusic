@@ -9,6 +9,8 @@ export const DEFAULT_MEDIA_UA =
 const MAX_MEDIA_REDIRECTS = 5;
 /** 缓冲类响应（封面图等）体积上限，防止代理内存耗尽 */
 const MAX_BUFFERED_MEDIA_BYTES = 8 * 1024 * 1024;
+/** 部分网易云封面 CDN 即使请求 size=96 仍会返回原图，允许图片使用更高但有限的上限。 */
+const MAX_BUFFERED_IMAGE_BYTES = 32 * 1024 * 1024;
 
 function hostnameOf(rawUrl) {
   try {
@@ -403,13 +405,15 @@ export async function serveUpstreamMedia(rawUrl, res, fetchWithTimeout, options 
 
   if (useBuffer) {
     try {
+      const isImage = /^image\//i.test(rawType);
+      const maxBufferedBytes = isImage ? MAX_BUFFERED_IMAGE_BYTES : MAX_BUFFERED_MEDIA_BYTES;
       const declaredLen = Number(response.headers.get('content-length') || 0);
-      if (Number.isFinite(declaredLen) && declaredLen > MAX_BUFFERED_MEDIA_BYTES) {
+      if (Number.isFinite(declaredLen) && declaredLen > maxBufferedBytes) {
         if (!res.headersSent) res.status(413).json({ error: '媒体过大' });
         return false;
       }
       const buffer = Buffer.from(await response.arrayBuffer());
-      if (buffer.length > MAX_BUFFERED_MEDIA_BYTES) {
+      if (buffer.length > maxBufferedBytes) {
         if (!res.headersSent) res.status(413).json({ error: '媒体过大' });
         return false;
       }

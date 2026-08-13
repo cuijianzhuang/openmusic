@@ -1,4 +1,5 @@
 import { fetchWithTimeout } from '../api/http';
+import { isSourceUnavailableMessage } from './audioPlaybackError';
 
 type LocalSource = { url?: unknown; auth?: unknown };
 type WorkerResult = { id: number; data?: ArrayBuffer; contentType?: string; error?: string };
@@ -6,6 +7,7 @@ type WorkerResult = { id: number; data?: ArrayBuffer; contentType?: string; erro
 export type QishuiLocalPlaybackResult =
   | { status: 'ok'; url: string }
   | { status: 'aborted' }
+  | { status: 'source-unavailable' }
   | { status: 'failed' };
 
 const LOCAL_DECRYPT_TIMEOUT_MS = 20_000;
@@ -133,10 +135,14 @@ async function resolveLocalPlaybackUrl(
         LOCAL_SOURCE_FETCH_TIMEOUT_MS,
       );
       if (signal?.aborted) return { status: 'aborted' };
-      if (!response.ok) return { status: 'failed' };
+      if (!response.ok) {
+        const body = await response.text().catch(() => '');
+        return isSourceUnavailableMessage(body) ? { status: 'source-unavailable' } : { status: 'failed' };
+      }
       const payload = await response.json() as LocalSource;
       const sourceUrl = typeof payload.url === 'string' ? payload.url : '';
       const auth = typeof payload.auth === 'string' ? payload.auth : '';
+      if (isSourceUnavailableMessage(sourceUrl)) return { status: 'source-unavailable' };
       if (!sourceUrl || !auth) return { status: 'failed' };
       blobUrl = await runWorker(sourceUrl, auth, signal);
       if (signal?.aborted) {

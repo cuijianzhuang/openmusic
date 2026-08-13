@@ -299,7 +299,7 @@ export async function bindRoomMusicAccount({ roomId, platform, cookie, shared, n
   }
 
   if (!shared) {
-    // 未共享账号不写入 Meting；先清掉历史遗留的房间池记录。
+    // 未共享账号不写入 Meting，并清理该房间在共享池中的账号记录。
     await unbindRoomMusicAccount(roomId, plat);
     return {
       ok: true,

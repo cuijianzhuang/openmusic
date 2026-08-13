@@ -15,7 +15,8 @@ import { buildAppVersionMeta, writeVersionJson } from '../scripts/app-version.mj
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const appVersionMeta = buildAppVersionMeta();
-const shouldPrecompress = process.env.OPENMUSIC_PRECOMPRESS === 'true';
+// 生产静态资源默认生成 Brotli/Gzip，Node 直出时也能复用，部署到 Nginx 时可直接忽略。
+const shouldPrecompress = process.env.OPENMUSIC_PRECOMPRESS !== 'false';
 
 /** 构建期规范主域：优先 SITE_CANONICAL_URL，否则 CLIENT_URL 首项 */
 const BUILD_SITE_ORIGIN = resolvePrimarySiteOrigin(

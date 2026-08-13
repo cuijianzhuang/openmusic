@@ -1112,7 +1112,7 @@ export default function RoomSettingsModal({
                       label="聊天室 AI 助手"
                       description={
                         globalAiEnabled
-                          ? '关闭后本房无法 @ 助手、无主动搭话与 emo 关心'
+                          ? '关闭后本房无法 @ 助手'
                           : '站点尚未开启 AI，请联系管理员在后台启用'
                       }
                     />

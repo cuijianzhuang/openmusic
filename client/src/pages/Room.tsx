@@ -326,6 +326,7 @@ export default function Room() {
   const [overlaySearchMode, setOverlaySearchMode] = useState<SearchMode>('song');
   const [overlayQuery, setOverlayQuery] = useState('');
   const prevOverlayOpenRef = useRef(false);
+  const songSearchRequestRef = useRef(0);
   const [searchFilterMode, setSearchFilterMode] = useState<SearchFilterMode>('smart');
   const [playlistImportOpen, setPlaylistImportOpen] = useState(false);
   const [recommendDrawerOpen, setRecommendDrawerOpen] = useState(false);
@@ -906,10 +907,14 @@ export default function Room() {
   }, [activeSearchMode, searchedKeyword, searching, playlistSearchLoading, playlistSearchBackup, query]);
 
   const doSearch = useCallback(async (keyword: string, filterMode = searchFilterMode) => {
+    const requestId = ++songSearchRequestRef.current;
 
     if (!keyword.trim()) {
 
-      setResults([]);
+      if (requestId === songSearchRequestRef.current) {
+        setResults([]);
+        setSearching(false);
+      }
 
       return;
 
@@ -919,17 +924,18 @@ export default function Room() {
 
     try {
 
-      const songs = await searchAllSongs(keyword, sources, { filterMode });
+      // 音源配置还在加载时不能传空数组，否则 searchAllSongs 会直接返回空结果。
+      const songs = await searchAllSongs(keyword, sources.length > 0 ? sources : undefined, { filterMode });
 
-      setResults(songs);
+      if (requestId === songSearchRequestRef.current) setResults(songs);
 
     } catch {
 
-      setResults([]);
+      if (requestId === songSearchRequestRef.current) setResults([]);
 
     } finally {
 
-      setSearching(false);
+      if (requestId === songSearchRequestRef.current) setSearching(false);
 
     }
 
@@ -1233,6 +1239,7 @@ export default function Room() {
   }, [overlaySearchMode, overlayQuery, searchedKeyword, playlistSearchBackup, doPlaylistSearch, doSearch]);
 
   const clearSearchResults = useCallback(() => {
+    songSearchRequestRef.current += 1;
     setQuery('');
     setOverlayQuery('');
     setResults([]);

@@ -11,6 +11,7 @@ const MAX_MEDIA_SIGN_CACHE = 200;
 type MediaSignEntry = { signed: string; expiresAt: number };
 
 const mediaSignMemory = new Map<string, MediaSignEntry>();
+const mediaSignInflight = new Map<string, Promise<string>>();
 
 /**
  * 去掉已有签名参数。
@@ -110,25 +111,39 @@ export async function signApiUrl(relativeUrl: string, options?: { force?: boolea
   if (reuseMedia) {
     const cached = getCachedMediaSign(cacheKey);
     if (cached) return cached;
+    const pending = mediaSignInflight.get(cacheKey);
+    if (pending) return pending;
   }
 
-  await ensureSessionBootstrap();
-  const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
-  const parsed = new URL(cacheKey, origin);
-  const query = canonicalApiQuery(parsed.searchParams);
-  const headers = await buildApiSignHeaders('GET', parsed.pathname, query, '');
-  if (!headers['X-OM-Sign']) return cacheKey;
+  const request = (async () => {
+    await ensureSessionBootstrap();
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
+    const parsed = new URL(cacheKey, origin);
+    const query = canonicalApiQuery(parsed.searchParams);
+    const headers = await buildApiSignHeaders('GET', parsed.pathname, query, '');
+    if (!headers['X-OM-Sign']) return cacheKey;
 
-  parsed.searchParams.set('om_ts', headers['X-OM-Ts']);
-  parsed.searchParams.set('om_nonce', headers['X-OM-Nonce']);
-  parsed.searchParams.set('om_sign', headers['X-OM-Sign']);
-  const signed = `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    parsed.searchParams.set('om_ts', headers['X-OM-Ts']);
+    parsed.searchParams.set('om_nonce', headers['X-OM-Nonce']);
+    parsed.searchParams.set('om_sign', headers['X-OM-Sign']);
+    const signed = `${parsed.pathname}${parsed.search}${parsed.hash}`;
 
-  if (isMediaApiPath(cacheKey)) {
-    setCachedMediaSign(cacheKey, signed);
+    if (isMediaApiPath(cacheKey)) {
+      setCachedMediaSign(cacheKey, signed);
+    }
+
+    return signed;
+  })();
+
+  if (reuseMedia) {
+    mediaSignInflight.set(cacheKey, request);
+    void request.then(() => {
+      if (mediaSignInflight.get(cacheKey) === request) mediaSignInflight.delete(cacheKey);
+    }, () => {
+      if (mediaSignInflight.get(cacheKey) === request) mediaSignInflight.delete(cacheKey);
+    });
   }
-
-  return signed;
+  return request;
 }
 
 /** 强制换发新签名；非 /api 直链原样返回 */

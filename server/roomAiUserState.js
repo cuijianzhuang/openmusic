@@ -7,6 +7,7 @@ const states = new Map();
 const MAX_USER_STATE_ENTRIES = 1800;
 /** 内存回收：长期无互动的条目清理 */
 const STALE_MS = 45 * 60 * 1000;
+const SONG_CANDIDATES_TTL_MS = 10 * 60 * 1000;
 const MOOD_KEYWORDS = [
   '治愈', '摇滚', '说唱', '民谣', '电子', '古典', '爵士', '粤语', '国语', '英语',
   '安静', '学习', '运动', '开车', '夜听', '睡前', 'emo', '伤感', '快乐', '兴奋',
@@ -52,6 +53,8 @@ function getEntry(roomId, userId) {
       violationCount: 0,
       ignoredUntil: 0,
       profile: defaultProfile(),
+      songCandidates: [],
+      songCandidatesUpdatedAt: 0,
       updatedAt: Date.now(),
     };
     states.set(key, entry);
@@ -275,6 +278,36 @@ export function recordAiSongRequest(roomId, userId, song = {}) {
   if (name) pushUniqueLimited(profile.recentSongs, artist ? `${name} - ${artist}` : name, 8);
   bumpArtistCount(profile, artist);
   entry.updatedAt = Date.now();
+}
+
+/** 保存当前用户最近一次搜歌/推荐的候选，供下一条消息选择歌曲。 */
+export function setAiSongCandidates(roomId, userId, songs = []) {
+  const entry = getEntry(roomId, userId);
+  if (!entry) return;
+  entry.songCandidates = Array.isArray(songs)
+    ? songs.filter((song) => song && song.id).slice(0, 5).map((song) => ({
+      index: Number(song.index) || 0,
+      id: String(song.id),
+      name: String(song.name || '').slice(0, 100),
+      artist: String(song.artist || '').slice(0, 80),
+      pic: String(song.pic || '').slice(0, 500),
+      server: String(song.server || 'netease'),
+    }))
+    : [];
+  entry.songCandidatesUpdatedAt = Date.now();
+  entry.updatedAt = Date.now();
+}
+
+/** 获取尚未过期的候选；候选按用户隔离，避免串歌。 */
+export function getAiSongCandidates(roomId, userId) {
+  const entry = getEntry(roomId, userId);
+  if (!entry || !Array.isArray(entry.songCandidates)) return [];
+  if (Date.now() - (entry.songCandidatesUpdatedAt || 0) > SONG_CANDIDATES_TTL_MS) {
+    entry.songCandidates = [];
+    entry.songCandidatesUpdatedAt = 0;
+    return [];
+  }
+  return entry.songCandidates.map((song) => ({ ...song }));
 }
 
 /** @returns {{ ignored: boolean, violationCount: number, justEnteredIgnore?: boolean }} */

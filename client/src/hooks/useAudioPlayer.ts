@@ -1093,8 +1093,9 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
           if (gen !== loadGeneration.current) return;
           playbackUrl = url;
           let resolvedMeta = resolved;
-          // 汽水只允许在听众浏览器本地取 CDN 并解密，服务端不再提供整首音频回退。
-          if (current.source === 'qishui') {
+          // 仅汽水播放会话需要本地解密。跨源成功后 current.source 仍是 qishui，
+          // 但 resolved.url 已是网易/QQ 直链，不能再误送进汽水解密器。
+          if (current.source === 'qishui' && /\/api\/qishui-source(?:\?|$)/i.test(url)) {
             const localAbort = new AbortController();
             qishuiLocalAbortRef.current = localAbort;
             let localResult = await resolveQishuiLocalPlaybackUrl(url, localAbort.signal);
@@ -1110,10 +1111,21 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
             if (gen !== loadGeneration.current || localAbort.signal.aborted || localResult.status === 'aborted') {
               return;
             }
-            if (localResult.status !== 'ok') {
+            if (localResult.status === 'source-unavailable') {
+              invalidateTrackUrlCache(current);
+              const fallbackUrl = await fetchServiceFallbackUrl(current);
+              if (!fallbackUrl) throw new SourceUnavailableError('no url');
+              playbackUrl = (await refreshSignedApiUrl(fallbackUrl)) || fallbackUrl;
+              resolvedMeta = {
+                ...resolvedMeta,
+                url: playbackUrl,
+                crossSource: true,
+                crossSourceFrom: getCachedUrlCrossSourceFrom(current) || getTrackCrossSourceFrom(current),
+              };
+            } else if (localResult.status !== 'ok') {
               throw new Error('汽水解密失败，请刷新重试');
             }
-            playbackUrl = localResult.url;
+            if (localResult.status === 'ok') playbackUrl = localResult.url;
           }
           qualityLabel = resolvedMeta.qualityLabel;
           crossSource = Boolean(resolvedMeta.crossSource)

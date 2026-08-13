@@ -217,6 +217,11 @@ export function getCoverUrl(
   song: Pick<Song, 'id' | 'source' | 'pic'>,
   size: CoverSize = 'full',
 ): string {
+  // 房间自定义封面不是音乐平台歌曲，不能按网易云歌曲 ID 请求 Meting pic。
+  // 该对象由 Room.tsx 以 id=room-custom-cover 构造，pic 本身就是最终图片地址。
+  if (song.id === 'room-custom-cover' && song.pic) {
+    return resizeCoverUrl(song.pic, size);
+  }
   const source = song.source || 'netease';
   const raw = getProvider(source).getCoverUrl({ ...song, source });
   const normalized = toLocalMetingPicUrl(raw) ?? raw;
@@ -262,12 +267,15 @@ const CREDIT_LINE_RE =
 const PROMO_LINE_RE =
   /(网易飓风计划|现金激励|流量扶持|业务联系|vip\.163\.com|来自〖|〗)/i;
 
+const NON_LYRIC_LINE_RE = /^(?:乐夏|拜拜|谢谢|再见|主唱|吉他(?:\/和声)?|贝斯|鼓(?:\/和声)?|和声|特邀键盘|声音制作人|音乐混音(?:顾问)?|舞台总监|灯光总监)\b/i;
+
 export function filterDisplayLyrics(lines: import('../../types').LyricLine[]): import('../../types').LyricLine[] {
   return lines.filter((line) => {
     const text = line.text.trim();
     if (!text) return false;
     if (CREDIT_LINE_RE.test(text)) return false;
     if (PROMO_LINE_RE.test(text)) return false;
+    if (NON_LYRIC_LINE_RE.test(text)) return false;
     return true;
   });
 }
@@ -373,9 +381,25 @@ export async function createRoom(name?: string, password?: string): Promise<{ id
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
-    const data = (await res.json().catch(() => null)) as { error?: unknown; code?: unknown } | null;
+    const data = (await res.json().catch(() => null)) as {
+      error?: unknown;
+      code?: unknown;
+      retryAfterSec?: unknown;
+    } | null;
     const message = typeof data?.error === 'string' ? data.error.trim() : '';
     const code = typeof data?.code === 'string' ? data.code.trim() : '';
+    if (code === 'OM-RCD1') {
+      const retryAfterSec = Number(data?.retryAfterSec) || 0;
+      throw new Error(retryAfterSec > 0
+        ? `你创建房间有点频繁啦，请 ${retryAfterSec} 秒后再试～`
+        : '你创建房间有点频繁啦，请稍后再试～');
+    }
+    if (code === 'OM-RCD2') {
+      const retryAfterSec = Number(data?.retryAfterSec) || 0;
+      throw new Error(retryAfterSec > 0
+        ? `刚刚已经创建过房间啦，请 ${retryAfterSec} 秒后再试～`
+        : '刚刚已经创建过房间啦，请稍后再试～');
+    }
     if (message) throw new Error(message);
     if (code) throw new Error(`系统开小差了，请稍后再试。如有疑问请联系管理员（错误码 ${code}）`);
     throw new Error(`创建房间失败（${res.status}）`);

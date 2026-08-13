@@ -8,7 +8,6 @@ import { installVisibilitySync } from './lib/visibilitySync';
 import { applyPageSeo, fetchSiteSeo } from './lib/seo';
 import { ensureSessionBootstrap } from './lib/sessionBootstrap';
 import { refreshQualityCapabilities } from './api/music/quality';
-import { warmUpSocketSession } from './hooks/useSocket';
 import { applyStoredRoomThemeColor } from './lib/roomThemeColor';
 import { installGuideUsageTracking } from './lib/userGuide';
 import { prefetchLoadingQuote } from './lib/loadingQuote';
@@ -21,8 +20,12 @@ void prefetchLoadingQuote();
 void fetchSiteSeo().then(() => applyPageSeo());
 applyPageSeo();
 void ensureSessionBootstrap().then(() => {
-  void refreshQualityCapabilities();
-  return warmUpSocketSession();
+  const refresh = () => void refreshQualityCapabilities();
+  if (typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(refresh, { timeout: 5000 });
+  } else {
+    window.setTimeout(refresh, 2500);
+  }
 });
 
 createRoot(document.getElementById('root')!).render(

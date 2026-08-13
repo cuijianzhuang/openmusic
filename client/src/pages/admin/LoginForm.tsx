@@ -5,7 +5,7 @@ import {
   SafetyCertificateOutlined,
   UserOutlined,
 } from '@ant-design/icons';
-import { Alert, Button, Card, Divider, Form, Input, Layout, Space, Typography } from 'antd';
+import { App, Button, Card, Divider, Form, Input, Layout, Space, Typography } from 'antd';
 import { adminFetch } from './utils';
 import { LinuxDoIcon } from './brandIcons';
 
@@ -24,7 +24,7 @@ const GITHUB_LOGIN_ERRORS: Record<string, string> = {
 };
 
 export default function LoginForm({ onLoggedIn }: { onLoggedIn: () => void }) {
-  const [error, setError] = useState('');
+  const { message } = App.useApp();
   const [busy, setBusy] = useState(false);
   const [linuxdoEnabled, setLinuxdoEnabled] = useState(false);
   const [githubEnabled, setGithubEnabled] = useState(false);
@@ -41,21 +41,20 @@ export default function LoginForm({ onLoggedIn }: { onLoggedIn: () => void }) {
     const linuxdoResult = url.searchParams.get('linuxdo');
     const githubResult = url.searchParams.get('github');
     if (linuxdoResult && linuxdoResult !== 'login_ok') {
-      setError(LINUXDO_LOGIN_ERRORS[linuxdoResult] || 'Linux.do 登录失败');
+      message.error(LINUXDO_LOGIN_ERRORS[linuxdoResult] || 'Linux.do 登录失败');
     } else if (githubResult && githubResult !== 'login_ok') {
-      setError(GITHUB_LOGIN_ERRORS[githubResult] || 'GitHub 登录失败');
+      message.error(GITHUB_LOGIN_ERRORS[githubResult] || 'GitHub 登录失败');
     }
     if (linuxdoResult || githubResult) {
       url.searchParams.delete('linuxdo');
       url.searchParams.delete('github');
       window.history.replaceState(null, '', url.pathname + url.search + url.hash);
     }
-  }, []);
+  }, [message]);
 
   const submit = async (values: { username: string; password: string }) => {
     if (busy) return;
     setBusy(true);
-    setError('');
     try {
       await adminFetch('/api/admin/login', {
         method: 'POST',
@@ -63,7 +62,7 @@ export default function LoginForm({ onLoggedIn }: { onLoggedIn: () => void }) {
       });
       onLoggedIn();
     } catch (err) {
-      setError(err instanceof Error ? err.message : '登录失败');
+      message.error(err instanceof Error ? err.message : '登录失败');
     } finally {
       setBusy(false);
     }
@@ -88,7 +87,6 @@ export default function LoginForm({ onLoggedIn }: { onLoggedIn: () => void }) {
               </Typography.Title>
             </Space>
             <Typography.Text type="secondary">输入管理员账号密码登录</Typography.Text>
-            {error && <Alert type="error" message={error} showIcon />}
             <Form layout="vertical" onFinish={submit} requiredMark={false}>
               <Form.Item
                 name="username"

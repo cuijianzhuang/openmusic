@@ -141,7 +141,7 @@ function renderAiInlineText(
     const content = isBold ? part.slice(2, -2) : part;
     const node = renderMessageText(content, 'message', chatScrollRoot, nicknames);
     return isBold ? (
-      <strong key={`${keyPrefix}-strong-${index}`} className="font-semibold text-white">
+      <strong key={`${keyPrefix}-strong-${index}`} className="font-normal text-inherit">
         {node}
       </strong>
     ) : (
@@ -157,7 +157,7 @@ function renderAiMessageText(
 ) {
   const lines = normalizeAiRichText(messageText).split('\n');
   return (
-    <div className="space-y-1.5 text-[15px] leading-7 tracking-[0.005em] text-white/95">
+    <div className="space-y-1.5 text-sm font-normal leading-7 tracking-normal text-white/95">
       {lines.map((rawLine, index) => {
         const line = rawLine.trim();
         if (!line) return <div key={`ai-gap-${index}`} className="h-1" aria-hidden />;
@@ -166,7 +166,7 @@ function renderAiMessageText(
         if (numbered) {
           return (
             <div key={`ai-item-${index}`} className="grid grid-cols-[1.4rem_minmax(0,1fr)] gap-1.5 py-0.5">
-              <span className="pt-0.5 text-xs font-semibold tabular-nums text-sky-200/75">{numbered[1]}</span>
+              <span className="pt-0.5 text-xs font-normal tabular-nums text-sky-200/75">{numbered[1]}</span>
               <span className="min-w-0">{renderAiInlineText(numbered[2], `ai-item-${index}`, chatScrollRoot, nicknames)}</span>
             </div>
           );

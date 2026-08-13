@@ -114,44 +114,6 @@ export default function App() {
     };
   }, []);
 
-  // 空闲时预热 QQ 表情清单与常用图，避免每次进房才开始拉
-  useEffect(() => {
-    let cancelled = false;
-    const warm = () => {
-      if (cancelled) return;
-      void import('./lib/qface').then((mod) => {
-        if (!cancelled) mod.ensureQQFacesLoaded();
-      });
-      // 预热房间页面及沉浸式背景的懒加载 chunk：新建/加入房间是跳转进 Room.tsx 的
-      // 第一次，如果这几个 chunk（尤其是带 three.js 的背景）还没取到，会在跳转瞬间
-      // 出现黑屏，直到 chunk 加载完成才渲染出内容。这里提前在空闲时取好，命中浏览器缓存。
-      void import('./pages/Room');
-      void import('./lib/roomVisualPreset').then((mod) => {
-        if (cancelled) return;
-        void import('./lib/immersiveEntry').then((entry) => {
-          if (!cancelled) void entry.preloadImmersiveBackground(mod.readRoomVisualMode());
-        });
-      });
-    };
-
-    const ric = typeof window !== 'undefined'
-      ? window.requestIdleCallback?.bind(window)
-      : undefined;
-    let idleId: number | undefined;
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    if (ric) {
-      idleId = ric(warm, { timeout: 3500 });
-    } else {
-      timeoutId = setTimeout(warm, 1200);
-    }
-
-    return () => {
-      cancelled = true;
-      if (idleId != null) window.cancelIdleCallback?.(idleId);
-      if (timeoutId) clearTimeout(timeoutId);
-    };
-  }, []);
-
   if (setupRequired === null) return <RouteFallback />;
 
   return (

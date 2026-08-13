@@ -414,7 +414,13 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
   }, [useVirtualList]);
 
   useEffect(() => {
-    if (pureMode) return;
+    if (pureMode) {
+      pendingWelcomeConfettiRef.current = false;
+      for (const msg of messages) {
+        if (msg.kind === 'welcome') welcomeConfettiIdsRef.current.add(msg.id);
+      }
+      return;
+    }
 
     const room = useRoomStore.getState().room;
     const now = Date.now();

@@ -9,11 +9,13 @@ export const COVER_SIZE_PX: Record<Exclude<CoverSize, 'full'>, number> = {
 const FALLBACK_COVER =
   'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect fill="%23333" width="48" height="48"/><text x="24" y="28" text-anchor="middle" fill="%23666" font-size="16">♪</text></svg>';
 
-function appendMetingThumbParam(url: string, px: number): string {
+function appendMetingThumbParam(url: string): string {
   const idx = url.indexOf('?');
   const params = new URLSearchParams(idx >= 0 ? url.slice(idx + 1) : '');
   if (params.get('type') !== 'pic') return url;
-  params.set('size', String(px));
+  // 同一首歌的封面由多个视觉层共用；统一请求一张 320px 公共封面，
+  // 避免房间背景、队列和播放器分别触发 48/96/320 多次请求。
+  params.set('size', '320');
   return `${url.split('?')[0]}?${params.toString()}`;
 }
 
@@ -107,12 +109,23 @@ export function resizeCoverUrl(url: string, size: CoverSize = 'full'): string {
 
   // 任意尺寸都先去掉 NetEase ?param=NyN，避免原图链自带缩略参数导致不显示
   let next = /music\.126\.net|126\.net|param=\d+y\d+/i.test(url) ? stripNeteaseParam(url) : url;
+  if (next.startsWith('/api/meting')) {
+    try {
+      const parsed = new URL(next, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
+      if (parsed.searchParams.get('type') === 'pic') {
+        parsed.searchParams.set('size', '320');
+        return `${parsed.pathname}?${parsed.searchParams.toString()}`;
+      }
+    } catch {
+      // Keep the original URL if it cannot be parsed.
+    }
+  }
   if (size === 'full') return next;
 
   const px = COVER_SIZE_PX[size];
 
   if (next.startsWith('/api/meting')) {
-    return appendMetingThumbParam(next, px);
+    return appendMetingThumbParam(next);
   }
 
   if (next.includes('/api/media-proxy')) {
