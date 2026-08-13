@@ -17,7 +17,7 @@ OpenMusic 是多人实时在线点歌系统，包含 Web、Node.js 服务端、R
 
 | 路径 | 责任 | 关键约束 |
 |---|---|---|
-| `client/` | React + Vite Web 客户端 | TypeScript；页面位于 `src/pages/`，状态位于 `src/stores/`，通用能力在 `src/lib/`。修改请求、事件或配置必须同步服务端。 |
+| `client/` | React + Vite Web 客户端 | TypeScript；页面位于 `src/pages/`，状态位于 `src/stores/`，通用能力在 `src/lib/`。修改请求、事件或配置必须同步服务端。普通用户主站禁止引入 Ant Design。 |
 | `server/` | Express + Socket.IO 业务服务 | `index.js` 是 HTTP、实时事件和启动编排入口；Redis 是生产必需依赖。禁止以改变生产语义的内存兜底代替 Redis。 |
 | `mobile/` | Flutter 原生客户端 | 与 Web 共用后端协议；涉及登录、房间、播放、队列、聊天或 Socket 事件必须评估兼容性。 |
 | `docs/` | 部署、移动端、用户和运维文档 | 用户可见功能、配置、命令、环境变量、部署或故障处理变更必须同步。 |
@@ -59,6 +59,13 @@ OpenMusic 是多人实时在线点歌系统，包含 Web、Node.js 服务端、R
 - 每个事件必须明确：发起端、服务端鉴权、参数校验、幂等/重复提交策略、成功回调、失败回调、广播房间及断线重连行为。
 - 事件名称和 payload 是跨 Web/移动端的公共协议。修改前搜索全部发送方与监听方；无法同时升级的客户端必须有兼容分支或安全降级。
 - 广播前确认房间隔离与权限范围，禁止将房间私密信息、管理员信息、账号凭据或内部错误广播给无关用户。
+
+### 前端依赖边界与包体积
+
+- `antd` 与 `@ant-design/*` 属于大型依赖，只允许出现在管理后台边界：`client/src/pages/admin/`、`client/src/pages/Admin.tsx` 和 `client/src/pages/Setup.tsx`。
+- `client/src/pages/Home.tsx`、`Room.tsx`、`TvDisplay.tsx`、普通用户组件、hooks、stores、lib 及其他主站代码禁止直接或间接新增 Ant Design 引入，避免把管理后台依赖带入普通用户首屏或主站 chunk。
+- 普通用户页面优先使用原生 HTML、项目已有轻量组件或 `lucide-react` 图标。新增 UI 依赖前必须评估构建产物、首屏加载和代码分割影响。
+- 不得通过修改检查脚本、扩大允许目录或隐藏 import 的方式绕过此规则；确需使用 Ant Design 时，必须将功能移动到管理后台边界并保持懒加载。
 
 ### Redis 与运行时状态
 
@@ -115,6 +122,7 @@ curl http://localhost:4000/api/health
 | 变更类型 | 至少验证 |
 |---|---|
 | 前端 UI/状态 | 类型检查、生产构建、桌面与窄屏关键流程、加载/空态/失败态 |
+| 前端依赖/组件 | `npm run build:check`；确认 `check:antd-boundary` 通过；检查主站 chunk 未引入 `antd-vendor` |
 | HTTP/Socket | 成功、未认证、越权、非法参数、限流、断线重连、旧 payload 或客户端兼容 |
 | Redis/配置 | 默认值、旧配置读取、写入后重启、无效输入、敏感字段脱敏、失败恢复 |
 | 权限/身份/凭据 | 正向权限、越权拒绝、会话失效、日志与响应脱敏、回调伪造/重放边界 |

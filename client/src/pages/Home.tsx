@@ -1,10 +1,9 @@
 import { useState, useEffect, useCallback, useMemo, memo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AndroidOutlined } from '@ant-design/icons';
 import {
   Users, ArrowRight, Lock, ListMusic,
   Loader2, RefreshCw, Plus, X, Disc3, Sparkles, Github, History, HeartHandshake, Heart,
-  Play, Activity, Search, ShieldCheck, Crown
+  Play, Activity, Search, ShieldCheck, Crown, Smartphone
 } from 'lucide-react';
 import { createRoom, checkRoom, listRooms } from '../api/meting';
 import { useRoomStore } from '../stores/roomStore';
@@ -684,12 +683,12 @@ export default function Home() {
               )}
               <Tooltip content="下载 Android 客户端">
                 <a href={ANDROID_APK_URL} download="openmusic.apk" className={`hidden sm:inline-flex ${headerIconCls}`} aria-label="下载 Android 客户端">
-                  <AndroidOutlined className="home-header-icon__download text-[20px]" />
+                  <Smartphone className="home-header-icon__download h-5 w-5" />
                 </a>
               </Tooltip>
               <Tooltip content="下载 Android 客户端">
                 <button type="button" onClick={() => setDownloadModalOpen(true)} className={`inline-flex sm:hidden ${headerIconCls}`} aria-label="下载 Android 客户端">
-                  <AndroidOutlined className="home-header-icon__download text-[20px]" />
+                  <Smartphone className="home-header-icon__download h-5 w-5" />
                 </button>
               </Tooltip>
               {adminEntryPath && (
