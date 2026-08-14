@@ -2091,6 +2091,44 @@ export async function listRooms(userId = '') {
   return personalizeLobbyRooms(cachedListRooms, userId);
 }
 
+function randomMatchRoomWeight(room) {
+  const userCount = room.users.size;
+  const activeScore = room.isPlaying && room.current ? 12 : room.current ? 8 : 0;
+  const crowdScore = Math.min(userCount, 8) * 3;
+  const queueScore = Math.min(room.queue.length, 12) * 0.75;
+  const freshnessScore = Math.max(0, 6 - Math.floor((Date.now() - (Number(room.createdAt) || 0)) / (30 * 60 * 1000)));
+  return Math.max(1, 1 + activeScore + crowdScore + queueScore + freshnessScore);
+}
+
+function isRoomRandomMatchable(room) {
+  if (!isRoomVisibleInLobby(room)) return false;
+  // 无人房间无法交接房主体验，随机匹配只带用户进入已有成员在线的房间。
+  if (room.users.size <= 0) return false;
+  // 随机匹配只进入无需凭据的公开房，避免把用户带到锁房/密码页。
+  if (room.isLocked || room.passwordHash) return false;
+  return true;
+}
+
+export function findRandomMatchRoom(userId = '') {
+  const candidates = Array.from(rooms.values()).filter(isRoomRandomMatchable);
+  if (candidates.length === 0) return null;
+
+  const weighted = candidates.map((room) => ({ room, weight: randomMatchRoomWeight(room) }));
+  const total = weighted.reduce((sum, item) => sum + item.weight, 0);
+  let pick = Math.random() * total;
+  let selected = weighted[weighted.length - 1].room;
+  for (const item of weighted) {
+    pick -= item.weight;
+    if (pick <= 0) {
+      selected = item.room;
+      break;
+    }
+  }
+
+  scheduleLobbyCoverResolve(selected);
+  return personalizeLobbyRooms([serializeRoomSummary(selected)], userId)[0] || null;
+}
+
 function personalizeLobbyRooms(list, userId) {
   const normalizedUserId = String(userId || '').trim();
   return list.map(({ ownerId, adminIds, ...room }) => ({

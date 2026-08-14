@@ -97,7 +97,7 @@ Meting / 房间凭证密钥等由向导或管理后台配置。使用汽水音�
 
 | 层级 | 职责 |
 |------|------|
-| **Nginx** | 直出 `client/dist` 静态资源；SPA `try_files`；HTTPS |
+| **Nginx** | 直出 `client/dist` 静态资源；仅首页、房间和后台入口回退；HTTPS |
 | **Node `:4000`** | 仅承接 `/api/*`、`/socket.io/`、`/downloads/`、`/wx-proxy`、`/cgi-bin/`、SEO 文件 |
 
 **不要** `location / { proxy_pass 4000; }` 全站进 Node。
@@ -115,7 +115,7 @@ Meting / 房间凭证密钥等由向导或管理后台配置。使用汽水音�
 
 1. `/socket.io/` 必须 WebSocket 升级
 2. `/api/media-proxy` 写在 `/api/` 前面，关闭缓冲
-3. `root` 指向 `client/dist`；`location /` 用 `try_files`
+3. `root` 指向 `client/dist`；未知路径须保持 HTTP `404`，并按示例回退到前端 404 页面；仅 `/`、`/room/*`、`/tv/*` 与后台入口可进入应用
 4. 有 CDN 时透传 `CLIENT_IP_HEADER`
 
 宝塔详细步骤见 [deploy/DEPLOY-BAOTA.md](../deploy/DEPLOY-BAOTA.md)。
@@ -142,6 +142,7 @@ npm run package:build      # 交互式录入更新说明，组装 release zip
 | `GET` | `/api/setup/status` | 是否需首次部署 |
 | `GET` | `/api/app-version` | 前端版本与更新说明 |
 | `GET` | `/api/rooms` | 房间列表 |
+| `GET` | `/api/rooms/random-match` | 随机匹配一个无需密码、未锁定且有成员在线的公开活跃房间 |
 | `POST` | `/api/rooms` | 创建房间 |
 | `GET` | `/api/music/toplist/netease` | 网易云热歌榜 |
 | `POST` | `/api/music/playlist/import` | 导入歌单 |

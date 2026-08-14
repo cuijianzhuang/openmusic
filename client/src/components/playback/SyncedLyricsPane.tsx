@@ -11,6 +11,7 @@ interface Props {
   scrollable?: boolean;
   /** TV 大屏降低滚动动画成本 */
   instantScroll?: boolean;
+  mobileCentered?: boolean;
 }
 
 function SyncedLyricsPane({
@@ -20,6 +21,7 @@ function SyncedLyricsPane({
   size = 'default',
   scrollable = false,
   instantScroll = false,
+  mobileCentered = false,
 }: Props) {
   const currentTime = useSmoothPlaybackTime();
 
@@ -32,6 +34,7 @@ function SyncedLyricsPane({
       size={size}
       scrollable={scrollable}
       instantScroll={instantScroll}
+      mobileCentered={mobileCentered}
     />
   );
 }

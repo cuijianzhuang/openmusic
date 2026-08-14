@@ -1,6 +1,6 @@
 import { memo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { Play, Pause, SkipForward, ChevronUp, Loader2, Flag } from 'lucide-react';
+import { Play, Pause, SkipForward, Loader2, Flag } from 'lucide-react';
 import { useRoomStore } from '../stores/roomStore';
 import { useAudioStore } from '../stores/audioStore';
 import { useSocket } from '../hooks/useSocket';
@@ -22,6 +22,7 @@ import TruncateTip from './TruncateTip';
 import ErrorReportModal from './ErrorReportModal';
 import PlayModeButton from './PlayModeButton';
 import { updateMediaSessionPlaybackState } from '../lib/mediaSession';
+import { isMobileDevice } from '../lib/audioUnlock';
 import DesktopLyricsPiP from './DesktopLyricsPiP';
 
 interface Props {
@@ -66,6 +67,8 @@ export default memo(function MiniPlayer({
   const [reportOpen, setReportOpen] = useState(false);
   const mySocketId = useRoomStore((s) => s.mySocketId);
   const hasPendingSkip = skipRequests?.some((r) => r.requestedBy === mySocketId) ?? false;
+  const isMobile = isMobileDevice();
+  const showDesktopLyrics = !isMobile;
   const qualityLabel = current
     ? (actualQualityByTrack[getTrackKey(current)] ?? null)
     : null;
@@ -172,7 +175,7 @@ export default memo(function MiniPlayer({
             song={current}
             size="tiny"
             eager
-            className="control-cover bg-netease-card"
+            className="control-cover hidden bg-netease-card sm:block"
           />
               <div className="control-meta">
                 <div className="control-title">
@@ -253,7 +256,7 @@ export default memo(function MiniPlayer({
               buttonClassName="mineradio-ctrl-btn"
               iconClassName="h-4 w-4"
             />
-            <DesktopLyricsPiP song={current} />
+            {showDesktopLyrics && <DesktopLyricsPiP song={current} />}
             <Tooltip content="上报错误/提交意见">
               <button
                 type="button"
@@ -302,7 +305,6 @@ export default memo(function MiniPlayer({
               <p className="truncate text-sm font-medium text-netease-muted">私人漫游</p>
               <p className="truncate text-[11px] text-netease-muted/80 sm:text-xs">正在加载…</p>
             </div>
-            <ChevronUp className="h-4 w-4 flex-shrink-0 text-transparent sm:hidden" aria-hidden />
           </div>
 
           <div className="min-w-0 flex-1 px-1 text-center sm:px-2">
@@ -357,16 +359,16 @@ export default memo(function MiniPlayer({
 
         <div className="mx-auto flex w-full max-w-5xl items-center gap-2 px-3 py-2 sm:gap-3 sm:px-4 sm:py-2.5">
 
-        <button onClick={onExpand} className="flex items-center gap-2 sm:gap-2.5 flex-shrink-0 max-w-[38%] sm:max-w-[32%] min-w-0 text-left">
+        <button onClick={onExpand} className="flex min-w-0 flex-1 items-center gap-2 text-left sm:max-w-[32%] sm:flex-shrink-0 sm:gap-2.5">
 
           <SongCover
             song={current}
             size="tiny"
             eager
-            className="w-10 h-10 sm:w-11 sm:h-11 rounded-lg object-cover bg-netease-card flex-shrink-0"
+            className="hidden w-10 h-10 sm:block sm:w-11 sm:h-11 rounded-lg object-cover bg-netease-card flex-shrink-0"
           />
 
-          <div className="min-w-0 hidden sm:block">
+          <div className="min-w-0 block">
 
             <div className="flex min-w-0 items-center gap-1.5">
               <TruncateTip
@@ -388,13 +390,11 @@ export default memo(function MiniPlayer({
 
           </div>
 
-          <ChevronUp className="w-4 h-4 text-netease-muted flex-shrink-0 sm:hidden" />
-
         </button>
 
         <MiniPlayerLyricTicker song={current} />
 
-        <div className="flex flex-shrink-0 items-center gap-1 sm:gap-2">
+        <div className="ml-auto flex flex-shrink-0 items-center gap-1 sm:gap-2">
 
         <PlaybackTimeLabel
           song={current}
@@ -452,7 +452,7 @@ export default memo(function MiniPlayer({
 
         <VolumeControl compact className="flex-shrink-0" />
             <FavoriteButton song={current} className="w-8 h-8 text-netease-muted hover:text-rose-300" />
-        <DesktopLyricsPiP song={current} />
+        {showDesktopLyrics && <DesktopLyricsPiP song={current} />}
         <Tooltip content="上报错误/提交意见">
           <button
             type="button"

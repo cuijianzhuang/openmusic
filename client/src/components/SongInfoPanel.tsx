@@ -10,6 +10,7 @@ interface Props {
   requestedBy?: string;
   qualityLabel?: string | null;
   size?: 'default' | 'large';
+  mobileCentered?: boolean;
 }
 
 function SongInfoPanel({
@@ -19,6 +20,7 @@ function SongInfoPanel({
   requestedBy,
   qualityLabel,
   size = 'default',
+  mobileCentered = false,
 }: Props) {
   const large = size === 'large';
   const metaParts = [
@@ -29,7 +31,7 @@ function SongInfoPanel({
 
   return (
     <div className={`flex-shrink-0 px-1 ${large ? 'pt-2 sm:pt-4 lg:pt-10 2xl:pt-14' : 'pt-4 lg:pt-10'} pb-2 sm:pb-4`}>
-      <div className="flex min-w-0 items-center gap-2 2xl:gap-3">
+      <div className={`flex min-w-0 items-center gap-2 2xl:gap-3 ${mobileCentered ? 'justify-center lg:justify-start' : ''}`}>
         <h2 className={`min-w-0 truncate font-semibold ${large ? 'text-xl lg:text-2xl 2xl:text-4xl 3xl:text-5xl' : 'text-xl lg:text-2xl 2xl:text-3xl'}`}>{name}</h2>
         <PlaybackQualityTag
           label={qualityLabel}
@@ -37,7 +39,7 @@ function SongInfoPanel({
           className={large ? 'text-[11px] 2xl:text-sm px-2 py-1' : undefined}
         />
       </div>
-      <p className={`mt-2 truncate text-white/65 ${large ? 'text-sm 2xl:text-xl 3xl:text-2xl' : 'text-sm 2xl:text-base'}`}>
+      <p className={`mt-2 truncate text-white/65 ${mobileCentered ? 'text-center lg:text-left' : ''} ${large ? 'text-sm 2xl:text-xl 3xl:text-2xl' : 'text-sm 2xl:text-base'}`}>
         {metaParts.join(' · ')}
       </p>
     </div>

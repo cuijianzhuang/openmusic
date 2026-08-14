@@ -49,7 +49,7 @@ export default function RoomQualityBadge({ audioQuality, className = '', onClick
       <AudioLines className="h-3 w-3 text-white/35" aria-hidden />
       <Tooltip content={`网易：${neteaseLabel}`}>
         <span className="inline-flex items-center gap-1">
-          <span className="text-netease-red/80">网易</span>
+          <span className="text-[#ec4141]/80">网易</span>
           <span className="text-white/75">{neteaseShort}</span>
         </span>
       </Tooltip>

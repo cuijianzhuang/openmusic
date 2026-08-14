@@ -41,6 +41,7 @@ import SongCover from '../components/SongCover';
 import { fileToRoomCoverDataUrl, isSupportedRoomCoverFile } from '../lib/roomCoverImage';
 
 import AudioEngine from '../components/AudioEngine';
+import NativeWebViewBridge from '../components/NativeWebViewBridge';
 
 import SourceBadge from '../components/SourceBadge';
 import SearchFilterSelect from '../components/SearchFilterSelect';
@@ -78,6 +79,7 @@ import Tooltip from '../components/Tooltip';
 import RoomThemeColorPicker from '../components/RoomThemeColorPicker';
 import UserRoleMarks from '../components/UserRoleMarks';
 import { copyToClipboard } from '../lib/copyToClipboard';
+import { shareWithNative } from '../lib/nativeWebView';
 import { rememberRoomVisit } from '../lib/recentRooms';
 import { ensureRoomChromeInit } from '../lib/roomChromeInit';
 import { buildRoomShareText } from '../lib/roomShare';
@@ -297,7 +299,7 @@ export default function Room() {
     noindex: true,
   });
 
-  const { joinRoom, addSong, leaveRoom, listFavorites, setFavorite, importFavorites, renameRoomName, setRoomLock, setRoomFmMode, setRoomAnnouncement, setRoomCustomCover, setChatHistoryVisibleOnJoin, setChatShowAvatars, setRoomJoinNotice, setRoomAiSettings, setRoomMaxAdmins, setSongRequestEnabled, unbanRoomSong, addRoomForbiddenWord, removeRoomForbiddenWord, setRoomMemberTier, removeRoomMemberTier, setRoomMemberSettings, loadSongHistory, transferOwner, destroyRoom, applyRoomPermanent, cancelRoomPermanent, clearQueue, createMusicAccountQr, checkMusicAccountQr, bindMusicAccount, listMusicAccounts, setMusicAccountShared, unbindMusicAccount } = useSocket();
+  const { joinRoom, addSong, leaveRoom, listFavorites, setFavorite, importFavorites, renameRoomName, setRoomLock, setRoomFmMode, setRoomAnnouncement, setRoomCustomCover, setChatHistoryVisibleOnJoin, setChatShowAvatars, setRoomJoinNotice, setRoomAiSettings, setRoomMaxAdmins, setSongRequestEnabled, unbanRoomSong, addRoomForbiddenWord, removeRoomForbiddenWord, setRoomMemberTier, removeRoomMemberTier, setRoomMemberSettings, loadSongHistory, transferOwner, destroyRoom, applyRoomPermanent, cancelRoomPermanent, clearQueue, createMusicAccountQr, checkMusicAccountQr, bindMusicAccount, listMusicAccounts, setMusicAccountShared, unbindMusicAccount, skipSong, togglePlay } = useSocket();
   const { applyFavorites } = useFavorites();
   const { queueKeys, playedKeys } = useRoomSongKeySets();
 
@@ -1663,7 +1665,7 @@ export default function Room() {
         : null,
       isPlaying: room.isPlaying,
     });
-    const ok = await copyToClipboard(text);
+    const ok = await shareWithNative(text) || await copyToClipboard(text);
     if (ok) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
@@ -2519,6 +2521,13 @@ export default function Room() {
       }`}
       style={immersiveTransition || immersiveShellMotion ? immersiveTimingCssVars() : undefined}
     >
+
+      <NativeWebViewBridge
+        song={room.current}
+        isPlaying={Boolean(room.isPlaying)}
+        skipSong={skipSong}
+        togglePlay={togglePlay}
+      />
 
       <Suspense fallback={null}>
         <ImmersiveTransitionOverlay

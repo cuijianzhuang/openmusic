@@ -71,6 +71,7 @@ export function isPublicApiPath(req) {
   if (path === '/api/music/sources' && req.method === 'GET') return true;
   // 大厅房间列表仅公开摘要，无敏感字段；公开后首屏可与会话并行加载
   if (path === '/api/rooms' && req.method === 'GET') return true;
+  if (path === '/api/rooms/random-match' && req.method === 'GET') return true;
   if (path === '/api/session/bootstrap' && req.method === 'POST') return true;
   // 汽水官方二次验证组件运行在 iframe 中，只能通过原生 fetch 回调，
   // 无法生成 OpenMusic 的 X-OM-* 请求签名；具体路由仍会校验 HttpOnly 会话和扫码会话归属。

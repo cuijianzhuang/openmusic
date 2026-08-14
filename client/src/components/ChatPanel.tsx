@@ -84,14 +84,17 @@ export default function ChatPanel({ className = '' }: { className?: string }) {
     if (!isMobileLayout) return;
     const panel = chatPanelRef.current;
     if (!panel) return;
-    // 与 Room.tsx / MiniPlayer：fixed bottom + h-[4.75rem] + safe-area
+    // 根据底栏实际高度避让，歌词独立行等移动端布局变化也能自动适配
     const rem = Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
     const probe = document.createElement('div');
     probe.style.cssText = 'position:fixed;visibility:hidden;pointer-events:none;height:env(safe-area-inset-bottom,0px)';
     document.body.appendChild(probe);
     const safeBottom = probe.getBoundingClientRect().height;
     probe.remove();
-    const limit = window.innerHeight - 4.75 * rem - safeBottom - 8;
+    const bottomBar = document.getElementById('bottom-bar');
+    const bottomBarRect = bottomBar?.getBoundingClientRect();
+    const fallbackTop = window.innerHeight - 4.75 * rem - safeBottom;
+    const limit = (bottomBarRect ? bottomBarRect.top : fallbackTop) - 8;
     const overflow = panel.getBoundingClientRect().bottom - limit;
     if (overflow <= 1) return;
     let node: HTMLElement | null = panel.parentElement;

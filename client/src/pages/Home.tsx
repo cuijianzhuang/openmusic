@@ -3,13 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import {
   Users, ArrowRight, Lock, ListMusic,
   Loader2, RefreshCw, Plus, X, Disc3, Sparkles, Github, History, HeartHandshake, Heart,
-  Play, Activity, Search, ShieldCheck, Crown, Smartphone
+  Play, Activity, Search, ShieldCheck, Crown, Smartphone, Shuffle
 } from 'lucide-react';
-import { createRoom, checkRoom, listRooms } from '../api/meting';
+import { createRoom, checkRoom, listRooms, randomMatchRoom } from '../api/meting';
 import { useRoomStore } from '../stores/roomStore';
 import { useSocket } from '../hooks/useSocket';
 import type { RoomSummary } from '../types';
-import { usePageSeo } from '../lib/seo';
+import { usePageSeo, useSiteSeoConfig } from '../lib/seo';
 import { partitionRoomsByRecent, sortRecentRooms } from '../lib/recentRooms';
 import { getStoredRoomPassword } from '../lib/roomPassword';
 import { areRoomListsEqual, isLobbyHardLocked, sortLobbyRooms } from '../lib/roomListCompare';
@@ -392,12 +392,15 @@ export default function Home() {
   const { leaveRoom } = useSocket();
 
   usePageSeo({ path: '/' });
+  const siteSeo = useSiteSeoConfig();
 
   const [rooms, setRooms] = useState<RoomSummary[]>([]);
   const [roomsLoading, setRoomsLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
+  const [matchLoading, setMatchLoading] = useState(false);
   const [adminEntryPath] = useState(() => getRememberedAdminEntryPath());
   const [error, setError] = useState('');
+  const [matchError, setMatchError] = useState('');
 
   const [showCreate, setShowCreate] = useState(false);
   const [showJoin, setShowJoin] = useState(false);
@@ -558,6 +561,7 @@ export default function Home() {
   const handleCreate = async () => {
     setActionLoading(true);
     setError('');
+    setMatchError('');
     setModalError('');
     const pwd = createPassword.trim();
     if (pwd && pwd.length < 4) {
@@ -579,6 +583,24 @@ export default function Home() {
     }
   };
 
+  const handleRandomMatch = async () => {
+    if (matchLoading) return;
+    setMatchLoading(true);
+    setError('');
+    setMatchError('');
+    setModalError('');
+    try {
+      const room = await randomMatchRoom();
+      goToRoom(room.id);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message.trim() : '';
+      setMatchError(msg || '暂时没有可随机加入的公开房间');
+      void fetchRooms(true);
+    } finally {
+      setMatchLoading(false);
+    }
+  };
+
   const handleJoinByCode = async () => {
     const code = joinCode.trim().toUpperCase();
     if (!code) {
@@ -587,6 +609,7 @@ export default function Home() {
     }
     setActionLoading(true);
     setError('');
+    setMatchError('');
     setModalError('');
     try {
       const result = await checkRoom(code);
@@ -607,6 +630,7 @@ export default function Home() {
 
   const handleRoomCardClick = useCallback((room: RoomSummary) => {
     setError('');
+    setMatchError('');
     const storedPassword = getStoredRoomPassword(room.id);
     if (room.hasPassword && !storedPassword) {
       navigate(`/room/${room.id}`, { state: { hasPassword: true } });
@@ -747,7 +771,7 @@ export default function Home() {
 
             <h1 className="home-hero-stage home-hero-stage--title relative text-4xl sm:text-5xl lg:text-[68px] font-black tracking-tight leading-[1.1] mb-5">
               <BlurText
-                text="和喜欢的人"
+                text={siteSeo.heroHeadline}
                 delay={40}
                 startDelay={60}
                 charClassName="hero-char"
@@ -765,7 +789,7 @@ export default function Home() {
                     animationSpeed={8}
                     direction="diagonal"
                   >
-                    听同一首歌
+                    {siteSeo.heroSubline}
                   </GradientText>
                 </span>
                 <GradientText
@@ -774,7 +798,7 @@ export default function Home() {
                   animationSpeed={8}
                   direction="diagonal"
                 >
-                  听同一首歌
+                  {siteSeo.heroSubline}
                 </GradientText>
               </span>
             </h1>
@@ -822,8 +846,27 @@ export default function Home() {
                         className="w-full h-12 sm:h-14 bg-transparent pl-14 pr-6 text-white caret-netease-red placeholder:text-white/30 outline-none rounded-full text-[15px] transition-colors focus:bg-white/[0.04]"
                       />
                     </div>
-                    <div className="flex gap-2.5">
-                      <Magnet className="flex flex-1 sm:flex-none" strength={0.28} maxOffset={8}>
+                    <div className="flex flex-wrap sm:flex-nowrap gap-2.5">
+                      <Magnet className="order-2 flex flex-1 sm:flex-none" strength={0.28} maxOffset={8}>
+                        <div className="flex w-full">
+                          <button
+                            type="button"
+                            onClick={() => void handleRandomMatch()}
+                            disabled={matchLoading}
+                            onMouseMove={handleBtnTilt}
+                            onMouseLeave={resetBtnTilt}
+                            className="btn-shine btn-tilt group/match h-12 sm:h-14 w-full px-5 sm:px-7 rounded-full bg-white/10 hover:bg-white/18 border border-white/10 hover:border-white/25 text-white font-semibold shadow-lg shadow-black/20 whitespace-nowrap disabled:cursor-wait disabled:opacity-70"
+                          >
+                            <span className="btn-tilt-face flex h-full w-full items-center justify-center gap-2">
+                              {matchLoading ? (
+                                <Loader2 className="w-5 h-5 animate-spin" />
+                              ) : null}
+                              匹配
+                            </span>
+                          </button>
+                        </div>
+                      </Magnet>
+                      <Magnet className="order-1 flex flex-1 sm:flex-none" strength={0.28} maxOffset={8}>
                         <div data-guide="home-create" className="flex w-full">
                           <button
                             type="button"
@@ -844,7 +887,7 @@ export default function Home() {
                           </button>
                         </div>
                       </Magnet>
-                      <Magnet className="flex flex-1 sm:flex-none" strength={0.28} maxOffset={8}>
+                      <Magnet className="order-3 flex flex-1 sm:flex-none" strength={0.28} maxOffset={8}>
                         <div data-guide="home-join" className="flex w-full">
                           <button
                             type="button"
@@ -888,6 +931,21 @@ export default function Home() {
                   aria-label="关闭提示"
                   onClick={() => setError('')}
                   className="shrink-0 p-0.5 rounded-full text-red-400/70 hover:text-white hover:bg-white/10 transition-colors"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
+            {matchError && (
+              <div className="mt-4 flex items-center gap-2 px-5 py-3 rounded-full bg-white/[0.06] border border-white/10 text-white/70 text-sm animate-fade-in">
+                <Shuffle className="w-4 h-4 shrink-0 text-netease-red/80" />
+                <span className="flex-1 min-w-0">{matchError}</span>
+                <button
+                  type="button"
+                  aria-label="关闭提示"
+                  onClick={() => setMatchError('')}
+                  className="shrink-0 p-0.5 rounded-full text-white/50 hover:text-white hover:bg-white/10 transition-colors"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>

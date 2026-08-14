@@ -3,6 +3,7 @@
 @tailwind utilities;
 
 :root {
+  --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
   color-scheme: dark;
   --om-canvas: #09090b;
   --om-surface: #111114;
@@ -27,6 +28,42 @@
   --room-chrome-filter: blur(24px);
 }
 
+.nav-link-underline {
+  position: relative;
+  padding-bottom: 4px;
+}
+
+.nav-link-underline::after {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 1px;
+  background: currentColor;
+  content: '';
+  transform: scaleX(0);
+  transform-origin: right;
+  transition: transform 240ms var(--ease-spring);
+}
+
+.nav-link-underline:hover::after { transform: scaleX(1); transform-origin: left; }
+.role-link { transition: transform 180ms var(--ease-spring), opacity 180ms ease; }
+.role-link:hover { transform: translateX(4px); }
+.status-dot { animation: dotPulse 1.6s ease-in-out infinite; }
+.reveal-up { animation: revealUp 0.9s var(--ease-spring) both; }
+.reveal-right { animation: revealRight 0.9s var(--ease-spring) both; }
+.portfolio-cta { transition: opacity 180ms ease; }
+.portfolio-cta:hover { opacity: 0.75; }
+
+@keyframes revealUp { from { opacity: 0; transform: translateY(80px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes revealRight { from { opacity: 0; transform: translateX(100px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes dotPulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .45; transform: scale(1.45); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .status-dot, .reveal-up, .reveal-right { animation: none; }
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; }
+}
+
 * {
   box-sizing: border-box;
 }
@@ -42,6 +79,7 @@ body {
   font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
+
 
 /* 暗色输入框：抑制 Chrome 自动填充/切焦点时的白底闪烁 */
 .home-modal-input {
@@ -3564,9 +3602,10 @@ body.immersive-mode #hand-canvas {
     margin-left: auto;
   }
 
-  /* 普通底栏窄屏可隐藏歌名区；沉浸模式必须显示歌曲名 */
+  /* 手机端保留歌名/歌手信息；隐藏的桌面歌词按钮不再占用布局空间 */
   .control-track {
-    display: none;
+    display: flex;
+    max-width: 42%;
   }
 
   .room-immersive-mode .control-track {

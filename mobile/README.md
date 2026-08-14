@@ -1,49 +1,21 @@
-# OpenMusic Mobile (Flutter)
+# OpenMusic Mobile
 
-原生 Android / iOS / Windows / Web 客户端，**不嵌入 WebView**。与现有 Node + Socket.IO 后端互通。
+这是一个 Android WebView 容器，不再实现 Flutter 原生房间、Socket.IO 或音频播放逻辑。网页负责业务与媒体播放，Flutter 提供 WebView、Android 通知栏媒体控件和受限 Android 工具调用。
 
-## 本地调试（推荐）
+Android 13 及以上首次播放时需要允许通知权限，才能显示通知栏/锁屏媒体控件。
 
-见 [LOCAL.md](./LOCAL.md)。最短路径：
+## 本地启动
 
 ```powershell
-# 终端 1：仓库根目录
-npm run dev
-
-# 终端 2
 cd mobile
-.\scripts\run-local.ps1
+flutter pub get
+flutter run --dart-define=OM_FLAVOR=local --dart-define=OM_SERVER_URL=http://10.0.2.2:4000
 ```
 
-会用 Chrome 打开 App，默认连 `http://127.0.0.1:4000`。
-
-## 要求
-
-- Flutter 3.24+ / Dart 3.5+
-- 本机调试优先 Chrome；Windows 桌面需 VS「使用 C++ 的桌面开发」
-- Android Studio / Xcode（按移动平台）
-
-## 配置
-
-| 场景 | 地址 |
-|------|------|
-| 本机 Chrome / Windows | `http://127.0.0.1:4000` |
-| Android 模拟器 | `http://10.0.2.2:4000` |
-| 真机连本机 | `http://<电脑局域网IP>:4000` |
-| 正式服 | `https://qqovo.top` |
-
-也可 `--dart-define=OM_SERVER_URL=...`，或大厅右上角改地址。
+详细的模拟器与真机地址配置见 [LOCAL.md](./LOCAL.md)，桥接事件和原生工具见 [WEB_SHELL.md](./WEB_SHELL.md)。
 
 ## 构建
 
 ```bash
-cd mobile
-flutter build apk --release --split-per-abi --dart-define=OM_FLAVOR=prod
-flutter build appbundle --release --dart-define=OM_FLAVOR=prod
+flutter build apk --release --dart-define=OM_FLAVOR=prod --dart-define=OM_SERVER_URL=https://qqovo.top
 ```
-
-产物可复制到 `server/downloads/openmusic.apk`。
-
-## 范围
-
-一起听歌用户端对等；不做沉浸模式、TV、Admin。

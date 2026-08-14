@@ -41,7 +41,7 @@ function readStoredSource(): HotRankSource {
 }
 
 function rankClass(rank: number) {
-  if (rank === 1) return 'text-netease-red font-bold';
+  if (rank === 1) return 'text-[#ec4141] font-bold';
   if (rank === 2) return 'text-orange-400/90 font-semibold';
   if (rank === 3) return 'text-amber-400/80 font-semibold';
   return 'text-netease-muted/70 font-medium tabular-nums';

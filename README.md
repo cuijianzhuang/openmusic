@@ -119,7 +119,7 @@ npm run dev
 
 ### 🏠 房间
 
-- 大厅、密码房、最近访问、分享链接
+- 大厅、随机匹配、密码房、最近访问、分享链接
 - **自定义封面**：房主可上传房间封面，大厅卡片同步；取消后恢复跟随当前歌曲
 - 站点公告 / 房间公告（进房弹窗）、网易与汽水漫游、主题色
 - 房主转让、正式管理员、房主离线时临时控播
@@ -225,19 +225,27 @@ API Key 仅用于服务端请求，运行配置会进行加密存储；AI 未启
 
 ---
 
-## 📱 Android / iOS（重构中）
+## 📱 Android 应用
 
-> 功能与产物可能变动，暂不建议作为稳定版本使用。
+Android 端是 **Flutter WebView 容器**，加载 OpenMusic 网页；房间、登录、播放和权限统一由网页及服务端处理
 
-路径：[`mobile/`](mobile/)（Flutter，不嵌入 WebView），与网页共用 Socket.IO 后端。详见 [移动端文档](docs/MOBILE.md)。
+### 构建 APK
 
-```bash
+```powershell
 cd mobile
 flutter pub get
-flutter run --dart-define=OM_SERVER_URL=https://your-host
+flutter build apk --release `
+  --dart-define=OM_FLAVOR=prod `
+  --dart-define=OM_SERVER_URL=https://qqovo.top
 ```
 
-CI：`flutter-android-apk.yml` / `flutter-ios-ipa.yml`。产物发布至 `/downloads/openmusic.apk` 与 `/downloads/openmusic.ipa`。
+APK 输出位置：`mobile/build/app/outputs/flutter-apk/app-release.apk`。
+
+### 通知栏播放
+
+- Android 13+ 需允许通知权限，通知栏和锁屏播放控件才会显示。
+- 支持播放 / 暂停、下一首和拖动进度，操作会回传网页，并由服务端按房间权限最终裁决。
+- 详情见 [`mobile/README.md`](mobile/README.md)。
 
 ---
 

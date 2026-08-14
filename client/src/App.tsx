@@ -4,6 +4,7 @@ import AppUpdateGate from './components/AppUpdateGate';
 import AppErrorBoundary from './components/AppErrorBoundary';
 import ErrorReportSolutionGate from './components/ErrorReportSolutionGate';
 import PermanentDecisionGate from './components/PermanentDecisionGate';
+import NotFoundPage from './components/NotFoundPage';
 import { rememberAdminEntryPath } from './lib/adminEntryShortcut';
 import { lazyWithRetry } from './lib/lazyWithRetry';
 import { nextLoadingQuote, useLoadingQuote } from './lib/loadingQuote';
@@ -30,12 +31,7 @@ function RouteFallback() {
 }
 
 function NotFound() {
-  return (
-    <div className="flex h-full min-h-[50vh] flex-col items-center justify-center gap-2 bg-netease-dark text-netease-muted">
-      <p className="text-sm">页面不存在</p>
-      <a href="/" className="text-xs text-netease-red hover:underline">返回首页</a>
-    </div>
-  );
+  return <NotFoundPage />;
 }
 
 /** 与服务端 sanitizeAdminEntryPath 对齐：仅合法形态才打 gate，避免 * 通配放大探测 */

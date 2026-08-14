@@ -413,6 +413,16 @@ export async function listRooms(): Promise<RoomSummary[]> {
   return res.json();
 }
 
+export async function randomMatchRoom(): Promise<RoomSummary> {
+  const res = await fetchWithTimeout('/api/rooms/random-match', {}, 12000);
+  if (!res.ok) {
+    const data = (await res.json().catch(() => null)) as { error?: unknown } | null;
+    const message = typeof data?.error === 'string' ? data.error.trim() : '';
+    throw new Error(message || '随机匹配失败，请稍后再试');
+  }
+  return res.json();
+}
+
 export async function checkRoom(id: string): Promise<RoomCheckResult> {
   const res = await fetchWithTimeout(`/api/rooms/${id}`);
   if (!res.ok) return { exists: false, hasPassword: false };

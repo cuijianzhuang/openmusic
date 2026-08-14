@@ -15,6 +15,7 @@ interface Props {
   scrollable?: boolean;
   /** TV 等场景用 instant 滚动降低布局成本 */
   instantScroll?: boolean;
+  mobileCentered?: boolean;
 }
 
 const SIDE_WINDOW = 5;
@@ -28,6 +29,7 @@ function Lyrics({
   size = 'default',
   scrollable = false,
   instantScroll = false,
+  mobileCentered = false,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const activeRef = useRef<HTMLDivElement>(null);
@@ -181,7 +183,7 @@ function Lyrics({
               onClick={onSeek ? () => onSeek(line.time) : undefined}
               className={`${onSeek ? 'cursor-pointer' : ''} ${
                 isActive || isPast ? 'transition-none' : 'transition-colors duration-150'
-              } ${isSide ? 'text-left' : 'text-center'} ${
+              } ${isSide ? (mobileCentered ? 'text-center lg:text-left' : 'text-left') : 'text-center'} ${
                 isActive
                   ? isSide
                     ? activeSideCls

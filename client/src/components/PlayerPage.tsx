@@ -183,6 +183,7 @@ export default memo(function PlayerPage({ onClose }: Props) {
             requestedBy={current.requestedBy}
             qualityLabel={qualityLabel}
             size="large"
+            mobileCentered
           />
 
           <SyncedLyricsPane
@@ -191,6 +192,7 @@ export default memo(function PlayerPage({ onClose }: Props) {
             variant="side"
             size="large"
             scrollable
+            mobileCentered
           />
 
         </div>

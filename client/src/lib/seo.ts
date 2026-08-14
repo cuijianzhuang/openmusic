@@ -210,26 +210,6 @@ function upsertJsonLd(origin: string, seo: SiteSeoConfig) {
   }
   appEl.textContent = JSON.stringify(appData);
 
-  const faqId = 'openmusic-faq-json-ld';
-  let faqEl = document.getElementById(faqId) as HTMLScriptElement | null;
-  const faqs = seo.faqs?.length ? seo.faqs : SEO_FAQS;
-  const faqData = {
-    '@context': 'https://schema.org',
-    '@type': 'FAQPage',
-    mainEntity: faqs.map((item) => ({
-      '@type': 'Question',
-      name: item.q,
-      acceptedAnswer: { '@type': 'Answer', text: item.a },
-    })),
-  };
-  if (!faqEl) {
-    faqEl = document.createElement('script');
-    faqEl.id = faqId;
-    faqEl.type = 'application/ld+json';
-    document.head.appendChild(faqEl);
-  }
-  faqEl.textContent = JSON.stringify(faqData);
-
   const breadcrumbId = 'openmusic-breadcrumb-json-ld';
   let breadcrumbEl = document.getElementById(breadcrumbId) as HTMLScriptElement | null;
   const breadcrumbData = {
@@ -290,9 +270,6 @@ export function applyPageSeo(options: PageSeoOptions = {}) {
     upsertJsonLd(origin, seo);
   }
 
-  // 仅更新视觉隐藏的爬虫底座，不改首页可见 UI
-  syncSeoBootstrap(seo);
-
   upsertMeta('og:title', title, 'property');
   upsertMeta('og:description', description, 'property');
   if (origin) upsertMeta('og:url', url, 'property');
@@ -338,52 +315,8 @@ export function useSiteSeoConfig(): SiteSeoConfig {
   return seo;
 }
 
-/**
- * 同步视觉隐藏的 #seo-bootstrap（爬虫可读，用户看不见）。
- * 不删除该节点，避免弱 JS 爬虫丢正文。
- */
-export function syncSeoBootstrap(seo: SiteSeoConfig = getActiveSeo()) {
-  const el = document.getElementById('seo-bootstrap');
-  if (!el) return;
-
-  const faqs = seo.faqs?.length ? seo.faqs : SEO_FAQS;
-  const features = seo.featureList?.length ? seo.featureList : FEATURE_LIST;
-  const headline = `${seo.heroHeadline} - ${seo.heroSubline}`.replace(/\s*-\s*$/, '').trim()
-    || seo.title;
-
-  // 视觉隐藏：用户看不见，爬虫可读。不用 h1，避免与首页可见 H1 重复。
-  el.innerHTML = [
-    `<p><strong>${escapeHtml(headline)}</strong></p>`,
-    `<p>${escapeHtml(seo.description)}</p>`,
-    `<h2>${escapeHtml(seo.aboutTitle)}</h2>`,
-    `<p>${escapeHtml(seo.aboutText)}</p>`,
-    '<ul>',
-    ...features.map((item) => `<li>${escapeHtml(item)}</li>`),
-    '</ul>',
-    '<h2>常见问题</h2>',
-    ...faqs.flatMap((item) => [
-      `<h3>${escapeHtml(item.q)}</h3>`,
-      `<p>${escapeHtml(item.a)}</p>`,
-    ]),
-    '<nav aria-label="站点导航">',
-    '<a href="/">首页</a>',
-    '<a href="/#about">关于 OpenMusic</a>',
-    '<a href="/#faq">常见问题</a>',
-    '<a href="https://github.com/qq01-hub/openmusic" rel="noopener noreferrer">GitHub 开源仓库</a>',
-    '<a href="https://gitee.com/w3126197382/openmusic" rel="noopener noreferrer">Gitee 镜像</a>',
-    '</nav>',
-  ].join('');
-}
-
-function escapeHtml(text: string) {
-  return String(text || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-/** @deprecated 保留兼容；可见区策略下不再移除爬虫底座 */
+/** React 成功启动后交由各页面输出可见标题，避免与静态兜底 h1 重复。 */
 export function removeSeoBootstrap() {
-  // no-op：隐藏底座留给爬虫，不影响可见 UI
+  const el = document.getElementById('seo-bootstrap');
+  el?.remove();
 }

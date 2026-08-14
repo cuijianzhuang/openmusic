@@ -19,7 +19,7 @@ function MiniPlayerLyricTicker({ song }: Props) {
 
   return (
     <div
-      className="flex-1 min-w-0 px-1 text-center select-text sm:px-2"
+      className="hidden min-w-0 flex-1 select-text px-2 text-center sm:block"
       title="可直接选中复制歌词"
     >
       {currentLyric || nextLyric ? (

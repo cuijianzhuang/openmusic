@@ -5,7 +5,7 @@ import App from './App';
 import './index.css';
 import { installOpenMusicDebug } from './lib/debugTools';
 import { installVisibilitySync } from './lib/visibilitySync';
-import { applyPageSeo, fetchSiteSeo } from './lib/seo';
+import { applyPageSeo, fetchSiteSeo, removeSeoBootstrap } from './lib/seo';
 import { ensureSessionBootstrap } from './lib/sessionBootstrap';
 import { refreshQualityCapabilities } from './api/music/quality';
 import { applyStoredRoomThemeColor } from './lib/roomThemeColor';
@@ -35,3 +35,5 @@ createRoot(document.getElementById('root')!).render(
     </BrowserRouter>
   </StrictMode>,
 );
+
+removeSeoBootstrap();

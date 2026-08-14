@@ -6,6 +6,7 @@ import { getAudioBoundQueueId } from './audioTrackBinding';
 import { debugLine, debugLog } from './debugTools';
 import {
   applyPlaybackState,
+  getClientPlaybackVersion,
   getPlaybackTime,
   playbackStateFromRoom,
   resetPlaybackStateCache,
@@ -46,7 +47,11 @@ function shouldDropPendingAgainstOptimisticPause(state: PlaybackState): boolean 
   const room = useRoomStore.getState().room;
   if (!room || room.id !== state.roomId) return false;
   if (room.isPlaying) return false;
-  return state.status === 'playing';
+  if (state.status !== 'playing') return false;
+
+  // 仅丢弃不新于本地已知版本的旧 playing 快照。暂停后房主再次播放
+  // 会产生更高版本的服务端快照，不能因为本地仍是暂停态而误丢弃。
+  return state.version <= getClientPlaybackVersion();
 }
 
 function isAudioReadyForSnapshot(trackId: string): boolean {

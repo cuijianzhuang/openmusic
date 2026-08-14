@@ -76,6 +76,7 @@ import {
   getRoomPublic,
   getRoom,
   listRooms,
+  findRandomMatchRoom,
   listRoomsForAdmin,
   findIdleOwnedRoom,
   reuseIdleOwnedRoom,
@@ -2315,6 +2316,15 @@ app.get('/api/rooms', async (req, res) => {
   res.json(await listRooms(identity?.userId || ''));
 });
 
+app.get('/api/rooms/random-match', (req, res) => {
+  const identity = resolveIdentityFromRequest(req);
+  const room = findRandomMatchRoom(identity?.userId || '');
+  if (!room) {
+    return res.status(404).json({ error: '暂时没有可随机加入的公开房间' });
+  }
+  res.json(room);
+});
+
 app.post('/api/rooms', async (req, res) => {
   const createIp = getRequestIp(req);
   const createDeviceId = resolveDeviceIdFromCookieHeader(req.headers?.cookie || '');
@@ -2572,7 +2582,7 @@ app.get('/sitemap.xml', (req, res) => {
   res.type('application/xml; charset=utf-8').send(buildSitemapXml(origin));
 });
 
-function sendSpaIndexHtml(req, res, next) {
+function sendSpaIndexHtml(req, res, next, opts = {}) {
   const runtime = getRuntimeConfig();
   const origin = resolveSiteOrigin(req, ALLOWED_ORIGINS, {
     canonicalEnv: runtime.seoCanonicalUrl || SITE_CANONICAL_URL,
@@ -2582,8 +2592,18 @@ function sendSpaIndexHtml(req, res, next) {
     siteOrigin: origin,
   });
   if (!html) return next();
+  if (opts.noindex) {
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+  }
+  if (opts.status) {
+    res.status(opts.status);
+  }
   res.setHeader('Cache-Control', 'no-cache, must-revalidate');
   res.type('html').send(html);
+}
+
+function isRoomOrTvPage(pathname) {
+  return /^\/(?:room|tv)\/[^/]+\/?$/.test(pathname);
 }
 
 /** 启动时把后台已保存的百度验证码写进 dist，兼容 Nginx 静态直出 */
@@ -2667,7 +2687,13 @@ app.get('*', (req, res, next) => {
   ) {
     return next();
   }
-  sendSpaIndexHtml(req, res, next);
+  if (isRoomOrTvPage(req.path)) {
+    return sendSpaIndexHtml(req, res, next, { noindex: true });
+  }
+  if (req.path === getAdminEntryPath()) {
+    return sendSpaIndexHtml(req, res, next, { noindex: true });
+  }
+  sendSpaIndexHtml(req, res, next, { noindex: true, status: 404 });
 });
 
 const socketToRoom = new Map();

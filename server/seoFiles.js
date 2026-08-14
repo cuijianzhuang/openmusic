@@ -156,29 +156,8 @@ export function buildRobotsTxt(siteOrigin) {
     'User-agent: *',
     'Allow: /',
     '',
-    '# 动态会话页不参与收录',
-    'Disallow: /room/',
-    'Disallow: /tv/',
-    '',
-    'User-agent: Baiduspider',
-    'Allow: /',
-    'Disallow: /room/',
-    'Disallow: /tv/',
-    '',
-    'User-agent: Googlebot',
-    'Allow: /',
-    'Disallow: /room/',
-    'Disallow: /tv/',
-    '',
-    'User-agent: Sogou web spider',
-    'Allow: /',
-    'Disallow: /room/',
-    'Disallow: /tv/',
-    '',
-    'User-agent: 360Spider',
-    'Allow: /',
-    'Disallow: /room/',
-    'Disallow: /tv/',
+    '# 房间与电视页由服务端 X-Robots-Tag: noindex, nofollow 控制。',
+    '# 保持可抓取，确保搜索引擎能读取该禁止收录指令。',
     '',
     origin ? `Sitemap: ${origin}/sitemap.xml` : 'Sitemap: /sitemap.xml',
     '',
@@ -266,7 +245,7 @@ export function buildFaqJsonLd(faqs = SEO_FAQS) {
  */
 export function applySiteOriginToHtml(html, siteOrigin) {
   const origin = String(siteOrigin || '').replace(/\/$/, '');
-  if (!origin || !html) return html;
+  if (!html) return html;
   return html.split('__SITE_ORIGIN__').join(origin);
 }
 

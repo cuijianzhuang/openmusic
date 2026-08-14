@@ -22,7 +22,7 @@ const shouldPrecompress = process.env.OPENMUSIC_PRECOMPRESS !== 'false';
 const BUILD_SITE_ORIGIN = resolvePrimarySiteOrigin(
   process.env.CLIENT_URL || '',
   process.env.SITE_CANONICAL_URL || '',
-) || 'https://qqovo.top';
+);
 
 function seoDevMiddleware() {
   return {
@@ -81,7 +81,9 @@ function seoBuildPlugin(): Plugin {
     name: 'openmusic-seo-build',
     apply: 'build',
     transformIndexHtml(html) {
-      console.log(`[seo] site origin → ${BUILD_SITE_ORIGIN}`);
+      console.log(BUILD_SITE_ORIGIN
+        ? `[seo] site origin → ${BUILD_SITE_ORIGIN}`
+        : '[seo] SITE_CANONICAL_URL 未配置；静态产物不写入固定规范域。');
       const withSeo = applySeoToHtml(html, {
         siteOrigin: BUILD_SITE_ORIGIN,
         baiduVerification: process.env.SITE_BAIDU_VERIFICATION || '',
@@ -90,6 +92,7 @@ function seoBuildPlugin(): Plugin {
     },
     writeBundle(outputOptions) {
       const outDir = outputOptions.dir || path.join(__dirname, 'dist');
+      if (!BUILD_SITE_ORIGIN) return;
       fs.writeFileSync(path.join(outDir, 'robots.txt'), buildRobotsTxt(BUILD_SITE_ORIGIN), 'utf8');
       fs.writeFileSync(path.join(outDir, 'sitemap.xml'), buildSitemapXml(BUILD_SITE_ORIGIN), 'utf8');
       console.log(`[seo] wrote robots.txt & sitemap.xml → ${BUILD_SITE_ORIGIN}`);

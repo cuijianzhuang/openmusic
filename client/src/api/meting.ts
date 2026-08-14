@@ -8,6 +8,7 @@ export {
   getSourceLabel,
   parseLrc,
   listRooms,
+  randomMatchRoom,
   createRoom,
   checkRoom,
   getAvailableSources,
