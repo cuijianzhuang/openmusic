@@ -30,32 +30,69 @@ const flutter =
       ? 'C:\\flutter\\bin\\flutter.bat'
       : 'flutter';
 
-function bumpAndroidBuildNumber() {
-  const pubspecPath = path.join(mobileRoot, 'pubspec.yaml');
-  const pubspec = readFileSync(pubspecPath, 'utf8');
-  const versionMatch = pubspec.match(/^version:\s*(\d+)\.(\d+)\.(\d+)\+(\d+)\s*$/m);
+const pubspecPath = path.join(mobileRoot, 'pubspec.yaml');
+const localVersionPath = path.join(mobileRoot, '.android-version.local');
+
+function parseVersion(version, source) {
+  const versionMatch = String(version).trim().match(/^(\d+)\.(\d+)\.(\d+)\+(\d+)$/);
   if (!versionMatch) {
-    console.error('Cannot find Flutter version in pubspec.yaml, expected: version: x.y.z+build');
+    console.error(`Invalid Flutter version in ${source}, expected: x.y.z+build`);
     process.exit(1);
   }
 
   const [, major, minor, patch, build] = versionMatch;
-  const nextBuild = Number(build) + 1;
-  if (!Number.isSafeInteger(nextBuild) || nextBuild <= Number(build)) {
-    console.error('Invalid Flutter build number in pubspec.yaml:', build);
+  return {
+    major: Number(major),
+    minor: Number(minor),
+    patch: Number(patch),
+    build: Number(build),
+  };
+}
+
+function formatVersion({ major, minor, patch, build }) {
+  return `${major}.${minor}.${patch}+${build}`;
+}
+
+function readBaseVersion() {
+  const pubspec = readFileSync(pubspecPath, 'utf8');
+  const versionMatch = pubspec.match(/^version:\s*(\d+\.\d+\.\d+\+\d+)\s*$/m);
+  if (!versionMatch) {
+    console.error('Cannot find Flutter version in pubspec.yaml, expected: version: x.y.z+build');
+    process.exit(1);
+  }
+  return parseVersion(versionMatch[1], 'pubspec.yaml');
+}
+
+function readLocalVersion() {
+  if (!existsSync(localVersionPath)) return null;
+  return parseVersion(readFileSync(localVersionPath, 'utf8'), '.android-version.local');
+}
+
+function bumpAndroidVersion() {
+  const previous = readLocalVersion() ?? readBaseVersion();
+  const nextPatch = previous.patch + 1;
+  const nextBuild = previous.build + 1;
+  if (
+    !Number.isSafeInteger(nextPatch)
+    || nextPatch <= previous.patch
+    || !Number.isSafeInteger(nextBuild)
+    || nextBuild <= previous.build
+  ) {
+    console.error('Invalid Android version:', formatVersion(previous));
     process.exit(1);
   }
 
-  const previous = `${major}.${minor}.${patch}+${build}`;
-  const next = `${major}.${minor}.${patch}+${nextBuild}`;
-  writeFileSync(pubspecPath, pubspec.replace(versionMatch[0], `version: ${next}`));
-  console.log(`Bumped Android version: ${previous} -> ${next}`);
+  const next = { ...previous, patch: nextPatch, build: nextBuild };
+  writeFileSync(localVersionPath, `${formatVersion(next)}\n`);
+  console.log(`Bumped local Android version: ${formatVersion(previous)} -> ${formatVersion(next)}`);
   return next;
 }
 
-if (release && !noVersionBump) {
-  bumpAndroidBuildNumber();
-}
+const androidVersion = release
+  ? noVersionBump
+    ? readLocalVersion() ?? readBaseVersion()
+    : bumpAndroidVersion()
+  : readBaseVersion();
 
 const buildType = release ? 'apk' : 'apk';
 const mode = release ? '--release' : '--debug';
@@ -65,6 +102,8 @@ const r = spawnSync(
     'build',
     buildType,
     mode,
+    `--build-name=${androidVersion.major}.${androidVersion.minor}.${androidVersion.patch}`,
+    `--build-number=${androidVersion.build}`,
     '--dart-define=OM_FLAVOR=prod',
     `--dart-define=OM_SERVER_URL=${serverUrl}`,
   ],

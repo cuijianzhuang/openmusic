@@ -1,6 +1,7 @@
 {
   "notes": [
-    "修复房主暂停再播放，成员不同步播放问题"
+    "安卓APP退回内嵌版本，优化播放栏",
+    "优化已知问题"
   ],
-  "forcePrompt": false
+  "forcePrompt": true
 }

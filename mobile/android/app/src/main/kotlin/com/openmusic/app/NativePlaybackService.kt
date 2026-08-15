@@ -64,6 +64,8 @@ class NativePlaybackService : Service() {
     private var coverUrl = ""
     private var cover: Bitmap? = null
     private var artworkRequestId = 0L
+    private var artworkLoadingUrl = ""
+    private var lastArtworkAttemptAtMs = 0L
     private var pendingPlaying: Boolean? = null
     private var pendingPlayingUntilMs = 0L
     private var pendingPositionMs: Long? = null
@@ -95,9 +97,9 @@ class NativePlaybackService : Service() {
                 override fun onSkipToNext() = handleControlAction("next")
                 override fun onCustomAction(action: String, extras: android.os.Bundle?) {
                     when (action) {
+                        ACTION_TOGGLE_FAVORITE -> handleControlAction("toggleFavorite")
                         ACTION_LYRICS -> handleLyricsAction()
                         ACTION_TOGGLE_MODE -> handleControlAction("toggleMode")
-                        ACTION_TOGGLE_FAVORITE -> handleControlAction("toggleFavorite")
                     }
                 }
                 override fun onSeekTo(pos: Long) {
@@ -176,6 +178,8 @@ class NativePlaybackService : Service() {
             coverUrl = nextCoverUrl
             cover = null
             loadArtwork(nextCoverUrl)
+        } else if (cover == null && nextCoverUrl.isNotBlank()) {
+            retryArtworkIfIdle(nextCoverUrl)
         }
         updateLyricsOverlayText()
         publish()
@@ -192,15 +196,15 @@ class NativePlaybackService : Service() {
                 currentPositionMs(),
                 if (playing) 1f else 0f,
             )
-            .addCustomAction(ACTION_LYRICS, "歌词", R.drawable.ic_notify_lyrics)
-            .addCustomAction(
-                ACTION_TOGGLE_FAVORITE,
-                if (favorited) "取消收藏" else "收藏",
-                favoriteIconRes(),
-            )
+        playbackState.addCustomAction(ACTION_LYRICS, "歌词", R.drawable.ic_notify_lyrics)
         if (canChangeMode) {
             playbackState.addCustomAction(ACTION_TOGGLE_MODE, playModeLabel, playModeIconRes())
         }
+        playbackState.addCustomAction(
+            ACTION_TOGGLE_FAVORITE,
+            if (favorited) "取消收藏" else "收藏",
+            favoriteIconRes(),
+        )
         mediaSession.setPlaybackState(playbackState.build())
         val metadata = MediaMetadata.Builder()
             .putString(MediaMetadata.METADATA_KEY_TITLE, title)
@@ -219,15 +223,29 @@ class NativePlaybackService : Service() {
 
     private fun loadArtwork(rawUrl: String) {
         val requestId = ++artworkRequestId
-        if (rawUrl.isBlank()) return
+        if (rawUrl.isBlank()) {
+            artworkLoadingUrl = ""
+            return
+        }
+        artworkLoadingUrl = rawUrl
+        lastArtworkAttemptAtMs = SystemClock.elapsedRealtime()
         artworkExecutor.execute {
             val bitmap = downloadArtwork(rawUrl)
             mainHandler.post {
-                if (requestId != artworkRequestId || bitmap == null) return@post
+                if (requestId != artworkRequestId) return@post
+                if (artworkLoadingUrl == rawUrl) artworkLoadingUrl = ""
+                if (bitmap == null) return@post
                 cover = bitmap
                 publish()
             }
         }
+    }
+
+    private fun retryArtworkIfIdle(rawUrl: String) {
+        if (artworkLoadingUrl == rawUrl) return
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastArtworkAttemptAtMs < ARTWORK_RETRY_INTERVAL_MS) return
+        loadArtwork(rawUrl)
     }
 
     private fun downloadArtwork(rawUrl: String): Bitmap? {
@@ -243,7 +261,7 @@ class NativePlaybackService : Service() {
                 when (connection.responseCode) {
                     in 200..299 -> {
                         val contentLength = connection.contentLengthLong
-                        if (contentLength <= 0 || contentLength > MAX_ARTWORK_BYTES) return null
+                        if (contentLength > MAX_ARTWORK_BYTES) return null
                         val data = readArtworkBytes(connection.inputStream) ?: return null
                         return BitmapFactory.decodeByteArray(data, 0, data.size)?.let(::scaleArtwork)
                     }
@@ -319,9 +337,11 @@ class NativePlaybackService : Service() {
 
         val compactActionIndexes = mutableListOf<Int>()
         var actionIndex = 0
-        builder.addAction(favoriteIconRes(), if (favorited) "已收藏" else "收藏", servicePendingIntent(ACTION_TOGGLE_FAVORITE))
-        compactActionIndexes += actionIndex
-        actionIndex += 1
+        if (canChangeMode) {
+            builder.addAction(playModeIconRes(), playModeLabel, servicePendingIntent(ACTION_TOGGLE_MODE))
+            compactActionIndexes += actionIndex
+            actionIndex += 1
+        }
         builder.addAction(R.drawable.ic_notify_lyrics, "词", servicePendingIntent(ACTION_LYRICS))
         compactActionIndexes += actionIndex
         actionIndex += 1
@@ -332,13 +352,10 @@ class NativePlaybackService : Service() {
         }
         if (canSkip) {
             builder.addAction(android.R.drawable.ic_media_next, "下一首", servicePendingIntent(ACTION_NEXT))
-            compactActionIndexes += actionIndex
             actionIndex += 1
         }
-        if (canChangeMode) {
-            builder.addAction(playModeIconRes(), playModeLabel, servicePendingIntent(ACTION_TOGGLE_MODE))
-            actionIndex += 1
-        }
+        builder.addAction(favoriteIconRes(), if (favorited) "已收藏" else "收藏", servicePendingIntent(ACTION_TOGGLE_FAVORITE))
+        actionIndex += 1
         builder.setStyle(
             Notification.MediaStyle()
                 .setMediaSession(mediaSession.sessionToken)
@@ -403,7 +420,6 @@ class NativePlaybackService : Service() {
         val view = TextView(this).apply {
             text = lyricsOverlayText()
             setTextColor(Color.WHITE)
-            setShadowLayer(8f, 0f, 2f, Color.argb(220, 0, 0, 0))
             setTypeface(Typeface.DEFAULT_BOLD)
             textSize = 20f
             gravity = Gravity.CENTER
@@ -492,7 +508,8 @@ class NativePlaybackService : Service() {
 
     private fun playModeIconRes(): Int {
         return when (playMode) {
-            "shuffle", "shuffle-loop" -> R.drawable.ic_notify_shuffle
+            "shuffle" -> R.drawable.ic_notify_shuffle
+            "shuffle-loop" -> R.drawable.ic_notify_dices
             "loop-one" -> R.drawable.ic_notify_repeat_one
             "loop-all" -> R.drawable.ic_notify_repeat
             else -> R.drawable.ic_notify_order
@@ -581,6 +598,7 @@ class NativePlaybackService : Service() {
         private const val MAX_ARTWORK_EDGE = 512
         private const val ARTWORK_CONNECT_TIMEOUT_MS = 5_000
         private const val ARTWORK_READ_TIMEOUT_MS = 8_000
+        private const val ARTWORK_RETRY_INTERVAL_MS = 5_000L
         private const val PROGRESS_UPDATE_MS = 1_000L
         private const val LOCAL_ACTION_CONFIRM_TIMEOUT_MS = 2_500L
         private const val POSITION_ACK_TOLERANCE_MS = 1_500L

@@ -49,3 +49,4 @@ mobile/ios/Flutter/ephemeral/
 mobile/windows/flutter/ephemeral/
 mobile/linux/flutter/ephemeral/
 mobile/macos/Flutter/ephemeral/
+mobile/.android-version.local

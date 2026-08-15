@@ -238,7 +238,7 @@ flutter pub get
 node scripts/build-flutter-apk.mjs --release --server-url=https://your-host
 ```
 
-脚本会在打包前自动递增 `mobile/pubspec.yaml` 的 `version: x.y.z+build` 构建号。APK 输出位置：`mobile/build/app/outputs/flutter-apk/app-release.apk`，并复制到 `server/downloads/openmusic.apk`。
+脚本会在打包前仅递增本机的 `mobile/.android-version.local`（已被 Git 忽略）中的可见版本号和 Android 构建号；仓库内的 `mobile/pubspec.yaml` 始终保持基线 `1.0.0+1`，新拉取项目会从该版本开始。APK 输出位置：`mobile/build/app/outputs/flutter-apk/app-release.apk`，并复制到 `server/downloads/openmusic.apk`。
 
 ### 通知栏播放
 

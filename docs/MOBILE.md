@@ -34,6 +34,6 @@ cd mobile
 node scripts/build-flutter-apk.mjs --release --server-url=https://your-host
 ```
 
-该脚本会在 release 打包前自动递增 `mobile/pubspec.yaml` 的 `version: x.y.z+build` 构建号；仅临时重打同一版本时可追加 `--no-version-bump`。
+该脚本会在 release 打包前仅递增本机 `mobile/.android-version.local`（已被 Git 忽略）中的可见版本号和 Android 构建号。仓库内的 `mobile/pubspec.yaml` 始终保持基线 `1.0.0+1`，新拉取项目会从该版本开始；仅临时重打同一版本时可追加 `--no-version-bump`。
 
 桥接字段或命令变更时，必须同时核对 Web、Flutter 与 Android 三端，并更新 [`mobile/WEB_SHELL.md`](../mobile/WEB_SHELL.md)。
