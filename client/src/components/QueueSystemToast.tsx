@@ -6,7 +6,7 @@ import { useRoomStore } from '../stores/roomStore';
 const VISIBLE_MS = 2800;
 const FADE_MS = 320;
 
-/** 切歌 / 点歌等系统提示，以及重连状态，居中覆盖在播放队列标题栏正中间 */
+/** 队列操作提示与重连状态，居中覆盖在队列内容区域，不参与布局 */
 export default function QueueSystemToast() {
   const text = useChatSystemToastStore((s) => s.text);
   const seq = useChatSystemToastStore((s) => s.seq);

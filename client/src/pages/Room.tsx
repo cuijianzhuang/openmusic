@@ -2163,10 +2163,10 @@ export default function Room() {
             {queueCount > 0 ? `共 ${queueCount} 首` : '暂无歌曲'}
           </span>
         </div>
-        <QueueSystemToast />
       </div>
-      <div className={`p-2 ${fillHeight ? 'flex-1 min-h-0 overflow-hidden flex flex-col' : ''}`}>
+      <div className={`relative p-2 ${fillHeight ? 'flex-1 min-h-0 overflow-hidden flex flex-col' : ''}`}>
         <QueuePanel fillHeight={fillHeight} />
+        <QueueSystemToast />
       </div>
     </div>
   );
@@ -2527,6 +2527,7 @@ export default function Room() {
         isPlaying={Boolean(room.isPlaying)}
         skipSong={skipSong}
         togglePlay={togglePlay}
+        showLyrics={() => setShowPlayer(true)}
       />
 
       <Suspense fallback={null}>

@@ -1459,7 +1459,7 @@ export default function RuntimeConfigPanel({
           <Input
             value={draft.seoCanonicalUrl}
             maxLength={200}
-            placeholder="https://qqovo.top"
+            placeholder="https://your-host"
             onChange={(e) => setDraft({ ...draft, seoCanonicalUrl: e.target.value })}
           />
         </Col>

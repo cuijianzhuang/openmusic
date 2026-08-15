@@ -125,6 +125,7 @@ npm run dev
 - 房主转让、正式管理员、房主离线时临时控播
 - 贵宾角标与进房欢迎、成员归属地
 - 点歌规则、禁播、踩歌切歌
+- **新房间沿用常用规则**：同一浏览器内，房主再次创建房间时会自动应用最近一次创建房间的点歌、队列与聊天设置
 - **纯净模式**：隐藏动效与热榜；聊天图/贴纸可遮罩；浏览器标签页标题与图标可伪装
 - **常驻房**：房主申请 → 站点管理员审核，避免空闲被自动销毁
 - **身份找回（可选）**：绑定 Linux.do / GitHub，换设备或清 Cookie 后找回房主身份
@@ -234,17 +235,17 @@ Android 端是 **Flutter WebView 容器**，加载 OpenMusic 网页；房间、�
 ```powershell
 cd mobile
 flutter pub get
-flutter build apk --release `
-  --dart-define=OM_FLAVOR=prod `
-  --dart-define=OM_SERVER_URL=https://qqovo.top
+node scripts/build-flutter-apk.mjs --release --server-url=https://your-host
 ```
 
-APK 输出位置：`mobile/build/app/outputs/flutter-apk/app-release.apk`。
+脚本会在打包前自动递增 `mobile/pubspec.yaml` 的 `version: x.y.z+build` 构建号。APK 输出位置：`mobile/build/app/outputs/flutter-apk/app-release.apk`，并复制到 `server/downloads/openmusic.apk`。
 
 ### 通知栏播放
 
 - Android 13+ 需允许通知权限，通知栏和锁屏播放控件才会显示。
-- 支持播放 / 暂停、下一首和拖动进度，操作会回传网页，并由服务端按房间权限最终裁决。
+- 支持播放 / 暂停、下一首和拖动进度；有控播权限时还可切换播放模式。收藏操作会同步到网页收藏。
+- 通知栏会显示当前歌词。点「词」后允许悬浮窗权限，可显示可拖动的悬浮歌词；轻点歌词即可关闭。
+- 所有原生操作都会回传网页，并由网页与服务端按房间权限最终裁决。
 - 详情见 [`mobile/README.md`](mobile/README.md)。
 
 ---

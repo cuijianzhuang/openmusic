@@ -40,6 +40,7 @@ scripts/package-build.mjs
 mobile/.dart_tool/
 mobile/build/
 mobile/android/.gradle/
+mobile/android/.kotlin/
 mobile/android/**/build/
 mobile/android/**/.cxx/
 mobile/android/**/.externalNativeBuild/

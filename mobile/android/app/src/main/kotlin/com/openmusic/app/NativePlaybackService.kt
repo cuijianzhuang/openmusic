@@ -7,6 +7,9 @@ import android.app.PendingIntent
 import android.app.Service
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Color
+import android.graphics.PixelFormat
+import android.graphics.Typeface
 import android.content.Context
 import android.content.Intent
 import android.media.MediaMetadata
@@ -17,6 +20,12 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
+import android.provider.Settings
+import android.view.Gravity
+import android.view.MotionEvent
+import android.view.View
+import android.view.WindowManager
+import android.widget.TextView
 import io.flutter.plugin.common.MethodChannel
 import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
@@ -47,6 +56,11 @@ class NativePlaybackService : Service() {
     private var canPause = false
     private var canSkip = false
     private var canSeek = false
+    private var lyric = ""
+    private var playMode = "order"
+    private var playModeLabel = "顺序"
+    private var canChangeMode = false
+    private var favorited = false
     private var coverUrl = ""
     private var cover: Bitmap? = null
     private var artworkRequestId = 0L
@@ -56,6 +70,12 @@ class NativePlaybackService : Service() {
     private var pendingPositionUntilMs = 0L
     private var lastControlAction = ""
     private var lastControlAtMs = 0L
+    private var lyricsOverlayView: TextView? = null
+    private var lyricsOverlayParams: WindowManager.LayoutParams? = null
+    private var overlayTouchStartX = 0
+    private var overlayTouchStartY = 0
+    private var overlayRawStartX = 0f
+    private var overlayRawStartY = 0f
     private val mainHandler = Handler(Looper.getMainLooper())
     private val artworkExecutor = Executors.newSingleThreadExecutor()
     private val progressTicker = object : Runnable {
@@ -73,6 +93,13 @@ class NativePlaybackService : Service() {
                 override fun onPlay() = handleControlAction("play")
                 override fun onPause() = handleControlAction("pause")
                 override fun onSkipToNext() = handleControlAction("next")
+                override fun onCustomAction(action: String, extras: android.os.Bundle?) {
+                    when (action) {
+                        ACTION_LYRICS -> handleLyricsAction()
+                        ACTION_TOGGLE_MODE -> handleControlAction("toggleMode")
+                        ACTION_TOGGLE_FAVORITE -> handleControlAction("toggleFavorite")
+                    }
+                }
                 override fun onSeekTo(pos: Long) {
                     if (!canSeek) return
                     setPendingPosition(pos.coerceAtLeast(0L))
@@ -98,6 +125,10 @@ class NativePlaybackService : Service() {
             ACTION_PLAY -> handleControlAction("play")
             ACTION_PAUSE -> handleControlAction("pause")
             ACTION_NEXT -> handleControlAction("next")
+            ACTION_LYRICS -> handleLyricsAction()
+            ACTION_SHOW_LYRICS_OVERLAY -> showLyricsOverlay()
+            ACTION_TOGGLE_MODE -> handleControlAction("toggleMode")
+            ACTION_TOGGLE_FAVORITE -> handleControlAction("toggleFavorite")
         }
         return START_NOT_STICKY
     }
@@ -106,6 +137,7 @@ class NativePlaybackService : Service() {
 
     override fun onDestroy() {
         mainHandler.removeCallbacks(progressTicker)
+        removeLyricsOverlay()
         artworkExecutor.shutdownNow()
         mediaSession.release()
         super.onDestroy()
@@ -134,12 +166,18 @@ class NativePlaybackService : Service() {
         canPause = values["canPause"] == true
         canSkip = values["canSkip"] == true
         canSeek = values["canSeek"] == true
+        lyric = values["lyric"]?.toString()?.take(180).orEmpty()
+        playMode = values["playMode"]?.toString()?.take(32)?.ifBlank { "order" } ?: "order"
+        playModeLabel = values["playModeLabel"]?.toString()?.take(32)?.ifBlank { "顺序" } ?: "顺序"
+        canChangeMode = values["canChangeMode"] == true
+        favorited = values["favorited"] == true
         val nextCoverUrl = values["cover"]?.toString().orEmpty()
         if (nextCoverUrl != coverUrl) {
             coverUrl = nextCoverUrl
             cover = null
             loadArtwork(nextCoverUrl)
         }
+        updateLyricsOverlayText()
         publish()
     }
 
@@ -147,19 +185,27 @@ class NativePlaybackService : Service() {
         val actions = (if (canPause) PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE else 0L) or
             (if (canSkip) PlaybackState.ACTION_SKIP_TO_NEXT else 0L) or
             (if (canSeek) PlaybackState.ACTION_SEEK_TO else 0L)
-        mediaSession.setPlaybackState(
-            PlaybackState.Builder()
-                .setActions(actions)
-                .setState(
-                    if (playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED,
-                    currentPositionMs(),
-                    if (playing) 1f else 0f,
-                )
-                .build(),
-        )
+        val playbackState = PlaybackState.Builder()
+            .setActions(actions)
+            .setState(
+                if (playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED,
+                currentPositionMs(),
+                if (playing) 1f else 0f,
+            )
+            .addCustomAction(ACTION_LYRICS, "歌词", R.drawable.ic_notify_lyrics)
+            .addCustomAction(
+                ACTION_TOGGLE_FAVORITE,
+                if (favorited) "取消收藏" else "收藏",
+                favoriteIconRes(),
+            )
+        if (canChangeMode) {
+            playbackState.addCustomAction(ACTION_TOGGLE_MODE, playModeLabel, playModeIconRes())
+        }
+        mediaSession.setPlaybackState(playbackState.build())
         val metadata = MediaMetadata.Builder()
             .putString(MediaMetadata.METADATA_KEY_TITLE, title)
             .putString(MediaMetadata.METADATA_KEY_ARTIST, artist)
+            .putString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE, lyric.ifBlank { artist })
             .putLong(MediaMetadata.METADATA_KEY_DURATION, durationMs)
         cover?.let {
             metadata.putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, it)
@@ -263,25 +309,40 @@ class NativePlaybackService : Service() {
         }
             .setSmallIcon(R.drawable.ic_stat_notify)
             .setContentTitle(title)
-            .setContentText(artist)
+            .setContentText(lyric.ifBlank { artist })
+            .setSubText(if (lyric.isNotBlank() && artist.isNotBlank()) artist else null)
             .setContentIntent(activityPendingIntent())
             .setOnlyAlertOnce(true)
             .setOngoing(playing)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
+        cover?.let { builder.setLargeIcon(it) }
 
         val compactActionIndexes = mutableListOf<Int>()
+        var actionIndex = 0
+        builder.addAction(favoriteIconRes(), if (favorited) "已收藏" else "收藏", servicePendingIntent(ACTION_TOGGLE_FAVORITE))
+        compactActionIndexes += actionIndex
+        actionIndex += 1
+        builder.addAction(R.drawable.ic_notify_lyrics, "词", servicePendingIntent(ACTION_LYRICS))
+        compactActionIndexes += actionIndex
+        actionIndex += 1
         if (canPause) {
             builder.addAction(playPauseIcon, playPauseLabel, servicePendingIntent(playPauseAction))
-            compactActionIndexes += 0
+            compactActionIndexes += actionIndex
+            actionIndex += 1
         }
         if (canSkip) {
             builder.addAction(android.R.drawable.ic_media_next, "下一首", servicePendingIntent(ACTION_NEXT))
-            compactActionIndexes += compactActionIndexes.size
+            compactActionIndexes += actionIndex
+            actionIndex += 1
+        }
+        if (canChangeMode) {
+            builder.addAction(playModeIconRes(), playModeLabel, servicePendingIntent(ACTION_TOGGLE_MODE))
+            actionIndex += 1
         }
         builder.setStyle(
             Notification.MediaStyle()
                 .setMediaSession(mediaSession.sessionToken)
-                .setShowActionsInCompactView(*compactActionIndexes.toIntArray()),
+                .setShowActionsInCompactView(*compactActionIndexes.take(3).toIntArray()),
         )
         return builder.build()
     }
@@ -317,7 +378,137 @@ class NativePlaybackService : Service() {
                 NativePlaybackBridge.dispatch("pause")
             }
             "next" -> dispatchIfAllowed("next", canSkip)
+            "toggleMode" -> dispatchIfAllowed("toggleMode", canChangeMode)
+            "toggleFavorite" -> NativePlaybackBridge.dispatch("toggleFavorite")
         }
+    }
+
+    private fun handleLyricsAction() {
+        if (!canDrawOverlays()) {
+            requestOverlayPermission()
+            return
+        }
+        if (lyricsOverlayView == null) showLyricsOverlay() else removeLyricsOverlay()
+    }
+
+    private fun showLyricsOverlay() {
+        if (!canDrawOverlays()) {
+            requestOverlayPermission()
+            return
+        }
+        if (lyricsOverlayView != null) {
+            updateLyricsOverlayText()
+            return
+        }
+        val view = TextView(this).apply {
+            text = lyricsOverlayText()
+            setTextColor(Color.WHITE)
+            setShadowLayer(8f, 0f, 2f, Color.argb(220, 0, 0, 0))
+            setTypeface(Typeface.DEFAULT_BOLD)
+            textSize = 20f
+            gravity = Gravity.CENTER
+            maxLines = 2
+            setPadding(32, 18, 32, 18)
+            setBackgroundColor(Color.TRANSPARENT)
+            setOnTouchListener { v, event ->
+                val params = lyricsOverlayParams ?: return@setOnTouchListener false
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        overlayTouchStartX = params.x
+                        overlayTouchStartY = params.y
+                        overlayRawStartX = event.rawX
+                        overlayRawStartY = event.rawY
+                        true
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        params.x = overlayTouchStartX + (event.rawX - overlayRawStartX).toInt()
+                        params.y = overlayTouchStartY + (event.rawY - overlayRawStartY).toInt()
+                        runCatching { windowManager().updateViewLayout(v, params) }
+                        true
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        if (kotlin.math.abs(event.rawX - overlayRawStartX) < 8 && kotlin.math.abs(event.rawY - overlayRawStartY) < 8) {
+                            removeLyricsOverlay()
+                        }
+                        true
+                    }
+                    else -> false
+                }
+            }
+        }
+        val windowType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        } else {
+            @Suppress("DEPRECATION")
+            WindowManager.LayoutParams.TYPE_PHONE
+        }
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            windowType,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT,
+        ).apply {
+            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            y = 120
+        }
+        runCatching {
+            windowManager().addView(view, params)
+            lyricsOverlayView = view
+            lyricsOverlayParams = params
+        }.onFailure {
+            lyricsOverlayView = null
+            lyricsOverlayParams = null
+            requestOverlayPermission()
+        }
+    }
+
+    private fun removeLyricsOverlay() {
+        val view = lyricsOverlayView ?: return
+        runCatching { windowManager().removeView(view) }
+        lyricsOverlayView = null
+        lyricsOverlayParams = null
+    }
+
+    private fun updateLyricsOverlayText() {
+        lyricsOverlayView?.text = lyricsOverlayText()
+    }
+
+    private fun lyricsOverlayText(): String {
+        return lyric.ifBlank {
+            if (artist.isBlank()) title else "$title - $artist"
+        }
+    }
+
+    private fun canDrawOverlays(): Boolean {
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this)
+    }
+
+    private fun favoriteIconRes(): Int {
+        return if (favorited) R.drawable.ic_notify_heart_filled else R.drawable.ic_notify_heart
+    }
+
+    private fun playModeIconRes(): Int {
+        return when (playMode) {
+            "shuffle", "shuffle-loop" -> R.drawable.ic_notify_shuffle
+            "loop-one" -> R.drawable.ic_notify_repeat_one
+            "loop-all" -> R.drawable.ic_notify_repeat
+            else -> R.drawable.ic_notify_order
+        }
+    }
+
+    private fun requestOverlayPermission() {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(MainActivity.EXTRA_REQUEST_OVERLAY_PERMISSION, true)
+        }
+        startActivity(intent)
+    }
+
+    private fun windowManager(): WindowManager {
+        return getSystemService(Context.WINDOW_SERVICE) as WindowManager
     }
 
     private fun setPendingPosition(position: Long) {
@@ -349,11 +540,16 @@ class NativePlaybackService : Service() {
     }
 
     private fun activityPendingIntent(): PendingIntent {
+        return activityPendingIntent(null)
+    }
+
+    private fun activityPendingIntent(nativeAction: String?): PendingIntent {
         return PendingIntent.getActivity(
             this,
-            0,
+            nativeAction?.hashCode() ?: 0,
             Intent(this, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                if (nativeAction != null) putExtra(MainActivity.EXTRA_NATIVE_PLAYBACK_ACTION, nativeAction)
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
@@ -377,6 +573,10 @@ class NativePlaybackService : Service() {
         private const val ACTION_PLAY = "com.openmusic.app.PLAY"
         private const val ACTION_PAUSE = "com.openmusic.app.PAUSE"
         private const val ACTION_NEXT = "com.openmusic.app.NEXT"
+        private const val ACTION_LYRICS = "com.openmusic.app.LYRICS"
+        private const val ACTION_SHOW_LYRICS_OVERLAY = "com.openmusic.app.SHOW_LYRICS_OVERLAY"
+        private const val ACTION_TOGGLE_MODE = "com.openmusic.app.TOGGLE_MODE"
+        private const val ACTION_TOGGLE_FAVORITE = "com.openmusic.app.TOGGLE_FAVORITE"
         private const val MAX_ARTWORK_BYTES = 5L * 1024 * 1024
         private const val MAX_ARTWORK_EDGE = 512
         private const val ARTWORK_CONNECT_TIMEOUT_MS = 5_000
@@ -403,6 +603,10 @@ class NativePlaybackService : Service() {
 
         fun clear(context: Context) {
             context.startService(Intent(context, NativePlaybackService::class.java).setAction(ACTION_CLEAR))
+        }
+
+        fun showLyricsOverlay(context: Context) {
+            context.startService(Intent(context, NativePlaybackService::class.java).setAction(ACTION_SHOW_LYRICS_OVERLAY))
         }
     }
 }

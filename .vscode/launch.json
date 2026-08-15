@@ -57,7 +57,7 @@
       ],
       "args": [
         "--dart-define=OM_FLAVOR=prod",
-        "--dart-define=OM_SERVER_URL=https://qqovo.top"
+        "--dart-define=OM_SERVER_URL=https://your-host"
       ]
     }
   ]

@@ -18,7 +18,12 @@ class WebPlayerState {
       this.duration = 0,
       this.canPause = false,
       this.canSkip = false,
-      this.canSeek = false});
+      this.canSeek = false,
+      this.lyric = '',
+      this.playMode = 'order',
+      this.playModeLabel = '顺序',
+      this.canChangeMode = false,
+      this.favorited = false});
 
   final String title;
   final String artist;
@@ -29,6 +34,11 @@ class WebPlayerState {
   final bool canPause;
   final bool canSkip;
   final bool canSeek;
+  final String lyric;
+  final String playMode;
+  final String playModeLabel;
+  final bool canChangeMode;
+  final bool favorited;
 
   WebPlayerState copyWith(
           {String? title,
@@ -39,7 +49,12 @@ class WebPlayerState {
           double? duration,
           bool? canPause,
           bool? canSkip,
-          bool? canSeek}) =>
+          bool? canSeek,
+          String? lyric,
+          String? playMode,
+          String? playModeLabel,
+          bool? canChangeMode,
+          bool? favorited}) =>
       WebPlayerState(
         title: title ?? this.title,
         artist: artist ?? this.artist,
@@ -50,6 +65,11 @@ class WebPlayerState {
         canPause: canPause ?? this.canPause,
         canSkip: canSkip ?? this.canSkip,
         canSeek: canSeek ?? this.canSeek,
+        lyric: lyric ?? this.lyric,
+        playMode: playMode ?? this.playMode,
+        playModeLabel: playModeLabel ?? this.playModeLabel,
+        canChangeMode: canChangeMode ?? this.canChangeMode,
+        favorited: favorited ?? this.favorited,
       );
 }
 
@@ -119,7 +139,7 @@ class _WebShellPageState extends State<WebShellPage> {
       backgroundColor: _background,
       resizeToAvoidBottomInset: false,
       body: SafeArea(
-        top: false,
+        top: true,
         bottom: false,
         child: Stack(children: [
           InAppWebView(
@@ -149,6 +169,11 @@ class _WebShellPageState extends State<WebShellPage> {
                     canPause: m['canPause'] == true,
                     canSkip: m['canSkip'] == true,
                     canSeek: m['canSeek'] == true,
+                    lyric: '${m['lyric'] ?? ''}',
+                    playMode: '${m['playMode'] ?? 'order'}',
+                    playModeLabel: '${m['playModeLabel'] ?? '顺序'}',
+                    canChangeMode: m['canChangeMode'] == true,
+                    favorited: m['favorited'] == true,
                   );
                   setState(() => _player = next);
                   await _syncMediaNotification(next);
@@ -205,6 +230,11 @@ class _WebShellPageState extends State<WebShellPage> {
         'canPause': state.canPause,
         'canSkip': state.canSkip,
         'canSeek': state.canSeek,
+        'lyric': state.lyric,
+        'playMode': state.playMode,
+        'playModeLabel': state.playModeLabel,
+        'canChangeMode': state.canChangeMode,
+        'favorited': state.favorited,
       });
     } on PlatformException {
       // The web player remains usable when the Android notification fails.

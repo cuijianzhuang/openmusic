@@ -1,38 +1,39 @@
-# OpenMusic 原生移动端（Flutter）
+# OpenMusic 移动端（Flutter WebView）
 
-## 目标
+## 架构与边界
 
-与网页共用 Node + Socket.IO 后端，实现一起听歌；**不使用 WebView**。
+移动端以 WebView 加载 OpenMusic 网页。房间、登录、Socket.IO、搜索、队列和网页音频仍由 Web 与服务端统一实现；Flutter 只提供应用壳、Android 通知栏媒体控件和受限的原生能力调用。
 
-## 工程
+| 范围 | 责任 |
+|---|---|
+| `mobile/lib/features/web/` | WebView 启动、网页与原生桥接、通知栏状态同步 |
+| `mobile/android/` | 通知栏、锁屏媒体会话、悬浮歌词权限与 Android 工具调用 |
+| `client/src/components/NativeWebViewBridge.tsx` | 网页播放器状态上报，以及原生命令回传处理 |
+| `mobile/WEB_SHELL.md` | 跨 Web、Flutter、Android 的桥接字段和命令契约 |
 
-路径：[`mobile/`](../mobile/)
+原生端只能请求操作，不能绕过网页或服务端权限。播放、下一首、拖进度和切换模式仍由网页与服务端最终裁决。
 
-| 模块 | 说明 |
-|------|------|
-| `lib/core` | HTTP 签名、会话 Cookie、Socket.IO |
-| `lib/domain` | Room / Song / Playback 模型与权限 |
-| `lib/data` | REST + Socket 房间仓库 |
-| `lib/playback` | `just_audio` + `audio_service` + 同步引擎 |
-| `lib/features` | 大厅 / 队列 / 点歌 / 聊天 / 设置 / 播放页 |
+## Android 媒体能力
 
-不做：沉浸模式、TV、Admin。
+- Android 13+ 首次播放时需要授予通知权限，才能显示通知栏和锁屏控件。
+- 通知栏支持播放 / 暂停、下一首、进度拖动、实时歌词和收藏；拥有房间控播权限时可切换播放模式。
+- 点通知栏的「词」会申请悬浮窗权限。获准后显示可拖动的歌词浮窗，轻点浮窗关闭。
+- 原生桥接或权限请求失败不应影响网页中的基础房间与播放功能。
 
-## 本地
+## 本地运行
 
-1. 安装 [Flutter](https://docs.flutter.dev/get-started/install) stable
-2. （可选）国内镜像：`FLUTTER_STORAGE_BASE_URL` / `PUB_HOSTED_URL`
-3. `cd mobile && flutter create --platforms=android,ios --org=com.openmusic --project-name=openmusic .`
-4. `flutter pub get`
-5. `flutter run --dart-define=OM_SERVER_URL=https://your-host`
+1. 安装 [Flutter](https://docs.flutter.dev/get-started/install) stable。
+2. 执行 `cd mobile`、`flutter pub get`。
+3. 模拟器运行：`flutter run --dart-define=OM_FLAVOR=local --dart-define=OM_SERVER_URL=http://10.0.2.2:4000`。
+4. 真机或生产地址见 [`mobile/LOCAL.md`](../mobile/LOCAL.md)。
 
-## CI
+## 构建
 
-- `.github/workflows/flutter-android-apk.yml`
-- `.github/workflows/flutter-ios-ipa.yml`
+```powershell
+cd mobile
+node scripts/build-flutter-apk.mjs --release --server-url=https://your-host
+```
 
-产物复制到 `server/downloads/openmusic.apk`（及 IPA）。
+该脚本会在 release 打包前自动递增 `mobile/pubspec.yaml` 的 `version: x.y.z+build` 构建号；仅临时重打同一版本时可追加 `--no-version-bump`。
 
-## Capacitor 退役
-
-`client/android` WebView 壳见 `DEPRECATED.md`；旧 workflow 已标记 DEPRECATED。
+桥接字段或命令变更时，必须同时核对 Web、Flutter 与 Android 三端，并更新 [`mobile/WEB_SHELL.md`](../mobile/WEB_SHELL.md)。

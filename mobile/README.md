@@ -16,6 +16,8 @@ flutter run --dart-define=OM_FLAVOR=local --dart-define=OM_SERVER_URL=http://10.
 
 ## 构建
 
-```bash
-flutter build apk --release --dart-define=OM_FLAVOR=prod --dart-define=OM_SERVER_URL=https://qqovo.top
+```powershell
+node scripts/build-flutter-apk.mjs --release --server-url=https://your-host
 ```
+
+脚本会在 release 打包前自动递增 `pubspec.yaml` 的 `version: x.y.z+build` 构建号，并将 APK 复制到 `../server/downloads/openmusic.apk`。仅临时重打同一版本时可加 `--no-version-bump`。

@@ -37,6 +37,11 @@ import {
   getClientNetworkInfo,
   type ClientNetworkInfo,
 } from '../lib/clientNetworkInfo';
+import {
+  cacheOwnerRoomConfigFromRoom,
+  consumePendingRoomConfigApply,
+  readCachedOwnerRoomConfig,
+} from '../lib/roomConfigCache';
 
 
 
@@ -45,6 +50,9 @@ let socketListenersAttached = false;
 let socketConnectRequested = false;
 
 const SOCKET_ACK_TIMEOUT_MS = 8000;
+// Socket.IO 最长重连退避为 8 秒；首次进房还需要给下一次握手留出余量，
+// 否则正好落在退避窗口内时会被误判为网络超时。
+const SOCKET_CONNECT_TIMEOUT_MS = 15_000;
 const SOCKET_IMAGE_ACK_TIMEOUT_MS = 20000;
 /** 扫码走 Meting 上游，创建/校验/绑定可能较慢 */
 const SOCKET_MUSIC_ACCOUNT_ACK_TIMEOUT_MS = 50000;
@@ -98,7 +106,7 @@ function getSocket(): Socket {
 
 }
 
-function waitForSocketConnect(s: Socket, timeoutMs = SOCKET_ACK_TIMEOUT_MS): Promise<void> {
+function waitForSocketConnect(s: Socket, timeoutMs = SOCKET_CONNECT_TIMEOUT_MS): Promise<void> {
   if (s.connected) return Promise.resolve();
   try {
     // 若曾因全站封禁关掉自动重连，正常进房时重新打开
@@ -107,15 +115,31 @@ function waitForSocketConnect(s: Socket, timeoutMs = SOCKET_ACK_TIMEOUT_MS): Pro
     // ignore
   }
   return new Promise((resolve, reject) => {
-    const timer = window.setTimeout(() => {
+    let settled = false;
+    const cleanup = () => {
+      window.clearTimeout(timer);
       s.off('connect', onConnect);
-      reject(new Error('连接超时，请检查网络'));
+      s.off('connect_error', onConnectError);
+    };
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (error) reject(error);
+      else resolve();
+    };
+    const timer = window.setTimeout(() => {
+      finish(new Error('连接超时，请检查网络'));
     }, timeoutMs);
     const onConnect = () => {
-      window.clearTimeout(timer);
-      resolve();
+      finish();
+    };
+    const onConnectError = (error: Error) => {
+      const message = String(error?.message || '').trim();
+      finish(new Error(message || '无法连接到服务器，请检查网络或服务状态'));
     };
     s.once('connect', onConnect);
+    s.once('connect_error', onConnectError);
     if (!s.active) s.connect();
   });
 }
@@ -135,10 +159,9 @@ async function reconnectSocketSession(forceBootstrap = false): Promise<Socket> {
   await requireSessionBootstrap(forceBootstrap);
   const s = getSocket();
   if (s.connected || s.active) {
-    await new Promise<void>((resolve) => {
-      s.once('disconnect', () => resolve());
-      s.disconnect();
-    });
+    // 不等待 disconnect 事件：当底层握手已失败或正处于重连退避时，事件不一定会再
+    // 到达，等待它会把这个 Socket 永久卡住，直到浏览器整页刷新。
+    s.disconnect();
   }
   socketConnectRequested = true;
   await waitForSocketConnect(s);
@@ -240,6 +263,71 @@ type JoinAckResponse = {
   needsSession?: boolean;
   nickname?: string;
 };
+
+type RoomConfigApplyResponse = {
+  success: boolean;
+  error?: string;
+  room?: RoomState;
+};
+
+function cacheCurrentOwnerRoomConfig(
+  room: RoomState | null | undefined,
+  options: { force?: boolean } = {},
+) {
+  cacheOwnerRoomConfigFromRoom(room, useRoomStore.getState().mySocketId, options);
+}
+
+async function applyCachedOwnerRoomConfigAfterJoin(room: RoomState, socketId?: string) {
+  if (!socketId || room.creatorId !== socketId) return;
+  if (!consumePendingRoomConfigApply(room.id)) return;
+
+  const cached = readCachedOwnerRoomConfig();
+  if (!cached) return;
+
+  const config = cached.settings;
+  let latestRoom: RoomState | null = null;
+
+  const applySetting = async (event: string, payload: unknown) => {
+    const res = await emitWithAck<RoomConfigApplyResponse>(
+      event,
+      payload,
+      { success: false, error: '连接超时，请重试' },
+    );
+    if (!res.success || !res.room) return;
+    latestRoom = res.room;
+    applyRoomSnapshot(res.room);
+  };
+
+  if (config.fmMode) {
+    await applySetting('set_room_fm_mode', { mode: config.fmMode, source: config.fmSource });
+  }
+
+  await applySetting('set_room_chat_history', { enabled: config.chatHistoryVisibleOnJoin });
+  await applySetting('set_room_chat_avatars', { enabled: config.chatShowAvatars });
+
+  if (config.maxAdmins !== undefined) {
+    await applySetting('set_room_max_admins', { maxAdmins: config.maxAdmins });
+  }
+  await applySetting('set_room_song_request', {
+    enabled: config.songRequestEnabled,
+    minStaySec: config.songRequestMinStaySec,
+    maxPerUser: config.songRequestMaxPerUser,
+    cooldownSec: config.songRequestCooldownSec,
+    queueMaxLength: config.queueMaxLength,
+    memberJumpEnabled: config.memberJumpEnabled,
+    memberSeekEnabled: config.memberSeekEnabled,
+    memberPauseEnabled: config.memberPauseEnabled,
+    systemMediaPlayBound: config.systemMediaPlayBound,
+    systemMediaSkipBound: config.systemMediaSkipBound,
+    dislikeSkipMode: config.dislikeSkipMode,
+    dislikeSkipThreshold: config.dislikeSkipThreshold,
+    dislikeSkipPercent: config.dislikeSkipPercent,
+    clearSongsOnLeaveEnabled: config.clearSongsOnLeaveEnabled,
+    clearSongsOnLeaveDelaySec: config.clearSongsOnLeaveDelaySec,
+  });
+
+  cacheCurrentOwnerRoomConfig(latestRoom || useRoomStore.getState().room || room, { force: true });
+}
 
 function applyJoinResponse(session: JoinSession, res: JoinAckResponse) {
   if (!res.success || !res.room) return;
@@ -449,7 +537,7 @@ async function attemptRoomRejoin(trigger: string) {
     if (!s.connected) {
       socketConnectRequested = true;
       if (!s.active) s.connect();
-      await waitForSocketConnect(s, 12000);
+      await waitForSocketConnect(s);
     }
 
     let res = await emitJoinRoom(s, session);
@@ -863,6 +951,7 @@ export function useSocket() {
         if (res.success && res.room) {
           if (generation !== joinGeneration) return res;
           applyJoinResponse(session, res);
+          void applyCachedOwnerRoomConfigAfterJoin(res.room, res.socketId);
           // 加入后自动同步本地头像到服务器（非阻塞）
           const localAvatar = localStorage.getItem('avatar_url') || '';
           if (localAvatar && !res.room.userAvatarUrls?.[res.socketId || '']) {
@@ -1286,6 +1375,7 @@ export function useSocket() {
     ).then((res) => {
       if (res.success && res.room) {
         applyRoomSnapshot(res.room);
+        cacheCurrentOwnerRoomConfig(res.room);
       }
       return res;
     });
@@ -1420,6 +1510,7 @@ export function useSocket() {
     ).then((res) => {
       if (res.success && res.room) {
         applyRoomSnapshot(res.room);
+        cacheCurrentOwnerRoomConfig(res.room);
       }
       return res;
     });
@@ -1433,6 +1524,7 @@ export function useSocket() {
     ).then((res) => {
       if (res.success && res.room) {
         applyRoomSnapshot(res.room);
+        cacheCurrentOwnerRoomConfig(res.room);
       }
       return res;
     });
@@ -1479,6 +1571,7 @@ export function useSocket() {
     ).then((res) => {
       if (res.success && res.room) {
         applyRoomSnapshot(res.room);
+        cacheCurrentOwnerRoomConfig(res.room);
       }
       return res;
     });

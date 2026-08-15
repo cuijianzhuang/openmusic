@@ -9,6 +9,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { ArrowRight, Check, Sparkles } from 'lucide-react';
 import {
   getGuideSelector,
   getPendingGuideSteps,
@@ -349,53 +350,85 @@ export default function UserGuideTour({ scope, paused = false, delayMs = 700 }: 
       <div
         ref={popoverRef}
         style={tipPlacement.style}
-        className="pointer-events-auto z-[321] max-w-[min(360px,calc(100vw-24px))] animate-fade-in rounded-2xl border border-white/12 bg-[#16161c]/96 p-4 shadow-2xl shadow-black/50 backdrop-blur-xl sm:p-5"
+        className="pointer-events-auto z-[321] max-w-[min(380px,calc(100vw-24px))] animate-fade-in overflow-hidden rounded-2xl border border-white/12 bg-[#16161c]/96 shadow-2xl shadow-black/50 backdrop-blur-xl"
         onClick={stopBubble}
         onMouseDown={stopBubble}
       >
-        <div className="mb-2.5 flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-xs font-medium tracking-wide text-netease-red/90 sm:text-[13px]">
-              新手指引 · {index + 1}/{steps.length}
-            </p>
-            <h3 className="mt-1.5 text-base font-semibold text-white sm:text-lg">{step.title}</h3>
+        <div className="border-b border-white/8 bg-white/[0.025] px-4 pb-3 pt-4 sm:px-5 sm:pt-5">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2 text-xs font-medium text-netease-red/90 sm:text-[13px]">
+              <Sparkles className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              <span>新手指引</span>
+            </div>
+            <span className="shrink-0 tabular-nums text-xs text-white/45 sm:text-[13px]">
+              {index + 1} / {steps.length}
+            </span>
           </div>
-          <button
-            type="button"
-            onClick={skipAll}
-            className="shrink-0 rounded-lg px-2.5 py-1.5 text-xs text-white/50 transition-colors hover:bg-white/10 hover:text-white sm:text-[13px]"
-          >
-            跳过指引
-          </button>
+          <div className="flex gap-1" aria-label={`进度 ${index + 1} / ${steps.length}`}>
+            {steps.map((item, itemIndex) => (
+              <span
+                key={item.id}
+                className={`h-1 flex-1 rounded-full transition-colors ${
+                  itemIndex <= index ? 'bg-netease-red' : 'bg-white/10'
+                }`}
+              />
+            ))}
+          </div>
         </div>
-        <div className="mt-1 space-y-1.5 text-sm leading-relaxed sm:text-[15px] sm:leading-6">
-          {step.body.split('\n').filter(Boolean).map((line) => {
-            const sep = line.indexOf('：');
-            if (sep <= 0) {
+        <div className="px-4 pb-4 pt-3.5 sm:px-5 sm:pb-5">
+          <div className="mb-3 flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h3 className="text-base font-semibold text-white sm:text-lg">{step.title}</h3>
+            </div>
+            <button
+              type="button"
+              onClick={skipAll}
+              className="shrink-0 rounded-lg px-2.5 py-1.5 text-xs text-white/50 transition-colors hover:bg-white/10 hover:text-white sm:text-[13px]"
+            >
+              跳过指引
+            </button>
+          </div>
+          <ol className="space-y-2 text-sm leading-relaxed sm:text-[15px] sm:leading-6">
+            {step.body.split('\n').filter(Boolean).map((line, lineIndex) => {
+              const sep = line.indexOf('：');
+              if (sep <= 0) {
+                return (
+                  <li key={line} className="flex gap-2.5 text-white/72">
+                    <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-netease-red/80" />
+                    <span>{line}</span>
+                  </li>
+                );
+              }
+              const name = line.slice(0, sep);
+              const desc = line.slice(sep + 1);
               return (
-                <p key={line} className="text-white/72">{line}</p>
+                <li key={line} className="flex gap-2.5 text-white/72">
+                  <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-netease-red/25 bg-netease-red/10 text-[11px] font-semibold text-netease-red/95">
+                    {lineIndex + 1}
+                  </span>
+                  <span>
+                    <span className="font-medium text-white/90">{name}</span>
+                    <span className="text-white/35">：</span>
+                    <span>{desc}</span>
+                  </span>
+                </li>
               );
-            }
-            const name = line.slice(0, sep);
-            const desc = line.slice(sep + 1);
-            return (
-              <p key={line} className="text-white/72">
-                <span className="font-medium text-white/90">{name}</span>
-                <span className="text-white/35">：</span>
-                <span>{desc}</span>
-              </p>
-            );
-          })}
-        </div>
-        <div className="mt-4 flex items-center justify-between gap-3">
-          <p className="text-xs text-white/35 sm:text-[13px]">点灰色区域也可下一步</p>
-          <button
-            type="button"
-            onClick={advance}
-            className="rounded-full bg-netease-red px-4 py-2 text-sm font-medium text-white shadow-lg shadow-netease-red/25 transition-colors hover:bg-netease-red/90"
-          >
-            {isLast ? '完成' : '下一步'}
-          </button>
+            })}
+          </ol>
+          <div className="mt-4 flex items-center justify-between gap-3">
+            <p className="flex items-center gap-1.5 text-xs text-white/35 sm:text-[13px]">
+              <Check className="h-3.5 w-3.5" aria-hidden />
+              按节奏认识这里
+            </p>
+            <button
+              type="button"
+              onClick={advance}
+              className="inline-flex items-center gap-1.5 rounded-full bg-netease-red px-4 py-2 text-sm font-medium text-white shadow-lg shadow-netease-red/25 transition-colors hover:bg-netease-red/90"
+            >
+              {isLast ? '完成' : '下一步'}
+              {!isLast && <ArrowRight className="h-3.5 w-3.5" aria-hidden />}
+            </button>
+          </div>
         </div>
       </div>
     </div>,

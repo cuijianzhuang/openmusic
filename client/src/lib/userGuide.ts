@@ -9,6 +9,7 @@
 
 export type GuideFeatureId =
   | 'home-nickname'
+  | 'home-match'
   | 'home-create'
   | 'home-join'
   | 'home-lobby'
@@ -18,6 +19,7 @@ export type GuideFeatureId =
   | 'room-chat'
   | 'room-header'
   | 'room-player'
+  | 'room-desktop-lyrics'
   | 'room-report';
 
 export type GuideScope = 'home' | 'room';
@@ -50,6 +52,7 @@ const GUIDE_EVENT = 'openmusic:guide-feature-used';
 
 const ALL_FEATURE_IDS: GuideFeatureId[] = [
   'home-nickname',
+  'home-match',
   'home-create',
   'home-join',
   'home-lobby',
@@ -59,6 +62,7 @@ const ALL_FEATURE_IDS: GuideFeatureId[] = [
   'room-chat',
   'room-header',
   'room-player',
+  'room-desktop-lyrics',
   'room-report',
 ];
 
@@ -87,10 +91,17 @@ export const GUIDE_STEPS: GuideStep[] = [
     side: 'bottom',
   },
   {
+    id: 'home-match',
+    scope: 'home',
+    title: '快速匹配',
+    body: '匹配：自动加入一个可进入的公开房间\n没有可加入的房间：会提示你创建房间或稍后重试',
+    side: 'bottom',
+  },
+  {
     id: 'home-create',
     scope: 'home',
     title: '创建房间',
-    body: '创建房间：开一个专属房间邀请朋友一起听',
+    body: '创建房间：开一个专属房间，邀请朋友一起听\n常用规则：再次创建时，会沿用最近一次创建房间的点歌、队列和聊天设置',
     side: 'bottom',
   },
   {
@@ -146,13 +157,21 @@ export const GUIDE_STEPS: GuideStep[] = [
     id: 'room-player',
     scope: 'room',
     title: '底部播放器',
-    body: '展开：点封面/歌词看大播放器\n播控：房主/管理可播放暂停与切歌\n申请切歌：普通成员可申请\n播放模式：循环/随机等\n音量：调本机音量\n收藏：心形收藏，可在「我的收藏」再点',
+    body: '展开：点封面或歌词，打开大播放器\n播控：房主/管理可播放、暂停和切歌；普通成员可申请切歌\n播放模式：循环、随机等；音量只影响本机\n收藏：点心形收藏，可在「我的收藏」再次点播',
     side: 'top',
+  },
+  {
+    id: 'room-desktop-lyrics',
+    scope: 'room',
+    title: '桌面歌词',
+    body: '桌面歌词：把同步歌词显示在独立的小窗口\n开关：再次点击底栏的歌词按钮即可关闭\n浏览器要求：使用支持文档画中画的最新版 Chrome 或 Edge',
+    side: 'top',
+    desktopOnly: true,
   },
   {
     id: 'room-report',
     scope: 'room',
-    title: '异常与意见上报',
+    title: '意见与错误上报',
     body: '上报错误：附带调试快照，方便排查问题\n提交意见：只交文字建议',
     side: 'top',
   },

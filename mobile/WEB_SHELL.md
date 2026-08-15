@@ -6,7 +6,7 @@
 flutter run --dart-define=OM_SERVER_URL=https://your-host
 ```
 
-当前房间页已经通过 `flutter_inappwebview` bridge 自动报送 Android 通知栏媒体状态，并响应 `play`、`pause`、`seek`、`next`。通知栏的按钮和进度拖动需由网页同步权限字段；服务端仍负责最终权限校验。Android 13 及以上首次播放需允许通知权限。
+当前房间页通过 `flutter_inappwebview` bridge 自动报送 Android 通知栏媒体状态，并响应 `play`、`pause`、`seek`、`next`、`lyrics`、`toggleMode`、`toggleFavorite`。通知栏的按钮、进度拖动与模式切换都依赖网页同步的权限字段；网页和服务端仍负责最终权限校验。Android 13 及以上首次播放需允许通知权限；悬浮歌词还需要系统悬浮窗权限。
 
 ```js
 window.flutter_inappwebview.callHandler('omPlayerState', {
@@ -19,6 +19,11 @@ window.flutter_inappwebview.callHandler('omPlayerState', {
   canPause: permissions.canPause,
   canSkip: permissions.canSkip,
   canSeek: permissions.canSeek,
+  lyric: currentLyric,
+  playMode: room.playMode,
+  playModeLabel: playModeLabel,
+  canChangeMode: permissions.canChangeMode,
+  favorited: isFavorite,
 });
 
 window.addEventListener('omNativePlayerCommand', ({ detail }) => {
@@ -26,8 +31,13 @@ window.addEventListener('omNativePlayerCommand', ({ detail }) => {
   if (detail.action === 'pause') player.pause();
   if (detail.action === 'seek') player.seek(detail.time);
   if (detail.action === 'next') nextTrack();
+  if (detail.action === 'lyrics') openPlayerLyrics();
+  if (detail.action === 'toggleMode') changePlayMode();
+  if (detail.action === 'toggleFavorite') toggleFavorite();
 });
 ```
+
+`lyrics` 仅是当前可显示的歌词文本；没有歌词时传空字符串。`toggleMode` 必须由网页先检查控播权限，`toggleFavorite` 只操作当前用户自己的收藏。原生端的「词」按钮会在未授权时引导到悬浮窗权限页，获准后显示可拖动、轻点关闭的歌词浮窗。
 
 网页可调用的 Android 原生工具是受限白名单，避免把任意 Intent 暴露给不可信页面：
 

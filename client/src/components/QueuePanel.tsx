@@ -8,6 +8,7 @@ import type { RoomMemberTier, QueueItem, MusicSource } from '../types';
 import { resolveDislikeSkipThreshold } from '../lib/dislikeSkip';
 import { useSourceErrorRevision } from '../hooks/useSongSourceError';
 import { isTrackSourceError, isTrackCrossSource, getTrackCrossSourceFrom } from '../lib/songPreloadCache';
+import { useChatSystemToastStore } from '../stores/chatSystemToastStore';
 
 const VISIBLE_ROWS = 3;
 const LIST_HEIGHT = VISIBLE_ROWS * QUEUE_ROW_HEIGHT + (VISIBLE_ROWS - 1) * QUEUE_ROW_GAP;
@@ -121,7 +122,6 @@ export default function QueuePanel({ fillHeight = false }: Props) {
   const hasManualOrder = useRoomStore((s) => (s.room?.queue || []).some((song) => Number.isFinite(song.manualOrder)));
   const likeRaisesOrder = !hasManualOrder;
   const { removeSong, requestJump, reorderQueue, toggleQueueLike, toggleCurrentDislike, banRoomSong } = useSocket();
-  const [jumpMsg, setJumpMsg] = useState('');
   const [dragFromId, setDragFromId] = useState<string | null>(null);
   const [dragOverQueueId, setDragOverQueueId] = useState<string | null>(null);
   const currentRef = useRef<HTMLDivElement>(null);
@@ -185,12 +185,10 @@ export default function QueuePanel({ fillHeight = false }: Props) {
   }, [currentKey, allSongs, useVirtualList]);
 
   const showQueueMessage = useCallback((message: string) => {
-    setJumpMsg(message);
-    setTimeout(() => setJumpMsg(''), 3000);
+    useChatSystemToastStore.getState().show(message);
   }, []);
 
   const handleJumpRequest = useCallback(async (queueId: string) => {
-    setJumpMsg('');
     const res = await requestJump(queueId);
     if (res.success) {
       showQueueMessage(canControlPlayback ? '已插队到下一首，优先于点赞排序' : '已插队到下一首');
@@ -216,7 +214,6 @@ export default function QueuePanel({ fillHeight = false }: Props) {
   }, [showQueueMessage, toggleCurrentDislike]);
 
   const handleBanSong = useCallback(async (song: QueueRowSong) => {
-    setJumpMsg('');
     const res = await banRoomSong({
       id: song.id,
       source: song.source || 'netease',
@@ -390,10 +387,6 @@ export default function QueuePanel({ fillHeight = false }: Props) {
 
   return (
     <div className={`flex flex-col ${fillHeight ? 'h-full min-h-0' : ''}`}>
-      {jumpMsg && (
-        <p className="text-xs text-amber-400/80 mb-1.5 px-1 flex-shrink-0">{jumpMsg}</p>
-      )}
-
       {useVirtualList ? (
         <div
           ref={listContainerRef}

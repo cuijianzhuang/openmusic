@@ -1,15 +1,13 @@
 /// App runtime configuration.
 ///
 /// Server URL is fixed at build time via `--dart-define=OM_SERVER_URL=...`
-/// or inferred from `OM_FLAVOR` (local → localhost, prod → production).
+/// or inferred from `OM_FLAVOR` for local development.
 library;
 
 import 'package:flutter/foundation.dart';
 
 class AppConfig {
   AppConfig._();
-
-  static const productionDefault = 'https://qqovo.top';
 
   /// Local `npm run dev` — Web must use localhost for cookies.
   static const localDesktopDefault = 'http://localhost:4000';
@@ -35,15 +33,17 @@ class AppConfig {
     if (url.isEmpty) {
       url = _defaultForRuntime();
     }
+    if (url.isEmpty) {
+      throw StateError('Release/prod builds require --dart-define=OM_SERVER_URL=https://your-host');
+    }
     serverUrl = _normalize(url);
   }
 
   static String _defaultForRuntime() {
-    if (flavor == 'prod') return productionDefault;
     if (flavor == 'local') return _localDefaultForPlatform();
 
-    // Release APK/IPA without explicit flavor → production.
-    if (kReleaseMode) return productionDefault;
+    // Production builds must receive their deployment URL during packaging.
+    if (flavor == 'prod' || kReleaseMode) return '';
 
     // Debug/profile without flavor → local dev server.
     return _localDefaultForPlatform();

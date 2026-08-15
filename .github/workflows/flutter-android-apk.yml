@@ -6,7 +6,7 @@ on:
       server_url:
         description: '后端站点 URL（写入 OM_SERVER_URL）'
         required: true
-        default: 'https://qqovo.top'
+        default: 'https://your-host'
       build_type:
         description: '构建类型'
         required: true

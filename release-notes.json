@@ -2,5 +2,5 @@
   "notes": [
     "修复房主暂停再播放，成员不同步播放问题"
   ],
-  "forcePrompt": true
+  "forcePrompt": false
 }

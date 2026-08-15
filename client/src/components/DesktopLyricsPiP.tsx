@@ -137,6 +137,7 @@ export default function DesktopLyricsPiP({ song }: Props) {
       <Tooltip content={pipWindow ? '关闭桌面歌词' : '桌面歌词'}>
         <button
           type="button"
+          data-guide="room-desktop-lyrics"
           onClick={() => void open()}
           className={`inline-flex h-8 w-8 flex-shrink-0 items-center justify-center transition-colors ${pipWindow ? 'text-white' : 'text-netease-muted hover:text-white'}`}
           aria-label={pipWindow ? '关闭桌面歌词' : '打开桌面歌词'}

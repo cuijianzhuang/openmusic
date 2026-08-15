@@ -7,11 +7,13 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.content.pm.PackageManager
+import android.provider.Settings
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
     private var notificationPermissionRequested = false
+    private var waitingForOverlayPermission = false
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -77,6 +79,19 @@ class MainActivity : FlutterActivity() {
     override fun onResume() {
         super.onResume()
         requestNotificationPermissionIfNeeded()
+        consumeOverlayPermissionRequest(intent)
+        if (waitingForOverlayPermission && canDrawOverlays()) {
+            waitingForOverlayPermission = false
+            NativePlaybackService.showLyricsOverlay(this)
+        }
+        consumeNativePlaybackAction(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        consumeOverlayPermissionRequest(intent)
+        consumeNativePlaybackAction(intent)
     }
 
     override fun onDestroy() {
@@ -92,7 +107,33 @@ class MainActivity : FlutterActivity() {
         requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATION_PERMISSION)
     }
 
+    private fun consumeNativePlaybackAction(intent: Intent?) {
+        val action = intent?.getStringExtra(EXTRA_NATIVE_PLAYBACK_ACTION)?.takeIf { it.isNotBlank() } ?: return
+        intent.removeExtra(EXTRA_NATIVE_PLAYBACK_ACTION)
+        window.decorView.post {
+            NativePlaybackBridge.dispatch(action)
+        }
+    }
+
+    private fun consumeOverlayPermissionRequest(intent: Intent?) {
+        if (intent?.getBooleanExtra(EXTRA_REQUEST_OVERLAY_PERMISSION, false) != true) return
+        intent.removeExtra(EXTRA_REQUEST_OVERLAY_PERMISSION)
+        if (canDrawOverlays()) {
+            NativePlaybackService.showLyricsOverlay(this)
+            return
+        }
+        waitingForOverlayPermission = true
+        val uri = Uri.parse("package:$packageName")
+        startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, uri))
+    }
+
+    private fun canDrawOverlays(): Boolean {
+        return android.os.Build.VERSION.SDK_INT < 23 || Settings.canDrawOverlays(this)
+    }
+
     companion object {
+        const val EXTRA_NATIVE_PLAYBACK_ACTION = "com.openmusic.app.EXTRA_NATIVE_PLAYBACK_ACTION"
+        const val EXTRA_REQUEST_OVERLAY_PERMISSION = "com.openmusic.app.EXTRA_REQUEST_OVERLAY_PERMISSION"
         private const val REQUEST_NOTIFICATION_PERMISSION = 1101
     }
 }

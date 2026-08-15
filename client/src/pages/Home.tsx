@@ -15,6 +15,7 @@ import { getStoredRoomPassword } from '../lib/roomPassword';
 import { areRoomListsEqual, isLobbyHardLocked, sortLobbyRooms } from '../lib/roomListCompare';
 import { ANDROID_APK_URL } from '../lib/androidDownload';
 import { resizeCoverUrl } from '../lib/coverUrl';
+import { markRoomConfigApplyPending, rememberLatestCreatedRoom } from '../lib/roomConfigCache';
 import {
   fetchSiteAnnouncement,
   markSiteAnnouncementSeen,
@@ -571,6 +572,8 @@ export default function Home() {
     }
     try {
       const room = await createRoom(createRoomName, createPassword);
+      rememberLatestCreatedRoom(room.id);
+      markRoomConfigApplyPending(room.id);
       setShowCreate(false);
       setCreateRoomName('');
       setCreatePassword('');
@@ -848,10 +851,13 @@ export default function Home() {
                     </div>
                     <div className="flex flex-wrap sm:flex-nowrap gap-2.5">
                       <Magnet className="order-2 flex flex-1 sm:flex-none" strength={0.28} maxOffset={8}>
-                        <div className="flex w-full">
+                        <div data-guide="home-match" className="flex w-full">
                           <button
                             type="button"
-                            onClick={() => void handleRandomMatch()}
+                            onClick={() => {
+                              markGuideFeatureUsed('home-match');
+                              void handleRandomMatch();
+                            }}
                             disabled={matchLoading}
                             onMouseMove={handleBtnTilt}
                             onMouseLeave={resetBtnTilt}
@@ -862,6 +868,9 @@ export default function Home() {
                                 <Loader2 className="w-5 h-5 animate-spin" />
                               ) : null}
                               匹配
+                              {!matchLoading && (
+                                <Shuffle className="h-4 w-0 ml-0 opacity-0 -translate-x-1 transition-all duration-300 ease-out group-hover/match:w-4 group-hover/match:ml-1.5 group-hover/match:opacity-100 group-hover/match:translate-x-0 group-focus-visible/match:w-4 group-focus-visible/match:ml-1.5 group-focus-visible/match:opacity-100 group-focus-visible/match:translate-x-0 group-active/match:w-4 group-active/match:ml-1.5 group-active/match:opacity-100 group-active/match:translate-x-0" />
+                              )}
                             </span>
                           </button>
                         </div>
