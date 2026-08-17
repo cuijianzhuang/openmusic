@@ -60,6 +60,7 @@ import {
 } from '../lib/songPreloadCache';
 import { resolveQishuiLocalPlaybackUrl } from '../lib/qishuiLocalPlayback';
 import { refreshSignedApiUrl, stripApiSignParams } from '../lib/signedApiUrl';
+import { isProxiedMediaUrl, toProxiedMediaUrl } from '../lib/mediaProxyUrl';
 import {
   classifyMediaPlaybackError,
   isSourceUnavailableMessage,
@@ -82,6 +83,7 @@ import {
   bindAudioQueueId,
   clearAudioQueueBinding,
   canSyncAudioForQueue,
+  getAudioBoundQueueId,
   isAudioBoundToQueue,
   shouldSkipTrackLoad,
 } from '../lib/audioTrackBinding';
@@ -752,6 +754,14 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
       audio.addEventListener('error', () => {
         const runtime = activeAudioRuntime;
         if (!runtime) return;
+        debugLog('audio_error', debugLine({
+          queueId: useRoomStore.getState().room?.current?.queueId ?? null,
+          readyState: audio.readyState,
+          networkState: audio.networkState,
+          errorCode: audio.error?.code ?? null,
+          errorMessage: audio.error?.message || null,
+          proxied: Boolean(audio.currentSrc && isProxiedMediaUrl(audio.currentSrc)),
+        }));
         const live = useRoomStore.getState();
         if (!live.room?.current || runtime.skippingRef.current) return;
         if (!isAudioBoundToQueue(audio, live.room.current.queueId)) return;
@@ -835,6 +845,18 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
         if (audio.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) return;
         if (runtime.stallRetryTimer.current) return;
 
+        debugLog('audio_stalled', debugLine({
+          queueId: live.room.current.queueId,
+          readyState: audio.readyState,
+          networkState: audio.networkState,
+          currentTime: Number.isFinite(audio.currentTime) ? Number(audio.currentTime.toFixed(3)) : null,
+          bufferedAhead: audio.buffered.length > 0
+            ? Number((audio.buffered.end(audio.buffered.length - 1) - audio.currentTime).toFixed(3))
+            : 0,
+          proxied: Boolean(audio.currentSrc && isProxiedMediaUrl(audio.currentSrc)),
+          retryCount: runtime.tempRetries.current,
+        }));
+
         runtime.stallRetryTimer.current = window.setTimeout(() => {
           runtime.stallRetryTimer.current = null;
           if (audio.paused || audio.ended) return;
@@ -843,6 +865,37 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
 
           runtime.tempRetries.current += 1;
           controller.enqueue(async () => {
+            const current = useRoomStore.getState().room?.current;
+            const currentSrc = controller.audio.currentSrc || controller.audio.src;
+            const canProxy = current
+              && current.source !== 'qishui'
+              && currentSrc
+              && !isProxiedMediaUrl(currentSrc);
+
+            // 直链连续 stalled 时切到同源代理，避免 CDN Range 请求在浏览器侧永久挂起。
+            if (canProxy) {
+              const proxied = toProxiedMediaUrl(currentSrc);
+              if (proxied !== currentSrc) {
+                const resumeAt = Number.isFinite(controller.audio.currentTime)
+                  ? controller.audio.currentTime
+                  : 0;
+                controller.audio.pause();
+                controller.audio.src = proxied;
+                if (current) bindAudioQueueId(controller.audio, current.queueId);
+                controller.audio.load();
+                debugLog('audio_proxy_fallback', debugLine({
+                  queueId: current?.queueId ?? null,
+                  retryCount: runtime.tempRetries.current,
+                  fromProxied: false,
+                }));
+                if (resumeAt > 0) {
+                  try { controller.audio.currentTime = resumeAt; } catch { /* metadata 尚未就绪 */ }
+                }
+                await controller.audio.play().catch(() => {});
+                return;
+              }
+            }
+
             await reloadAudioWithFreshSign(controller.audio);
           });
         }, 2500);
@@ -1011,6 +1064,14 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
         localRecoveryQueueId = null;
       }
       enqueuePause();
+      // 取链期间不要让旧曲继续占用 audio；新曲加载失败时也应保持明确静音状态。
+      controller.enqueue(() => {
+        const audio = controller.audio;
+        audio.pause();
+        clearAudioQueueBinding(audio);
+        audio.removeAttribute('src');
+        audio.load();
+      });
       snapSmoothPlaybackTime(0);
     }
     prevQueueIdRef.current = current.queueId;
@@ -1054,10 +1115,17 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     qishuiLocalAbortRef.current = null;
 
     const loadTrack = async () => {
+      const loadStartedAt = performance.now();
       tempRetries.current = 0;
       lowestFallbackAttempted.current = false;
       successRecordedTrackKey.current = null;
       setTrackLoading(true);
+      debugLog('track_load_start', debugLine({
+        queueId,
+        trackKey,
+        source: current.source || 'netease',
+        previousAudioBound: getAudioBoundQueueId(controller.audio),
+      }));
 
       try {
         const liveBeforeLoad = useRoomStore.getState().room;
@@ -1092,6 +1160,14 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
           url = (await refreshSignedApiUrl(resolved.url)) || resolved.url;
           if (gen !== loadGeneration.current) return;
           playbackUrl = url;
+          debugLog('track_resolve_done', debugLine({
+            queueId,
+            elapsedMs: Math.round(performance.now() - loadStartedAt),
+            source: current.source || 'netease',
+            proxied: Boolean(url && isProxiedMediaUrl(url)),
+            quality: resolved.qualityLabel || null,
+            crossSource: Boolean(resolved.crossSource),
+          }));
           let resolvedMeta = resolved;
           // 仅汽水播放会话需要本地解密。跨源成功后 current.source 仍是 qishui，
           // 但 resolved.url 已是网易/QQ 直链，不能再误送进汽水解密器。
@@ -1200,6 +1276,11 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
           audio.src = playbackUrl;
           bindAudioQueueId(audio, current.queueId);
           audio.load();
+          debugLog('track_audio_bound', debugLine({
+            queueId: current.queueId,
+            elapsedMs: Math.round(performance.now() - loadStartedAt),
+            proxied: isProxiedMediaUrl(playbackUrl),
+          }));
         });
 
         if (gen !== loadGeneration.current) return;
@@ -1226,6 +1307,13 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
 
         await waitForAudioMinimumReady(controller.audio);
         if (gen !== loadGeneration.current) return;
+        debugLog('track_audio_ready', debugLine({
+          queueId: current.queueId,
+          elapsedMs: Math.round(performance.now() - loadStartedAt),
+          readyState: controller.audio.readyState,
+          duration: Number.isFinite(controller.audio.duration) ? Number(controller.audio.duration.toFixed(3)) : null,
+          networkState: controller.audio.networkState,
+        }));
 
         // 仅缓存/同步服务端地址；blob: 只属于当前浏览器，不能发给房间内其他用户。
         rememberSongUrl(trackKey, url, qualityLabel, crossSource, crossSourceFrom, loudness, duration);
@@ -1281,6 +1369,11 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
         if (liveRoom) prefetchUpcomingFromRoom(liveRoom);
       } catch (err) {
         console.error('Failed to load song:', err);
+        debugLog('track_load_failed', debugLine({
+          queueId: current.queueId,
+          elapsedMs: Math.round(performance.now() - loadStartedAt),
+          error: err instanceof Error ? err.message : String(err),
+        }));
         if (gen !== loadGeneration.current) return;
         clearAudioQueueBinding(controller.audio);
         scheduleLocalRecovery(current, 'load_track_failed');
@@ -1288,6 +1381,13 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
         releaseLoadLock(loadLockRef, queueId, gen);
         if (gen === loadGeneration.current) {
           setTrackLoading(false);
+          debugLog('track_load_end', debugLine({
+            queueId,
+            elapsedMs: Math.round(performance.now() - loadStartedAt),
+            boundQueueId: getAudioBoundQueueId(controller.audio),
+            readyState: controller.audio.readyState,
+            loadingCleared: true,
+          }));
           const live = useRoomStore.getState().room;
           // 新曲已绑定：放开自动续播闸，再走 forceZero/校正同步
           if (live?.current?.queueId === queueId && isAudioBoundToQueue(controller.audio, queueId)) {

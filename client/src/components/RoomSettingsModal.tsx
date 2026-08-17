@@ -726,7 +726,11 @@ export default function RoomSettingsModal({
                     <h3 className="text-sm font-medium text-white">申请常驻</h3>
                   </div>
                   <p className="mb-3 text-xs text-netease-muted">
-                    长时间不来听歌，房间可能会被管理员强制解散。提交后由管理员审核，通过或拒绝都会弹窗通知你。
+                    常驻仅适合长期有多人活跃的房间申请。
+                    <span className="text-netease-red">
+                      即使不申请常驻，房间缓存也会保留，下次创建房间仍会沿用相同配置；
+                    </span>
+                    常驻房间超过 2 天无人进入会被强制解散，周六日及节假日不计算在内。审核结果会弹窗通知你。
                   </p>
 
                   {protectedFromDestroy ? (

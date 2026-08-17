@@ -1586,7 +1586,7 @@ function AdminPage() {
                             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                               当前无在线成员
                               {(room.creatorNickname || room.creatorId || room.creatorIp || room.creatorDeviceId)
-                                ? ' · 建房人信息如下（创建时记录，人不在线也能看）'
+                                ? ' · 建房人信息如下'
                                 : ' · 暂无建房人记录（旧房间可能未保存）'}
                             </Typography.Text>
                             {(room.creatorNickname || room.creatorId || room.creatorIp || room.creatorDeviceId) ? (

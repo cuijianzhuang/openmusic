@@ -17,7 +17,7 @@ on:
           - release
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -35,29 +35,31 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Ensure platform folders
+      - name: Install dependencies
         working-directory: mobile
         run: |
-          flutter create --platforms=android,ios --org=com.openmusic --project-name=openmusic .
           flutter pub get
+
+      - name: Verify Android project
+        working-directory: mobile
+        run: |
+          test -f android/settings.gradle.kts
+          test -f android/app/src/main/AndroidManifest.xml
 
       - name: Build APK
         working-directory: mobile
+        env:
+          OM_SERVER_URL: ${{ inputs.server_url }}
         run: |
           if [ "${{ inputs.build_type }}" = "release" ]; then
-            flutter build apk --release --dart-define=OM_SERVER_URL=${{ inputs.server_url }}
+            flutter build apk --release --dart-define=OM_SERVER_URL="$OM_SERVER_URL"
             cp build/app/outputs/flutter-apk/app-release.apk ../openmusic.apk
           else
-            flutter build apk --debug --dart-define=OM_SERVER_URL=${{ inputs.server_url }}
+            flutter build apk --debug --dart-define=OM_SERVER_URL="$OM_SERVER_URL"
             cp build/app/outputs/flutter-apk/app-debug.apk ../openmusic.apk
           fi
 
       - uses: actions/upload-artifact@v4
         with:
-          name: openmusic-apk
+          name: openmusic-${{ inputs.build_type }}-apk
           path: openmusic.apk
-
-      - name: Publish to server/downloads
-        run: |
-          mkdir -p server/downloads
-          cp openmusic.apk server/downloads/openmusic.apk

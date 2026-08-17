@@ -881,7 +881,7 @@ body {
   }
 }
 
-/* 贵宾点歌边框 — 纯色描边 + 向内光晕（亮度见 memberTierPresets.ts MEMBER_FRAME_GLOW） */
+/* 贵宾点歌边框 — 轻量立体描边 + 向内光晕（亮度见 memberTierPresets.ts MEMBER_FRAME_GLOW） */
 .member-queue-shell {
   position: relative;
   border-radius: 0.75rem;
@@ -902,17 +902,23 @@ body {
 }
 
 .member-queue-compact {
-  border-width: 1.5px;
+  border-width: 1px;
   box-shadow:
-    inset 0 0 10px 1px color-mix(in srgb, var(--member-border-color) 14%, transparent),
-    0 0 4px color-mix(in srgb, var(--member-border-color) 25%, transparent);
+    inset 0 1px 0 color-mix(in srgb, white 16%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, var(--member-border-color) 24%, transparent),
+    inset 0 0 10px 1px color-mix(in srgb, var(--member-border-color) 12%, transparent),
+    0 1px 4px color-mix(in srgb, black 28%, transparent),
+    0 0 4px color-mix(in srgb, var(--member-border-color) 18%, transparent);
 }
 
 .member-frame-preview {
-  border-width: 2px;
+  border-width: 1px;
   box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 20%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, var(--member-border-color) 30%, transparent),
     inset 0 0 10px 2px color-mix(in srgb, var(--member-border-color) calc(var(--member-glow-inset) * 100%), transparent),
     inset 0 0 18px 3px color-mix(in srgb, var(--member-border-color) var(--member-glow-inner-mix), transparent),
+    0 2px 8px color-mix(in srgb, black 30%, transparent),
     0 0 7px color-mix(in srgb, var(--member-border-color) calc(var(--member-glow-outer) * 100%), transparent);
 }
 
@@ -925,7 +931,10 @@ body {
   backface-visibility: hidden;
   -webkit-font-smoothing: antialiased;
   color: var(--member-badge-color);
-  text-shadow: 0 0 8px color-mix(in srgb, var(--member-badge-color) 42%, transparent);
+  transform: translateY(-0.5px) translateZ(0);
+  text-shadow:
+    0 1px 0 color-mix(in srgb, black 45%, transparent),
+    0 0 7px color-mix(in srgb, var(--member-badge-color) 32%, transparent);
 }
 
 .member-badge-shine::before {
@@ -934,18 +943,21 @@ body {
   inset: 0;
   border-radius: inherit;
   background: linear-gradient(
-    145deg,
-    color-mix(in srgb, var(--member-badge-color) 26%, transparent) 0%,
-    color-mix(in srgb, var(--member-badge-color) 16%, transparent) 52%,
-    color-mix(in srgb, var(--member-badge-color) 22%, transparent) 100%
+    160deg,
+    color-mix(in srgb, white 18%, var(--member-badge-color)) 0%,
+    color-mix(in srgb, var(--member-badge-color) 28%, transparent) 26%,
+    color-mix(in srgb, var(--member-badge-color) 16%, transparent) 68%,
+    color-mix(in srgb, black 18%, var(--member-badge-color)) 100%
   );
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
   box-shadow:
-    inset 0 0 0 1px var(--member-badge-color),
-    inset 0 1px 0 rgba(255, 255, 255, 0.18),
-    inset 0 0 12px color-mix(in srgb, var(--member-badge-color) 12%, transparent),
-    0 0 10px color-mix(in srgb, var(--member-badge-color) 14%, transparent);
+    inset 0 0 0 0.75px color-mix(in srgb, var(--member-badge-color) 62%, rgba(255, 255, 255, 0.3)),
+    inset 0 1px 0 rgba(255, 255, 255, 0.42),
+    inset 0 -1px 0 color-mix(in srgb, black 32%, transparent),
+    inset 0 0 12px color-mix(in srgb, var(--member-badge-color) 16%, transparent),
+    0 1px 2px color-mix(in srgb, black 38%, transparent),
+    0 0 8px color-mix(in srgb, var(--member-badge-color) 16%, transparent);
   z-index: 0;
   pointer-events: none;
 }
@@ -967,7 +979,7 @@ body {
   transform: translateX(-100%);
   animation: member-badge-shine-sweep 3s ease-in-out infinite;
   pointer-events: none;
-  opacity: 0.55;
+  opacity: 0.42;
   z-index: 1;
 }
 

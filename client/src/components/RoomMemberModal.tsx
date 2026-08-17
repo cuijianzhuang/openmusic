@@ -27,6 +27,7 @@ interface Props {
   userNicknames?: Record<string, string>;
   creatorId?: string;
   adminIds?: string[];
+  isOwner?: boolean;
   memberTiers: Record<string, RoomMemberTier>;
   memberSettings: RoomMemberSettings;
   saving?: boolean;
@@ -72,10 +73,12 @@ function ColorSwatches({
   value,
   onChange,
   ariaPrefix,
+  disabled = false,
 }: {
   value: string;
   onChange: (color: string) => void;
   ariaPrefix: string;
+  disabled?: boolean;
 }) {
   const colors = getSelectableBadgeColorPresets();
   return (
@@ -88,8 +91,9 @@ function ColorSwatches({
             type="button"
             title={preset.name}
             aria-label={`${ariaPrefix}${preset.name}`}
+            disabled={disabled}
             onClick={() => onChange(preset.color)}
-            className={`h-7 w-7 rounded-full transition-transform ${
+            className={`h-7 w-7 rounded-full transition-transform disabled:cursor-not-allowed disabled:opacity-45 ${
               active ? 'scale-110 ring-2 ring-amber-300/70 ring-offset-1 ring-offset-netease-dark' : 'hover:scale-105'
             }`}
             style={{ backgroundColor: preset.color }}
@@ -106,6 +110,7 @@ export default function RoomMemberModal({
   userNicknames = {},
   creatorId,
   adminIds = [],
+  isOwner = false,
   memberTiers,
   memberSettings,
   saving = false,
@@ -164,12 +169,20 @@ export default function RoomMemberModal({
         return true;
       })
       .sort((a, b) => {
-        const aTier = memberTiers[a.id] ? 1 : 0;
-        const bTier = memberTiers[b.id] ? 1 : 0;
-        if (aTier !== bTier) return bTier - aTier;
+        const aOffline = a.offline ? 1 : 0;
+        const bOffline = b.offline ? 1 : 0;
+        if (aOffline !== bOffline) return aOffline - bOffline;
+
+        const getRoleOrder = (user: MemberUserOption) => {
+          if (creatorId && user.id === creatorId) return 0;
+          if (adminIds.includes(user.id)) return 1;
+          return 2;
+        };
+        const roleOrderDiff = getRoleOrder(a) - getRoleOrder(b);
+        if (roleOrderDiff !== 0) return roleOrderDiff;
         return a.nickname.localeCompare(b.nickname, 'zh-CN');
       });
-  }, [assignableUsers, memberTiers, query, userFilter]);
+  }, [adminIds, assignableUsers, creatorId, memberTiers, query, userFilter]);
 
   const selectedUser = selectableUsers.find((user) => user.id === selectedUserId)
     || assignableUsers.find((user) => user.id === selectedUserId)
@@ -177,6 +190,7 @@ export default function RoomMemberModal({
   const selectedIsVip = Boolean(selectedUser && memberTiers[selectedUser.id]);
   const selectedIsOwner = Boolean(selectedUser && creatorId && selectedUser.id === creatorId);
   const selectedIsAdmin = Boolean(selectedUser && adminIds.includes(selectedUser.id) && !selectedIsOwner);
+  const canEditSelected = isOwner || (!selectedIsOwner && !selectedIsAdmin);
   const cooldownMinutes = Math.floor(normalizeWelcomeCooldownSec(draft.welcomeCooldownSec) / 60);
   const cooldownIsPreset = (WELCOME_COOLDOWN_MINUTE_OPTIONS as readonly number[]).includes(cooldownMinutes);
   const previewNickname = selectedUser?.nickname || '贵宾昵称';
@@ -196,6 +210,7 @@ export default function RoomMemberModal({
   };
 
   const updateAccentColor = (color: string) => {
+    if (!canEditSelected) return;
     setDraft((prev) => ({
       ...prev,
       badgeColor: color,
@@ -209,7 +224,7 @@ export default function RoomMemberModal({
   const entryFxOn = welcomeOn || confettiOn;
 
   const handleSaveTier = () => {
-    if (!selectedUserId) return;
+    if (!selectedUserId || !canEditSelected) return;
     const templateId = normalizeWelcomeTemplateId(draft.welcomeTemplateId);
     onSaveTier(selectedUserId, {
       badgeLabel: draft.badgeLabel.trim().slice(0, 8) || '贵宾',
@@ -256,7 +271,7 @@ export default function RoomMemberModal({
           </button>
         </header>
 
-        <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[210px_minmax(0,1fr)]">
+        <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[260px_minmax(0,1fr)]">
           <aside className="flex min-h-0 flex-col border-b border-netease-border/40 lg:border-b-0 lg:border-r lg:border-netease-border/40">
             <div className="flex-shrink-0 space-y-2 px-3 pb-2">
               <div className="relative">
@@ -352,6 +367,9 @@ export default function RoomMemberModal({
                         {selectedIsVip ? '已是贵宾' : '未设置'}
                       </span>
                     </div>
+                    {!canEditSelected && (
+                      <p className="text-[11px] text-amber-200/75">房主或管理员的贵宾设置仅限房主修改</p>
+                    )}
                     <MemberQueueFrame tier={draft} variant="preview" innerClassName="bg-netease-card px-3 py-2">
                       <p className="text-sm font-medium text-white">点歌边框预览</p>
                       <p className="text-[11px] text-netease-muted">队列中将显示此边框效果</p>
@@ -369,6 +387,7 @@ export default function RoomMemberModal({
                       </div>
                       <input
                         value={draft.badgeLabel}
+                        disabled={!canEditSelected}
                         onChange={(event) => setDraft((prev) => ({ ...prev, badgeLabel: event.target.value.slice(0, 8) }))}
                         maxLength={8}
                         placeholder="如：赞助、VIP、老铁"
@@ -379,8 +398,9 @@ export default function RoomMemberModal({
                           <button
                             key={label}
                             type="button"
+                            disabled={!canEditSelected}
                             onClick={() => setDraft((prev) => ({ ...prev, badgeLabel: label }))}
-                            className={`flex-shrink-0 rounded-full px-2.5 py-1 text-[11px] transition-colors ${
+                            className={`flex-shrink-0 rounded-full px-2.5 py-1 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
                               draft.badgeLabel === label
                                 ? 'bg-amber-500/18 text-amber-100'
                                 : 'bg-netease-card text-netease-muted hover:text-white'
@@ -398,6 +418,7 @@ export default function RoomMemberModal({
                         ariaPrefix="角标色与边框色"
                         value={draft.badgeColor}
                         onChange={updateAccentColor}
+                        disabled={!canEditSelected}
                       />
                     </div>
                   </section>
@@ -418,7 +439,7 @@ export default function RoomMemberModal({
                           type="button"
                           role="switch"
                           aria-checked={confettiOn}
-                          disabled={saving}
+                          disabled={saving || !canEditSelected}
                           onClick={() => setDraft((prev) => ({
                             ...prev,
                             confettiEnabled: !prev.confettiEnabled,
@@ -445,12 +466,13 @@ export default function RoomMemberModal({
                             <button
                               key={preset.id}
                               type="button"
+                              disabled={!canEditSelected}
                               onClick={() => setDraft((prev) => ({
                                 ...prev,
                                 welcomeTemplateId: preset.id,
                                 welcomeEnabled: preset.id !== 'none',
                               }))}
-                              className={`rounded-lg px-2.5 py-1.5 text-xs transition-colors ${
+                              className={`rounded-lg px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
                                 active
                                   ? 'bg-amber-500/18 text-amber-100'
                                   : 'bg-netease-card text-netease-muted hover:text-white'
@@ -466,6 +488,7 @@ export default function RoomMemberModal({
                         <div className="space-y-1.5">
                           <textarea
                             value={draft.welcomeCustomText || ''}
+                            disabled={!canEditSelected}
                             onChange={(event) => setDraft((prev) => ({
                               ...prev,
                               welcomeCustomText: event.target.value.slice(0, 200),
@@ -502,7 +525,7 @@ export default function RoomMemberModal({
                             <button
                               key={minutes}
                               type="button"
-                              disabled={saving || !entryFxOn}
+                              disabled={saving || !entryFxOn || !canEditSelected}
                               onClick={() => setDraft((prev) => ({ ...prev, welcomeCooldownSec: sec }))}
                               className={`rounded-lg px-2.5 py-1.5 text-xs transition-colors disabled:opacity-50 ${
                                 active
@@ -526,7 +549,7 @@ export default function RoomMemberModal({
                             min={0}
                             max={24 * 60}
                             step={1}
-                            disabled={saving || !entryFxOn}
+                            disabled={saving || !entryFxOn || !canEditSelected}
                             value={cooldownMinutes}
                             onChange={(event) => {
                               const raw = event.target.value;
@@ -556,7 +579,7 @@ export default function RoomMemberModal({
                 <footer className="flex flex-shrink-0 items-center gap-2 border-t border-netease-border/35 px-3 py-3 sm:px-4">
                   <button
                     type="button"
-                    disabled={saving}
+                    disabled={saving || !canEditSelected}
                     onClick={handleSaveTier}
                     className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-medium text-black hover:bg-amber-400 disabled:opacity-50"
                   >
@@ -565,7 +588,7 @@ export default function RoomMemberModal({
                   {selectedIsVip && (
                     <button
                       type="button"
-                      disabled={saving}
+                      disabled={saving || !canEditSelected}
                       onClick={() => onRemoveTier(selectedUser.id)}
                       className="inline-flex items-center gap-1 rounded-xl px-3 py-2 text-sm text-red-300/90 hover:bg-red-500/10 disabled:opacity-50"
                     >

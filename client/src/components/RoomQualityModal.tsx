@@ -93,7 +93,7 @@ export default function RoomQualityModal({ open, value, saving = false, onClose,
         <div className="space-y-4">
           <section>
             <div className="mb-2 flex items-center gap-2">
-              <span className="text-sm font-medium text-netease-red/90">网易</span>
+              <span className="text-sm font-medium text-[#ec4141]/90">网易</span>
             </div>
             <div className="flex flex-wrap gap-2">
               {neteaseOptions.map((opt) => (
@@ -104,7 +104,7 @@ export default function RoomQualityModal({ open, value, saving = false, onClose,
                   onClick={() => handleNeteaseChange(opt.value)}
                   className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50 ${
                     current.netease === opt.value
-                      ? 'border-netease-red/40 bg-netease-red/15 text-white'
+                      ? 'border-[#ec4141]/40 bg-[#ec4141]/15 text-white'
                       : 'border-white/10 bg-netease-card text-netease-muted hover:border-white/20 hover:text-white'
                   }`}
                 >

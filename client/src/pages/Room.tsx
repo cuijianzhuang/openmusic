@@ -2708,6 +2708,7 @@ export default function Room() {
         userNicknames={room?.userNicknames ?? {}}
         creatorId={room?.creatorId ?? undefined}
         adminIds={room?.adminIds ?? []}
+        isOwner={isOwner}
         memberTiers={room?.memberTiers ?? {}}
         memberSettings={room?.memberSettings ?? DEFAULT_MEMBER_SETTINGS}
         saving={memberSaving}

@@ -25,6 +25,7 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.widget.LinearLayout
 import android.widget.TextView
 import io.flutter.plugin.common.MethodChannel
 import java.io.ByteArrayOutputStream
@@ -72,8 +73,12 @@ class NativePlaybackService : Service() {
     private var pendingPositionUntilMs = 0L
     private var lastControlAction = ""
     private var lastControlAtMs = 0L
-    private var lyricsOverlayView: TextView? = null
+    private var lyricsOverlayView: View? = null
+    private var lyricsOverlayTextView: TextView? = null
+    private var lyricsOverlayLockView: TextView? = null
+    private var lyricsOverlayCloseView: TextView? = null
     private var lyricsOverlayParams: WindowManager.LayoutParams? = null
+    private var lyricsOverlayLocked = false
     private var overlayTouchStartX = 0
     private var overlayTouchStartY = 0
     private var overlayRawStartX = 0f
@@ -405,7 +410,11 @@ class NativePlaybackService : Service() {
             requestOverlayPermission()
             return
         }
-        if (lyricsOverlayView == null) showLyricsOverlay() else removeLyricsOverlay()
+        if (lyricsOverlayView == null) {
+            showLyricsOverlay()
+        } else if (!lyricsOverlayLocked) {
+            removeLyricsOverlay()
+        }
     }
 
     private fun showLyricsOverlay() {
@@ -417,40 +426,63 @@ class NativePlaybackService : Service() {
             updateLyricsOverlayText()
             return
         }
-        val view = TextView(this).apply {
+        val overlayTouchListener = View.OnTouchListener { v, event ->
+            val params = lyricsOverlayParams ?: return@OnTouchListener false
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    overlayTouchStartX = params.x
+                    overlayTouchStartY = params.y
+                    overlayRawStartX = event.rawX
+                    overlayRawStartY = event.rawY
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    if (!lyricsOverlayLocked) {
+                        params.x = overlayTouchStartX + (event.rawX - overlayRawStartX).toInt()
+                        params.y = overlayTouchStartY + (event.rawY - overlayRawStartY).toInt()
+                        runCatching { windowManager().updateViewLayout(lyricsOverlayView ?: v, params) }
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP -> true
+                else -> false
+            }
+        }
+        val lyricView = TextView(this).apply {
             text = lyricsOverlayText()
-            setTextColor(Color.WHITE)
+            setTextColor(Color.rgb(168, 85, 247))
             setTypeface(Typeface.DEFAULT_BOLD)
             textSize = 20f
             gravity = Gravity.CENTER
             maxLines = 2
-            setPadding(32, 18, 32, 18)
-            setBackgroundColor(Color.TRANSPARENT)
-            setOnTouchListener { v, event ->
-                val params = lyricsOverlayParams ?: return@setOnTouchListener false
-                when (event.actionMasked) {
-                    MotionEvent.ACTION_DOWN -> {
-                        overlayTouchStartX = params.x
-                        overlayTouchStartY = params.y
-                        overlayRawStartX = event.rawX
-                        overlayRawStartY = event.rawY
-                        true
-                    }
-                    MotionEvent.ACTION_MOVE -> {
-                        params.x = overlayTouchStartX + (event.rawX - overlayRawStartX).toInt()
-                        params.y = overlayTouchStartY + (event.rawY - overlayRawStartY).toInt()
-                        runCatching { windowManager().updateViewLayout(v, params) }
-                        true
-                    }
-                    MotionEvent.ACTION_UP -> {
-                        if (kotlin.math.abs(event.rawX - overlayRawStartX) < 8 && kotlin.math.abs(event.rawY - overlayRawStartY) < 8) {
-                            removeLyricsOverlay()
-                        }
-                        true
-                    }
-                    else -> false
-                }
+            setPadding(32, 18, 32, 8)
+            setOnTouchListener(overlayTouchListener)
+        }
+        val lockView = overlayActionView("锁定").apply {
+            setOnClickListener {
+                lyricsOverlayLocked = !lyricsOverlayLocked
+                updateLyricsOverlayLockState()
             }
+        }
+        val closeView = overlayActionView("关闭").apply {
+            setOnClickListener {
+                if (!lyricsOverlayLocked) removeLyricsOverlay()
+            }
+        }
+        val controls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            addView(lockView)
+            addView(closeView)
+        }
+        val view = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, 8)
+            setBackgroundColor(Color.TRANSPARENT)
+            setOnTouchListener(overlayTouchListener)
+            addView(lyricView)
+            addView(controls)
         }
         val windowType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -473,10 +505,19 @@ class NativePlaybackService : Service() {
         runCatching {
             windowManager().addView(view, params)
             lyricsOverlayView = view
+            lyricsOverlayTextView = lyricView
+            lyricsOverlayLockView = lockView
+            lyricsOverlayCloseView = closeView
             lyricsOverlayParams = params
+            lyricsOverlayLocked = false
+            updateLyricsOverlayLockState()
         }.onFailure {
             lyricsOverlayView = null
+            lyricsOverlayTextView = null
+            lyricsOverlayLockView = null
+            lyricsOverlayCloseView = null
             lyricsOverlayParams = null
+            lyricsOverlayLocked = false
             requestOverlayPermission()
         }
     }
@@ -485,11 +526,34 @@ class NativePlaybackService : Service() {
         val view = lyricsOverlayView ?: return
         runCatching { windowManager().removeView(view) }
         lyricsOverlayView = null
+        lyricsOverlayTextView = null
+        lyricsOverlayLockView = null
+        lyricsOverlayCloseView = null
         lyricsOverlayParams = null
+        lyricsOverlayLocked = false
     }
 
     private fun updateLyricsOverlayText() {
-        lyricsOverlayView?.text = lyricsOverlayText()
+        lyricsOverlayTextView?.text = lyricsOverlayText()
+    }
+
+    private fun updateLyricsOverlayLockState() {
+        lyricsOverlayLockView?.text = if (lyricsOverlayLocked) "解锁" else "锁定"
+        lyricsOverlayCloseView?.setTextColor(
+            if (lyricsOverlayLocked) Color.rgb(156, 163, 175) else Color.rgb(168, 85, 247)
+        )
+    }
+
+    private fun overlayActionView(label: String): TextView {
+        return TextView(this).apply {
+            text = label
+            setTextColor(Color.rgb(168, 85, 247))
+            textSize = 13f
+            gravity = Gravity.CENTER
+            setPadding(18, 8, 18, 8)
+            isClickable = true
+            isFocusable = true
+        }
     }
 
     private fun lyricsOverlayText(): String {

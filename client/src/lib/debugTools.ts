@@ -477,7 +477,7 @@ function collectAudioFields(
   audio: HTMLAudioElement,
   audioStore: ReturnType<typeof useAudioStore.getState>,
   current: Pick<QueueItem, 'queueId' | 'id' | 'source' | 'url'> | null | undefined,
-): { element: Record<string, DebugScalar>; media: Record<string, DebugScalar>; srcFull: string | null } {
+): { element: Record<string, DebugScalar>; media: Record<string, DebugScalar> } {
   const src = audio.currentSrc || audio.src || '';
   const boundQueueId = getAudioBoundQueueId(audio);
   const upstream = src
@@ -529,7 +529,6 @@ function collectAudioFields(
       visualMode: readRoomVisualMode(),
       visualProxySong: shouldProxySongPlaybackUrl(),
     },
-    srcFull: src || null,
   };
 }
 
@@ -620,10 +619,8 @@ function formatSnapshotText(reason: string): string {
   pushSection(lines, 'room', collectRoomFields());
   pushSection(lines, 'quality', qualityParts(source));
   pushSection(lines, 'track', collectTrackFields(current, audioStore));
-  if (current?.url) lines.push(`trackUrlFull=${current.url}`);
   pushSection(lines, 'audio', audioParts.element);
   pushSection(lines, 'media', audioParts.media);
-  if (audioParts.srcFull) lines.push(`audioSrcFull=${audioParts.srcFull}`);
   pushSection(lines, 'sync', collectSyncFields(audio));
   lines.push(formatDriftHistogram());
   lines.push(`event_counts ${formatEventCounts()}`);
@@ -662,8 +659,6 @@ export function getDebugSnapshotObject(reason = 'snapshot'): Record<string, unkn
     track: collectTrackFields(current, audioStore),
     audio: audioParts.element,
     media: audioParts.media,
-    audioSrcFull: audioParts.srcFull,
-    trackUrlFull: current?.url || null,
     sync: collectSyncFields(audio),
     driftHistogramTotal: getDriftHistogramTotal(),
     eventCounts: formatEventCounts(30),
@@ -715,7 +710,6 @@ function buildErrorReportMeta(): Record<string, DebugScalar> {
     ...collectRoomFields(),
     ...quality,
     ...collectTrackFields(current, audioStore),
-    audioSrc: audioParts.srcFull,
     audioSrcProxied: audioParts.media.audioSrcProxied ?? null,
     audioUpstreamHost: audioParts.media.audioUpstreamHost ?? null,
     audioError: audioParts.media.audioError ?? null,

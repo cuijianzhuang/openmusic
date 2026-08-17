@@ -2894,6 +2894,11 @@ export function setRoomMemberTier(roomId, actorId, targetUserId, payload = {}, c
 
   const userId = String(targetUserId || "").trim();
   if (!userId) return { error: "无效用户" };
+  // 普通管理员只能管理成员贵宾，房主与其他管理员的贵宾身份由房主维护。
+  if (!isRoomCreator(room, actorId)
+    && (isRoomCreator(room, userId) || isAppointedAdmin(room, userId))) {
+    return { error: "仅房主可修改房主或管理员的贵宾设置" };
+  }
 
   if (!room.memberTiers) room.memberTiers = new Map();
   const normalized = normalizeIncomingMemberTier(payload);
@@ -2917,6 +2922,10 @@ export function removeRoomMemberTier(roomId, actorId, targetUserId, connectionId
 
   const userId = String(targetUserId || "").trim();
   if (!userId) return { error: "无效用户" };
+  if (!isRoomCreator(room, actorId)
+    && (isRoomCreator(room, userId) || isAppointedAdmin(room, userId))) {
+    return { error: "仅房主可修改房主或管理员的贵宾设置" };
+  }
   if (!room.memberTiers?.has(userId)) return { error: "该用户不是贵宾" };
 
   room.memberTiers.delete(userId);
