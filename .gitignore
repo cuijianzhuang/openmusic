@@ -15,6 +15,7 @@ client/.env.capacitor
 server/downloads/*.apk
 server/downloads/*.ipa
 .playwright-mcp
+.codex/
 
 # Docker 部署持久化目录（deploy/deploy.sh docker 生成）
 /data/
