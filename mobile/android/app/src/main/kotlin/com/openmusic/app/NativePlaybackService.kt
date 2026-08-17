@@ -77,6 +77,7 @@ class NativePlaybackService : Service() {
     private var lyricsOverlayTextView: TextView? = null
     private var lyricsOverlayLockView: TextView? = null
     private var lyricsOverlayCloseView: TextView? = null
+    private var lyricsOverlayControlsView: View? = null
     private var lyricsOverlayParams: WindowManager.LayoutParams? = null
     private var lyricsOverlayLocked = false
     private var overlayTouchStartX = 0
@@ -84,6 +85,9 @@ class NativePlaybackService : Service() {
     private var overlayRawStartX = 0f
     private var overlayRawStartY = 0f
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val hideLyricsOverlayControlsRunnable = Runnable {
+        lyricsOverlayControlsView?.visibility = View.GONE
+    }
     private val artworkExecutor = Executors.newSingleThreadExecutor()
     private val progressTicker = object : Runnable {
         override fun run() {
@@ -428,6 +432,7 @@ class NativePlaybackService : Service() {
         }
         val overlayTouchListener = View.OnTouchListener { v, event ->
             val params = lyricsOverlayParams ?: return@OnTouchListener false
+            showLyricsOverlayControls()
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     overlayTouchStartX = params.x
@@ -460,12 +465,14 @@ class NativePlaybackService : Service() {
         }
         val lockView = overlayActionView("锁定").apply {
             setOnClickListener {
+                showLyricsOverlayControls()
                 lyricsOverlayLocked = !lyricsOverlayLocked
                 updateLyricsOverlayLockState()
             }
         }
         val closeView = overlayActionView("关闭").apply {
             setOnClickListener {
+                showLyricsOverlayControls()
                 if (!lyricsOverlayLocked) removeLyricsOverlay()
             }
         }
@@ -508,14 +515,17 @@ class NativePlaybackService : Service() {
             lyricsOverlayTextView = lyricView
             lyricsOverlayLockView = lockView
             lyricsOverlayCloseView = closeView
+            lyricsOverlayControlsView = controls
             lyricsOverlayParams = params
             lyricsOverlayLocked = false
             updateLyricsOverlayLockState()
+            showLyricsOverlayControls()
         }.onFailure {
             lyricsOverlayView = null
             lyricsOverlayTextView = null
             lyricsOverlayLockView = null
             lyricsOverlayCloseView = null
+            lyricsOverlayControlsView = null
             lyricsOverlayParams = null
             lyricsOverlayLocked = false
             requestOverlayPermission()
@@ -524,11 +534,13 @@ class NativePlaybackService : Service() {
 
     private fun removeLyricsOverlay() {
         val view = lyricsOverlayView ?: return
+        mainHandler.removeCallbacks(hideLyricsOverlayControlsRunnable)
         runCatching { windowManager().removeView(view) }
         lyricsOverlayView = null
         lyricsOverlayTextView = null
         lyricsOverlayLockView = null
         lyricsOverlayCloseView = null
+        lyricsOverlayControlsView = null
         lyricsOverlayParams = null
         lyricsOverlayLocked = false
     }
@@ -542,6 +554,13 @@ class NativePlaybackService : Service() {
         lyricsOverlayCloseView?.setTextColor(
             if (lyricsOverlayLocked) Color.rgb(156, 163, 175) else Color.rgb(168, 85, 247)
         )
+    }
+
+    private fun showLyricsOverlayControls() {
+        val controls = lyricsOverlayControlsView ?: return
+        controls.visibility = View.VISIBLE
+        mainHandler.removeCallbacks(hideLyricsOverlayControlsRunnable)
+        mainHandler.postDelayed(hideLyricsOverlayControlsRunnable, 3000L)
     }
 
     private fun overlayActionView(label: String): TextView {

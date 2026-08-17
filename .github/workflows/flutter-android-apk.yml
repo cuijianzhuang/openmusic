@@ -30,6 +30,10 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -52,14 +56,21 @@ jobs:
           OM_SERVER_URL: ${{ inputs.server_url }}
         run: |
           if [ "${{ inputs.build_type }}" = "release" ]; then
-            flutter build apk --release --dart-define=OM_SERVER_URL="$OM_SERVER_URL"
+            node scripts/build-flutter-apk.mjs --release --server-url="$OM_SERVER_URL"
             cp build/app/outputs/flutter-apk/app-release.apk ../openmusic.apk
           else
-            flutter build apk --debug --dart-define=OM_SERVER_URL="$OM_SERVER_URL"
+            node scripts/build-flutter-apk.mjs --server-url="$OM_SERVER_URL"
             cp build/app/outputs/flutter-apk/app-debug.apk ../openmusic.apk
           fi
+
+      - name: Prepare server download
+        run: |
+          mkdir -p server/downloads
+          cp openmusic.apk server/downloads/openmusic.apk
 
       - uses: actions/upload-artifact@v4
         with:
           name: openmusic-${{ inputs.build_type }}-apk
-          path: openmusic.apk
+          path: |
+            openmusic.apk
+            server/downloads/openmusic.apk
