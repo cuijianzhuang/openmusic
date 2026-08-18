@@ -40,7 +40,7 @@ import {
   setBackgroundKeepaliveActive,
 } from '../lib/backgroundKeepalive';
 import { createWorkerInterval } from '../lib/workerTimer';
-import { ensureGalaxyAudioOutput } from '../components/galaxy/lib/galaxyAudio';
+import { ensureGalaxyAudioOutputIfLoaded } from '../lib/galaxyAudioBridge';
 import { canSeekInRoom } from '../lib/roomPermissions';
 import {
   prefetchUpcomingFromRoom,
@@ -932,7 +932,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
             }
           }
         }
-        ensureGalaxyAudioOutput();
+        ensureGalaxyAudioOutputIfLoaded();
         markAudioSessionUnlocked();
         useAudioStore.getState().setNeedsAudioUnlock(false);
         const live = useRoomStore.getState().room;
@@ -1328,9 +1328,10 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
           setMediaDuration(trackKey, duration);
           reportTrackDurationToServer(current.queueId, duration);
         }
-        if (qualityLabel) {
-          useAudioStore.getState().setActualQuality(trackKey, qualityLabel);
-        }
+        useAudioStore.getState().setActualMedia(trackKey, {
+          qualityLabel,
+          source: crossSource ? crossSourceFrom : (current.source || 'netease'),
+        });
         // 向房间分享当前曲链接，后续进房者可直接命中缓存
         reportPlaybackMedia({
           trackId: current.queueId,

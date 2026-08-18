@@ -14,6 +14,9 @@ import {
   tickGalaxyBeatMap,
 } from './galaxyBeatMap';
 
+(globalThis as typeof globalThis & { __openmusicGalaxyAudioLoaded?: boolean })
+  .__openmusicGalaxyAudioLoaded = true;
+
 const FFT_SIZE = 2048;
 const BEAT_FFT_SIZE = 2048;
 const REALTIME_MIN_INTERVAL = 0.46;

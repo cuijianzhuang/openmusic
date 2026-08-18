@@ -27,6 +27,7 @@ import ClientDownloadModal from '../components/ClientDownloadModal';
 import MusicContributionModal from '../components/MusicContributionModal';
 import SiteAnnouncementPopup from '../components/SiteAnnouncementPopup';
 import UserGuideTour from '../components/UserGuideTour';
+import Toast from '../components/Toast';
 import BrandMark from '../components/BrandMark';
 import HomeAuroraBackdrop from '../components/react-bits/HomeAuroraBackdrop';
 import GradientText from '../components/react-bits/GradientText';
@@ -410,6 +411,7 @@ export default function Home() {
   const [joinCode, setJoinCode] = useState('');
   const [joinPassword, setJoinPassword] = useState('');
   const [modalError, setModalError] = useState('');
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [downloadModalOpen, setDownloadModalOpen] = useState(false);
   const [contributionOpen, setContributionOpen] = useState(false);
   const [donationOpen, setDonationOpen] = useState(false);
@@ -580,7 +582,12 @@ export default function Home() {
       goToRoom(room.id, pwd || undefined);
     } catch (err) {
       const msg = err instanceof Error ? err.message.trim() : '';
-      setModalError(msg || '创建房间失败，请重试');
+      if (msg.startsWith('你创建房间有点频繁啦') || msg.startsWith('刚刚已经创建过房间啦')) {
+        setModalError('');
+        setToast({ message: msg, type: 'error' });
+      } else {
+        setModalError(msg || '创建房间失败，请重试');
+      }
     } finally {
       setActionLoading(false);
     }
@@ -1212,6 +1219,14 @@ export default function Home() {
         text={siteAnnouncement?.text || ''}
         onClose={handleCloseSiteAnnouncement}
       />
+
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
+      )}
 
       <UserGuideTour scope="home" paused={siteAnnouncementOpen || showCreate || showJoin} delayMs={1000} />
     </div>

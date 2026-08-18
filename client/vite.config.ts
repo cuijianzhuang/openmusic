@@ -140,7 +140,8 @@ export default defineConfig({
     minify: 'esbuild',
     cssMinify: true,
     reportCompressedSize: false,
-    chunkSizeWarningLimit: 600,
+    // AntD 仅由后台路由懒加载；稳定 vendor 约 937KB minified / 301KB gzip。
+    chunkSizeWarningLimit: 950,
     modulePreload: {
       polyfill: false,
     },
@@ -166,11 +167,24 @@ export default defineConfig({
             }
             return;
           }
-          if (id.includes('antd') || id.includes('@ant-design')) {
+          if (id.includes('@ant-design/icons')) {
+            return 'antd-icons';
+          }
+          if (id.includes('antd/locale')) {
+            return 'antd-locale';
+          }
+          if (id.includes('/antd/es/')) {
+            // AntD 内部组件互相引用，按组件名拆桶会形成循环 chunk；保持单一稳定 vendor。
             return 'antd-vendor';
           }
-          if (id.includes('three') || id.includes('@react-three') || id.includes('@mediapipe')) {
-            return;
+          if (id.includes('@react-three')) {
+            return 'react-three-vendor';
+          }
+          if (id.includes('/three/')) {
+            return 'three-vendor';
+          }
+          if (id.includes('@mediapipe')) {
+            return 'mediapipe-vendor';
           }
           if (id.includes('socket.io-client')) {
             return 'socket-vendor';

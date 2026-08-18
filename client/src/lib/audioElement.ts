@@ -1,8 +1,8 @@
-import { resetGalaxyAudioWire } from '../components/galaxy/lib/galaxyAudio';
 import { configureInlineAudio } from './audioUnlock';
 import { useAudioStore } from '../stores/audioStore';
 import { getAudioController } from './audioController';
 import { clearAudioQueueBinding } from './audioTrackBinding';
+import { resetGalaxyAudioWireIfLoaded } from './galaxyAudioBridge';
 
 let sharedAudio: HTMLAudioElement | null = null;
 let loudnessMultiplier = 1;
@@ -48,7 +48,7 @@ export function resetSharedAudioElement(): HTMLAudioElement {
     sharedAudio.pause();
     clearAudioQueueBinding(sharedAudio);
   }
-  resetGalaxyAudioWire();
+  resetGalaxyAudioWireIfLoaded();
   sharedAudio = new Audio();
   sharedAudioGeneration += 1;
   configureInlineAudio(sharedAudio);
@@ -62,7 +62,7 @@ export function stopSharedAudio(): void {
     sharedAudio.pause();
     clearAudioQueueBinding(sharedAudio);
   }
-  resetGalaxyAudioWire();
+  resetGalaxyAudioWireIfLoaded();
   loudnessMultiplier = 1;
   sharedAudio = null;
   sharedAudioGeneration += 1;

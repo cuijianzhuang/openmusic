@@ -9,7 +9,8 @@ import GestureHudOverlay from '../galaxy/GestureHudOverlay';
 import TopographyAudioDriver from './TopographyAudioDriver';
 import TopographyCameraRig, { TOPOGRAPHY_ORBIT_BASELINE } from './TopographyCameraRig';
 import TopographyMapScene from './TopographyMapScene';
-import { useVisualRenderPolicy, VisualFrameScheduler } from '../../hooks/useVisualRenderPolicy';
+import { useVisualRenderPolicy } from '../../hooks/useVisualRenderPolicy';
+import VisualFrameScheduler from '../visual/VisualFrameScheduler';
 
 interface Props {
   className?: string;

@@ -59,7 +59,7 @@ export default memo(function MiniPlayer({
   const setTrackLoading = useAudioStore((s) => s.setTrackLoading);
   const seekPlayback = useAudioStore((s) => s.seekPlayback);
   const localPlayback = useAudioStore((s) => s.localPlayback);
-  const actualQualityByTrack = useAudioStore((s) => s.actualQualityByTrack);
+  const actualMediaByTrack = useAudioStore((s) => s.actualMediaByTrack);
   const { togglePlay, skipSong, requestSkip } = useSocket();
 
   const [skipError, setSkipError] = useState('');
@@ -69,9 +69,9 @@ export default memo(function MiniPlayer({
   const hasPendingSkip = skipRequests?.some((r) => r.requestedBy === mySocketId) ?? false;
   const isMobile = isMobileDevice();
   const showDesktopLyrics = !isMobile;
-  const qualityLabel = current
-    ? (actualQualityByTrack[getTrackKey(current)] ?? null)
-    : null;
+  const actualMedia = current ? actualMediaByTrack[getTrackKey(current)] : undefined;
+  const qualityLabel = actualMedia?.qualityLabel ?? null;
+  const displaySource = actualMedia?.source ?? current?.source ?? 'netease';
 
   const handlePlayPause = () => {
     if (!hasRoom) return;
@@ -189,7 +189,7 @@ export default memo(function MiniPlayer({
                   <span className="text-white/70">{current.artist}</span>
                   <span>
                     {' · '}
-                    {getSourceShortLabel(current.source || 'netease')}
+                    {getSourceShortLabel(displaySource)}
                   </span>
                 </div>
               </div>
@@ -376,14 +376,14 @@ export default memo(function MiniPlayer({
                 as="p"
                 className="min-w-0 truncate text-sm font-medium"
               />
-              <PlaybackQualityTag label={qualityLabel} source={current.source} />
+              <PlaybackQualityTag label={qualityLabel} source={displaySource} />
             </div>
 
             <p className="truncate text-[11px] text-netease-muted sm:text-xs">
               <span className="text-white/70">{current.artist}</span>
               <span>
                 {' · '}
-                {getSourceShortLabel(current.source || 'netease')}
+                {getSourceShortLabel(displaySource)}
                 {current.requestedBy ? ` · ${current.requestedBy}点的歌` : ''}
               </span>
             </p>

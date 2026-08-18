@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { applyAllAudioVolume } from '../lib/audioVolume';
+import type { MusicSource } from '../types';
 
 const VOLUME_KEY = 'openmusic:volume';
 
@@ -43,7 +44,10 @@ interface AudioStore {
   requestTrackReload: () => void;
   /** 各曲目实际音质（按 trackKey；预取下一首时不会覆盖当前曲） */
   actualQualityByTrack: Record<string, string>;
-  setActualQuality: (trackKey: string, label: string | null) => void;
+  /** 各曲目实际播放媒体信息（按 trackKey；跨源取链时 source 为实际取链平台） */
+  actualMediaByTrack: Record<string, { qualityLabel?: string; source?: MusicSource }>;
+  setActualMedia: (trackKey: string, media: { qualityLabel?: string | null; source?: MusicSource | null }) => void;
+  setActualQuality: (trackKey: string, label: string | null, source?: MusicSource | null) => void;
   volume: number;
   setVolume: (volume: number) => void;
 }
@@ -76,26 +80,48 @@ export const useAudioStore = create<AudioStore>((set) => ({
   trackReloadNonce: 0,
   requestTrackReload: () => set((state) => ({ trackReloadNonce: state.trackReloadNonce + 1 })),
   actualQualityByTrack: {},
-  setActualQuality: (trackKey, label) => set((state) => {
+  actualMediaByTrack: {},
+  setActualMedia: (trackKey, media) => set((state) => {
     if (!trackKey) return state;
-    const trimmed = label?.trim() || '';
+    const trimmed = media.qualityLabel?.trim() || '';
+    const source = media.source || undefined;
     const prev = state.actualQualityByTrack[trackKey];
-    if (!trimmed) {
-      if (!prev) return state;
-      const next = { ...state.actualQualityByTrack };
-      delete next[trackKey];
-      return { actualQualityByTrack: next };
+    const prevMedia = state.actualMediaByTrack[trackKey];
+    // 取链成功但上游未返回音质时，只更新实际平台，不抹掉先前已确认的音质。
+    const effectiveQuality = trimmed || prevMedia?.qualityLabel || prev || '';
+    if (!trimmed && !source) {
+      if (!prev && !prevMedia) return state;
+      const nextQuality = { ...state.actualQualityByTrack };
+      const nextMedia = { ...state.actualMediaByTrack };
+      delete nextQuality[trackKey];
+      delete nextMedia[trackKey];
+      return { actualQualityByTrack: nextQuality, actualMediaByTrack: nextMedia };
     }
-    if (prev === trimmed) return state;
-    const next = { ...state.actualQualityByTrack, [trackKey]: trimmed };
-    const keys = Object.keys(next);
+    if (prev === effectiveQuality && prevMedia?.qualityLabel === (effectiveQuality || undefined) && prevMedia?.source === source) {
+      return state;
+    }
+    const nextQuality = { ...state.actualQualityByTrack };
+    if (effectiveQuality) nextQuality[trackKey] = effectiveQuality;
+    else delete nextQuality[trackKey];
+    const nextMedia = {
+      ...state.actualMediaByTrack,
+      [trackKey]: {
+        ...(effectiveQuality ? { qualityLabel: effectiveQuality } : {}),
+        ...(source ? { source } : {}),
+      },
+    };
+    const keys = Object.keys(nextMedia);
     if (keys.length > MAX_QUALITY_TRACKS) {
       for (const key of keys.slice(0, keys.length - MAX_QUALITY_TRACKS)) {
-        delete next[key];
+        delete nextQuality[key];
+        delete nextMedia[key];
       }
     }
-    return { actualQualityByTrack: next };
+    return { actualQualityByTrack: nextQuality, actualMediaByTrack: nextMedia };
   }),
+  setActualQuality: (trackKey, label, source) => (
+    useAudioStore.getState().setActualMedia(trackKey, { qualityLabel: label, source })
+  ),
   volume: readStoredVolume(),
   setVolume: (volume) => {
     const next = Math.min(1, Math.max(0, volume));

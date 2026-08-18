@@ -2,7 +2,7 @@
  * Mineradio 摄像头手势 — MediaPipe Tasks HandLandmarker
  * 手掌推开 · 捏合旋转 · 握拳收束
  */
-import { FilesetResolver, HandLandmarker, type NormalizedLandmark } from '@mediapipe/tasks-vision';
+import type { HandLandmarker, NormalizedLandmark } from '@mediapipe/tasks-vision';
 import * as THREE from 'three';
 import { PLANE_SIZE } from './particleGeometry';
 import {
@@ -264,6 +264,7 @@ async function ensureHandLandmarker(): Promise<HandLandmarker> {
   if (handLandmarker) return handLandmarker;
   if (!landmarkerInitPromise) {
     landmarkerInitPromise = (async () => {
+      const { FilesetResolver, HandLandmarker } = await import('@mediapipe/tasks-vision');
       const vision = await FilesetResolver.forVisionTasks(VISION_WASM_BASE);
       const create = (delegate: 'GPU' | 'CPU') =>
         HandLandmarker.createFromOptions(vision, {

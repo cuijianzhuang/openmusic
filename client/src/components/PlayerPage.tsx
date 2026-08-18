@@ -51,7 +51,7 @@ export default memo(function PlayerPage({ onClose }: Props) {
   const setTrackLoading = useAudioStore((s) => s.setTrackLoading);
   const seekPlayback = useAudioStore((s) => s.seekPlayback);
   const localPlayback = useAudioStore((s) => s.localPlayback);
-  const actualQualityByTrack = useAudioStore((s) => s.actualQualityByTrack);
+  const actualMediaByTrack = useAudioStore((s) => s.actualMediaByTrack);
   const { togglePlay, skipSong, requestSkip } = useSocket();
 
   const [skipError, setSkipError] = useState('');
@@ -61,9 +61,9 @@ export default memo(function PlayerPage({ onClose }: Props) {
 
 
   const current = room?.current;
-  const qualityLabel = current
-    ? (actualQualityByTrack[getTrackKey(current)] ?? null)
-    : null;
+  const actualMedia = current ? actualMediaByTrack[getTrackKey(current)] : undefined;
+  const qualityLabel = actualMedia?.qualityLabel ?? null;
+  const displaySource = actualMedia?.source ?? current?.source ?? 'netease';
   const lyrics = useTrackLyrics(current);
 
   const isPlaying = room?.isPlaying ?? false;
@@ -179,7 +179,7 @@ export default memo(function PlayerPage({ onClose }: Props) {
           <SongInfoPanel
             name={current.name}
             artist={current.artist}
-            source={current.source || 'netease'}
+            source={displaySource}
             requestedBy={current.requestedBy}
             qualityLabel={qualityLabel}
             size="large"

@@ -9,7 +9,8 @@ import GalaxyParticles from './GalaxyParticles';
 import GalaxyGestureSceneBridge from './GalaxyGestureSceneBridge';
 import GestureHudOverlay from './GestureHudOverlay';
 import type { QueueItem } from '../../types';
-import { useVisualRenderPolicy, VisualFrameScheduler } from '../../hooks/useVisualRenderPolicy';
+import { useVisualRenderPolicy } from '../../hooks/useVisualRenderPolicy';
+import VisualFrameScheduler from '../visual/VisualFrameScheduler';
 
 interface Props {
   className?: string;

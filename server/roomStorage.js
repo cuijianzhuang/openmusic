@@ -1,7 +1,9 @@
 import { decryptRoomSecrets, encryptRoomSecrets } from './roomCredentialCrypto.js';
+import { createLogger, incrementMetric } from './logger.js';
 
 const ROOM_IDS_KEY = 'openmusic:room_ids';
 const roomKey = (id) => `openmusic:room:${id}`;
+const log = createLogger('room-storage');
 
 let redisClient = null;
 let enabled = false;
@@ -15,15 +17,15 @@ function parseRedisDb(value) {
   return Number.isFinite(n) && n >= 0 ? n : undefined;
 }
 
-function buildRedisOptions() {
-  const url = (process.env.REDIS_URL || '').trim();
-  const host = (process.env.REDIS_HOST || '').trim();
+export function getRedisConnectionOptions(env = process.env) {
+  const url = String(env.REDIS_URL || '').trim();
+  const host = String(env.REDIS_HOST || '').trim();
 
   if (!url && !host) return null;
 
-  const username = (process.env.REDIS_USERNAME || '').trim();
-  const password = (process.env.REDIS_PASSWORD || '').trim();
-  const database = parseRedisDb(process.env.REDIS_DB);
+  const username = String(env.REDIS_USERNAME || '').trim();
+  const password = String(env.REDIS_PASSWORD || '').trim();
+  const database = parseRedisDb(env.REDIS_DB);
 
   if (url) {
     const options = { url };
@@ -33,7 +35,7 @@ function buildRedisOptions() {
     return options;
   }
 
-  const port = parseInt(process.env.REDIS_PORT || '6379', 10) || 6379;
+  const port = parseInt(env.REDIS_PORT || '6379', 10) || 6379;
   const options = {
     socket: { host, port },
   };
@@ -78,9 +80,9 @@ export function hasRedisEnvConfig() {
 export async function initRoomStorage() {
   if (redisClient) return enabled;
 
-  const options = buildRedisOptions();
+  const options = getRedisConnectionOptions();
   if (!options) {
-    console.log('Redis: 未配置（REDIS_URL 或 REDIS_HOST）');
+    log.info('redis_not_configured');
     return false;
   }
 
@@ -88,14 +90,16 @@ export async function initRoomStorage() {
     const { createClient } = await import('redis');
     redisClient = createClient(options);
     redisClient.on('error', (err) => {
-      console.error('Redis 错误:', err.message);
+      incrementMetric('redis_error_total', { phase: 'runtime' });
+      log.error('redis_runtime_error', { error: err });
     });
     await redisClient.connect();
     enabled = true;
-    console.log(`Redis: 已连接 ${describeRedisTarget(options)}`);
+    log.info('redis_connected', { target: describeRedisTarget(options) });
     return true;
   } catch (err) {
-    console.error('Redis: 连接失败 —', err.message);
+    incrementMetric('redis_error_total', { phase: 'connect' });
+    log.error('redis_connect_failed', { error: err });
     redisClient = null;
     enabled = false;
     return false;
@@ -116,7 +120,8 @@ export async function loadAllRoomsFromStorage() {
       room.musicAccountSecrets = decryptRoomSecrets(room.musicAccountSecrets, room.id);
       rooms.push(room);
     } catch (err) {
-      console.error(`Redis: 跳过损坏的房间数据 ${id}:`, err.message);
+      incrementMetric('redis_error_total', { phase: 'load_room' });
+      log.warn('redis_room_payload_invalid', { roomId: id, error: err });
     }
   }
 
@@ -135,7 +140,8 @@ export async function saveRoomToStorage(roomSnapshot) {
     await redisClient.set(roomKey(roomSnapshot.id), payload);
     await redisClient.sAdd(ROOM_IDS_KEY, roomSnapshot.id);
   } catch (err) {
-    console.error(`Redis: 保存房间 ${roomSnapshot.id} 失败:`, err.message);
+    incrementMetric('redis_error_total', { phase: 'save_room' });
+    log.error('redis_save_room_failed', { roomId: roomSnapshot.id, error: err });
   }
 }
 
@@ -169,7 +175,8 @@ export async function deleteRoomFromStorage(roomId) {
     await redisClient.del(roomKey(roomId));
     await redisClient.sRem(ROOM_IDS_KEY, roomId);
   } catch (err) {
-    console.error(`Redis: 删除房间 ${roomId} 失败:`, err.message);
+    incrementMetric('redis_error_total', { phase: 'delete_room' });
+    log.error('redis_delete_room_failed', { roomId, error: err });
   }
 }
 

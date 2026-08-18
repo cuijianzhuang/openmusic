@@ -205,11 +205,16 @@ function persistUrlCacheToStorage() {
   }
 }
 
-function publishActualQuality(song: Pick<QueueItem, 'queueId' | 'id' | 'source'>, qualityLabel?: string) {
+function publishActualQuality(
+  song: Pick<QueueItem, 'queueId' | 'id' | 'source'>,
+  qualityLabel?: string,
+  actualSource?: MusicSource,
+) {
   const label = qualityLabel?.trim();
-  // 无音质时不写 store：避免预取/缓存未带 quality 时把当前曲标签清掉
-  if (!label) return;
-  useAudioStore.getState().setActualQuality(trackKeyOf(song), label);
+  const source = normalizeMusicSource(actualSource);
+  // 无音质时仍允许写入实际平台：跨源取链可能没有 quality，但底栏来源必须跟真实取链平台一致。
+  if (!label && !source) return;
+  useAudioStore.getState().setActualMedia(trackKeyOf(song), { qualityLabel: label, source });
 }
 
 function trackKeyOf(song: Pick<QueueItem, 'queueId' | 'id' | 'source'>) {
@@ -333,7 +338,7 @@ async function fetchCrossSourceFallback(song: QueueItem): Promise<CachedUrlEntry
         trimUrlCache();
         // 取链成功即打标（含下一曲预取）；中途未拿到 URL 前不会走到这里
         markTrackCrossSource(song, from);
-        publishActualQuality(song, info.qualityLabel);
+        publishActualQuality(song, info.qualityLabel, from);
         return entry;
       } catch {
         // 当前候选不可播放时继续尝试下一平台/版本。
@@ -594,7 +599,7 @@ async function fetchSongUrl(
     clearTrackSourceError(song);
     // 命中跨源缓存时补打标，避免刷新/重取后标丢失
     if (first.crossSource) markTrackCrossSource(song, first.crossSourceFrom);
-    publishActualQuality(song, first.qualityLabel);
+    publishActualQuality(song, first.qualityLabel, first.crossSource ? first.crossSourceFrom : songSourceOf(song));
     return {
       url: first.url,
       qualityLabel: first.qualityLabel,
@@ -615,7 +620,7 @@ async function fetchSongUrl(
     if (fallback.ok) {
       clearTrackSourceError(song);
       if (fallback.crossSource) markTrackCrossSource(song, fallback.crossSourceFrom);
-      publishActualQuality(song, fallback.qualityLabel);
+      publishActualQuality(song, fallback.qualityLabel, fallback.crossSource ? fallback.crossSourceFrom : songSourceOf(song));
       return {
         url: fallback.url,
         qualityLabel: fallback.qualityLabel,
@@ -656,7 +661,7 @@ export async function fetchServiceFallbackUrl(
 
   const fallback = await tryLowestQualityFetch(song);
   if (fallback.ok) {
-    publishActualQuality(song, fallback.qualityLabel);
+    publishActualQuality(song, fallback.qualityLabel, fallback.crossSource ? fallback.crossSourceFrom : songSourceOf(song));
     return fallback.url;
   }
   return (await fetchCrossSourceFallback(song))?.url || null;
@@ -734,7 +739,7 @@ export function seedSharedSongUrl(
   } else if (sourceErrorKeys.delete(trackKeyOf(song))) {
     notifySourceErrors();
   }
-  if (qualityLabel) publishActualQuality(song, qualityLabel);
+  publishActualQuality(song, qualityLabel, crossSource ? crossSourceFrom : songSourceOf(song));
   return true;
 }
 
@@ -793,7 +798,7 @@ export function syncActualQualityFromCache(song: Pick<QueueItem, 'queueId' | 'id
   const key = urlCacheKey(song, getEffectivePlaybackQuality(song));
   const cached = urlCache.get(key) || urlCache.get(trackKeyOf(song));
   if (cached?.qualityLabel) {
-    publishActualQuality(song, cached.qualityLabel);
+    publishActualQuality(song, cached.qualityLabel, cached.crossSource ? normalizeMusicSource(cached.crossSourceFrom) : songSourceOf(song));
   }
 }
 

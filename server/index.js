@@ -205,6 +205,8 @@ import {
 import { kickConnectionsMatchingBan } from './kickSiteBan.js';
 import { createErrorReport, listPendingSolutionsForUser, ackErrorReportSolution } from './errorReports.js';
 import { getRuntimeConfig, getPublicSiteSeo, setRuntimeConfig } from './runtimeConfig.js';
+import { socketPayload } from './socketPayload.js';
+import { hardenSocketHandlers } from './socketHandlerGuard.js';
 import {
   isLinuxdoConfigured,
   signLinuxdoState,
@@ -3067,35 +3069,6 @@ async function advanceEndedRoomNow(roomId, expectedQueueId = '') {
   return advanced;
 }
 
-/**
- * 给这一个 socket 实例的 .on() 包一层统一兜底：下面几十个事件处理器大多没有自己的
- * try/catch，处理器内部抛错或 async 函数 reject 时，原本会直接变成一个未处理的异常/
- * rejection —— 客户端等待的 ack callback 永远不会被调用（界面卡死），情况更差时还可能
- * 直接影响进程稳定性。改成猴子补丁的方式统一兜底，不用逐个去改 50 处注册代码。
- */
-function hardenSocketHandlers(target) {
-  const originalOn = target.on.bind(target);
-  target.on = (event, handler) => {
-    if (typeof handler !== 'function') return originalOn(event, handler);
-    return originalOn(event, (...args) => {
-      const callback = typeof args[args.length - 1] === 'function' ? args[args.length - 1] : null;
-      const reportFailure = (err) => {
-        console.error(`socket 事件 "${event}" 处理失败:`, err?.message || err);
-        callback?.({ success: false, error: '服务器内部错误，请重试' });
-      };
-      try {
-        const result = handler(...args);
-        if (result && typeof result.catch === 'function') {
-          result.catch(reportFailure);
-        }
-      } catch (err) {
-        reportFailure(err);
-      }
-    });
-  };
-  return target;
-}
-
 io.on('connection', (socket) => {
   hardenSocketHandlers(socket);
 
@@ -4330,7 +4303,8 @@ io.on('connection', (socket) => {
     callback?.({ success: true });
   });
 
-  socket.on('add_song', async ({ song }, callback) => {
+  socket.on('add_song', async (payload, callback) => {
+    const { song } = socketPayload(payload);
     if (rejectReadOnly(socket, callback)) return;
     if (rejectRateLimited(socket, limitSocketAction, 'add_song', callback)) return;
 
@@ -4364,7 +4338,8 @@ io.on('connection', (socket) => {
 
   });
 
-  socket.on('remove_song', ({ queueId }, callback) => {
+  socket.on('remove_song', (payload, callback) => {
+    const { queueId } = socketPayload(payload);
     if (rejectReadOnly(socket, callback)) return;
     if (rejectRateLimited(socket, limitSocketAction, 'remove_song', callback)) return;
 
@@ -4405,15 +4380,16 @@ io.on('connection', (socket) => {
     callback?.({ success: true });
   });
 
-  socket.on('report_playback_media', ({
-    trackId,
-    url,
-    qualityLabel,
-    crossSource,
-    crossSourceFrom,
-    loudness,
-    duration,
-  } = {}, callback) => {
+  socket.on('report_playback_media', (payload, callback) => {
+    const {
+      trackId,
+      url,
+      qualityLabel,
+      crossSource,
+      crossSourceFrom,
+      loudness,
+      duration,
+    } = socketPayload(payload);
     if (rejectReadOnly(socket, callback)) return;
     if (rejectRateLimited(socket, limitSocketAction, 'report_playback_media', callback)) return;
 
@@ -4464,7 +4440,8 @@ io.on('connection', (socket) => {
     callback?.({ success: true });
   });
 
-  socket.on('finish_song', async ({ queueId }, callback) => {
+  socket.on('finish_song', async (payload, callback) => {
+    const { queueId } = socketPayload(payload);
     if (rejectReadOnly(socket, callback)) return;
     if (rejectRateLimited(socket, limitSocketAction, 'finish_song', callback)) return;
 
@@ -4492,7 +4469,8 @@ io.on('connection', (socket) => {
     callback?.({ success: true });
   });
 
-  socket.on('request_jump', async ({ queueId }, callback) => {
+  socket.on('request_jump', async (payload, callback) => {
+    const { queueId } = socketPayload(payload);
     if (rejectReadOnly(socket, callback)) return;
     if (rejectRateLimited(socket, limitSocketAction, 'request_jump', callback)) return;
 
@@ -4513,7 +4491,8 @@ io.on('connection', (socket) => {
     callback?.({ success: true });
   });
 
-  socket.on('reorder_queue', ({ orderedQueueIds, movedQueueId }, callback) => {
+  socket.on('reorder_queue', (payload, callback) => {
+    const { orderedQueueIds, movedQueueId } = socketPayload(payload);
     if (rejectReadOnly(socket, callback)) return;
     if (rejectRateLimited(socket, limitSocketAction, 'reorder_queue', callback)) return;
 
@@ -4533,7 +4512,8 @@ io.on('connection', (socket) => {
     callback?.({ success: true });
   });
 
-  socket.on('toggle_queue_like', ({ queueId }, callback) => {
+  socket.on('toggle_queue_like', (payload, callback) => {
+    const { queueId } = socketPayload(payload);
     if (rejectReadOnly(socket, callback)) return;
     if (rejectRateLimited(socket, limitSocketAction, 'toggle_queue_like', callback)) return;
 
@@ -4586,7 +4566,8 @@ io.on('connection', (socket) => {
     });
   });
 
-  socket.on('approve_jump', async ({ requestId }, callback) => {
+  socket.on('approve_jump', async (payload, callback) => {
+    const { requestId } = socketPayload(payload);
     if (rejectReadOnly(socket, callback)) return;
     if (rejectRateLimited(socket, limitSocketAction, 'approve_jump', callback)) return;
 
@@ -4606,7 +4587,8 @@ io.on('connection', (socket) => {
     callback?.({ success: true });
   });
 
-  socket.on('reject_jump', ({ requestId }, callback) => {
+  socket.on('reject_jump', (payload, callback) => {
+    const { requestId } = socketPayload(payload);
     if (rejectReadOnly(socket, callback)) return;
     if (rejectRateLimited(socket, limitSocketAction, 'reject_jump', callback)) return;
 
@@ -4646,7 +4628,8 @@ io.on('connection', (socket) => {
     callback?.({ success: true });
   });
 
-  socket.on('approve_skip', async ({ requestId }, callback) => {
+  socket.on('approve_skip', async (payload, callback) => {
+    const { requestId } = socketPayload(payload);
     if (rejectReadOnly(socket, callback)) return;
     if (rejectRateLimited(socket, limitSocketAction, 'approve_skip', callback)) return;
 
@@ -4666,7 +4649,8 @@ io.on('connection', (socket) => {
     callback?.({ success: true });
   });
 
-  socket.on('reject_skip', ({ requestId }, callback) => {
+  socket.on('reject_skip', (payload, callback) => {
+    const { requestId } = socketPayload(payload);
     if (rejectReadOnly(socket, callback)) return;
     if (rejectRateLimited(socket, limitSocketAction, 'reject_skip', callback)) return;
 
@@ -4686,7 +4670,8 @@ io.on('connection', (socket) => {
     callback?.({ success: true });
   });
 
-  socket.on('send_chat', async ({ text, mentions, replyTo, imageUrl, imageKey, asSticker }, callback) => {
+  socket.on('send_chat', async (payload, callback) => {
+    const { text, mentions, replyTo, imageUrl, imageKey, asSticker } = socketPayload(payload);
     if (rejectReadOnly(socket, callback)) return;
     if (rejectRateLimited(socket, limitSocketChat, 'send_chat', callback)) return;
 
@@ -4866,7 +4851,8 @@ io.on('connection', (socket) => {
     callback?.({ success: true, songs: result.songs });
   });
 
-  socket.on('report_track_duration', async ({ queueId, durationMs }, callback) => {
+  socket.on('report_track_duration', async (payload, callback) => {
+    const { queueId, durationMs } = socketPayload(payload);
     if (rejectRateLimited(socket, limitSocketAction, 'report_track_duration', callback)) return;
 
     const roomId = socketToRoom.get(socket.id);
@@ -4905,7 +4891,8 @@ io.on('connection', (socket) => {
     callback?.({ success: true, favorites });
   });
 
-  socket.on('set_favorite', async ({ song, favorite }, callback) => {
+  socket.on('set_favorite', async (payload, callback) => {
+    const { song, favorite } = socketPayload(payload);
     if (rejectRateLimited(socket, limitSocketAction, 'set_favorite', callback)) return;
 
     const identity = resolveIdentityFromCookies(socket.handshake?.headers?.cookie || '');
@@ -4928,7 +4915,8 @@ io.on('connection', (socket) => {
     callback?.({ success: true, favorites: result.favorites, favorite: result.favorite });
   });
 
-  socket.on('import_favorites', async ({ songs }, callback) => {
+  socket.on('import_favorites', async (payload, callback) => {
+    const { songs } = socketPayload(payload);
     if (rejectRateLimited(socket, limitSocketAction, 'import_favorites', callback)) return;
 
     const identity = resolveIdentityFromCookies(socket.handshake?.headers?.cookie || '');
@@ -4955,7 +4943,8 @@ io.on('connection', (socket) => {
     }
     callback?.({ success: true, favorites: result.favorites, imported: result.imported, dropped: result.dropped, maxFavorites: result.maxFavorites });
   });
-  socket.on('toggle_play', ({ isPlaying }, callback) => {
+  socket.on('toggle_play', (payload, callback) => {
+    const { isPlaying } = socketPayload(payload);
     if (rejectReadOnly(socket, callback)) return;
     if (rejectRateLimited(socket, limitSocketAction, 'toggle_play', callback)) return;
 
@@ -4974,7 +4963,8 @@ io.on('connection', (socket) => {
     callback?.({ success: true });
   });
 
-  socket.on('seek', ({ time }, callback) => {
+  socket.on('seek', (payload, callback) => {
+    const { time } = socketPayload(payload);
     if (rejectReadOnly(socket, callback)) return;
     if (rejectRateLimited(socket, limitSocketAction, 'seek', callback)) return;
 

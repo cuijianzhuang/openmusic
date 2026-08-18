@@ -16,7 +16,8 @@ import GalaxyFloatingSongCard from '../galaxy/GalaxyFloatingSongCard';
 import TopographyCameraRig, { TOPOGRAPHY_ORBIT_BASELINE } from './TopographyCameraRig';
 import TopographyStarField from './TopographyStarField';
 import TopographyVisualRoot from './TopographyVisualRoot';
-import { useVisualRenderPolicy, VisualFrameScheduler } from '../../hooks/useVisualRenderPolicy';
+import { useVisualRenderPolicy } from '../../hooks/useVisualRenderPolicy';
+import VisualFrameScheduler from '../visual/VisualFrameScheduler';
 
 interface Props {
   song: Pick<QueueItem, 'id' | 'source' | 'name' | 'artist' | 'pic' | 'duration'> | null | undefined;
