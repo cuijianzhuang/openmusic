@@ -73,7 +73,7 @@ import {
   isPlaybackQualityLockedToLowest,
   lockPlaybackQualityToLowest,
 } from '../lib/playbackQualityLock';
-import { waitForAudioMinimumReady } from '../lib/audioReady';
+import { waitForAudioCanPlay } from '../lib/audioReady';
 import { applyFollowerSync, applyVisibilityResume, applyPostBufferSync, isEndedWhileServerPlaying } from '../lib/playbackSync';
 import { getClientPlaybackState, getPlaybackTime, optimisticSeekPosition, optimisticSetPlaying } from '../lib/playbackState';
 import { attachAudioBufferingListeners, isAudioBuffering, setAudioBufferEndHandler } from '../lib/audioBuffering';
@@ -1305,7 +1305,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
           });
         }
 
-        await waitForAudioMinimumReady(controller.audio);
+        await waitForAudioCanPlay(controller.audio);
         if (gen !== loadGeneration.current) return;
         debugLog('track_audio_ready', debugLine({
           queueId: current.queueId,

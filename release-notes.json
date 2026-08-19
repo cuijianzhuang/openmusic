@@ -1,6 +1,6 @@
 {
   "notes": [
-    "优化页面性能"
+    "优化歌曲缓冲播放逻辑"
   ],
   "forcePrompt": true
 }

@@ -10,6 +10,8 @@ import {
   type ClientPlaybackState,
 } from './playbackState';
 import { isAudioBuffering } from './audioBuffering';
+import { waitForAudioProgress } from './audioReady';
+import { getBufferedAheadSeconds } from './audioReadiness';
 import { shouldSkipRoutineSync as shouldSkipByBufferingState } from './syncStateMachine';
 import { resetDriftController } from './driftController';
 import {
@@ -176,6 +178,23 @@ function lockPlaybackRate(audio: HTMLAudioElement): void {
   resetDriftController(audio);
 }
 
+async function verifyPlaybackStarted(
+  audio: HTMLAudioElement,
+  result: PlayResult,
+  reason: string,
+): Promise<PlayResult> {
+  if (result !== 'played') return result;
+  const progressed = await waitForAudioProgress(audio);
+  if (progressed) return result;
+  debugLog('sync_play_stalled', debugLine({
+    reason,
+    audio: Number(audio.currentTime.toFixed(3)),
+    readyState: audio.readyState,
+    networkState: audio.networkState,
+    bufferedAhead: Number(getBufferedAheadSeconds(audio).toFixed(3)),
+  }));
+  return 'error';
+}
 function syncModeLabel(options: ApplySyncOptions): string {
   if (options.forceZero) return 'force_zero';
   if (options.forceTime !== undefined) return 'force_time';
@@ -338,7 +357,7 @@ async function recoverFromEndedAudio(
   snapSmoothPlaybackTime(seekTarget);
 
   const initial = await tryPlayWithAutoplayFallback(audio, Boolean(options.tvMode));
-  const result = await assessPlaybackResult(audio, initial);
+  const result = await verifyPlaybackStarted(audio, await assessPlaybackResult(audio, initial), 'sync');
   debugLog('sync_play', debugLine({
     reason: `ended_recover_${reason}`,
     result,
@@ -452,7 +471,7 @@ async function applyCorrectionSync(
 
   if (audio.paused) {
     const initial = await tryPlayWithAutoplayFallback(audio, Boolean(options.tvMode));
-    const result = await assessPlaybackResult(audio, initial);
+    const result = await verifyPlaybackStarted(audio, await assessPlaybackResult(audio, initial), 'sync');
     debugLog('sync_play', debugLine({
       reason: 'correction',
       result,
@@ -498,7 +517,7 @@ async function applyMandatorySync(
 
   if (audio.paused) {
     const initial = await tryPlayWithAutoplayFallback(audio, Boolean(options.tvMode));
-    const result = await assessPlaybackResult(audio, initial);
+    const result = await verifyPlaybackStarted(audio, await assessPlaybackResult(audio, initial), 'sync');
     debugLog('sync_play', debugLine({
       reason: options.forceZero ? 'force_zero' : 'mandatory',
       result,
@@ -564,7 +583,7 @@ export async function applyFollowerSync(
 
   if (audio.paused) {
     const initial = await tryPlayWithAutoplayFallback(audio, Boolean(options.tvMode));
-    const result = await assessPlaybackResult(audio, initial);
+    const result = await verifyPlaybackStarted(audio, await assessPlaybackResult(audio, initial), 'sync');
     if (result !== 'played') return result;
   }
 

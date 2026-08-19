@@ -1,42 +1,36 @@
 import { isMobileDevice } from './audioUnlock';
+import { getBufferedAheadSeconds, isAudioBufferedForPlayback } from './audioReadiness';
 
 export function waitForAudioCanPlay(audio: HTMLAudioElement, timeoutMs?: number): Promise<void> {
-  const mobile = isMobileDevice();
-  const timeout = timeoutMs ?? (mobile ? 2500 : 10000);
-  const minReadyState = mobile
-    ? HTMLMediaElement.HAVE_METADATA
-    : HTMLMediaElement.HAVE_FUTURE_DATA;
+  const timeout = timeoutMs ?? (isMobileDevice() ? 12000 : 15000);
+  if (isAudioBufferedForPlayback(audio)) return Promise.resolve();
 
-  if (audio.readyState >= minReadyState) {
-    return Promise.resolve();
-  }
-
-  return new Promise((resolve) => {
-    const timer = window.setTimeout(() => {
-      cleanup();
-      resolve();
-    }, timeout);
-
+  return new Promise((resolve, reject) => {
+    let timer = 0;
     const cleanup = () => {
       window.clearTimeout(timer);
       audio.removeEventListener('canplay', onReady);
+      audio.removeEventListener('canplaythrough', onReady);
+      audio.removeEventListener('progress', onReady);
       audio.removeEventListener('loadeddata', onReady);
-      audio.removeEventListener('loadedmetadata', onReady);
     };
-
     const onReady = () => {
-      if (audio.readyState < minReadyState) return;
+      if (!isAudioBufferedForPlayback(audio)) return;
       cleanup();
       resolve();
     };
-
-    audio.addEventListener('canplay', onReady, { once: true });
-    audio.addEventListener('loadeddata', onReady, { once: true });
-    audio.addEventListener('loadedmetadata', onReady, { once: true });
+    timer = window.setTimeout(() => {
+      cleanup();
+      reject(new Error(`音频缓冲不足（readyState=${audio.readyState}, bufferedAhead=${getBufferedAheadSeconds(audio).toFixed(3)}s）`));
+    }, timeout);
+    audio.addEventListener('canplay', onReady);
+    audio.addEventListener('canplaythrough', onReady);
+    audio.addEventListener('progress', onReady);
+    audio.addEventListener('loadeddata', onReady);
   });
 }
 
-/** metadata ready is enough to seek/play; do not block track switching on full buffering. */
+/** 等待元数据：仅供需要读取时长/seek 的非播放场景。 */
 export function waitForAudioMinimumReady(audio: HTMLAudioElement): Promise<void> {
   if (audio.readyState >= HTMLMediaElement.HAVE_METADATA) return Promise.resolve();
 
@@ -63,5 +57,34 @@ export function waitForAudioMinimumReady(audio: HTMLAudioElement): Promise<void>
     audio.addEventListener('loadedmetadata', done, { once: true });
     audio.addEventListener('loadeddata', done, { once: true });
     audio.addEventListener('canplay', done, { once: true });
+  });
+}
+
+export async function waitForAudioProgress(
+  audio: HTMLAudioElement,
+  timeoutMs = 1500,
+): Promise<boolean> {
+  const initial = Number.isFinite(audio.currentTime) ? audio.currentTime : 0;
+  if (audio.paused || audio.ended) return false;
+
+  return new Promise((resolve) => {
+    let timer = 0;
+    let settled = false;
+    const finish = (progressed: boolean) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      audio.removeEventListener('timeupdate', onProgress);
+      audio.removeEventListener('playing', onProgress);
+      resolve(progressed);
+    };
+    const onProgress = () => {
+      const current = Number.isFinite(audio.currentTime) ? audio.currentTime : initial;
+      if (current > initial + 0.05) finish(true);
+    };
+    timer = window.setTimeout(() => finish(false), timeoutMs);
+    audio.addEventListener('timeupdate', onProgress);
+    audio.addEventListener('playing', onProgress);
+    onProgress();
   });
 }
