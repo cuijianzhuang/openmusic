@@ -19,6 +19,11 @@ const clientState = {
   lastCommitWasSeek: false,
 };
 
+function playbackRateOf(state: PlaybackState | null | undefined): number {
+  const value = Number(state?.playbackRate);
+  return Number.isFinite(value) && value > 0 ? value : 1;
+}
+
 function statePositionSeconds(state: PlaybackState): number {
   const position = Number(state.positionSec ?? state.currentTime ?? 0);
   return Number.isFinite(position) && position > 0 ? position : 0;
@@ -30,7 +35,8 @@ function positionSecAtServerSnapshot(state: PlaybackState): number {
   const startedAt = Number(state.startedAt);
   const serverNowMs = Number(state.serverNowMs);
   if (Number.isFinite(startedAt) && startedAt > 0 && Number.isFinite(serverNowMs) && serverNowMs > 0) {
-    return Math.max(0, (serverNowMs - startedAt) / 1000);
+    const rate = playbackRateOf(state);
+    return Math.max(0, ((serverNowMs - startedAt) / 1000) * rate);
   }
   if (Number.isFinite(serverNowMs) && serverNowMs > 0) {
     return base;
@@ -48,7 +54,7 @@ function deriveBasePositionSec(
   }
   const atReceive = positionSecAtServerSnapshot(state);
   const queueDelaySec = Math.max(0, (committedAt - receivedAt) / 1000);
-  return Math.max(0, atReceive + queueDelaySec);
+  return Math.max(0, atReceive + queueDelaySec * playbackRateOf(state));
 }
 
 /**
@@ -72,7 +78,7 @@ function isServerTimelineSeek(
     : Number.NaN;
 
   if (Number.isFinite(serverElapsedSec)) {
-    const expectedSnap = prevSnap + Math.max(0, serverElapsedSec);
+    const expectedSnap = prevSnap + Math.max(0, serverElapsedSec) * playbackRateOf(prev);
     return Math.abs(nextSnap - expectedSnap) > SERVER_SEEK_DETECT_SEC;
   }
 
@@ -100,7 +106,7 @@ function clampMonotonicPlayingBase(
 
   const continuousSec = Math.max(
     0,
-    prev.basePositionSec + (committedAt - prev.committedAt) / 1000,
+    prev.basePositionSec + ((committedAt - prev.committedAt) / 1000) * playbackRateOf(prev),
   );
   if (basePositionSec >= continuousSec - 0.05) return basePositionSec;
   if (isServerTimelineSeek(prev, state)) return basePositionSec;
@@ -125,7 +131,7 @@ export function getPlaybackTime(state: PlaybackState | null | undefined): number
   const base = cached.basePositionSec ?? statePositionSeconds(state);
   const anchor = cached.committedAt ?? cached.receivedAt ?? 0;
   if (anchor > 0) {
-    return Math.max(0, base + (Date.now() - anchor) / 1000);
+    return Math.max(0, base + ((Date.now() - anchor) / 1000) * playbackRateOf(state));
   }
   return positionSecAtServerSnapshot(state);
 }
@@ -225,19 +231,22 @@ export function playbackStateFromRoom(
   currentTime: number,
   version = 0,
   durationMs = 0,
+  playbackRate = 1,
 ): PlaybackState {
   const now = Date.now();
   const positionSec = Math.max(0, Number(currentTime) || 0);
   const durationSec = Number(durationMs) > 0 ? Number(durationMs) / 1000 : 0;
+  const rate = Number.isFinite(playbackRate) && playbackRate > 0 ? playbackRate : 1;
   return {
     roomId,
+    playbackRate: rate,
     version,
     trackId,
     status: isPlaying ? 'playing' : 'paused',
     positionSec,
     durationSec: durationSec > 0 ? durationSec : undefined,
     serverNowMs: now,
-    startedAt: isPlaying ? now - positionSec * 1000 : 0,
+    startedAt: isPlaying ? now - (positionSec / rate) * 1000 : 0,
     currentTime: positionSec,
     updatedAt: now,
   };

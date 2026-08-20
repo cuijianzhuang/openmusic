@@ -6,6 +6,7 @@ const DECAY_FACTOR = 0.75;
 const DEAD_ZONE_DECAY = 0.8;
 
 let rateBias = 0;
+let baseRate = 1;
 
 function clampBias(value: number): number {
   return Math.min(BIAS_MAX, Math.max(BIAS_MIN, value));
@@ -15,16 +16,15 @@ export function getRateBias(): number {
   return rateBias;
 }
 
-export function resetDriftController(audio?: HTMLAudioElement): void {
+export function resetDriftController(audio?: HTMLAudioElement, playbackRate = 1): void {
   rateBias = 0;
-  if (audio) {
-    audio.playbackRate = 1;
-  }
+  baseRate = Number.isFinite(playbackRate) && playbackRate > 0 ? playbackRate : 1;
+  if (audio) audio.playbackRate = baseRate;
 }
 
 /** 只应用当前 bias，不更新（visibility 保护期用） */
 export function applyCurrentDriftRate(audio: HTMLAudioElement): void {
-  audio.playbackRate = 1 + rateBias;
+  audio.playbackRate = baseRate + rateBias;
 }
 
 /**
@@ -37,12 +37,12 @@ export function applyDriftCorrection(audio: HTMLAudioElement, diff: number): voi
 
   if (absDiff < DEAD_ZONE_SEC) {
     rateBias *= DEAD_ZONE_DECAY;
-    audio.playbackRate = 1 + rateBias;
+    audio.playbackRate = baseRate + rateBias;
     return;
   }
 
   rateBias += diff * DIFF_GAIN;
   rateBias = clampBias(rateBias);
   rateBias *= DECAY_FACTOR;
-  audio.playbackRate = 1 + rateBias;
+  audio.playbackRate = baseRate + rateBias;
 }

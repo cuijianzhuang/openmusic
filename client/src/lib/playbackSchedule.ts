@@ -171,6 +171,7 @@ export function seedPlaybackFromRoom(room: RoomState): void {
     room.currentTime,
     0,
     room.current.duration ?? 0,
+    room.playbackRate ?? 1,
   );
   schedulePlaybackState(state);
 }

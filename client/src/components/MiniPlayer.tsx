@@ -73,6 +73,7 @@ export default memo(function MiniPlayer({
   const qualityLabel = actualMedia?.qualityLabel ?? null;
   const displaySource = actualMedia?.source ?? current?.source ?? 'netease';
 
+
   const handlePlayPause = () => {
     if (!hasRoom) return;
     const next = !isPlaying;
@@ -449,7 +450,6 @@ export default memo(function MiniPlayer({
         )}
 
         <PlayModeButton className="hidden h-8 w-8 sm:flex" iconClassName="h-4 w-4" />
-
         <VolumeControl compact className="flex-shrink-0" />
             <FavoriteButton song={current} className="w-8 h-8 text-netease-muted hover:text-rose-300" />
         {showDesktopLyrics && <DesktopLyricsPiP song={current} />}

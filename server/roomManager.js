@@ -52,6 +52,8 @@ const PROTECTED_ROOMS_REDIS_KEY = "openmusic:admin:protected_rooms";
 /** 管理后台设置的保活房间；Redis 可用时跨重启持久化 */
 const protectedRoomIds = new Set();
 const DEFAULT_QUEUE_MAX_LENGTH = 200;
+export const ALLOWED_PLAYBACK_RATES = [0.25, 0.5, 1, 1.25, 1.5, 2, 3];
+export const DEFAULT_PLAYBACK_RATE = 1;
 const ALLOWED_QUEUE_MAX_LENGTHS = [50, 100, 200];
 const ALLOWED_SONG_REQUEST_COOLDOWNS_SEC = [0, 10, 30, 60, 120];
 const DEFAULT_DISLIKE_SKIP_THRESHOLD = 5;
@@ -612,6 +614,7 @@ function snapshotRoomForStorage(room) {
     currentTime: getPlaybackTime(room),
     playbackVersion: room.playbackVersion ?? 0,
     playbackUpdatedAt: room.playbackUpdatedAt ?? Date.now(),
+    playbackRate: normalizePlaybackRate(room.playbackRate),
     messages: room.messages.slice(-MAX_CHAT_MESSAGES).map(sanitizeMessageForStorage),
     knownUserIds: Array.from(room.knownUserIds || []),
     chatVisibleSinceByUserId: Object.fromEntries(room.chatVisibleSinceByUserId || []),
@@ -677,6 +680,7 @@ function restoreRoomFromStorage(data) {
   room.currentTime = data.currentTime ?? 0;
   room.playbackVersion = data.playbackVersion ?? 0;
   room.playbackUpdatedAt = data.playbackUpdatedAt ?? Date.now();
+  room.playbackRate = normalizePlaybackRate(data.playbackRate);
   room.messages = data.messages || [];
   room.knownUserIds = new Set(data.knownUserIds || []);
   room.chatVisibleSinceByUserId = restoreChatVisibleSinceMap(data.chatVisibleSinceByUserId);
@@ -742,7 +746,7 @@ function restoreRoomFromStorage(data) {
   room.emptySince = Date.now();
 
   if (room.isPlaying && room.current) {
-    room.startedAt = Date.now() - room.currentTime * 1000;
+    room.startedAt = Date.now() - (room.currentTime / normalizePlaybackRate(room.playbackRate)) * 1000;
   }
 
   return room;
@@ -940,6 +944,7 @@ export function buildPlaybackState(room) {
     serverNowMs: now,
     startedAt: room.isPlaying && room.startedAt ? room.startedAt : 0,
     currentTime: positionSec,
+    playbackRate: normalizePlaybackRate(room.playbackRate),
     updatedAt: room.playbackUpdatedAt || now,
   };
   // 仅当共享链仍对应当前曲时下发，避免切歌后旧链误用
@@ -1055,6 +1060,7 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
     startedAt: null,
     playbackVersion: 0,
     playbackUpdatedAt: Date.now(),
+    playbackRate: DEFAULT_PLAYBACK_RATE,
     playbackDriftAnchored: false,
     playbackDriftAnchorCooldownUntil: 0,
     /** 当前曲已解析的播放直链（内存态，不落盘；供进房成员免二次取链） */
@@ -1487,6 +1493,11 @@ function normalizeSongRequestCooldownSec(value) {
   const sec = Math.floor(Number(value) || 0);
   if (!ALLOWED_SONG_REQUEST_COOLDOWNS_SEC.includes(sec)) return 0;
   return sec;
+}
+
+export function normalizePlaybackRate(value) {
+  const rate = Number(value);
+  return ALLOWED_PLAYBACK_RATES.includes(rate) ? rate : DEFAULT_PLAYBACK_RATE;
 }
 
 function normalizeQueueMaxLength(value) {
@@ -2600,7 +2611,7 @@ export function addUser(roomId, userId, nickname, options = {}) {
     refreshOwnerConnection(room);
   }
   if (room.isPlaying && room.current && !room.startedAt) {
-    room.startedAt = Date.now() - (room.currentTime || 0) * 1000;
+    room.startedAt = Date.now() - ((room.currentTime || 0) / normalizePlaybackRate(room.playbackRate)) * 1000;
   }
 
   persistRoom(room);
@@ -2945,6 +2956,23 @@ export function setRoomMemberSettings(roomId, actorId, settings = {}, connection
   });
   persistRoom(room);
   return { room: serializeRoom(room) };
+}
+
+export function setRoomPlaybackRate(roomId, actorId, playbackRate, connectionId = null) {
+  const room = rooms.get(roomId);
+  if (!room) return { error: "房间不存在" };
+  if (!isOwnerConnection(room, actorId, connectionId)) return { error: "仅房主可设置播放倍速" };
+  const nextRate = normalizePlaybackRate(playbackRate);
+  if (Number(playbackRate) !== nextRate) return { error: "播放倍速无效" };
+  const now = Date.now();
+  if (room.current) {
+    room.currentTime = getPlaybackTime(room);
+    room.startedAt = room.isPlaying ? now - (room.currentTime / nextRate) * 1000 : null;
+  }
+  room.playbackRate = nextRate;
+  bumpPlaybackState(room);
+  persistRoom(room);
+  return { room: serializeRoom(room), playbackRate: nextRate };
 }
 
 export function setRoomMaxAdmins(roomId, actorId, maxAdmins, connectionId = null) {
@@ -4699,7 +4727,7 @@ export function setPlaying(roomId, socketId, isPlaying, connectionId = null) {
     const now = Date.now();
     const currentTime = calculatePlaybackTime(room, now);
     room.currentTime = currentTime;
-    room.startedAt = now - currentTime * 1000;
+    room.startedAt = now - (currentTime / normalizePlaybackRate(room.playbackRate)) * 1000;
   } else {
     room.currentTime = calculatePlaybackTime(room);
     room.startedAt = null;
@@ -4719,7 +4747,7 @@ export function seekTo(roomId, socketId, time, connectionId = null) {
   if (!Number.isFinite(nextTime) || nextTime < 0) return null;
 
   room.currentTime = nextTime;
-  room.startedAt = room.isPlaying ? Date.now() - room.currentTime * 1000 : null;
+  room.startedAt = room.isPlaying ? Date.now() - (room.currentTime / normalizePlaybackRate(room.playbackRate)) * 1000 : null;
   bumpPlaybackState(room);
   persistRoom(room);
   return serializeRoom(room);
@@ -5340,7 +5368,7 @@ export function recallChatMessage(roomId, userId, messageId, connectionId = null
 export function getPlaybackTime(room) {
   if (!room.current) return 0;
   if (room.isPlaying && room.current && !room.startedAt) {
-    room.startedAt = Date.now() - (room.currentTime || 0) * 1000;
+    room.startedAt = Date.now() - ((room.currentTime || 0) / normalizePlaybackRate(room.playbackRate)) * 1000;
   }
   return calculatePlaybackTime(room);
 }
@@ -5381,7 +5409,7 @@ function applyPlaybackDriftAnchor(room, serverTime, now = Date.now()) {
 function calculatePlaybackTime(room, now = Date.now()) {
   if (!room?.current) return 0;
   if (room.isPlaying && room.startedAt) {
-    const serverTime = (now - room.startedAt) / 1000;
+    const serverTime = ((now - room.startedAt) / 1000) * normalizePlaybackRate(room.playbackRate);
     applyPlaybackDriftAnchor(room, serverTime, now);
     return serverTime;
   }
@@ -5431,7 +5459,7 @@ function serializeRoomSummary(room) {
 function repairPlaybackClock(room) {
   if (room.isPlaying && room.current && !room.startedAt) {
     const now = Date.now();
-    room.startedAt = now - (room.currentTime || 0) * 1000;
+    room.startedAt = now - ((room.currentTime || 0) / normalizePlaybackRate(room.playbackRate)) * 1000;
   }
 }
 
@@ -5641,6 +5669,7 @@ function serializeRoom(room, options = {}) {
     current: serializeQueueItemForRoom(room.current),
     isPlaying: room.isPlaying,
     currentTime: getPlaybackTime(room),
+    playbackRate: normalizePlaybackRate(room.playbackRate),
     users: Array.from(room.users.values()).map((user) => serializeUser(user, { roomAvatarUrls: room.userAvatarUrls })),
     userCount: room.users.size,
     jumpRequests: room.jumpRequests,
@@ -5716,6 +5745,7 @@ export function prepareRoomBroadcast(roomId) {
     current: serializeQueueItemForRoom(room.current),
     isPlaying: room.isPlaying,
     currentTime: getPlaybackTime(room),
+    playbackRate: normalizePlaybackRate(room.playbackRate),
     users: Array.from(room.users.values()).map((user) => serializeUser(user, { includeLocation: false, roomAvatarUrls: room.userAvatarUrls })),
     userCount: room.users.size,
     jumpRequests: room.jumpRequests,

@@ -75,6 +75,7 @@ import {
 } from '../lib/playbackQualityLock';
 import { waitForAudioCanPlay } from '../lib/audioReady';
 import { applyFollowerSync, applyVisibilityResume, applyPostBufferSync, isEndedWhileServerPlaying } from '../lib/playbackSync';
+import { resetDriftController } from '../lib/driftController';
 import { getClientPlaybackState, getPlaybackTime, optimisticSeekPosition, optimisticSetPlaying } from '../lib/playbackState';
 import { attachAudioBufferingListeners, isAudioBuffering, setAudioBufferEndHandler } from '../lib/audioBuffering';
 import { flushPendingPlaybackSnapshot } from '../lib/playbackSchedule';
@@ -332,6 +333,15 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
   const playbackVersion = useAudioStore((s) => s.playbackVersion);
   const trackReloadNonce = useAudioStore((s) => s.trackReloadNonce);
   const { togglePlay, seek, skipSong, finishSong, requestSkip: requestSkipVote, reportPlaybackMedia } = useSocket();
+
+  useEffect(() => {
+    const rate = Number(room?.playbackRate ?? 1);
+    const nextRate = Number.isFinite(rate) && rate > 0 ? rate : 1;
+    controller.enqueue(() => {
+      resetDriftController(controller.audio, nextRate);
+    });
+  }, [controller, room?.playbackRate]);
+
 
   const endedTrackKey = useRef<string | null>(null);
   const loadGeneration = useRef(0);

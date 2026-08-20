@@ -299,7 +299,7 @@ export default function Room() {
     noindex: true,
   });
 
-  const { joinRoom, addSong, leaveRoom, listFavorites, setFavorite, importFavorites, renameRoomName, setRoomLock, setRoomFmMode, setRoomAnnouncement, setRoomCustomCover, setChatHistoryVisibleOnJoin, setChatShowAvatars, setRoomJoinNotice, setRoomAiSettings, setRoomMaxAdmins, setSongRequestEnabled, unbanRoomSong, addRoomForbiddenWord, removeRoomForbiddenWord, setRoomMemberTier, removeRoomMemberTier, setRoomMemberSettings, loadSongHistory, transferOwner, destroyRoom, applyRoomPermanent, cancelRoomPermanent, clearQueue, createMusicAccountQr, checkMusicAccountQr, bindMusicAccount, listMusicAccounts, setMusicAccountShared, unbindMusicAccount, skipSong, togglePlay } = useSocket();
+  const { joinRoom, addSong, leaveRoom, listFavorites, setFavorite, importFavorites, renameRoomName, setRoomLock, setRoomFmMode, setRoomAnnouncement, setRoomCustomCover, setChatHistoryVisibleOnJoin, setChatShowAvatars, setRoomJoinNotice, setRoomAiSettings, setRoomMaxAdmins, setRoomPlaybackRate, setSongRequestEnabled, unbanRoomSong, addRoomForbiddenWord, removeRoomForbiddenWord, setRoomMemberTier, removeRoomMemberTier, setRoomMemberSettings, loadSongHistory, transferOwner, destroyRoom, applyRoomPermanent, cancelRoomPermanent, clearQueue, createMusicAccountQr, checkMusicAccountQr, bindMusicAccount, listMusicAccounts, setMusicAccountShared, unbindMusicAccount, skipSong, togglePlay } = useSocket();
   const { applyFavorites } = useFavorites();
   const { queueKeys, playedKeys } = useRoomSongKeySets();
 
@@ -400,6 +400,7 @@ export default function Room() {
   const [joinNoticeSaving, setJoinNoticeSaving] = useState(false);
   const [roomAiSaving, setRoomAiSaving] = useState(false);
   const [maxAdminsSaving, setMaxAdminsSaving] = useState(false);
+  const [playbackRateSaving, setPlaybackRateSaving] = useState(false);
   const [forbiddenWordSaving, setForbiddenWordSaving] = useState(false);
   const lastSongRequestAtRef = useRef(0);
   const playlistSearchScrollRef = useRef<HTMLDivElement>(null);
@@ -1516,6 +1517,14 @@ export default function Room() {
       setMaxAdminsSaving(false);
     }
   }, [maxAdminsSaving, setRoomMaxAdmins, showToast]);
+
+  const handleSavePlaybackRate = useCallback(async (nextRate: number) => {
+    if (playbackRateSaving) return;
+    setPlaybackRateSaving(true);
+    const res = await setRoomPlaybackRate(nextRate);
+    setPlaybackRateSaving(false);
+    if (!res.success) showToast(res.error || '倍速设置失败', 'error');
+  }, [playbackRateSaving, setRoomPlaybackRate, showToast]);
 
   const handleSaveSongRequestSettings = useCallback(async (settings: SongRequestSettings) => {
     if (songRequestSaving) return;
@@ -2697,7 +2706,10 @@ export default function Room() {
         onCancelPermanent={handleCancelPermanent}
         maxAdmins={room?.maxAdmins ?? 5}
         maxAdminsSaving={maxAdminsSaving}
+        playbackRate={room?.playbackRate ?? 1}
+        playbackRateSaving={playbackRateSaving}
         onSaveMaxAdmins={handleSaveMaxAdmins}
+        onSavePlaybackRate={handleSavePlaybackRate}
       />
       </Suspense>
 

@@ -100,6 +100,7 @@ import {
   setRoomJoinNotice,
   setRoomAiSettings,
   setRoomMaxAdmins,
+  setRoomPlaybackRate,
   postJoinNoticeMessage,
   shouldMuteJoinAnnouncements,
   wasKnownRoomUser,
@@ -3900,6 +3901,18 @@ io.on('connection', (socket) => {
     io.to(roomId).emit('room_ai_update', roomAi);
     broadcastRoomUpdate(roomId);
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId), roomAi });
+  });
+
+  socket.on('set_room_playback_rate', ({ playbackRate } = {}, callback) => {
+    if (rejectReadOnly(socket, callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, 'set_room_playback_rate', callback)) return;
+    const roomId = socketToRoom.get(socket.id);
+    if (!roomId) { callback?.({ success: false, error: '未加入房间' }); return; }
+    const result = setRoomPlaybackRate(roomId, getSocketUserId(socket), playbackRate, socket.id);
+    if (result.error) { callback?.({ success: false, error: result.error }); return; }
+    emitPlaybackOnly(roomId);
+    broadcastRoomUpdate(roomId);
+    callback?.({ success: true, room: getViewerRoomPayload(socket, roomId), playbackRate: result.playbackRate });
   });
 
   socket.on('set_room_max_admins', ({ maxAdmins } = {}, callback) => {

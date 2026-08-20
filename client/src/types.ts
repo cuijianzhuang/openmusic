@@ -238,6 +238,8 @@ export interface RoomState {
   current: QueueItem | null;
   isPlaying: boolean;
   currentTime: number;
+  /** 房间统一播放倍速，仅房主可修改 */
+  playbackRate?: number;
   users: RoomUser[];
   userCount: number;
   jumpRequests: JumpRequest[];
@@ -346,6 +348,8 @@ export interface PlaybackState {
   serverNowMs: number;
   startedAt: number;
   currentTime: number;
+  /** 房间统一播放倍速 */
+  playbackRate?: number;
   updatedAt: number;
   /** 房间内已解析的当前曲播放地址（可选，进房加速） */
   mediaUrl?: string;

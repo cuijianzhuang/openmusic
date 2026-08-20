@@ -363,6 +363,8 @@ function DonationModal({ open, onClose, donations }: { open: boolean; onClose: (
           ))}
         </div>
 
+        <p className="mt-3 text-center text-xs text-pink-100/45">请在备注中注明昵称，以便感谢</p>
+
         <div className="mt-7 border-t border-pink-300/15 pt-5">
           <div className="flex items-center justify-between">
             <div className="text-sm font-semibold text-pink-100">捐赠名单</div>

@@ -175,7 +175,7 @@ function ensureFinalSyncTrack(trackId: string): void {
 }
 
 function lockPlaybackRate(audio: HTMLAudioElement): void {
-  resetDriftController(audio);
+  resetDriftController(audio, useRoomStore.getState().room?.playbackRate ?? 1);
 }
 
 async function verifyPlaybackStarted(
@@ -609,7 +609,7 @@ export async function applyVisibilityResume(
 }
 
 export function resetPlaybackRate(audio: HTMLAudioElement): void {
-  resetDriftController(audio);
+  resetDriftController(audio, useRoomStore.getState().room?.playbackRate ?? 1);
 }
 
 export async function applyPostBufferSync(

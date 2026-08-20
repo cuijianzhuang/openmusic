@@ -1563,6 +1563,17 @@ export function useSocket() {
     });
   }, []);
 
+  const setRoomPlaybackRate = useCallback((playbackRate: number): Promise<{ success: boolean; error?: string; room?: RoomState; playbackRate?: number }> => {
+    return emitWithAck<{ success: boolean; error?: string; room?: RoomState; playbackRate?: number }>(
+      'set_room_playback_rate',
+      { playbackRate },
+      { success: false, error: '连接超时，请重试' },
+    ).then((res) => {
+      if (res.success && res.room) applyRoomSnapshot(res.room);
+      return res;
+    });
+  }, []);
+
   const setRoomMaxAdmins = useCallback((maxAdmins: number): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
     return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
       'set_room_max_admins',
@@ -1864,6 +1875,7 @@ export function useSocket() {
     setRoomJoinNotice,
     setRoomAiSettings,
     setRoomMaxAdmins,
+    setRoomPlaybackRate,
 
     setSongRequestEnabled,
 

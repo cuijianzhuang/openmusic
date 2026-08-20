@@ -149,6 +149,9 @@ interface Props {
   maxAdmins?: number;
   maxAdminsSaving?: boolean;
   onSaveMaxAdmins?: (maxAdmins: number) => void | Promise<void>;
+  playbackRate?: number;
+  playbackRateSaving?: boolean;
+  onSavePlaybackRate?: (playbackRate: number) => void | Promise<void>;
 }
 
 function clampInt(value: number, min: number, max: number) {
@@ -325,7 +328,10 @@ export default function RoomSettingsModal({
   onCancelPermanent,
   maxAdmins = 5,
   maxAdminsSaving = false,
+  playbackRate = 1,
+  playbackRateSaving = false,
   onSaveMaxAdmins,
+  onSavePlaybackRate,
 }: Props) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('announcement');
   const [draftAnnouncementEnabled, setDraftAnnouncementEnabled] = useState(announcementEnabled);
@@ -689,6 +695,26 @@ export default function RoomSettingsModal({
 
           {activeTab === 'room' && (
             <div className="space-y-6">
+              {isOwner && (
+                <section>
+                  <div className="mb-2 flex items-center gap-2">
+                    <span className="text-sm font-semibold text-white">播放倍速</span>
+                  </div>
+                  <p className="mb-3 text-xs text-netease-muted">修改后整个房间同步生效，仅房主可修改，默认 1 倍</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[0.25, 0.5, 1, 1.25, 1.5, 2, 3].map((rate) => (
+                      <button
+                        key={rate}
+                        type="button"
+                        disabled={playbackRateSaving}
+                        onClick={() => void onSavePlaybackRate?.(rate)}
+                        className={`rounded-lg border px-3 py-2 text-xs transition-colors disabled:opacity-50 ${playbackRate === rate ? 'border-netease-red/40 bg-netease-red/[0.12] text-white' : 'border-white/10 bg-white/[0.03] text-netease-muted hover:bg-white/[0.07]'}`}
+                      >{rate} 倍</button>
+                    ))}
+                  </div>
+                </section>
+              )}
+
               {isOwner && (
                 <section>
                   <div className="mb-2 flex items-center gap-2">

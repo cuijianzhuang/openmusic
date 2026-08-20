@@ -1,6 +1,6 @@
 {
   "notes": [
-    "优化歌曲缓冲播放逻辑"
+    "房主设置新增歌曲倍速调节"
   ],
-  "forcePrompt": true
+  "forcePrompt": false
 }
