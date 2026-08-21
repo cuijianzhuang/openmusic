@@ -229,6 +229,7 @@ export default function SonicWorkshopBackground({ song, isPlaying }: Props) {
         ref={iframeRef}
         title="音域回响 Wallpaper Engine"
         src="/vendor/sonic-workshop/mineradio-bridge.html"
+        sandbox="allow-scripts"
         className="pointer-events-none absolute inset-0 h-full w-full border-0"
         tabIndex={-1}
         aria-hidden

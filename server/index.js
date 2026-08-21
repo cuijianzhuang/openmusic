@@ -2652,6 +2652,10 @@ app.use(express.static(clientDist, {
       res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
       return;
     }
+    if (rel.startsWith('vendor/sonic-workshop/')) {
+      // sandboxed iframe 使用 opaque origin 加载 ES module，精确允许 Origin: null。
+      res.setHeader('Access-Control-Allow-Origin', 'null');
+    }
     if (rel.startsWith('qface/') || rel.startsWith('vendor/')) {
       // QQ 表情几乎不变，浏览器长缓存 1 年
       res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');

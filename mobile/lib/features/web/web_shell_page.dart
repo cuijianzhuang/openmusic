@@ -1,4 +1,6 @@
+import 'dart:collection';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -8,6 +10,28 @@ import 'package:openmusic/features/web/web_navigation_policy.dart';
 
 const _background = Color(0xFF121212);
 const _accent = Color(0xFFEC4141);
+const _bridgeTokenProperty = '__OPENMUSIC_NATIVE_BRIDGE_TOKEN__';
+
+String _newBridgeToken() {
+  final random = Random.secure();
+  final bytes = List<int>.generate(32, (_) => random.nextInt(256));
+  return base64UrlEncode(bytes);
+}
+
+String _bridgeTokenBootstrapScript(String token) => '''
+(() => {
+  if (window.top !== window ||
+      Object.prototype.hasOwnProperty.call(window, '$_bridgeTokenProperty')) {
+    return;
+  }
+  Object.defineProperty(window, '$_bridgeTokenProperty', {
+    value: ${jsonEncode(token)},
+    enumerable: false,
+    configurable: false,
+    writable: false,
+  });
+})();
+''';
 
 class WebPlayerState {
   const WebPlayerState(
@@ -92,12 +116,12 @@ class _WebShellPageState extends State<WebShellPage> {
   DateTime? _oauthExpiresAt;
   Uri? _lastTrustedUrl;
   var _restoringTrustedPage = false;
+  late final String _bridgeToken = _newBridgeToken();
 
   Uri get _url => Uri.parse(
       '${AppConfig.serverUrl}${widget.path.startsWith('/') ? widget.path : '/${widget.path}'}');
   Uri get _trustedOrigin => Uri.parse(AppConfig.serverUrl);
-  bool get _oauthActive =>
-      _oauthExpiresAt?.isAfter(DateTime.now()) == true;
+  bool get _oauthActive => _oauthExpiresAt?.isAfter(DateTime.now()) == true;
 
   @override
   void initState() {
@@ -165,6 +189,14 @@ class _WebShellPageState extends State<WebShellPage> {
         child: Stack(children: [
           InAppWebView(
             initialUrlRequest: URLRequest(url: WebUri(_url.toString())),
+            initialUserScripts: UnmodifiableListView([
+              UserScript(
+                source: _bridgeTokenBootstrapScript(_bridgeToken),
+                injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+                forMainFrameOnly: true,
+                allowedOriginRules: {_trustedOrigin.origin},
+              ),
+            ]),
             initialSettings: InAppWebViewSettings(
               javaScriptEnabled: true,
               mediaPlaybackRequiresUserGesture: false,
@@ -179,11 +211,16 @@ class _WebShellPageState extends State<WebShellPage> {
               controller.addJavaScriptHandler(
                 handlerName: 'omPlayerState',
                 callback: (args) async {
-                  if (!await _hasTrustedTopLevel()) {
+                  final raw = args.isNotEmpty ? args.first : null;
+                  if (!hasTrustedBridgeToken(
+                        payload: raw,
+                        expectedToken: _bridgeToken,
+                      ) ||
+                      !await _hasTrustedTopLevel()) {
                     return {'ok': false, 'error': 'untrusted_origin'};
                   }
-                  if (args.isEmpty || args.first is! Map) return null;
-                  final m = Map<String, dynamic>.from(args.first as Map);
+                  final m = Map<String, dynamic>.from(raw as Map)
+                    ..remove('bridgeToken');
                   if (!mounted) return null;
                   final next = _player.copyWith(
                     title: '${m['title'] ?? ''}',
@@ -209,10 +246,17 @@ class _WebShellPageState extends State<WebShellPage> {
               controller.addJavaScriptHandler(
                 handlerName: 'omNative',
                 callback: (args) async {
-                  if (!await _hasTrustedTopLevel()) {
+                  final raw = args.isNotEmpty ? args.first : null;
+                  if (!hasTrustedBridgeToken(
+                        payload: raw,
+                        expectedToken: _bridgeToken,
+                      ) ||
+                      !await _hasTrustedTopLevel()) {
                     return {'ok': false, 'error': 'untrusted_origin'};
                   }
-                  return _nativeCommand(args.isNotEmpty ? args.first : null);
+                  final payload = Map<String, dynamic>.from(raw as Map)
+                    ..remove('bridgeToken');
+                  return _nativeCommand(payload);
                 },
               );
             },

@@ -10,10 +10,13 @@ flutter run --dart-define=OM_SERVER_URL=https://your-host
 
 正式版只接受 HTTPS `OM_SERVER_URL`，且 Android Manifest 禁止明文流量；debug/profile 使用 local flavor 时仍可连接本机或局域网 HTTP 服务。配置值必须是纯 Origin，不能包含账号、路径、查询参数或片段。
 
-WebView 只把配置的站点 Origin 视为可信页面。普通外链交给系统浏览器，非 HTTP(S) 导航会被拒绝；Linux.do / GitHub OAuth 只能从本站既有 `/api/auth/*/start` 或后台授权起点进入短时 HTTPS 流程。任何非本站顶层页面都不能调用下列桥接，也不能接收原生通知栏发出的播放命令。
+WebView 只把配置的站点 Origin 视为可信页面。普通外链交给系统浏览器，非 HTTP(S) 导航会被拒绝；Linux.do / GitHub OAuth 只能从本站既有 `/api/auth/*/start` 或后台授权起点进入短时 HTTPS 流程。任何非本站顶层页面都不能调用下列桥接，也不能接收原生通知栏发出的播放命令。原生端会在受信**顶层**页面文档开始时注入一次性 `window.__OPENMUSIC_NATIVE_BRIDGE_TOKEN__`；所有桥接 payload 必须携带 `bridgeToken`。跨域 iframe 不会获得该令牌；本站的 Sonic Workshop iframe 额外以 `sandbox="allow-scripts"` 运行，形成 opaque origin，因而不能读取顶层页面令牌。新增同源 iframe 时也必须采用等效隔离，或改为独立 Origin。
+
+汽水二次验证 iframe 同样以 `sandbox="allow-scripts"` 隔离；完成消息只接受对应 iframe 的 `contentWindow`，不能仅按 Origin 信任。Sonic Workshop 的 ES module 静态资源需精确返回 `Access-Control-Allow-Origin: null`（不允许凭据）。
 
 ```js
 window.flutter_inappwebview.callHandler('omPlayerState', {
+  bridgeToken: window.__OPENMUSIC_NATIVE_BRIDGE_TOKEN__,
   title: song.name,
   artist: song.artist,
   cover: song.pic,
@@ -46,9 +49,10 @@ window.addEventListener('omNativePlayerCommand', ({ detail }) => {
 网页可调用的 Android 原生工具是受限白名单，避免把任意 Intent 暴露给不可信页面：
 
 ```js
-await window.flutter_inappwebview.callHandler('omNative', { action: 'vibrate' });
-await window.flutter_inappwebview.callHandler('omNative', { action: 'share', text: '...' });
-await window.flutter_inappwebview.callHandler('omNative', { action: 'openExternal', url: 'https://...' });
+const bridgeToken = window.__OPENMUSIC_NATIVE_BRIDGE_TOKEN__;
+await window.flutter_inappwebview.callHandler('omNative', { action: 'vibrate', bridgeToken });
+await window.flutter_inappwebview.callHandler('omNative', { action: 'share', text: '...', bridgeToken });
+await window.flutter_inappwebview.callHandler('omNative', { action: 'openExternal', url: 'https://...', bridgeToken });
 ```
 
 `openExternal` 只允许 `http` 或 `https` URL；分享文本最长 2000 个字符。

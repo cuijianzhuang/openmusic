@@ -315,25 +315,23 @@ export async function importFavoriteSongs(userId, songs) {
 
   try {
     const mutation = await mutateFavoritesAtomically(id, (items) => {
-      const merged = [...imported, ...items];
-      const seen = new Set();
-      const unique = [];
-      const existingIds = new Set(items.map(songFavoriteId));
-      let added = 0;
+      // 已有收藏优先保留：导入只填补剩余容量，不能静默挤掉用户旧收藏。
+      const current = capFavorites(items);
+      const seen = new Set(current.map(songFavoriteId));
+      const candidates = [];
 
-      for (const song of merged) {
+      for (const song of imported) {
         const favId = songFavoriteId(song);
         if (seen.has(favId)) continue;
         seen.add(favId);
-        if (!existingIds.has(favId)) added += 1;
-        unique.push(song);
+        candidates.push(song);
       }
 
-      const next = capFavorites(unique);
+      const accepted = candidates.slice(0, Math.max(0, MAX_FAVORITES - current.length));
       return {
-        items: next,
-        imported: added,
-        dropped: Math.max(0, unique.length - next.length),
+        items: [...accepted, ...current],
+        imported: accepted.length,
+        dropped: candidates.length - accepted.length,
       };
     });
     return {

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'rea
 import { createPortal } from 'react-dom';
 import { lazyWithRetry } from '../lib/lazyWithRetry';
 import { nextLoadingQuote, useLoadingQuote } from '../lib/loadingQuote';
+import { mergeFavoriteImportStats } from '../lib/favoriteImport';
 
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 
@@ -735,8 +736,7 @@ export default function Room() {
           return;
         }
         const batches = chunkSongs(songs, FAVORITES_IMPORT_BATCH_SIZE);
-        let imported = 0;
-        let dropped = 0;
+        let stats = { imported: 0, dropped: 0 };
         let maxFavorites = 5000;
         for (let index = 0; index < batches.length; index += 1) {
           setFavoritesImportProgress(`导入进度 ${Math.min((index + 1) * FAVORITES_IMPORT_BATCH_SIZE, songs.length)}/${songs.length}`);
@@ -745,18 +745,17 @@ export default function Room() {
             showToast(res.error || `导入到 ${index * FAVORITES_IMPORT_BATCH_SIZE}/${songs.length} 时失败`, 'error');
             return;
           }
-          imported += res.imported || 0;
-          dropped = Math.max(dropped, res.dropped || 0);
+          stats = mergeFavoriteImportStats(stats, res);
           if (res.maxFavorites) maxFavorites = res.maxFavorites;
           if (res.favorites) {
             setFavorites(res.favorites);
             applyFavorites(res.favorites);
           }
         }
-        if (dropped > 0) {
-          showToast(`已导入 ${imported} 首新收藏，${dropped} 首因超出 ${maxFavorites} 首上限未导入`, 'success');
+        if (stats.dropped > 0) {
+          showToast(`已导入 ${stats.imported} 首新收藏，${stats.dropped} 首因超出 ${maxFavorites} 首上限未导入`, 'success');
         } else {
-          showToast(`已导入 ${imported} 首新收藏，重复歌曲已跳过`, 'success');
+          showToast(`已导入 ${stats.imported} 首新收藏，重复歌曲已跳过`, 'success');
         }
       } catch {
         showToast('JSON 解析失败，请检查文件格式', 'error');

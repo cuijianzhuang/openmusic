@@ -131,6 +131,15 @@ location ^~ /qface/ {
     try_files $uri =404;
 }
 
+# Sonic Workshop 在 sandbox 的 opaque origin 内加载 ES module；仅允许 Origin: null，且不允许凭据。
+location ^~ /vendor/sonic-workshop/ {
+    expires 30d;
+    add_header Cache-Control "public, max-age=2592000" always;
+    add_header Access-Control-Allow-Origin "null" always;
+    access_log off;
+    try_files $uri =404;
+}
+
 location ^~ /vendor/ {
     expires 30d;
     add_header Cache-Control "public, max-age=2592000" always;

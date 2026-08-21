@@ -22,20 +22,27 @@ void main() {
 
   test('only known same-origin endpoints start OAuth', () {
     expect(
-      isOauthStartUrl(Uri.parse('https://music.example.com/api/auth/github/start'), trusted),
+      isOauthStartUrl(
+          Uri.parse('https://music.example.com/api/auth/github/start'),
+          trusted),
       isTrue,
     );
     expect(
-      isOauthStartUrl(Uri.parse('https://music.example.com/api/admin/linuxdo/login/start'), trusted),
+      isOauthStartUrl(
+          Uri.parse('https://music.example.com/api/admin/linuxdo/login/start'),
+          trusted),
       isTrue,
     );
     expect(
-      isOauthStartUrl(Uri.parse('https://evil.example/api/auth/github/start'), trusted),
+      isOauthStartUrl(
+          Uri.parse('https://evil.example/api/auth/github/start'), trusted),
       isFalse,
     );
   });
 
-  test('OAuth allows HTTPS providers while ordinary external links leave WebView', () {
+  test(
+      'OAuth allows HTTPS providers while ordinary external links leave WebView',
+      () {
     expect(
       decideWebNavigation(
         candidate: Uri.parse('https://github.com/login/oauth/authorize'),
@@ -53,6 +60,36 @@ void main() {
         hasUserGesture: true,
       ),
       WebNavigationDecision.openExternal,
+    );
+  });
+
+  test('native bridge requires the per-page trusted token', () {
+    const token = 'trusted-bridge-token';
+
+    expect(
+      hasTrustedBridgeToken(
+        payload: {'bridgeToken': token, 'action': 'vibrate'},
+        expectedToken: token,
+      ),
+      isTrue,
+    );
+    expect(
+      hasTrustedBridgeToken(
+        payload: {'action': 'vibrate'},
+        expectedToken: token,
+      ),
+      isFalse,
+    );
+    expect(
+      hasTrustedBridgeToken(
+        payload: {'bridgeToken': 'wrong-token'},
+        expectedToken: token,
+      ),
+      isFalse,
+    );
+    expect(
+      hasTrustedBridgeToken(payload: 'not-a-map', expectedToken: token),
+      isFalse,
     );
   });
 

@@ -52,6 +52,7 @@ export default function MusicContributionModal({ open, onClose, defaultProvider 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const runIdRef = useRef(0);
   const secondVerifySubmittedRef = useRef(false);
+  const secondVerifyFrameRef = useRef<HTMLIFrameElement | null>(null);
 
   useEffect(() => {
     providerRef.current = providerName;
@@ -59,7 +60,7 @@ export default function MusicContributionModal({ open, onClose, defaultProvider 
 
   useEffect(() => {
     const handleVerifyMessage = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin) return;
+      if (event.source !== secondVerifyFrameRef.current?.contentWindow) return;
       if (event.data?.type !== 'qishui-second-verify-complete') return;
       if (textValue(event.data.key) !== textValue(session?.sessionId)) return;
       secondVerifySubmittedRef.current = true;
@@ -395,8 +396,10 @@ export default function MusicContributionModal({ open, onClose, defaultProvider 
               </button>
             </div>
             <iframe
+              ref={secondVerifyFrameRef}
               title="汽水安全验证"
               src={secondVerifyUrl}
+              sandbox="allow-scripts"
               className="min-h-0 flex-1 border-0"
             />
           </div>

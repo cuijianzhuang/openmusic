@@ -72,8 +72,8 @@ test('真实 Redis 原子窗口在多个限流器实例间生效', {
   const { createClient } = await import('redis');
   const redis = createClient({ url: process.env.TEST_REDIS_URL });
   await redis.connect();
-  t.after(async () => {
-    if (redis.isOpen) await redis.quit();
+  t.after(() => {
+    if (redis.isOpen) redis.destroy();
   });
 
   const first = createDistributedSocketRateLimiter({ getRedisClient: () => redis });

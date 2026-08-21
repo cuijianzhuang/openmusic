@@ -43,7 +43,7 @@ test('收藏并发更新通过 Redis CAS 保留全部成功操作', {
   const key = `openmusic:favorites:${userId}`;
   t.after(async () => {
     await client.del(key);
-    if (client.isOpen) await client.quit();
+    if (client.isOpen) client.destroy();
   });
 
   const songs = Array.from({ length: 8 }, (_, index) => ({
@@ -91,6 +91,20 @@ test('收藏并发更新通过 Redis CAS 保留全部成功操作', {
   const capped = await importFavoriteSongs(userId, bulk);
   assert.equal(capped.error, undefined);
   assert.equal(capped.favorites.length, 5000);
+  assert.equal(capped.imported, 5000);
   assert.equal(capped.dropped, 5);
   assert.equal((await listFavoriteSongs(userId)).length, 5000);
+
+  const overflow = await importFavoriteSongs(userId, [{
+    id: 'must-not-evict-existing',
+    source: 'netease',
+    name: '容量已满时的新歌曲',
+    artist: '测试歌手',
+  }]);
+  assert.equal(overflow.error, undefined);
+  assert.equal(overflow.imported, 0);
+  assert.equal(overflow.dropped, 1);
+  assert.equal(overflow.favorites.length, 5000);
+  assert.equal(overflow.favorites.some((song) => song.id === 'must-not-evict-existing'), false);
+  assert.equal(overflow.favorites.some((song) => song.id === 'bulk-4999'), true);
 });

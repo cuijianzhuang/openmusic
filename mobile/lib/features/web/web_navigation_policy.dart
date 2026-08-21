@@ -20,9 +20,18 @@ bool isHttpUri(Uri? uri) {
 
 bool isTrustedWebOrigin(Uri? candidate, Uri trustedOrigin) {
   if (!isHttpUri(candidate)) return false;
-  return candidate!.scheme.toLowerCase() == trustedOrigin.scheme.toLowerCase() &&
+  return candidate!.scheme.toLowerCase() ==
+          trustedOrigin.scheme.toLowerCase() &&
       candidate.host.toLowerCase() == trustedOrigin.host.toLowerCase() &&
       _effectivePort(candidate) == _effectivePort(trustedOrigin);
+}
+
+bool hasTrustedBridgeToken({
+  required Object? payload,
+  required String expectedToken,
+}) {
+  if (expectedToken.isEmpty || payload is! Map) return false;
+  return payload['bridgeToken'] == expectedToken;
 }
 
 bool isOauthStartUrl(Uri? candidate, Uri trustedOrigin) {

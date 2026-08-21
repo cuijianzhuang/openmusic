@@ -10,6 +10,7 @@ import { findActiveLyricIndex } from '../lib/lyricActiveIndex';
 import { normalizePlayMode, nextPlayMode, PLAY_MODE_META, type PlayMode } from '../lib/playMode';
 import { useFavorites } from '../hooks/useFavorites';
 import { useSocket } from '../hooks/useSocket';
+import { getNativeBridgeToken } from '../lib/nativeWebView';
 
 interface Props {
   song: Song | null;
@@ -54,9 +55,10 @@ function sendPlayerState(
   extras: NativePlayerExtras,
 ) {
   const bridge = window.flutter_inappwebview;
-  if (!bridge) return;
+  const bridgeToken = getNativeBridgeToken();
+  if (!bridge || !bridgeToken) return;
   if (!song) {
-    void bridge.callHandler('omPlayerState', { title: '' });
+    void bridge.callHandler('omPlayerState', { title: '', bridgeToken });
     return;
   }
 
@@ -86,6 +88,7 @@ function sendPlayerState(
     playModeLabel: extras.playModeLabel,
     canChangeMode: extras.canChangeMode,
     favorited: extras.favorited,
+    bridgeToken,
   });
 }
 
@@ -124,8 +127,12 @@ export default function NativeWebViewBridge({ song, isPlaying, togglePlay, skipS
   }, [song, songId, isPlaying, permissions.canPause, permissions.canSkip, permissions.canSeek, extras, lyrics]);
 
   useEffect(() => () => {
-    if (window.flutter_inappwebview) {
-      void window.flutter_inappwebview.callHandler('omPlayerState', { title: '' });
+    const bridgeToken = getNativeBridgeToken();
+    if (window.flutter_inappwebview && bridgeToken) {
+      void window.flutter_inappwebview.callHandler('omPlayerState', {
+        title: '',
+        bridgeToken,
+      });
     }
   }, []);
 

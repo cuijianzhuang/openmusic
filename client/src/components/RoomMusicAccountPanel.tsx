@@ -315,6 +315,7 @@ export default function RoomMusicAccountPanel({
   const bindingRef = useRef(false);
   const runIdRef = useRef(0);
   const secondVerifySubmittedRef = useRef(false);
+  const secondVerifyFrameRef = useRef<HTMLIFrameElement | null>(null);
 
   useEffect(() => {
     if (!sharedMembershipEnabled) {
@@ -348,7 +349,7 @@ export default function RoomMusicAccountPanel({
 
   useEffect(() => {
     const handleVerifyMessage = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin) return;
+      if (event.source !== secondVerifyFrameRef.current?.contentWindow) return;
       if (event.data?.type !== 'qishui-second-verify-complete') return;
       if (textValue(event.data.key) !== textValue(session?.sessionId)) return;
       secondVerifySubmittedRef.current = true;
@@ -658,7 +659,13 @@ export default function RoomMusicAccountPanel({
                 关闭
               </button>
             </div>
-            <iframe title="汽水安全验证" src={secondVerifyUrl} className="min-h-0 flex-1 border-0" />
+            <iframe
+              ref={secondVerifyFrameRef}
+              title="汽水安全验证"
+              src={secondVerifyUrl}
+              sandbox="allow-scripts"
+              className="min-h-0 flex-1 border-0"
+            />
           </div>
         </div>
       ) : null}
