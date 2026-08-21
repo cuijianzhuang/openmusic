@@ -9,6 +9,10 @@
 ```bash
 # 下载 compose 文件
 curl -O https://raw.githubusercontent.com/qq01-hub/openmusic/main/docker-compose.full.yml
+curl -O https://raw.githubusercontent.com/qq01-hub/openmusic/main/.env.full.example
+
+# 生成部署变量并填写全部空值；留空时 Compose 会拒绝启动
+cp .env.full.example .env
 
 # 准备持久化目录
 mkdir -p data/downloads data/meting
@@ -17,15 +21,17 @@ echo '{}' > data/runtimeConfig.json
 echo '{}' > data/adminConfig.json
 
 # 启动（全量版：Redis + Meting + OpenMusic）
-docker compose -f docker-compose.full.yml up -d
+docker compose --env-file .env -f docker-compose.full.yml up -d
 ```
 
 打开 `http://<IP>:4000`，Redis / Meting 已自动填好，只需填站点域名。完成后自动重启。
 
-Meting 管理后台：`http://<IP>:3000/admin`，默认账号 `admin` / `admin123`（可用环境变量 `METING_ADMIN_USERNAME` / `METING_ADMIN_PASSWORD` 覆盖，仅首次无数据时生效）。
+Meting 管理后台仅绑定服务器的 `127.0.0.1:${METING_PORT:-3000}`，路径、用户名和首次初始化密码必须在 `.env` 中显式设置。远程管理时执行 `ssh -L 3000:127.0.0.1:3000 user@server`，再从本机浏览器访问；不要直接开放该端口。
+
+> 从旧版全量 Compose 升级时，先按示例补齐根目录 `.env`，否则新版会安全失败而不启动。已有 `ROOM_CREDENTIAL_ENCRYPTION_KEY` 必须原样沿用；Meting 已有数据不会因再次声明初始化变量而被重置。
 
 > 不需要内置 Meting？下载 `docker-compose.yml` 代替。
-> 更新：`docker compose pull && docker compose up -d`
+> 更新：`docker compose --env-file .env -f docker-compose.full.yml pull && docker compose --env-file .env -f docker-compose.full.yml up -d`
 > 宝塔用户：见 [宝塔部署指南](../deploy/DEPLOY-BAOTA.md)，可在 Docker 管理器里直接粘贴 compose。
 
 有源码时也可用一键脚本：`bash deploy/deploy.sh`
@@ -88,8 +94,9 @@ Meting / 房间凭证密钥等由向导或管理后台配置。使用汽水音�
 
 - 配置文件挂载到宿主机 `./data/`（`.env`、`runtimeConfig.json`、`adminConfig.json`、`setup.lock`、`downloads/`），容器重建不丢
 - Docker 环境下向导自动预填 Redis / Meting，完成后自动重启
-- 自定义端口：`OPENMUSIC_PORT=8080 docker compose up -d`
-- 更新：`git pull && docker compose up -d --build`
+- 全量版的 Compose 变量来自仓库根目录 `.env`，应用运行配置仍写入 `./data/.env`，两者用途不同
+- 自定义端口：`OPENMUSIC_PORT=8080 docker compose --env-file .env -f docker-compose.full.yml up -d`
+- 更新：`git pull && docker compose --env-file .env -f docker-compose.full.yml up -d --build`
 
 ---
 

@@ -66,25 +66,33 @@
 
 ```bash
 curl -O https://raw.githubusercontent.com/qq01-hub/openmusic/main/docker-compose.full.yml
+curl -O https://raw.githubusercontent.com/qq01-hub/openmusic/main/.env.full.example
+cp .env.full.example .env
+# 编辑 .env，填写所有空值；可用 openssl rand -hex 32 生成随机密钥
 mkdir -p data/downloads data/meting
 touch data/.env data/setup.lock
 echo '{}' > data/runtimeConfig.json
 echo '{}' > data/adminConfig.json
-docker compose -f docker-compose.full.yml up -d
+docker compose --env-file .env -f docker-compose.full.yml up -d
 ```
 
 | 服务 | 地址 | 说明 |
 |------|------|------|
 | OpenMusic | `http://<IP>:4000` | 首次进入部署向导，完成后自动重启 |
-| Meting 后台 | `http://<IP>:3000/admin` | 默认 `admin` / `admin123`（仅首次无数据时生效） |
+| Meting 后台 | `http://127.0.0.1:3000/<METING_ADMIN_PATH>` | 仅服务器本机访问，凭据来自 `.env` |
 
 ```bash
 # 更新
-docker compose -f docker-compose.full.yml pull && docker compose -f docker-compose.full.yml up -d
+docker compose --env-file .env -f docker-compose.full.yml pull
+docker compose --env-file .env -f docker-compose.full.yml up -d
 
 # 自定义端口
-OPENMUSIC_PORT=8080 docker compose -f docker-compose.full.yml up -d
+OPENMUSIC_PORT=8080 docker compose --env-file .env -f docker-compose.full.yml up -d
 ```
+
+远程管理 Meting 时先建立 SSH 隧道：`ssh -L 3000:127.0.0.1:3000 user@server`，再在本机打开管理地址。不要把 Meting 管理端口直接暴露到公网。
+
+旧版全量部署升级前也要先创建根目录 `.env`。已有 `ROOM_CREDENTIAL_ENCRYPTION_KEY` 时必须沿用原值；Meting 已初始化时填写现有管理路径和账号信息即可，容器不会重置已有数据。
 
 不需要内置 Meting 时改用 `docker-compose.yml`。宝塔面板见 [宝塔部署](deploy/DEPLOY-BAOTA.md)。
 
