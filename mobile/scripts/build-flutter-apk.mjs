@@ -17,11 +17,40 @@ const args = process.argv.slice(2);
 const release = args.includes('--release');
 const noVersionBump = args.includes('--no-version-bump');
 const serverArg = args.find((a) => a.startsWith('--server-url='));
-const serverUrl = serverArg?.slice('--server-url='.length) || process.env.OM_SERVER_URL;
-if (!serverUrl) {
+const rawServerUrl = serverArg?.slice('--server-url='.length) || process.env.OM_SERVER_URL;
+if (!rawServerUrl) {
   console.error('Missing --server-url= or OM_SERVER_URL');
   process.exit(1);
 }
+
+function normalizeServerOrigin(raw, requireHttps) {
+  let parsed;
+  try {
+    parsed = new URL(String(raw).trim());
+  } catch {
+    console.error('OM_SERVER_URL must be a valid http/https origin');
+    process.exit(1);
+  }
+  const validScheme = parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  if (
+    !validScheme
+    || parsed.username
+    || parsed.password
+    || (parsed.pathname && parsed.pathname !== '/')
+    || parsed.search
+    || parsed.hash
+  ) {
+    console.error('OM_SERVER_URL must be a valid http/https origin');
+    process.exit(1);
+  }
+  if (requireHttps && parsed.protocol !== 'https:') {
+    console.error('Release builds require an HTTPS OM_SERVER_URL');
+    process.exit(1);
+  }
+  return parsed.origin;
+}
+
+const serverUrl = normalizeServerOrigin(rawServerUrl, release);
 
 const flutter =
   process.env.FLUTTER_ROOT
@@ -104,7 +133,7 @@ const r = spawnSync(
     mode,
     `--build-name=${androidVersion.major}.${androidVersion.minor}.${androidVersion.patch}`,
     `--build-number=${androidVersion.build}`,
-    '--dart-define=OM_FLAVOR=prod',
+    `--dart-define=OM_FLAVOR=${release ? 'prod' : 'local'}`,
     `--dart-define=OM_SERVER_URL=${serverUrl}`,
   ],
   { cwd: mobileRoot, stdio: 'inherit', shell: process.platform === 'win32' },

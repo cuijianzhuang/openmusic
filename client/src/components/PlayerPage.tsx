@@ -221,7 +221,7 @@ export default memo(function PlayerPage({ onClose }: Props) {
           />
         </div>
 
-        <div className="relative flex items-center justify-center gap-8 sm:gap-10 2xl:gap-16">
+        <div className="relative flex items-center justify-center gap-3 sm:gap-10 2xl:gap-16">
 
           <VolumeControl
             compact
@@ -305,5 +305,4 @@ export default memo(function PlayerPage({ onClose }: Props) {
   );
 
 });
-
 

@@ -1,6 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getRedisConnectionOptions } from './roomStorage.js';
+import {
+  getRedisClient,
+  getRedisConnectionOptions,
+  importFavoriteSongs,
+  initRoomStorage,
+  listFavoriteSongs,
+  setFavoriteSong,
+} from './roomStorage.js';
 
 test('Redis connection options require an explicit host or URL', () => {
   assert.equal(getRedisConnectionOptions({}), null);
@@ -22,4 +29,68 @@ test('Redis host configuration uses the safe default port and optional auth fiel
     password: 'secret',
     database: 2,
   });
+});
+
+test('收藏并发更新通过 Redis CAS 保留全部成功操作', {
+  skip: !process.env.TEST_REDIS_URL,
+}, async (t) => {
+  process.env.REDIS_URL = process.env.TEST_REDIS_URL;
+  assert.equal(await initRoomStorage(), true);
+  const client = getRedisClient();
+  assert.ok(client);
+
+  const userId = `favorite-cas-${process.pid}-${Date.now()}`;
+  const key = `openmusic:favorites:${userId}`;
+  t.after(async () => {
+    await client.del(key);
+    if (client.isOpen) await client.quit();
+  });
+
+  const songs = Array.from({ length: 8 }, (_, index) => ({
+    id: String(index + 1),
+    source: 'netease',
+    name: `歌曲 ${index + 1}`,
+    artist: '测试歌手',
+  }));
+  const added = await Promise.all(
+    songs.map((song) => setFavoriteSong(userId, song, true)),
+  );
+  assert.equal(added.every((result) => !result.error), true);
+  assert.deepEqual(
+    new Set((await listFavoriteSongs(userId)).map((song) => song.id)),
+    new Set(songs.map((song) => song.id)),
+  );
+
+  const importedSongs = [9, 10, 11].map((id) => ({
+    id: String(id),
+    source: 'netease',
+    name: `歌曲 ${id}`,
+    artist: '测试歌手',
+  }));
+  const updates = await Promise.all([
+    setFavoriteSong(userId, songs[0], false),
+    setFavoriteSong(userId, songs[1], false),
+    importFavoriteSongs(userId, importedSongs),
+  ]);
+  assert.equal(updates.every((result) => !result.error), true);
+
+  const finalIds = new Set((await listFavoriteSongs(userId)).map((song) => song.id));
+  assert.equal(finalIds.has('1'), false);
+  assert.equal(finalIds.has('2'), false);
+  for (const id of ['3', '4', '5', '6', '7', '8', '9', '10', '11']) {
+    assert.equal(finalIds.has(id), true);
+  }
+
+  await client.del(key);
+  const bulk = Array.from({ length: 5005 }, (_, index) => ({
+    id: `bulk-${index}`,
+    source: 'netease',
+    name: `批量歌曲 ${index}`,
+    artist: '测试歌手',
+  }));
+  const capped = await importFavoriteSongs(userId, bulk);
+  assert.equal(capped.error, undefined);
+  assert.equal(capped.favorites.length, 5000);
+  assert.equal(capped.dropped, 5);
+  assert.equal((await listFavoriteSongs(userId)).length, 5000);
 });

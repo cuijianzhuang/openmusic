@@ -10,7 +10,7 @@
         android:label="OpenMusic"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
-        android:usesCleartextTraffic="true">
+        android:usesCleartextTraffic="false">
         <service
             android:name=".NativePlaybackService"
             android:exported="false"

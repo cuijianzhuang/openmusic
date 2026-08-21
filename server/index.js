@@ -179,6 +179,7 @@ import {
 } from './permanentApplication.js';
 import { importNeteasePlaylist, importQqPlaylist, importQishuiPlaylist, fetchNeteasePlaylistMetas } from './playlistImport.js';
 import { fetchNeteaseHotToplist } from './neteaseToplist.js';
+import { createNeteasePlaylistSearchHandler } from './neteasePlaylistSearch.js';
 import { getHotSongs } from './songHotRank.js';
 import { hasRedisEnvConfig, importFavoriteSongs, listFavoriteSongs, setFavoriteSong, getRedisClient } from './roomStorage.js';
 import {
@@ -209,6 +210,12 @@ import { createErrorReport, listPendingSolutionsForUser, ackErrorReportSolution 
 import { getRuntimeConfig, getPublicSiteSeo, setRuntimeConfig } from './runtimeConfig.js';
 import { socketPayload } from './socketPayload.js';
 import { hardenSocketHandlers } from './socketHandlerGuard.js';
+import {
+  buildSocketRatePrincipal,
+  createDistributedSocketRateLimiter,
+  getSocketEventRatePolicy,
+} from './socketRateLimiter.js';
+import { createLogger, incrementMetric } from './logger.js';
 import {
   isLinuxdoConfigured,
   signLinuxdoState,
@@ -647,13 +654,25 @@ const limitSocketAction = createRateLimiter({ windowMs: 60_000, max: 90 });
 const limitContributionQr = createRateLimiter({ windowMs: 60_000, max: 45 });
 const limitContributionBind = createRateLimiter({ windowMs: 10 * 60_000, max: 8 });
 const limitSocketChat = createRateLimiter({ windowMs: 60_000, max: 30 });
-const limitSocketRoomAi = createRateLimiter({ windowMs: 60_000, max: 8 });
 const limitOwnerDestroyRoom = createRateLimiter({ windowMs: 60_000, max: 3 });
 const limitErrorReport = createRateLimiter({ windowMs: 10 * 60_000, max: 5 });
 const limitSessionBootstrap = createRateLimiter({ windowMs: 60_000, max: 90 });
 const limitNewSessionBootstrap = createRateLimiter({ windowMs: 60_000, max: 45 });
 const limitLinuxdoAuth = createRateLimiter({ windowMs: 60_000, max: 10 });
 const limitGithubAuth = createRateLimiter({ windowMs: 60_000, max: 10 });
+const socketRateLog = createLogger('socket-rate-limit');
+let lastSocketRateRedisErrorAt = 0;
+const distributedSocketRateLimiter = createDistributedSocketRateLimiter({
+  getRedisClient,
+  onRedisError: (error) => {
+    incrementMetric('socket_rate_limit_redis_error_total');
+    const now = Date.now();
+    if (now - lastSocketRateRedisErrorAt >= 60_000) {
+      lastSocketRateRedisErrorAt = now;
+      socketRateLog.warn('redis_failed_using_memory_fallback', { error });
+    }
+  },
+});
 
 function sanitizeClientSong(song) {
   if (!song || typeof song !== 'object') {
@@ -1407,53 +1426,11 @@ app.get('/api/music/netease/playlists/meta', async (req, res) => {
   }
 });
 
-app.get('/api/music/netease/playlists/search', async (req, res) => {
-  const identity = requireSessionIdentity(req, res);
-  if (!identity) return;
-  if (!limitProxyRequest(proxyLimitKey('playlist-search', req))) {
-    return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
-  }
-
-  const keyword = limitText(req.query.keyword || req.query.s, 80);
-  const page = Math.max(1, parseInt(String(req.query.page || '1'), 10) || 1);
-  const limit = Math.min(50, Math.max(1, parseInt(String(req.query.limit || '20'), 10) || 20));
-  if (!keyword) return res.json({ playlists: [], total: 0, page, limit });
-
-  try {
-    const presence = findUserRoomPresence(identity.userId);
-    const response = await runWithMetingRequestContext(
-      {
-        userId: identity.userId,
-        userNickname: presence?.userNickname || '',
-        roomId: presence?.roomId || '',
-        roomName: presence?.roomName || '',
-        songId: String(query.id || ''),
-      },
-      () => fetchMetingApi({ server: 'netease', type: 'search_playlist', id: keyword }, {}, 10000),
-    );
-    if (!response.ok) return res.status(response.status).json({ error: '网易歌单搜索失败' });
-    const data = await response.json();
-    const playlists = Array.isArray(data) ? data : [];
-    const normalized = playlists.map((item) => ({
-      id: String(item.id || ''),
-      name: String(item.name || item.title || '未命名歌单'),
-      coverImgUrl: String(item.cover || item.coverImgUrl || item.pic || ''),
-      creatorName: String(item.creator?.nickname || item.creator?.name || item.user?.nickname || ''),
-      trackCount: Number(item.trackCount || item.track_count || item.song_count || 0),
-      playCount: Number(item.playCount || item.playcount || 0),
-    })).filter((item) => item.id);
-    const start = (page - 1) * limit;
-    res.json({
-      page,
-      limit,
-      total: normalized.length,
-      playlists: normalized.slice(start, start + limit),
-    });
-  } catch (err) {
-    console.error('Netease playlist search error:', err.message);
-    res.status(502).json({ error: '网易歌单搜索失败' });
-  }
-});
+app.get('/api/music/netease/playlists/search', createNeteasePlaylistSearchHandler({
+  requireIdentity: requireSessionIdentity,
+  consumeLimit: (req) => limitProxyRequest(proxyLimitKey('playlist-search', req)),
+  findPresence: findUserRoomPresence,
+}));
 
 app.get('/api/music/sources', async (_req, res) => {
   const sources = [
@@ -2720,6 +2697,30 @@ function getSocketUserId(socket) {
   return socketToUserId.get(socket.id) || null;
 }
 
+function getSocketRatePrincipal(socket) {
+  const roomId = socketToRoom.get(socket.id);
+  const socketUserId = getSocketUserId(socket);
+  const roomUser = roomId && socketUserId
+    ? getRoomInternal(roomId)?.users?.get(socketUserId)
+    : null;
+  const identity = roomUser?.readOnly
+    ? null
+    : resolveIdentityFromCookies(socket.handshake?.headers?.cookie || '');
+  return buildSocketRatePrincipal({
+    userId: identity?.userId || '',
+    ip: getClientIp(socket),
+  });
+}
+
+async function consumeDistributedSocketRate(socket, scope, policy) {
+  return distributedSocketRateLimiter.consume({
+    scope,
+    principal: getSocketRatePrincipal(socket),
+    windowMs: policy.windowMs,
+    max: policy.max,
+  });
+}
+
 function getMusicAccountProviderName(room, ownerId) {
   const onlineNickname = String(room?.users?.get(ownerId)?.nickname || '').trim();
   const savedNickname = String(room?.userNicknames?.get(ownerId) || '').trim();
@@ -3073,6 +3074,31 @@ async function advanceEndedRoomNow(roomId, expectedQueueId = '') {
 
 io.on('connection', (socket) => {
   hardenSocketHandlers(socket);
+
+  socket.use(async (packet, next) => {
+    const event = String(packet?.[0] || '');
+    const policy = getSocketEventRatePolicy(event);
+    if (!policy) {
+      next();
+      return;
+    }
+    try {
+      const result = await consumeDistributedSocketRate(socket, `event:${event}`, policy);
+      if (result.allowed) {
+        next();
+        return;
+      }
+      incrementMetric('socket_rate_limit_rejected_total', { event });
+      const callback = typeof packet[packet.length - 1] === 'function'
+        ? packet[packet.length - 1]
+        : null;
+      callback?.({ success: false, error: '操作过于频繁，请稍后再试' });
+    } catch (error) {
+      // 限流器自身异常不能破坏房间基础功能；实现内部已优先使用内存兜底。
+      socketRateLog.error('middleware_failed_open', { event, error });
+      next();
+    }
+  });
 
   // 建连即拦：避免被封用户反复 join_room 刷审计 / 占连接
   {
@@ -4731,7 +4757,7 @@ io.on('connection', (socket) => {
     const hasImage = Boolean(result.message?.imageUrl) && !result.message?.asSticker;
     const chatRoom = getRoomInternal(roomId);
     const botName = resolveRoomAiBotName(chatRoom);
-    setImmediate(() => {
+    setImmediate(async () => {
       // 明确的普通“切歌/下一首”控制词直接执行，不要求 AI 开启或昵称触发。
       if (!hasImage) {
         const commandText = stripAiTriggerPrefix(triggerText, botName)
@@ -4755,7 +4781,12 @@ io.on('connection', (socket) => {
       }
       if (!isRoomAiEnabledForRoom(chatRoom)) return;
       if (!shouldTriggerRoomAi(triggerText, botName, [], { hasImage })) return;
-      if (!limitSocketRoomAi(`room-ai:${socket.id}`)) {
+      const aiRate = await consumeDistributedSocketRate(socket, 'room-ai', {
+        windowMs: 60_000,
+        max: 8,
+      });
+      if (!aiRate.allowed) {
+        incrementMetric('socket_rate_limit_rejected_total', { event: 'room_ai' });
         const posted = postBotChatMessage(roomId, {
           text: '问得太快啦，稍等一下再叫我～',
           replyTo: result.message,

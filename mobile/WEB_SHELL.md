@@ -8,6 +8,10 @@ flutter run --dart-define=OM_SERVER_URL=https://your-host
 
 当前房间页通过 `flutter_inappwebview` bridge 自动报送 Android 通知栏媒体状态，并响应 `play`、`pause`、`seek`、`next`、`lyrics`、`toggleMode`、`toggleFavorite`。通知栏的按钮、进度拖动与模式切换都依赖网页同步的权限字段；网页和服务端仍负责最终权限校验。Android 13 及以上首次播放需允许通知权限；悬浮歌词还需要系统悬浮窗权限。
 
+正式版只接受 HTTPS `OM_SERVER_URL`，且 Android Manifest 禁止明文流量；debug/profile 使用 local flavor 时仍可连接本机或局域网 HTTP 服务。配置值必须是纯 Origin，不能包含账号、路径、查询参数或片段。
+
+WebView 只把配置的站点 Origin 视为可信页面。普通外链交给系统浏览器，非 HTTP(S) 导航会被拒绝；Linux.do / GitHub OAuth 只能从本站既有 `/api/auth/*/start` 或后台授权起点进入短时 HTTPS 流程。任何非本站顶层页面都不能调用下列桥接，也不能接收原生通知栏发出的播放命令。
+
 ```js
 window.flutter_inappwebview.callHandler('omPlayerState', {
   title: song.name,
