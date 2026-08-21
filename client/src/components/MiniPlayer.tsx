@@ -247,7 +247,7 @@ export default memo(function MiniPlayer({
               </Tooltip>
             )}
 
-            <PlayModeButton className="mineradio-ctrl-btn hidden h-8 w-8 sm:flex" iconClassName="h-4 w-4" />
+            <PlayModeButton className="mineradio-ctrl-btn h-10 w-10" iconClassName="h-4 w-4" />
           </div>
 
           <div className="control-cluster modes">
@@ -449,7 +449,8 @@ export default memo(function MiniPlayer({
           </Tooltip>
         )}
 
-        <PlayModeButton className="hidden h-8 w-8 sm:flex" iconClassName="h-4 w-4" />
+        <PlayModeButton className="h-10 w-10" iconClassName="h-4 w-4" />
+
         <VolumeControl compact className="flex-shrink-0" />
             <FavoriteButton song={current} className="w-8 h-8 text-netease-muted hover:text-rose-300" />
         {showDesktopLyrics && <DesktopLyricsPiP song={current} />}
