@@ -182,6 +182,17 @@ export async function deleteRoomFromStorage(roomId) {
 
 const FAVORITES_PREFIX = 'openmusic:favorites:';
 const MAX_FAVORITES = 5000;
+const FAVORITES_CAS_RETRIES = 8;
+const FAVORITES_CAS_SCRIPT = `
+local current = redis.call('GET', KEYS[1])
+if ARGV[1] == '0' then
+  if current then return 0 end
+elseif not current or current ~= ARGV[2] then
+  return 0
+end
+redis.call('SET', KEYS[1], ARGV[3])
+return 1
+`;
 
 function favoriteKey(userId) {
   return `${FAVORITES_PREFIX}${userId}`;
@@ -212,9 +223,7 @@ function normalizeFavoriteSong(song) {
   };
 }
 
-async function readFavorites(userId) {
-  if (!enabled || !redisClient) return [];
-  const raw = await redisClient.get(favoriteKey(userId));
+function parseFavorites(raw) {
   if (!raw) return [];
   try {
     const items = JSON.parse(raw);
@@ -224,14 +233,47 @@ async function readFavorites(userId) {
   }
 }
 
+async function readFavoritesSnapshot(userId) {
+  if (!enabled || !redisClient) return [];
+  const raw = await redisClient.get(favoriteKey(userId));
+  return { raw, items: parseFavorites(raw) };
+}
+
+async function readFavorites(userId) {
+  const snapshot = await readFavoritesSnapshot(userId);
+  return Array.isArray(snapshot) ? snapshot : snapshot.items;
+}
+
 function capFavorites(items) {
   return items.slice(0, MAX_FAVORITES);
 }
 
-async function writeFavorites(userId, items) {
-  const capped = capFavorites(items);
+async function compareAndSwapFavorites(userId, expectedRaw, items) {
   if (!enabled || !redisClient) throw new Error('Redis 不可用，收藏无法保存');
-  await redisClient.set(favoriteKey(userId), JSON.stringify(capped));
+  const result = await redisClient.eval(FAVORITES_CAS_SCRIPT, {
+    keys: [favoriteKey(userId)],
+    arguments: [
+      expectedRaw === null ? '0' : '1',
+      expectedRaw || '',
+      JSON.stringify(capFavorites(items)),
+    ],
+  });
+  return Number(result) === 1;
+}
+
+async function mutateFavoritesAtomically(userId, update) {
+  if (!enabled || !redisClient) throw new Error('Redis 不可用，收藏无法保存');
+  for (let attempt = 0; attempt < FAVORITES_CAS_RETRIES; attempt += 1) {
+    const snapshot = await readFavoritesSnapshot(userId);
+    const mutation = update(snapshot.items);
+    const items = capFavorites(mutation.items);
+    if (await compareAndSwapFavorites(userId, snapshot.raw, items)) {
+      return { ...mutation, items };
+    }
+  }
+  const error = new Error('收藏状态已被并发修改，请重试');
+  error.code = 'FAVORITES_CONFLICT';
+  throw error;
 }
 
 export async function listFavoriteSongs(userId) {
@@ -245,23 +287,22 @@ export async function setFavoriteSong(userId, song, favorite) {
   const clean = normalizeFavoriteSong(song);
   if (!id || !clean) return { error: '收藏歌曲无效' };
 
-  const items = await readFavorites(id);
-  const favId = songFavoriteId(clean);
-  const exists = items.some((item) => songFavoriteId(item) === favId);
-  let next = items;
-
-  if (favorite && !exists) {
-    next = capFavorites([clean, ...items]);
-  } else if (!favorite && exists) {
-    next = items.filter((item) => songFavoriteId(item) !== favId);
-  }
-
   try {
-    await writeFavorites(id, next);
+    const mutation = await mutateFavoritesAtomically(id, (items) => {
+      const favId = songFavoriteId(clean);
+      const exists = items.some((item) => songFavoriteId(item) === favId);
+      let next = items;
+      if (favorite && !exists) {
+        next = [clean, ...items];
+      } else if (!favorite && exists) {
+        next = items.filter((item) => songFavoriteId(item) !== favId);
+      }
+      return { items: next };
+    });
+    return { favorites: mutation.items, favorite: Boolean(favorite) };
   } catch (err) {
     return { error: err.message || '收藏保存失败' };
   }
-  return { favorites: next, favorite: Boolean(favorite) };
 }
 
 export async function importFavoriteSongs(userId, songs) {
@@ -272,30 +313,36 @@ export async function importFavoriteSongs(userId, songs) {
   const imported = songs.map(normalizeFavoriteSong).filter(Boolean);
   if (imported.length === 0) return { error: '没有可导入的歌曲' };
 
-  const items = await readFavorites(id);
-  const merged = [...imported, ...items];
-  const seen = new Set();
-  const next = [];
-  const existingIds = new Set(items.map(songFavoriteId));
-  let added = 0;
-  let uniqueTotal = 0;
-
-  for (const song of merged) {
-    const favId = songFavoriteId(song);
-    if (seen.has(favId)) continue;
-    seen.add(favId);
-    uniqueTotal += 1;
-    if (!existingIds.has(favId)) added += 1;
-    next.push(song);
-    if (next.length >= MAX_FAVORITES) break;
-  }
-
-  const dropped = Math.max(0, uniqueTotal - next.length);
-
   try {
-    await writeFavorites(id, next);
+    const mutation = await mutateFavoritesAtomically(id, (items) => {
+      const merged = [...imported, ...items];
+      const seen = new Set();
+      const unique = [];
+      const existingIds = new Set(items.map(songFavoriteId));
+      let added = 0;
+
+      for (const song of merged) {
+        const favId = songFavoriteId(song);
+        if (seen.has(favId)) continue;
+        seen.add(favId);
+        if (!existingIds.has(favId)) added += 1;
+        unique.push(song);
+      }
+
+      const next = capFavorites(unique);
+      return {
+        items: next,
+        imported: added,
+        dropped: Math.max(0, unique.length - next.length),
+      };
+    });
+    return {
+      favorites: mutation.items,
+      imported: mutation.imported,
+      dropped: mutation.dropped,
+      maxFavorites: MAX_FAVORITES,
+    };
   } catch (err) {
     return { error: err.message || '收藏保存失败' };
   }
-  return { favorites: next, imported: added, dropped, maxFavorites: MAX_FAVORITES };
 }
