@@ -178,6 +178,7 @@ import {
 } from './permanentApplication.js';
 import { importNeteasePlaylist, importQqPlaylist, importQishuiPlaylist, fetchNeteasePlaylistMetas } from './playlistImport.js';
 import { fetchNeteaseHotToplist } from './neteaseToplist.js';
+import { createNeteasePlaylistSearchHandler } from './neteasePlaylistSearch.js';
 import { getHotSongs } from './songHotRank.js';
 import { hasRedisEnvConfig, importFavoriteSongs, listFavoriteSongs, setFavoriteSong, getRedisClient } from './roomStorage.js';
 import {
@@ -1406,53 +1407,11 @@ app.get('/api/music/netease/playlists/meta', async (req, res) => {
   }
 });
 
-app.get('/api/music/netease/playlists/search', async (req, res) => {
-  const identity = requireSessionIdentity(req, res);
-  if (!identity) return;
-  if (!limitProxyRequest(proxyLimitKey('playlist-search', req))) {
-    return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
-  }
-
-  const keyword = limitText(req.query.keyword || req.query.s, 80);
-  const page = Math.max(1, parseInt(String(req.query.page || '1'), 10) || 1);
-  const limit = Math.min(50, Math.max(1, parseInt(String(req.query.limit || '20'), 10) || 20));
-  if (!keyword) return res.json({ playlists: [], total: 0, page, limit });
-
-  try {
-    const presence = findUserRoomPresence(identity.userId);
-    const response = await runWithMetingRequestContext(
-      {
-        userId: identity.userId,
-        userNickname: presence?.userNickname || '',
-        roomId: presence?.roomId || '',
-        roomName: presence?.roomName || '',
-        songId: String(query.id || ''),
-      },
-      () => fetchMetingApi({ server: 'netease', type: 'search_playlist', id: keyword }, {}, 10000),
-    );
-    if (!response.ok) return res.status(response.status).json({ error: '网易歌单搜索失败' });
-    const data = await response.json();
-    const playlists = Array.isArray(data) ? data : [];
-    const normalized = playlists.map((item) => ({
-      id: String(item.id || ''),
-      name: String(item.name || item.title || '未命名歌单'),
-      coverImgUrl: String(item.cover || item.coverImgUrl || item.pic || ''),
-      creatorName: String(item.creator?.nickname || item.creator?.name || item.user?.nickname || ''),
-      trackCount: Number(item.trackCount || item.track_count || item.song_count || 0),
-      playCount: Number(item.playCount || item.playcount || 0),
-    })).filter((item) => item.id);
-    const start = (page - 1) * limit;
-    res.json({
-      page,
-      limit,
-      total: normalized.length,
-      playlists: normalized.slice(start, start + limit),
-    });
-  } catch (err) {
-    console.error('Netease playlist search error:', err.message);
-    res.status(502).json({ error: '网易歌单搜索失败' });
-  }
-});
+app.get('/api/music/netease/playlists/search', createNeteasePlaylistSearchHandler({
+  requireIdentity: requireSessionIdentity,
+  consumeLimit: (req) => limitProxyRequest(proxyLimitKey('playlist-search', req)),
+  findPresence: findUserRoomPresence,
+}));
 
 app.get('/api/music/sources', async (_req, res) => {
   const sources = [
