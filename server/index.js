@@ -71,6 +71,7 @@ import {
   linkDeviceToUser,
   sanitizeDeviceId,
 } from './deviceIdentity.js';
+import { resolveBoundClientNetwork } from './clientIpBinding.js';
 import {
   createRoom,
   getRoomPublic,
@@ -3194,9 +3195,13 @@ io.on('connection', (socket) => {
       wasKnown,
     });
 
-    // 安全限流仍使用连接来源 IP；客户端上报值仅用于成员归属展示/同端统计。
-    const clientIp = normalizeReportedClientIp(reportedClientIp) || getClientIp(socket);
-    const location = normalizeLocationName(clientLocation) || fallbackLocationForIp(clientIp);
+    // 展示网络信息使用前端公网查询结果；首次有效值按 userId + deviceId 固定，后续 payload 不可覆盖。
+    const boundClientNetwork = await resolveBoundClientNetwork({ userId, deviceId }, {
+      ip: reportedClientIp,
+      location: clientLocation,
+    });
+    const clientIp = boundClientNetwork.ip || getClientIp(socket);
+    const location = boundClientNetwork.location || fallbackLocationForIp(clientIp);
     const joinedRoom = addUser(id, userId, nickname, {
       readOnly: Boolean(readOnly),
       connectionId: socket.id,
