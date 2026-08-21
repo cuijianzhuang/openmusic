@@ -21,12 +21,28 @@ jobs:
         run: npm ci
         working-directory: client
 
+      - name: Run tests
+        run: npm test
+        working-directory: client
+
       - name: Typecheck + antd import boundary + build
         run: npm run build:check
         working-directory: client
 
   server:
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      TEST_REDIS_URL: redis://127.0.0.1:6379/15
     steps:
       - uses: actions/checkout@v4
 
@@ -47,6 +63,52 @@ jobs:
           done
         working-directory: server
 
+      - name: Run ESLint
+        run: npm run lint
+        working-directory: server
+
       - name: Run tests
         run: npm test
         working-directory: server
+
+  mobile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+        working-directory: mobile
+
+      - name: Analyze
+        run: flutter analyze
+        working-directory: mobile
+
+      - name: Run tests
+        run: flutter test
+        working-directory: mobile
+
+  compose:
+    runs-on: ubuntu-latest
+    env:
+      METING_ADMIN_PATH: 'ci-random-admin-path'
+      METING_ADMIN_USERNAME: 'ci-admin-user'
+      METING_ADMIN_PASSWORD: 'ci-long-random-password'
+      ROOM_CREDENTIAL_ENCRYPTION_KEY: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Compose files
+        run: |
+          docker compose -f docker-compose.yml config --quiet
+          docker compose -f docker-compose.full.yml config --quiet

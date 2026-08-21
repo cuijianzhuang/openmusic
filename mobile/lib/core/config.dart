@@ -6,6 +6,38 @@ library;
 
 import 'package:flutter/foundation.dart';
 
+String normalizeServerOrigin(
+  String raw, {
+  required bool requireHttps,
+  bool normalizeWebLoopback = false,
+}) {
+  var value = raw.trim();
+  if (normalizeWebLoopback) {
+    value = value
+        .replaceFirst('http://127.0.0.1:', 'http://localhost:')
+        .replaceFirst('https://127.0.0.1:', 'https://localhost:');
+  }
+
+  final uri = Uri.tryParse(value);
+  final scheme = uri?.scheme.toLowerCase();
+  final validScheme = scheme == 'http' || scheme == 'https';
+  final hasOnlyOriginPath = uri != null && (uri.path.isEmpty || uri.path == '/');
+  if (uri == null ||
+      !validScheme ||
+      !uri.hasAuthority ||
+      uri.host.isEmpty ||
+      uri.userInfo.isNotEmpty ||
+      !hasOnlyOriginPath ||
+      uri.hasQuery ||
+      uri.hasFragment) {
+    throw StateError('OM_SERVER_URL 必须是有效的 http/https 站点 Origin');
+  }
+  if (requireHttps && scheme != 'https') {
+    throw StateError('Release/prod builds require an HTTPS OM_SERVER_URL');
+  }
+  return uri.origin;
+}
+
 class AppConfig {
   AppConfig._();
 
@@ -36,7 +68,11 @@ class AppConfig {
     if (url.isEmpty) {
       throw StateError('Release/prod builds require --dart-define=OM_SERVER_URL=https://your-host');
     }
-    serverUrl = _normalize(url);
+    serverUrl = normalizeServerOrigin(
+      url,
+      requireHttps: flavor == 'prod' || kReleaseMode,
+      normalizeWebLoopback: kIsWeb,
+    );
   }
 
   static String _defaultForRuntime() {
@@ -55,17 +91,6 @@ class AppConfig {
       return localAndroidEmulatorDefault;
     }
     return localDesktopDefault;
-  }
-
-  static String _normalize(String url) {
-    var out = url.trim();
-    if (out.endsWith('/')) out = out.substring(0, out.length - 1);
-    if (kIsWeb) {
-      out = out
-          .replaceFirst('http://127.0.0.1:', 'http://localhost:')
-          .replaceFirst('https://127.0.0.1:', 'https://localhost:');
-    }
-    return out;
   }
 
   static Uri api(String path, [Map<String, String>? query]) {

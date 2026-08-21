@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:openmusic/core/config.dart';
+import 'package:openmusic/features/web/web_navigation_policy.dart';
 
 const _background = Color(0xFF121212);
 const _accent = Color(0xFFEC4141);
@@ -88,13 +89,20 @@ class _WebShellPageState extends State<WebShellPage> {
   var _loading = true;
   String? _error;
   var _player = const WebPlayerState();
+  DateTime? _oauthExpiresAt;
+  Uri? _lastTrustedUrl;
+  var _restoringTrustedPage = false;
 
   Uri get _url => Uri.parse(
       '${AppConfig.serverUrl}${widget.path.startsWith('/') ? widget.path : '/${widget.path}'}');
+  Uri get _trustedOrigin => Uri.parse(AppConfig.serverUrl);
+  bool get _oauthActive =>
+      _oauthExpiresAt?.isAfter(DateTime.now()) == true;
 
   @override
   void initState() {
     super.initState();
+    _lastTrustedUrl = _url;
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
@@ -117,20 +125,33 @@ class _WebShellPageState extends State<WebShellPage> {
     if (call.method != 'playbackAction') {
       throw MissingPluginException('Unsupported native method: ${call.method}');
     }
+    if (!await _hasTrustedTopLevel()) {
+      return {'ok': false, 'error': 'untrusted_origin'};
+    }
     final raw = call.arguments;
     if (raw is! Map) return {'ok': false, 'error': 'invalid_payload'};
     final payload = Map<String, dynamic>.from(raw);
     final action = '${payload.remove('action') ?? ''}';
     if (action.isEmpty) return {'ok': false, 'error': 'invalid_action'};
-    await _command(action, payload);
-    return {'ok': true};
+    final dispatched = await _command(
+      action,
+      payload: payload,
+    );
+    return dispatched
+        ? {'ok': true}
+        : {'ok': false, 'error': 'untrusted_origin'};
   }
 
-  Future<void> _command(String action, [Map<String, dynamic>? payload]) async {
+  Future<bool> _command(
+    String action, {
+    Map<String, dynamic>? payload,
+  }) async {
+    if (!await _hasTrustedTopLevel()) return false;
     final body = <String, dynamic>{'action': action, ...?payload};
     await _controller?.evaluateJavascript(
         source:
             'window.dispatchEvent(new CustomEvent("omNativePlayerCommand", { detail: ${jsonEncode(body)} }));');
+    return true;
   }
 
   @override
@@ -150,12 +171,17 @@ class _WebShellPageState extends State<WebShellPage> {
               allowsInlineMediaPlayback: true,
               allowBackgroundAudioPlaying: true,
               thirdPartyCookiesEnabled: true,
+              supportMultipleWindows: true,
+              useShouldOverrideUrlLoading: true,
             ),
             onWebViewCreated: (controller) {
               _controller = controller;
               controller.addJavaScriptHandler(
                 handlerName: 'omPlayerState',
                 callback: (args) async {
+                  if (!await _hasTrustedTopLevel()) {
+                    return {'ok': false, 'error': 'untrusted_origin'};
+                  }
                   if (args.isEmpty || args.first is! Map) return null;
                   final m = Map<String, dynamic>.from(args.first as Map);
                   if (!mounted) return null;
@@ -182,18 +208,74 @@ class _WebShellPageState extends State<WebShellPage> {
               );
               controller.addJavaScriptHandler(
                 handlerName: 'omNative',
-                callback: (args) async =>
-                    _nativeCommand(args.isNotEmpty ? args.first : null),
+                callback: (args) async {
+                  if (!await _hasTrustedTopLevel()) {
+                    return {'ok': false, 'error': 'untrusted_origin'};
+                  }
+                  return _nativeCommand(args.isNotEmpty ? args.first : null);
+                },
               );
             },
-            onLoadStart: (_, __) => mounted
-                ? setState(() {
-                    _loading = true;
-                    _error = null;
-                  })
-                : null,
-            onLoadStop: (_, __) =>
-                mounted ? setState(() => _loading = false) : null,
+            shouldOverrideUrlLoading: (controller, navigationAction) async {
+              if (navigationAction.isForMainFrame == false) {
+                return NavigationActionPolicy.ALLOW;
+              }
+              final candidate = _parseWebUri(navigationAction.request.url);
+              final decision = decideWebNavigation(
+                candidate: candidate,
+                trustedOrigin: _trustedOrigin,
+                oauthActive: _oauthActive,
+                hasUserGesture: navigationAction.hasGesture == true,
+              );
+              if (decision == WebNavigationDecision.allowTrusted) {
+                _recordTrustedNavigation(candidate);
+                return NavigationActionPolicy.ALLOW;
+              }
+              if (decision == WebNavigationDecision.allowOauth) {
+                return NavigationActionPolicy.ALLOW;
+              }
+              if (decision == WebNavigationDecision.openExternal &&
+                  candidate != null) {
+                await _openExternal(candidate);
+              }
+              return NavigationActionPolicy.CANCEL;
+            },
+            onCreateWindow: (controller, createWindowAction) async {
+              final candidate = _parseWebUri(createWindowAction.request.url);
+              final decision = decideWebNavigation(
+                candidate: candidate,
+                trustedOrigin: _trustedOrigin,
+                oauthActive: _oauthActive,
+                hasUserGesture: createWindowAction.hasGesture == true,
+              );
+              if ((decision == WebNavigationDecision.allowTrusted ||
+                      decision == WebNavigationDecision.allowOauth) &&
+                  candidate != null) {
+                _recordTrustedNavigation(candidate);
+                await controller.loadUrl(
+                    urlRequest: URLRequest(url: WebUri(candidate.toString())));
+              } else if (decision == WebNavigationDecision.openExternal &&
+                  candidate != null) {
+                await _openExternal(candidate);
+              }
+              return false;
+            },
+            onLoadStart: (controller, url) async {
+              if (!await _acceptObservedNavigation(controller, url)) return;
+              if (mounted) {
+                setState(() {
+                  _loading = true;
+                  _error = null;
+                });
+              }
+            },
+            onLoadStop: (controller, url) async {
+              if (!await _acceptObservedNavigation(controller, url)) return;
+              if (mounted) setState(() => _loading = false);
+            },
+            onUpdateVisitedHistory: (controller, url, _) async {
+              await _acceptObservedNavigation(controller, url);
+            },
             onReceivedError: (_, request, error) {
               if (!mounted || request.isForMainFrame != true) return;
               setState(() {
@@ -238,6 +320,73 @@ class _WebShellPageState extends State<WebShellPage> {
       });
     } on PlatformException {
       // The web player remains usable when the Android notification fails.
+    }
+  }
+
+  Uri? _parseWebUri(WebUri? value) {
+    final text = value?.toString() ?? '';
+    return text.isEmpty ? null : Uri.tryParse(text);
+  }
+
+  void _recordTrustedNavigation(Uri? candidate) {
+    if (!isTrustedWebOrigin(candidate, _trustedOrigin)) return;
+    _lastTrustedUrl = candidate;
+    if (isOauthStartUrl(candidate, _trustedOrigin)) {
+      _oauthExpiresAt = DateTime.now().add(const Duration(minutes: 5));
+    } else if (_oauthActive) {
+      _oauthExpiresAt = null;
+    }
+  }
+
+  Future<bool> _acceptObservedNavigation(
+      InAppWebViewController controller, WebUri? value) async {
+    final candidate = _parseWebUri(value);
+    if (isTrustedWebOrigin(candidate, _trustedOrigin)) {
+      _recordTrustedNavigation(candidate);
+      return true;
+    }
+    if (_oauthActive && isHttpUri(candidate) && candidate!.scheme == 'https') {
+      return true;
+    }
+    if (_restoringTrustedPage) return false;
+    _restoringTrustedPage = true;
+    try {
+      await controller.stopLoading();
+      await _clearNativePlaybackState();
+      final fallback = _lastTrustedUrl ?? _url;
+      await controller.loadUrl(
+          urlRequest: URLRequest(url: WebUri(fallback.toString())));
+    } finally {
+      _restoringTrustedPage = false;
+    }
+    return false;
+  }
+
+  Future<bool> _hasTrustedTopLevel() async {
+    final controller = _controller;
+    if (controller == null) return false;
+    final current = await controller.getUrl();
+    final trusted = isTrustedWebOrigin(_parseWebUri(current), _trustedOrigin);
+    if (!trusted) await _clearNativePlaybackState();
+    return trusted;
+  }
+
+  Future<void> _clearNativePlaybackState() async {
+    if (mounted && (_player.title.isNotEmpty || _player.playing)) {
+      setState(() => _player = const WebPlayerState());
+    }
+    try {
+      await _android.invokeMethod('clearPlaybackNotification');
+    } on PlatformException {
+      // WebView 安全边界不依赖通知栏是否可用。
+    }
+  }
+
+  Future<void> _openExternal(Uri uri) async {
+    try {
+      await _android.invokeMethod('openExternal', {'url': uri.toString()});
+    } on PlatformException {
+      // 外链无法打开时保持在可信页面，不回退到 WebView 内加载。
     }
   }
 
