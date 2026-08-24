@@ -1,0 +1,62 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+  schedule:
+    - cron: '30 2 * * 1'
+
+# 针对本仓库实际使用的、且 CodeQL 支持的语言执行分析。
+# Dart 当前没有官方 CodeQL 分析器，因此由 Flutter/Dart 工具链负责检查。
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      packages: read
+      pull-requests: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Web 前端、Node.js 服务端及其测试代码。
+          - language: javascript-typescript
+            build-mode: none
+          # Android 原生 Kotlin 代码。
+          - language: java-kotlin
+            build-mode: autobuild
+          # iOS 原生 Swift 代码。
+          - language: swift
+            build-mode: autobuild
+          # GitHub Actions 工作流。
+          - language: actions
+            build-mode: none
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          # 默认安全查询 + 扩展安全查询 + 代码质量查询。
+          queries: security-extended,security-and-quality
+
+      - name: Autobuild compiled language
+        if: matrix.build-mode == 'autobuild'
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: '/language:${{ matrix.language }}'
+          upload: always

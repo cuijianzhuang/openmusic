@@ -277,10 +277,10 @@ export default memo(function MiniPlayer({
   }
 
   const playerBarClass = barClassName
-    ? `fixed bottom-0 left-0 right-0 z-40 border-t pb-[env(safe-area-inset-bottom,0px)] ${barClassName}`
+    ? `room-player-bar fixed bottom-0 left-0 right-0 z-40 border-t pb-[env(safe-area-inset-bottom,0px)] ${barClassName}`
     : transparentBar
-      ? 'fixed bottom-0 left-0 right-0 z-40 border-t border-white/10 bg-black/25 pb-[env(safe-area-inset-bottom,0px)] backdrop-blur-xl [-webkit-backdrop-filter:blur(24px)]'
-      : 'fixed bottom-0 left-0 right-0 z-40 glass border-t border-netease-border/50 pb-[env(safe-area-inset-bottom,0px)]';
+      ? 'room-player-bar fixed bottom-0 left-0 right-0 z-40 border-t border-white/10 bg-black/25 pb-[env(safe-area-inset-bottom,0px)] backdrop-blur-xl [-webkit-backdrop-filter:blur(24px)]'
+      : 'room-player-bar fixed bottom-0 left-0 right-0 z-40 glass border-t border-netease-border/50 pb-[env(safe-area-inset-bottom,0px)]';
 
   if (fmLoading) {
     return (

@@ -32,3 +32,14 @@ test('触控设备底栏使用稳定合成，避免点击按钮时队列底部�
   assert.match(block, /\.room-chrome-bar[\s\S]*?backdrop-filter:\s*none\s*!important/);
   assert.match(block, /\.room-chrome-bar[\s\S]*?-webkit-backdrop-filter:\s*none\s*!important/);
 });
+
+test('鼠标设备底栏保持稳定合成，避免悬停按钮时队列底部闪烁', () => {
+  const marker = '@media (hover: hover) and (pointer: fine) {';
+  const start = css.indexOf(marker);
+  assert.notEqual(start, -1, 'missing fine pointer bottom bar fallback');
+
+  const block = css.slice(start, css.indexOf('\n}', start) + 2);
+  assert.match(block, /\.room-player-bar\.room-chrome-bar/);
+  assert.match(block, /backdrop-filter:\s*none\s*!important/);
+  assert.match(block, /-webkit-backdrop-filter:\s*none\s*!important/);
+});

@@ -3683,6 +3683,19 @@ body.immersive-mode #hand-canvas {
   -webkit-backdrop-filter: none;
 }
 
+/* Keep the desktop player bar on a stable opaque layer. Chromium can repaint
+   the content behind a fixed backdrop-filter surface when a control changes
+   hover state, which shows up as a brief flash at the queue's bottom edge. */
+@media (hover: hover) and (pointer: fine) {
+  .room-player-bar.room-chrome-bar:not(.room-chrome-bar--ambient) {
+    background: rgba(8, 10, 14, 0.88) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    isolation: isolate;
+    contain: paint;
+  }
+}
+
 .surface-panel {
   border: 1px solid var(--om-border);
   background: linear-gradient(145deg, rgba(24, 24, 29, 0.7), rgba(13, 13, 16, 0.58));
