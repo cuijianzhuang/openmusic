@@ -6,9 +6,9 @@ import { mergeFavoriteImportStats } from '../lib/favoriteImport';
 
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 
-import { Search, Loader2, Copy, Check, LogOut, X, Heart, Plus, Download, ListMusic, Upload, History, ListPlus, Pencil, Lock, LockOpen, ChevronLeft, SlidersHorizontal, Shield, Maximize2, Smartphone, ImagePlus } from 'lucide-react';
+import { Search, Loader2, Copy, Check, LogOut, X, Heart, Plus, Download, ListMusic, Upload, History, ListPlus, Pencil, Lock, LockOpen, ChevronLeft, SlidersHorizontal, Shield, Maximize2, Smartphone, ImagePlus, MoreHorizontal, RefreshCw, Users } from 'lucide-react';
 
-import { searchAllSongs, getAvailableSources, type SearchFilterMode } from '../api/music';
+import { searchAllSongs, getAvailableSources, listRooms, type SearchFilterMode } from '../api/music';
 import { importPlaylist, searchPlaylists, type PlaylistSearchItem, type PlaylistPlatform, type PlaylistChannelFilter as PlaylistChannelFilterMode } from '../api/music/playlist';
 import { fetchDjPrograms, type DjRadioItem } from '../api/music/djRadio';
 import { normalizeFmMode } from '../api/music/fmMode';
@@ -19,7 +19,7 @@ import { detectPlaylistLink } from '../lib/playlistLink';
 import { consumeLinuxdoReturnParam, fetchLinuxdoStatus, type LinuxdoBinding } from '../lib/linuxdoAuth';
 import { consumeGithubReturnParam, fetchGithubStatus, type GithubBinding } from '../lib/githubAuth';
 
-import type { FavoriteSong, MusicSource, RoomAudioQuality, RoomMemberSettings, RoomMemberTier, SearchResult, Song, SongHistoryItem } from '../types';
+import type { FavoriteSong, MusicSource, RoomAudioQuality, RoomMemberSettings, RoomMemberTier, RoomSummary, SearchResult, Song, SongHistoryItem } from '../types';
 
 import type { MusicProviderMeta } from '../api/music/types';
 
@@ -81,7 +81,8 @@ import RoomThemeColorPicker from '../components/RoomThemeColorPicker';
 import UserRoleMarks from '../components/UserRoleMarks';
 import { copyToClipboard } from '../lib/copyToClipboard';
 import { shareWithNative } from '../lib/nativeWebView';
-import { rememberRoomVisit } from '../lib/recentRooms';
+import { getRecentRoomIds, rememberRoomVisit } from '../lib/recentRooms';
+import { sortRoomSwitcherRooms } from '../lib/roomSwitcher';
 import { ensureRoomChromeInit } from '../lib/roomChromeInit';
 import { buildRoomShareText } from '../lib/roomShare';
 import {
@@ -335,6 +336,11 @@ export default function Room() {
   const [recommendDrawerOpen, setRecommendDrawerOpen] = useState(false);
   const [djRadioDrawerOpen, setDjRadioDrawerOpen] = useState(false);
   const [downloadModalOpen, setDownloadModalOpen] = useState(false);
+  const [roomSwitcherOpen, setRoomSwitcherOpen] = useState(false);
+  const [roomSwitcherLoading, setRoomSwitcherLoading] = useState(false);
+  const [roomSwitcherError, setRoomSwitcherError] = useState('');
+  const [roomSwitcherRooms, setRoomSwitcherRooms] = useState<RoomSummary[]>([]);
+  const roomSwitcherRef = useRef<HTMLDivElement>(null);
   const [isPlaylistResults, setIsPlaylistResults] = useState(false);
   const [isRadioResults, setIsRadioResults] = useState(false);
   const [searchDetailOrigin, setSearchDetailOrigin] = useState<SearchDetailOrigin | null>(null);
@@ -421,6 +427,59 @@ export default function Room() {
   const showToast = useCallback((message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
   }, []);
+
+  const loadRoomSwitcherRooms = useCallback(async () => {
+    setRoomSwitcherLoading(true);
+    setRoomSwitcherError('');
+    try {
+      setRoomSwitcherRooms(await listRooms());
+    } catch {
+      setRoomSwitcherError('房间列表加载失败');
+    } finally {
+      setRoomSwitcherLoading(false);
+    }
+  }, []);
+
+  const handleRoomSwitcherToggle = useCallback(() => {
+    const nextOpen = !roomSwitcherOpen;
+    setRoomSwitcherOpen(nextOpen);
+    if (nextOpen) void loadRoomSwitcherRooms();
+  }, [loadRoomSwitcherRooms, roomSwitcherOpen]);
+
+  const handleRoomSwitch = useCallback((target: RoomSummary) => {
+    if (!roomId || target.id.toUpperCase() === roomId.toUpperCase()) {
+      setRoomSwitcherOpen(false);
+      return;
+    }
+    const password = getStoredRoomPassword(target.id);
+    setRoomSwitcherOpen(false);
+    if (target.hasPassword && !password) {
+      navigate(`/room/${target.id}`, { state: { hasPassword: true } });
+      return;
+    }
+    navigate(`/room/${target.id}`, { state: password ? { password } : undefined });
+  }, [navigate, roomId]);
+
+  const roomSwitcherItems = useMemo(
+    () => sortRoomSwitcherRooms(roomSwitcherRooms, roomId || '', getRecentRoomIds()),
+    [roomId, roomSwitcherRooms],
+  );
+
+  useEffect(() => {
+    if (!roomSwitcherOpen) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!roomSwitcherRef.current?.contains(event.target as Node)) setRoomSwitcherOpen(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setRoomSwitcherOpen(false);
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [roomSwitcherOpen]);
 
   useEffect(() => {
     const onVisualToast = (e: Event) => {
@@ -3047,6 +3106,94 @@ export default function Room() {
                   <span className="hidden sm:inline">{copied ? '已复制' : '分享房间'}</span>
                 </button>
               </Tooltip>
+
+              <div ref={roomSwitcherRef} className="relative">
+                <Tooltip side="bottom" content="切换房间">
+                  <button
+                    type="button"
+                    onClick={handleRoomSwitcherToggle}
+                    className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs transition-colors hover:bg-netease-card ${roomSwitcherOpen ? 'text-white bg-netease-card' : 'text-netease-muted hover:text-white'}`}
+                    aria-label="切换房间"
+                    aria-haspopup="menu"
+                    aria-expanded={roomSwitcherOpen}
+                  >
+                    <MoreHorizontal className="h-4 w-4" />
+                    <span className="hidden sm:inline">更多房间</span>
+                  </button>
+                </Tooltip>
+
+                {roomSwitcherOpen && (
+                  <div
+                    className="room-switcher-menu absolute right-0 top-[calc(100%+0.6rem)] z-50 w-[min(21rem,calc(100vw-1.5rem))] overflow-hidden rounded-2xl border border-white/10 shadow-2xl shadow-black/40"
+                    role="menu"
+                    aria-label="房间选项"
+                  >
+                    <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+                      <div>
+                        <p className="text-sm font-medium text-white">快捷切换房间</p>
+                        <p className="mt-0.5 text-[11px] text-white/40">选择后将自动离开当前房间并加入新房间</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void loadRoomSwitcherRooms()}
+                        disabled={roomSwitcherLoading}
+                        className="rounded-lg p-1.5 text-white/45 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-50"
+                        aria-label="刷新房间列表"
+                      >
+                        <RefreshCw className={`h-3.5 w-3.5 ${roomSwitcherLoading ? 'animate-spin' : ''}`} />
+                      </button>
+                    </div>
+
+                    {roomSwitcherLoading && roomSwitcherItems.length === 0 ? (
+                      <div className="flex items-center gap-2 px-4 py-5 text-xs text-white/45">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        正在加载房间…
+                      </div>
+                    ) : roomSwitcherError ? (
+                      <div className="flex items-center gap-3 px-4 py-5 text-xs text-white/50">
+                        <span className="min-w-0 flex-1">{roomSwitcherError}</span>
+                        <button type="button" onClick={() => void loadRoomSwitcherRooms()} className="shrink-0 text-netease-red hover:text-white">重试</button>
+                      </div>
+                    ) : roomSwitcherItems.length === 0 ? (
+                      <p className="px-4 py-6 text-center text-xs text-white/40">当前没有可切换的其他房间</p>
+                    ) : (
+                      <div className="max-h-[min(22rem,55vh)] overflow-y-auto p-2">
+                        {roomSwitcherItems.map((target) => {
+                          const isCurrent = target.id.toUpperCase() === roomId?.toUpperCase();
+                          return (
+                            <button
+                              key={target.id}
+                              type="button"
+                              role="menuitem"
+                              onClick={() => handleRoomSwitch(target)}
+                              className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors ${isCurrent ? 'bg-netease-red/15 text-white' : 'text-white/75 hover:bg-white/10 hover:text-white'}`}
+                              aria-current={isCurrent ? 'page' : undefined}
+                            >
+                              <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${isCurrent ? 'bg-netease-red/25 text-netease-red' : 'bg-white/8 text-white/45'}`}>
+                                <Users className="h-4 w-4" />
+                              </span>
+                              <span className="min-w-0 flex-1">
+                                <span className="flex items-center gap-1.5">
+                                  <span className="truncate text-sm font-medium">{target.name || '未命名房间'}</span>
+                                  {target.isOwner && <span className="shrink-0 text-[10px] text-amber-300">房主</span>}
+                                  {!target.isOwner && target.isAdmin && <span className="shrink-0 text-[10px] text-sky-300">管理员</span>}
+                                </span>
+                                <span className="mt-0.5 flex items-center gap-2 text-[10px] text-white/35">
+                                  <span>{target.id}</span>
+                                  <span>{target.userCount} 人在线</span>
+                                  {(target.hasPassword || target.isLocked) && <Lock className="h-3 w-3 text-amber-300/80" />}
+                                </span>
+                              </span>
+                              {isCurrent && <Check className="h-4 w-4 shrink-0 text-netease-red" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
 
               <Tooltip side="bottom" content="退出房间">
                 <button

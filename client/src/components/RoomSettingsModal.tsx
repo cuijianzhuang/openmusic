@@ -348,6 +348,7 @@ export default function RoomSettingsModal({
   const [confirmDestroy, setConfirmDestroy] = useState(false);
   const [permanentNote, setPermanentNote] = useState('');
   const [draftMaxAdmins, setDraftMaxAdmins] = useState(maxAdmins);
+  const [draftPlaybackRate, setDraftPlaybackRate] = useState(String(playbackRate));
   const [linuxdoEnabled, setLinuxdoEnabled] = useState(identityLinuxdoEnabled);
   const [linuxdoBound, setLinuxdoBound] = useState<LinuxdoBinding | null>(identityLinuxdoBound);
   const [linuxdoUnbinding, setLinuxdoUnbinding] = useState(false);
@@ -700,17 +701,31 @@ export default function RoomSettingsModal({
                   <div className="mb-2 flex items-center gap-2">
                     <span className="text-sm font-semibold text-white">播放倍速</span>
                   </div>
-                  <p className="mb-3 text-xs text-netease-muted">修改后整个房间同步生效，仅房主可修改，默认 1 倍</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {[0.25, 0.5, 1, 1.25, 1.5, 2, 3].map((rate) => (
-                      <button
-                        key={rate}
-                        type="button"
-                        disabled={playbackRateSaving}
-                        onClick={() => void onSavePlaybackRate?.(rate)}
-                        className={`rounded-lg border px-3 py-2 text-xs transition-colors disabled:opacity-50 ${playbackRate === rate ? 'border-netease-red/40 bg-netease-red/[0.12] text-white' : 'border-white/10 bg-white/[0.03] text-netease-muted hover:bg-white/[0.07]'}`}
-                      >{rate} 倍</button>
-                    ))}
+                  <p className="mb-3 text-xs text-netease-muted">修改后整个房间同步生效，仅房主可修改。可输入 0.1–3 倍，默认 1 倍</p>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min="0.1"
+                      max="3"
+                      step="0.1"
+                      inputMode="decimal"
+                      value={draftPlaybackRate}
+                      disabled={playbackRateSaving}
+                      onChange={(event) => setDraftPlaybackRate(event.target.value)}
+                      aria-label="播放倍速"
+                      className="w-24 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white outline-none transition-colors focus:border-netease-red/60 disabled:opacity-50"
+                    />
+                    <span className="text-xs text-netease-muted">倍</span>
+                    <button
+                      type="button"
+                      disabled={playbackRateSaving}
+                      onClick={() => {
+                        const nextRate = Number(draftPlaybackRate);
+                        if (!Number.isFinite(nextRate) || nextRate < 0.1 || nextRate > 3) return;
+                        void onSavePlaybackRate?.(nextRate);
+                      }}
+                      className="rounded-lg border border-netease-red/40 bg-netease-red/[0.12] px-3 py-2 text-xs text-white transition-colors hover:bg-netease-red/[0.2] disabled:opacity-50"
+                    >保存</button>
                   </div>
                 </section>
               )}

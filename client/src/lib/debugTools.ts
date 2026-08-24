@@ -1,4 +1,3 @@
-import { Capacitor } from '@capacitor/core';
 import { useAudioStore } from '../stores/audioStore';
 import { useRoomStore } from '../stores/roomStore';
 import { useChatStore } from '../stores/chatStore';
@@ -57,7 +56,6 @@ import {
   isRestrictedAutoplayEnv,
   isWeChatBrowser,
 } from './audioUnlock';
-import { isNativePlaybackMediaAvailable } from './nativePlaybackMedia';
 import {
   isLikelySystemMediaSuspend,
   shouldIgnoreBackgroundRoomPause,
@@ -351,9 +349,6 @@ function collectDeviceFields(): Record<string, DebugScalar> {
     cookieEnabled: probe.cookieEnabled,
     restrictedAutoplay: isRestrictedAutoplayEnv(),
     audioSessionUnlocked: isAudioSessionUnlocked(),
-    capacitorNative: Capacitor.isNativePlatform(),
-    capacitorPlatform: Capacitor.getPlatform(),
-    nativePlaybackMedia: isNativePlaybackMediaAvailable(),
     dpr: typeof window !== 'undefined' ? window.devicePixelRatio : null,
     viewport: typeof window !== 'undefined'
       ? `${window.innerWidth}x${window.innerHeight}`

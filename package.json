@@ -15,13 +15,7 @@
     "start": "npm run start --prefix server",
     "package:build": "node scripts/package-build.mjs",
     "install:all": "npm install && npm install --prefix server && npm install --prefix client",
-    "cap:sync:android": "npm run cap:sync:android --prefix client",
-    "cap:sync:ios": "npm run cap:sync:ios --prefix client",
-    "cap:open:android": "npm run cap:open:android --prefix client",
-    "cap:open:ios": "npm run cap:open:ios --prefix client",
-    "cap:run:android": "npm run cap:run:android --prefix client",
-    "cap:run:ios": "npm run cap:run:ios --prefix client",
-    "cap:build:apk": "npm run cap:build:apk --prefix client"
+    "build:apk": "npm run build:apk --prefix client"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

@@ -8,24 +8,15 @@ import {
   bindMediaSessionActions,
   clearMediaSession,
   isMediaSessionSupported,
-  resolveMediaArtworkUrl,
   updateMediaSessionMetadata,
   updateMediaSessionPlaybackState,
   updateMediaSessionPositionState,
 } from '../lib/mediaSession';
 import {
-  clearNativePlaybackMedia,
-  isNativePlaybackMediaAvailable,
-  subscribeNativeMediaActions,
-  syncNativePlaybackMetadata,
-  syncNativePlaybackState,
-} from '../lib/nativePlaybackMedia';
-import {
   installBackgroundPlaybackGuards,
   shouldIgnoreBackgroundRoomPause,
 } from '../lib/backgroundPlayback';
 import { canPauseInRoom, canSeekInRoom } from '../lib/roomPermissions';
-import { readRoomPureMode } from '../lib/roomPureMode';
 import type { RoomState } from '../types';
 
 const SEEK_STEP_SEC = 10;
@@ -56,7 +47,6 @@ function resolveSystemMediaControlFlags(
 
 /**
  * 将房间播放/暂停/切歌同步到系统媒体控件（锁屏、通知栏、耳机键、键盘多媒体键）。
- * Android Capacitor 另同步原生 MediaStyle 切歌栏（WebView 无 Media Session API）。
  * 无对应权限时不注册/不展示按键。
  */
 export function useMediaSession({
@@ -72,13 +62,11 @@ export function useMediaSession({
   useEffect(() => {
     if (!enabled) {
       clearMediaSession();
-      void clearNativePlaybackMedia();
       return;
     }
 
     const webSessionOk = isMediaSessionSupported();
-    const nativeOk = isNativePlaybackMediaAvailable();
-    if (!webSessionOk && !nativeOk) return;
+    if (!webSessionOk) return;
 
     installBackgroundPlaybackGuards();
 
@@ -87,7 +75,6 @@ export function useMediaSession({
     const softResumeOnly = () => {
       updateMediaSessionPlaybackState('playing', { force: true });
       useAudioStore.getState().softResumeLocalAudio?.();
-      void syncNativePlaybackState({ playing: true });
     };
 
     const cancelPendingPause = () => {
@@ -213,13 +200,6 @@ export function useMediaSession({
           playbackRate: 1,
         });
       }
-      if (nativeOk) {
-        void syncNativePlaybackState({
-          playing: Boolean(room?.isPlaying),
-          durationSec: duration,
-          positionSec: position,
-        });
-      }
     };
 
     const syncHandlers = () => {
@@ -264,8 +244,6 @@ export function useMediaSession({
       const store = useRoomStore.getState();
       const room = store.room;
       const current = room?.current ?? null;
-      const flags = resolveSystemMediaControlFlags(room, store.canControlPlayback);
-
       if (webSessionOk) {
         updateMediaSessionMetadata(current);
         if (!current) {
@@ -275,72 +253,13 @@ export function useMediaSession({
         }
       }
 
-      if (!nativeOk) return;
 
-      if (!current) {
-        void clearNativePlaybackMedia();
-        return;
-      }
-
-      const { smoothPlaybackTime, mediaDurationMs, mediaTrackKey, lrcDurationMs, lrcTrackKey } = useAudioStore.getState();
-      const duration = resolveDisplayDurationSeconds(current, {
-        lrcDurationMs,
-        lrcTrackKey,
-        mediaDurationMs,
-        mediaTrackKey,
-      });
-      const pure = readRoomPureMode();
-
-      // 先立刻同步按键权限（不等封面），避免无权限用户短暂看到可点按钮
-      void syncNativePlaybackMetadata({
-        hasTrack: true,
-        title: pure ? '正在播放' : (current.name || '未知歌曲'),
-        artist: pure ? '' : (current.artist || '未知歌手'),
-        album: pure ? 'OpenMusic' : (current.album || 'OpenMusic'),
-        playing: Boolean(room?.isPlaying),
-        durationSec: duration > 0 ? duration : undefined,
-        positionSec: Math.max(0, smoothPlaybackTime),
-        playBound: flags.playBound,
-        prevBound: flags.prevBound,
-        nextBound: flags.nextBound,
-      });
-
-      void resolveMediaArtworkUrl(pure ? null : current).then((artworkUrl) => {
-        const liveStore = useRoomStore.getState();
-        const live = liveStore.room;
-        if (live?.current?.queueId !== current.queueId) return;
-        const liveFlags = resolveSystemMediaControlFlags(live, liveStore.canControlPlayback);
-        void syncNativePlaybackMetadata({
-          hasTrack: true,
-          title: pure ? '正在播放' : (current.name || '未知歌曲'),
-          artist: pure ? '' : (current.artist || '未知歌手'),
-          album: pure ? 'OpenMusic' : (current.album || 'OpenMusic'),
-          artworkUrl: pure ? '' : artworkUrl,
-          playing: Boolean(live?.isPlaying),
-          durationSec: duration > 0 ? duration : undefined,
-          positionSec: Math.max(0, useAudioStore.getState().smoothPlaybackTime),
-          playBound: liveFlags.playBound,
-          prevBound: liveFlags.prevBound,
-          nextBound: liveFlags.nextBound,
-        });
-      });
     };
 
     syncHandlers();
     syncMetadataAndState();
     syncPosition();
 
-    let removeNativeActions: (() => void) | undefined;
-    if (nativeOk) {
-      void subscribeNativeMediaActions((action) => {
-        if (action === 'play') handlePlay();
-        else if (action === 'pause') handlePause();
-        else if (action === 'nexttrack') handleNext();
-        else if (action === 'previoustrack') handlePrevious();
-      }).then((dispose) => {
-        removeNativeActions = dispose;
-      });
-    }
 
     const unsubRoom = useRoomStore.subscribe((state, prev) => {
       if (
@@ -379,9 +298,7 @@ export function useMediaSession({
       unsubRoom();
       unsubAudio();
       window.clearInterval(timer);
-      removeNativeActions?.();
       clearMediaSession();
-      void clearNativePlaybackMedia();
     };
   }, [enabled]);
 }

@@ -52,7 +52,8 @@ const PROTECTED_ROOMS_REDIS_KEY = "openmusic:admin:protected_rooms";
 /** 管理后台设置的保活房间；Redis 可用时跨重启持久化 */
 const protectedRoomIds = new Set();
 const DEFAULT_QUEUE_MAX_LENGTH = 200;
-export const ALLOWED_PLAYBACK_RATES = [0.25, 0.5, 1, 1.25, 1.5, 2, 3];
+export const MIN_PLAYBACK_RATE = 0.1;
+export const MAX_PLAYBACK_RATE = 3;
 export const DEFAULT_PLAYBACK_RATE = 1;
 const ALLOWED_QUEUE_MAX_LENGTHS = [50, 100, 200];
 const ALLOWED_SONG_REQUEST_COOLDOWNS_SEC = [0, 10, 30, 60, 120];
@@ -1497,7 +1498,9 @@ function normalizeSongRequestCooldownSec(value) {
 
 export function normalizePlaybackRate(value) {
   const rate = Number(value);
-  return ALLOWED_PLAYBACK_RATES.includes(rate) ? rate : DEFAULT_PLAYBACK_RATE;
+  return Number.isFinite(rate) && rate >= MIN_PLAYBACK_RATE && rate <= MAX_PLAYBACK_RATE
+    ? rate
+    : DEFAULT_PLAYBACK_RATE;
 }
 
 function normalizeQueueMaxLength(value) {
