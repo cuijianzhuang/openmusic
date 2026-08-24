@@ -367,10 +367,12 @@ function readForwardBody(req) {
   if (req.method === 'GET' || req.method === 'HEAD') return undefined;
   if (Buffer.isBuffer(req.rawBody)) return req.rawBody;
   if (typeof req.rawBody === 'string') return req.rawBody;
+  if (Array.isArray(req.rawBody)) return undefined;
   if (req.body == null) return undefined;
   if (Buffer.isBuffer(req.body)) return req.body;
   if (typeof req.body === 'string') return req.body;
-  if (typeof req.body === 'object') return JSON.stringify(req.body);
+  if (Array.isArray(req.body)) return undefined;
+  if (Object.prototype.toString.call(req.body) === '[object Object]') return JSON.stringify(req.body);
   return undefined;
 }
 
