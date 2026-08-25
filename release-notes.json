@@ -4,5 +4,5 @@
     "房主设置新增倍速调节，可自定义歌曲倍速",
     "修复部分设备在触碰底栏按钮时的队列异常重绘"
   ],
-  "forcePrompt": true
+  "forcePrompt": false
 }

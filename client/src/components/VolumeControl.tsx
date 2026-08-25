@@ -84,7 +84,7 @@ export default function VolumeControl({
 
   if (compact) {
     return (
-      <div ref={rootRef} className={`relative flex items-center ${className}`}>
+      <div ref={rootRef} className={`relative z-30 flex items-center ${className}`}>
         <Tooltip content="音量（双击静音）">
           <button
             type="button"
@@ -98,7 +98,7 @@ export default function VolumeControl({
           </button>
         </Tooltip>
         {expanded && (
-          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2.5 py-3 rounded-lg bg-netease-card border border-netease-border/60 shadow-lg flex flex-col items-center">
+          <div className="pointer-events-auto absolute bottom-full left-1/2 z-[60] mb-2 flex -translate-x-1/2 flex-col items-center rounded-lg border border-netease-border/60 bg-netease-card px-2.5 py-3 shadow-lg">
             {slider}
           </div>
         )}
