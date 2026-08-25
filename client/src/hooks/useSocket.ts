@@ -84,6 +84,8 @@ function getSocket(): Socket {
 
       transports: ['websocket', 'polling'],
 
+      tryAllTransports: true,
+
       autoConnect: false,
 
       withCredentials: true,
