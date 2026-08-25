@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 const configPath = fileURLToPath(new URL('../../vite.config.ts', import.meta.url));
 const config = readFileSync(configPath, 'utf8');
 
-test('开发服务器允许 cpolar 测试域名访问', () => {
-  assert.match(config, /allowedHosts\s*:\s*\[[\s\S]*?3c602da\.r21\.cpolar\.top[\s\S]*?\]/);
+test('开发服务器保留本地 API 代理配置', () => {
+  assert.match(config, /server:\s*\{[\s\S]*?port:\s*5173/);
+  assert.match(config, /'\/api':\s*\{\s*target:\s*'http:\/\/localhost:4000'/);
 });
