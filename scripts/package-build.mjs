@@ -4,6 +4,7 @@ import path from 'path';
 import readline from 'readline';
 import { fileURLToPath } from 'url';
 import {
+  mergeReleaseNotes,
   parseForcePrompt,
   parseNotesFromEnv,
   readReleaseNotesFile,
@@ -72,11 +73,15 @@ async function collectReleaseNotes() {
   const forceFromEnv = envForce !== undefined && envForce !== ''
     ? parseForcePrompt(envForce)
     : null;
+  const appendFromEnv = process.env.RELEASE_NOTES_APPEND !== undefined
+    ? parseForcePrompt(process.env.RELEASE_NOTES_APPEND)
+    : false;
 
   if (process.env.RELEASE_NOTES) {
     const notes = parseNotesFromEnv(process.env.RELEASE_NOTES);
+    const finalNotes = mergeReleaseNotes(existing.notes, notes, appendFromEnv);
     const forcePrompt = forceFromEnv ?? existing.forcePrompt;
-    const saved = writeReleaseNotesFile(notes, { forcePrompt });
+    const saved = writeReleaseNotesFile(finalNotes, { forcePrompt });
     console.log(`>>> 强制提示: ${saved.forcePrompt ? '是' : '否'}`);
     return saved;
   }
@@ -102,7 +107,12 @@ async function collectReleaseNotes() {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const notes = [];
   let forcePrompt = forceFromEnv ?? existing.forcePrompt;
+  let appendPrevious = false;
   try {
+    if (existing.notes.length) {
+      const appendAnswer = await askLine(rl, '是否延续之前的更新记录续写？(y/N) ');
+      appendPrevious = parseForcePrompt(appendAnswer);
+    }
     for (let i = 0; i < 12; i += 1) {
       const line = await askLine(rl, `  ${i + 1}. `);
       if (!line) break;
@@ -116,10 +126,12 @@ async function collectReleaseNotes() {
   }
 
   const finalNotes = notes.length > 0
-    ? notes
+    ? mergeReleaseNotes(existing.notes, notes, appendPrevious)
     : (existing.notes.length ? existing.notes : ['功能与体验优化']);
   if (notes.length === 0) {
     console.log('>>> 未输入新说明，保留现有内容');
+  } else if (appendPrevious) {
+    console.log(`>>> 已续写 ${notes.length} 条更新说明，历史记录共 ${finalNotes.length} 条`);
   } else {
     console.log(`>>> 已写入 ${notes.length} 条更新说明`);
   }

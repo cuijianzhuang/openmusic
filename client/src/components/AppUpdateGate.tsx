@@ -11,6 +11,7 @@ import {
   type AppVersionInfo,
 } from '../lib/appVersion';
 import { setGuidePauseReason } from '../lib/guidePause';
+import { getDisplayUpdateNotes } from '../lib/updateNotes';
 
 const POLL_MS = 3 * 60 * 1000;
 
@@ -78,7 +79,7 @@ export default function AppUpdateGate() {
   if (!remote.forcePrompt) return null;
   if (isUpdateSuppressedForBuild(remote.buildId)) return null;
 
-  const notes = (remote.notes.length > 0 ? remote.notes : ['体验优化与问题修复']).slice(0, 4);
+  const notes = getDisplayUpdateNotes(remote.notes);
 
   const onLater = () => {
     dismissUpdateForBuild(remote.buildId);
@@ -121,7 +122,7 @@ export default function AppUpdateGate() {
             发现新版本
           </h2>
 
-          <ul className="mt-3.5 space-y-2">
+          <ul className="mt-3.5 max-h-[50vh] space-y-2 overflow-y-auto pr-1">
             {notes.map((note) => (
               <li
                 key={note}

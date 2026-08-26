@@ -15,6 +15,7 @@ import {
   reuseIdleOwnedRoom,
   setRoomAdmin,
   setRoomPlayMode,
+  selectRandomFavoriteSong,
   skipSong,
 } from './roomManager.js';
 
@@ -69,10 +70,11 @@ function seedPlayback(room, currentId = 'a', queueIds = []) {
   room.lastRecycledQueueId = null;
 }
 
-test('播放模式使用固定五种顺序，未知值降级为顺序播放', () => {
+test('播放模式使用固定六种顺序，未知值降级为顺序播放', () => {
   assert.deepEqual(PLAY_MODES, [
     'order',
     'shuffle',
+    'favorite-shuffle',
     'loop-one',
     'loop-all',
     'shuffle-loop',
@@ -83,7 +85,7 @@ test('播放模式使用固定五种顺序，未知值降级为顺序播放', ()
   assert.equal(normalizePlayMode(null), 'order');
 });
 
-test('房主切换五种模式后，房间快照和广播状态保持一致', (t) => {
+test('房主切换六种模式后，房间快照和广播状态保持一致', (t) => {
   const { roomId } = createTestRoom(t);
 
   for (const mode of PLAY_MODES) {
@@ -97,6 +99,18 @@ test('房主切换五种模式后，房间快照和广播状态保持一致', (t
   const fallback = setRoomPlayMode(roomId, OWNER_ID, 'legacy-mode', OWNER_CONNECTION);
   assert.equal(fallback.error, undefined);
   assert.equal(fallback.room?.playMode, 'order');
+});
+
+test('收藏随机模式从收藏列表选取下一首，并排除当前曲和已播放曲', () => {
+  const favorites = [makeSong('a'), makeSong('b'), makeSong('c')];
+  const selected = selectRandomFavoriteSong(favorites, favorites[0], new Set(['netease:b']), () => 0);
+  assert.equal(selected?.id, 'c');
+});
+
+test('收藏随机模式只有一首收藏时下一首仍可继续播放该歌曲', () => {
+  const only = makeSong('only');
+  const selected = selectRandomFavoriteSong([only], only, new Set(['netease:only']), () => 0);
+  assert.equal(selected?.id, 'only');
 });
 
 test('仅房主、正式管理员和临时控播管理员可以切换模式', (t) => {

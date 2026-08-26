@@ -1,7 +1,7 @@
 import { customAlphabet } from "nanoid";
 import { scrypt, scryptSync, randomBytes, timingSafeEqual } from "crypto";
 import { fetchMetingFmSongs, normalizeFmMode, DEFAULT_FM_MODE, FM_MODE_OFF } from "./metingFm.js";
-import { getRedisClient, initRoomStorage, isRedisEnabled, loadAllRoomsFromStorage, queueSaveRoomToStorage, deleteRoomFromStorage, saveRoomToStorage } from "./roomStorage.js";
+import { getRedisClient, initRoomStorage, isRedisEnabled, loadAllRoomsFromStorage, queueSaveRoomToStorage, deleteRoomFromStorage, saveRoomToStorage, listFavoriteSongs } from "./roomStorage.js";
 import {
   DEFAULT_MEMBER_SETTINGS,
   buildWelcomeText,
@@ -224,8 +224,8 @@ const MAX_RANDOM_PREFETCH_ATTEMPTS = 20;
 /** 非控制者首次补种时长的最小合理值（毫秒），杜绝 durationMs:1 之类的恶意切歌 */
 const MIN_REPORTABLE_DURATION_MS = 1000;
 
-/** 播放顺序：顺序 / 乱序 / 单曲循环 / 列表循环 / 列表内随机（随机且不消耗列表） */
-export const PLAY_MODES = ["order", "shuffle", "loop-one", "loop-all", "shuffle-loop"];
+/** 播放顺序：顺序 / 乱序 / 收藏随机 / 单曲循环 / 列表循环 / 列表内随机 */
+export const PLAY_MODES = ["order", "shuffle", "favorite-shuffle", "loop-one", "loop-all", "shuffle-loop"];
 export const DEFAULT_PLAY_MODE = "order";
 
 export function normalizePlayMode(value) {
@@ -636,6 +636,7 @@ function snapshotRoomForStorage(room) {
     musicAccounts: normalizeMusicAccounts(room.musicAccounts),
     musicAccountSecrets: normalizeMusicAccountSecrets(room.musicAccountSecrets),
     playMode: normalizePlayMode(room.playMode),
+    favoriteShuffleUserId: room.favoriteShuffleUserId || null,
     announcementEnabled: Boolean(room.announcementEnabled),
     announcementText: String(room.announcementText || "").slice(0, MAX_ANNOUNCEMENT_LENGTH),
     customCoverUrl: normalizeCustomCoverUrl(room.customCoverUrl),
@@ -713,6 +714,7 @@ function restoreRoomFromStorage(data) {
   room.musicAccounts = normalizeMusicAccounts(data.musicAccounts);
   room.musicAccountSecrets = normalizeMusicAccountSecrets(data.musicAccountSecrets);
   room.playMode = normalizePlayMode(data.playMode);
+  room.favoriteShuffleUserId = String(data.favoriteShuffleUserId || "").trim() || null;
   room.announcementEnabled = Boolean(data.announcementEnabled);
   room.announcementText = String(data.announcementText || "").slice(0, MAX_ANNOUNCEMENT_LENGTH);
   room.customCoverUrl = normalizeCustomCoverUrl(data.customCoverUrl);
@@ -1105,6 +1107,8 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
     /** 房间私有音源凭证（不广播；仅开启共享时同步到 Meting 池） */
     musicAccountSecrets: { netease: null, tencent: null, qishui: null },
     playMode: DEFAULT_PLAY_MODE,
+    /** 收藏随机模式使用的收藏列表所属用户；不向客户端广播 */
+    favoriteShuffleUserId: null,
     /** 列表内随机：上一首回收进队列的 queueId，避免立刻抽到自己 */
     lastRecycledQueueId: null,
     announcementEnabled: false,
@@ -2894,10 +2898,14 @@ export function setRoomPlayMode(roomId, actorId, mode, connectionId = null) {
   }
 
   const nextMode = normalizePlayMode(mode);
-  if (normalizePlayMode(room.playMode) === nextMode) {
+  const sameMode = normalizePlayMode(room.playMode) === nextMode;
+  room.playMode = nextMode;
+  room.favoriteShuffleUserId = nextMode === "favorite-shuffle" ? String(actorId || "").trim() || null : null;
+  if (sameMode && nextMode !== "favorite-shuffle") {
     return { room: serializeRoom(room) };
   }
-  room.playMode = nextMode;
+  clearNextRandom(room);
+  room.randomBatch = [];
   persistRoom(room);
   return { room: serializeRoom(room) };
 }
@@ -4098,7 +4106,35 @@ function clearNextRandom(room) {
 //   }
 // }
 
+export function selectRandomFavoriteSong(favorites, currentSong = null, playedKeys = new Set(), random = Math.random) {
+  const currentKey = currentSong?.source && currentSong?.id
+    ? songIdentity(currentSong.source, currentSong.id)
+    : '';
+  const usable = (Array.isArray(favorites) ? favorites : []).filter((song) => song?.id && song?.source);
+  const unplayed = usable.filter((song) => {
+    const key = songIdentity(song.source, song.id);
+    return key !== currentKey && !playedKeys.has(key);
+  });
+  const fallback = usable.filter((song) => songIdentity(song.source, song.id) !== currentKey);
+  const pool = unplayed.length > 0
+    ? unplayed
+    : (fallback.length > 0 ? fallback : usable);
+  if (pool.length === 0) return null;
+  return pool[Math.min(pool.length - 1, Math.max(0, Math.floor(random() * pool.length)))];
+}
+
 async function fetchRandomForRoom(room) {
+  if (normalizePlayMode(room.playMode) === "favorite-shuffle") {
+    if (!room.favoriteShuffleUserId) return null;
+    const favorites = await listFavoriteSongs(room.favoriteShuffleUserId);
+    const song = selectRandomFavoriteSong(favorites, room.current, room.randomPlayedKeys);
+    if (!song) return null;
+    return {
+      ...song,
+      requestedBy: "收藏随机",
+      requestedById: "",
+    };
+  }
   if (Array.isArray(room.randomBatch) && room.randomBatch.length > 0) {
     return room.randomBatch.shift();
   }
@@ -4126,7 +4162,7 @@ async function ensureNextRandom(room) {
     return;
   }
   // 漫游已关闭：不预取，队列放空后自然停止
-  if ((room.neteaseFmMode || DEFAULT_FM_MODE) === FM_MODE_OFF) {
+  if (normalizePlayMode(room.playMode) !== "favorite-shuffle" && (room.neteaseFmMode || DEFAULT_FM_MODE) === FM_MODE_OFF) {
     clearNextRandom(room);
     return;
   }
@@ -4194,7 +4230,7 @@ function setCurrentSong(room, song) {
   const next = serializeQueueItemForRoom(song);
   if (next) next.dislikedByIds = [];
   room.current = next;
-  if (song?.requestedBy === '私人漫游' && song?.id) {
+  if ((song?.requestedBy === '私人漫游' || song?.requestedBy === '收藏随机') && song?.id) {
     room.randomPlayedKeys.add(songIdentity(song.source, song.id));
     while (room.randomPlayedKeys.size > MAX_RANDOM_HISTORY) {
       const oldest = room.randomPlayedKeys.values().next().value;
@@ -4288,6 +4324,24 @@ async function playNextUnlocked(room, options = {}) {
   }
 
   recycleFinishedSongToQueue(room, finishedSong || room.current);
+
+  // 收藏随机明确以收藏列表作为下一首来源；已有点歌队列保留，退出该模式后继续消费。
+  if (normalizePlayMode(room.playMode) === "favorite-shuffle") {
+    if (room.nextRandomPromise) await room.nextRandomPromise;
+    let favorite = room.nextRandom;
+    room.nextRandom = null;
+    if (!favorite) {
+      room.randomLoading = true;
+      bumpPlaybackState(room);
+      favorite = await fetchRandomForRoom(room);
+    }
+    if (favorite) {
+      setCurrentSong(room, buildPendingRandomItem(favorite, "收藏随机") || favorite);
+      void ensureNextRandom(room);
+      return;
+    }
+    // 收藏为空/读取失败时不丢弃房间队列，退回普通队列播放。
+  }
 
   if (room.queue.length > 0) {
     clearNextRandom(room);
@@ -5515,7 +5569,7 @@ function serializeQueueItemForRoom(item) {
   };
   if (
     item.source === 'qishui'
-    && item.requestedBy === '私人漫游'
+    && (item.requestedBy === '私人漫游' || item.requestedBy === '收藏随机')
     && /^https?:\/\//i.test(String(item.url || ''))
   ) {
     payload.url = String(item.url);
@@ -5523,8 +5577,8 @@ function serializeQueueItemForRoom(item) {
   return payload;
 }
 
-/** 私人漫游预取曲目：分配稳定 queueId，播放与客户端 URL 缓存可复用 */
-function buildPendingRandomItem(song) {
+/** 自动随机曲目预取：分配稳定 queueId，播放与客户端 URL 缓存可复用 */
+function buildPendingRandomItem(song, requestedBy = "私人漫游", requestedById = "") {
   if (!song?.id) return null;
   return serializeQueueItemForRoom({
     queueId: song.queueId || `random-${generateId()}`,
@@ -5536,8 +5590,8 @@ function buildPendingRandomItem(song) {
     pic: song.pic,
     duration: normalizeSongDurationMs(song.duration),
     url: /^https?:\/\//i.test(String(song.url || '')) ? String(song.url) : undefined,
-    requestedBy: "私人漫游",
-    requestedById: "",
+    requestedBy,
+    requestedById,
     addedAt: song.addedAt || Date.now(),
   });
 }

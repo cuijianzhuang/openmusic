@@ -46,6 +46,13 @@ export function readReleaseNotesFile() {
   }
 }
 
+/** 将本次更新说明按选择追加到历史记录，具体数量限制由写入函数统一处理。 */
+export function mergeReleaseNotes(previousNotes, currentNotes, appendPrevious = false) {
+  const previous = Array.isArray(previousNotes) ? previousNotes : [];
+  const current = Array.isArray(currentNotes) ? currentNotes : [];
+  return appendPrevious ? [...previous, ...current] : [...current];
+}
+
 /**
  * @param {string[]} notes
  * @param {{ forcePrompt?: boolean }} [options]
