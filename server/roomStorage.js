@@ -1,4 +1,5 @@
 import { decryptRoomSecrets, encryptRoomSecrets } from './roomCredentialCrypto.js';
+import { randomBytes } from 'node:crypto';
 import { createLogger, incrementMetric } from './logger.js';
 
 const ROOM_IDS_KEY = 'openmusic:room_ids';
@@ -183,6 +184,9 @@ export async function deleteRoomFromStorage(roomId) {
 const FAVORITES_PREFIX = 'openmusic:favorites:';
 const MAX_FAVORITES = 5000;
 const FAVORITES_CAS_RETRIES = 8;
+const FAVORITE_SHARE_PREFIX = 'openmusic:favorite-share:';
+const FAVORITE_SHARE_TTL_SECONDS = 7 * 24 * 60 * 60;
+const FAVORITE_SHARE_CODE_LENGTH = 8;
 const FAVORITES_CAS_SCRIPT = `
 local current = redis.call('GET', KEYS[1])
 if ARGV[1] == '0' then
@@ -303,6 +307,51 @@ export async function setFavoriteSong(userId, song, favorite) {
   } catch (err) {
     return { error: err.message || '收藏保存失败' };
   }
+}
+
+function favoriteShareKey(code) {
+  return `${FAVORITE_SHARE_PREFIX}${code}`;
+}
+
+function normalizeFavoriteShareCode(code) {
+  return String(code || '').trim().toUpperCase();
+}
+
+function createFavoriteShareCode() {
+  return randomBytes(8).toString('hex').slice(0, FAVORITE_SHARE_CODE_LENGTH).toUpperCase();
+}
+
+export async function createFavoriteShare(userId) {
+  const id = String(userId || '').trim();
+  if (!id) return { error: '用户身份无效' };
+  if (!enabled || !redisClient) return { error: 'Redis 不可用，分享码无法创建' };
+  const favorites = await listFavoriteSongs(id);
+  if (!favorites.length) return { error: '暂无可分享的收藏歌曲' };
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const code = createFavoriteShareCode();
+    const created = await redisClient.set(favoriteShareKey(code), JSON.stringify(favorites), { NX: true, EX: FAVORITE_SHARE_TTL_SECONDS });
+    if (created === 'OK') return { code, count: favorites.length, expiresIn: FAVORITE_SHARE_TTL_SECONDS };
+  }
+  return { error: '分享码创建失败，请重试' };
+}
+
+export async function previewFavoriteShare(code) {
+  const normalized = normalizeFavoriteShareCode(code);
+  if (!/^[A-Z0-9]{8}$/.test(normalized) || !enabled || !redisClient) return { error: '分享码无效或已过期' };
+  const raw = await redisClient.get(favoriteShareKey(normalized));
+  const songs = parseFavorites(raw);
+  if (!songs.length) return { error: '分享码无效或已过期' };
+  return { code: normalized, songs };
+}
+
+export async function importFavoriteShare(userId, code, selectedIds) {
+  const preview = await previewFavoriteShare(code);
+  if (preview.error) return preview;
+  if (!Array.isArray(selectedIds) || selectedIds.length === 0 || selectedIds.length > 1000) return { error: '请选择要导入的歌曲' };
+  const selected = new Set(selectedIds.map((id) => String(id || '').trim()).filter(Boolean));
+  const songs = preview.songs.filter((song) => selected.has(songFavoriteId(song)) || selected.has(`${song.source || 'netease'}-${song.id}`));
+  if (!songs.length) return { error: '没有可导入的歌曲' };
+  return importFavoriteSongs(userId, songs);
 }
 
 export async function importFavoriteSongs(userId, songs) {

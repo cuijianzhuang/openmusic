@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   getRedisClient,
+  createFavoriteShare,
+  importFavoriteShare,
+  previewFavoriteShare,
   getRedisConnectionOptions,
   importFavoriteSongs,
   initRoomStorage,
@@ -29,6 +32,33 @@ test('Redis host configuration uses the safe default port and optional auth fiel
     password: 'secret',
     database: 2,
   });
+});
+
+test('收藏分享码可预览并按选择一次性复制到另一用户', {
+  skip: !process.env.TEST_REDIS_URL,
+}, async (t) => {
+  process.env.REDIS_URL = process.env.TEST_REDIS_URL;
+  assert.equal(await initRoomStorage(), true);
+  const client = getRedisClient();
+  assert.ok(client);
+  const sourceUser = `favorite-share-source-${process.pid}-${Date.now()}`;
+  const targetUser = `favorite-share-target-${process.pid}-${Date.now()}`;
+  t.after(async () => {
+    await client.del(`openmusic:favorites:${sourceUser}`, `openmusic:favorites:${targetUser}`);
+    if (client.isOpen) client.destroy();
+  });
+  await importFavoriteSongs(sourceUser, [
+    { id: 'share-1', source: 'netease', name: '分享一', artist: '歌手' },
+    { id: 'share-2', source: 'netease', name: '分享二', artist: '歌手' },
+  ]);
+  const created = await createFavoriteShare(sourceUser);
+  assert.equal(created.error, undefined);
+  assert.equal(created.expiresIn, 7 * 24 * 60 * 60);
+  const preview = await previewFavoriteShare(created.code);
+  assert.equal(preview.songs.length, 2);
+  const copied = await importFavoriteShare(targetUser, created.code, ['netease-share-2']);
+  assert.equal(copied.error, undefined);
+  assert.deepEqual((await listFavoriteSongs(targetUser)).map((song) => song.id), ['share-2']);
 });
 
 test('收藏并发更新通过 Redis CAS 保留全部成功操作', {

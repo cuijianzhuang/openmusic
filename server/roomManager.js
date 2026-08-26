@@ -4233,7 +4233,9 @@ function takeNextFromQueue(room) {
     const pool = excludeId
       ? room.queue.map((item, index) => index).filter((index) => room.queue[index]?.queueId !== excludeId)
       : room.queue.map((_, index) => index);
-    const candidates = pool.length ? pool : room.queue.map((_, index) => index);
+    // 房主/管理员置顶是明确的人工指令，优先级高于随机模式；同一优先级内仍随机。
+    const prioritized = pool.filter((index) => Number(room.queue[index]?.ownerPriority || 0) > 0);
+    const candidates = prioritized.length ? prioritized : (pool.length ? pool : room.queue.map((_, index) => index));
     const idx = candidates[Math.floor(Math.random() * candidates.length)];
     return room.queue.splice(idx, 1)[0] || null;
   }

@@ -152,6 +152,22 @@ test('随机播放自然结束后随机选取并消费一首待播歌曲', async
   assert.equal(advanced.room?.queue.some((song) => song.id === 'a'), false);
 });
 
+test('随机播放时房主置顶歌曲优先于随机抽样', async (t) => {
+  const { roomId, room } = createTestRoom(t);
+  room.playMode = 'shuffle';
+  seedPlayback(room, 'a', ['b', 'c', 'd']);
+  room.queue[1].ownerPriority = Date.now();
+  const originalRandom = Math.random;
+  Math.random = () => 0;
+  try {
+    const advanced = await finishCurrentSong(roomId, OWNER_ID, OWNER_CONNECTION, room.current.queueId);
+    assert.equal(advanced.error, undefined);
+    assert.equal(advanced.room?.current?.id, 'c');
+  } finally {
+    Math.random = originalRandom;
+  }
+});
+
 test('单曲循环只在自然结束时重播，手动切歌仍然前进', async (t) => {
   const { roomId, room } = createTestRoom(t);
   room.playMode = 'loop-one';

@@ -181,7 +181,7 @@ import { importNeteasePlaylist, importQqPlaylist, importQishuiPlaylist, fetchNet
 import { fetchNeteaseHotToplist } from './neteaseToplist.js';
 import { createNeteasePlaylistSearchHandler } from './neteasePlaylistSearch.js';
 import { getHotSongs } from './songHotRank.js';
-import { hasRedisEnvConfig, importFavoriteSongs, listFavoriteSongs, setFavoriteSong, getRedisClient } from './roomStorage.js';
+import { hasRedisEnvConfig, createFavoriteShare, importFavoriteShare, importFavoriteSongs, listFavoriteSongs, previewFavoriteShare, setFavoriteSong, getRedisClient } from './roomStorage.js';
 import {
   createChatImageUploadToken,
   isQiniuConfigured,
@@ -4966,6 +4966,30 @@ io.on('connection', (socket) => {
       return;
     }
     callback?.({ success: true, favorites: result.favorites, favorite: result.favorite });
+  });
+
+  socket.on('create_favorite_share', async (_payload, callback) => {
+    if (rejectRateLimited(socket, limitSocketAction, 'import_favorites', callback)) return;
+    const identity = resolveIdentityFromCookies(socket.handshake?.headers?.cookie || '');
+    if (!identity?.userId) return callback?.({ success: false, error: '会话未就绪，请刷新页面后重试' });
+    const result = await createFavoriteShare(identity.userId);
+    callback?.(result.error ? { success: false, error: result.error } : { success: true, ...result });
+  });
+
+  socket.on('preview_favorite_share', async (payload, callback) => {
+    const { code } = socketPayload(payload);
+    if (rejectRateLimited(socket, limitSocketAction, 'preview_favorite_share', callback)) return;
+    const result = await previewFavoriteShare(code);
+    callback?.(result.error ? { success: false, error: result.error } : { success: true, songs: result.songs, code: result.code });
+  });
+
+  socket.on('import_favorite_share', async (payload, callback) => {
+    const { code, selectedIds } = socketPayload(payload);
+    if (rejectRateLimited(socket, limitSocketAction, 'import_favorites', callback)) return;
+    const identity = resolveIdentityFromCookies(socket.handshake?.headers?.cookie || '');
+    if (!identity?.userId) return callback?.({ success: false, error: '会话未就绪，请刷新页面后重试' });
+    const result = await importFavoriteShare(identity.userId, code, selectedIds);
+    callback?.(result.error ? { success: false, error: result.error } : { success: true, favorites: result.favorites, imported: result.imported, dropped: result.dropped, maxFavorites: result.maxFavorites });
   });
 
   socket.on('import_favorites', async (payload, callback) => {

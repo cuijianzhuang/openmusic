@@ -62,6 +62,7 @@ const ACTION_EVENTS = new Set([
   'report_track_duration',
   'set_favorite',
   'import_favorites',
+  'create_favorite_share',
   'toggle_play',
   'seek',
 ]);
@@ -74,6 +75,7 @@ const EXTRA_POLICIES = new Map([
   ['load_chat_history', { windowMs: 60_000, max: 60 }],
   ['load_song_history', { windowMs: 60_000, max: 60 }],
   ['list_favorites', { windowMs: 60_000, max: 60 }],
+  ['preview_favorite_share', { windowMs: 60_000, max: 60 }],
   ['ack_error_report_solution', { windowMs: 60_000, max: 60 }],
   ['ack_room_permanent_decision', { windowMs: 60_000, max: 60 }],
 ]);

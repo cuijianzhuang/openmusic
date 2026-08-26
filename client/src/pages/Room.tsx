@@ -6,7 +6,7 @@ import { mergeFavoriteImportStats } from '../lib/favoriteImport';
 
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 
-import { Search, Loader2, Copy, Check, LogOut, X, Heart, Plus, Download, ListMusic, Upload, History, ListPlus, Pencil, Lock, LockOpen, ChevronLeft, SlidersHorizontal, Shield, Maximize2, Smartphone, ImagePlus, MoreHorizontal, RefreshCw, Users } from 'lucide-react';
+import { Search, Loader2, Copy, Check, LogOut, X, Heart, Plus, Download, ListMusic, Upload, History, ListPlus, Pencil, Share2, Lock, LockOpen, ChevronLeft, SlidersHorizontal, Shield, Maximize2, Smartphone, ImagePlus, MoreHorizontal, RefreshCw, Users } from 'lucide-react';
 
 import { searchAllSongs, getAvailableSources, listRooms, type SearchFilterMode } from '../api/music';
 import { importPlaylist, searchPlaylists, type PlaylistSearchItem, type PlaylistPlatform, type PlaylistChannelFilter as PlaylistChannelFilterMode } from '../api/music/playlist';
@@ -301,7 +301,7 @@ export default function Room() {
     noindex: true,
   });
 
-  const { joinRoom, addSong, leaveRoom, listFavorites, setFavorite, importFavorites, renameRoomName, setRoomLock, setRoomFmMode, setRoomAnnouncement, setRoomCustomCover, setChatHistoryVisibleOnJoin, setChatShowAvatars, setRoomJoinNotice, setRoomAiSettings, setRoomMaxAdmins, setRoomPlaybackRate, setSongRequestEnabled, unbanRoomSong, addRoomForbiddenWord, removeRoomForbiddenWord, setRoomMemberTier, removeRoomMemberTier, setRoomMemberSettings, loadSongHistory, transferOwner, destroyRoom, applyRoomPermanent, cancelRoomPermanent, clearQueue, createMusicAccountQr, checkMusicAccountQr, bindMusicAccount, listMusicAccounts, setMusicAccountShared, unbindMusicAccount, skipSong, togglePlay } = useSocket();
+  const { joinRoom, addSong, leaveRoom, listFavorites, setFavorite, importFavorites, createFavoriteShare, previewFavoriteShare, importFavoriteShare, renameRoomName, setRoomLock, setRoomFmMode, setRoomAnnouncement, setRoomCustomCover, setChatHistoryVisibleOnJoin, setChatShowAvatars, setRoomJoinNotice, setRoomAiSettings, setRoomMaxAdmins, setRoomPlaybackRate, setSongRequestEnabled, unbanRoomSong, addRoomForbiddenWord, removeRoomForbiddenWord, setRoomMemberTier, removeRoomMemberTier, setRoomMemberSettings, loadSongHistory, transferOwner, destroyRoom, applyRoomPermanent, cancelRoomPermanent, clearQueue, createMusicAccountQr, checkMusicAccountQr, bindMusicAccount, listMusicAccounts, setMusicAccountShared, unbindMusicAccount, skipSong, togglePlay } = useSocket();
   const { applyFavorites } = useFavorites();
   const { queueKeys, playedKeys } = useRoomSongKeySets();
 
@@ -370,6 +370,11 @@ export default function Room() {
   const [favoritesOpen, setFavoritesOpen] = useState(false);
   const [songHistoryOpen, setSongHistoryOpen] = useState(false);
   const [favoritesLoading, setFavoritesLoading] = useState(false);
+  const [favoriteShareOpen, setFavoriteShareOpen] = useState(false);
+  const [favoriteShareCode, setFavoriteShareCode] = useState('');
+  const [favoriteShareSongs, setFavoriteShareSongs] = useState<FavoriteSong[]>([]);
+  const [favoriteShareSelected, setFavoriteShareSelected] = useState<Set<string>>(new Set());
+  const [favoriteShareLoading, setFavoriteShareLoading] = useState(false);
   const [favorites, setFavorites] = useState<FavoriteSong[]>([]);
   const [favoriteQuery, setFavoriteQuery] = useState('');
   const [favoritePage, setFavoritePage] = useState(1);
@@ -748,6 +753,37 @@ export default function Room() {
       showToast(res.error || '收藏列表加载失败', 'error');
     }
   }, [listFavorites, showToast, applyFavorites]);
+
+  const createShareCode = useCallback(async () => {
+    const res = await createFavoriteShare();
+    if (res.success && res.code) {
+      setFavoriteShareCode(res.code);
+      try {
+        await navigator.clipboard?.writeText(res.code);
+      } catch {
+        // 剪贴板权限不可用时仍保留分享码，用户可手动复制。
+      }
+      showToast(`分享码 ${res.code} 已生成`, 'success');
+    } else showToast(res.error || '分享码创建失败', 'error');
+  }, [createFavoriteShare, showToast]);
+
+  const previewShareCode = useCallback(async () => {
+    setFavoriteShareLoading(true);
+    const res = await previewFavoriteShare(favoriteShareCode);
+    setFavoriteShareLoading(false);
+    if (!res.success) return showToast(res.error || '分享码无效或已过期', 'error');
+    const songs = res.songs || [];
+    setFavoriteShareSongs(songs);
+    setFavoriteShareSelected(new Set(songs.map(songKey)));
+  }, [favoriteShareCode, previewFavoriteShare, showToast]);
+
+  const importShareFavorites = useCallback(async () => {
+    const res = await importFavoriteShare(favoriteShareCode, [...favoriteShareSelected]);
+    if (!res.success) return showToast(res.error || '导入失败', 'error');
+    if (res.favorites) { setFavorites(res.favorites); applyFavorites(res.favorites); }
+    setFavoriteShareOpen(false);
+    showToast(`已复制 ${res.imported || 0} 首收藏${res.dropped ? `，${res.dropped} 首因容量上限未导入` : ''}`, 'success');
+  }, [favoriteShareCode, favoriteShareSelected, importFavoriteShare, showToast, applyFavorites]);
 
   const removeFavorite = useCallback(async (song: FavoriteSong) => {
     const key = songKey(song);
@@ -3531,6 +3567,18 @@ export default function Room() {
           document.body,
         )}
 
+      {favoriteShareOpen && createPortal(
+        <div className="fixed inset-0 z-[100] flex items-start justify-center px-4 pt-32">
+          <button type="button" className="absolute inset-0 bg-black/65 backdrop-blur-sm" onClick={() => setFavoriteShareOpen(false)} aria-label="关闭分享收藏" />
+          <div className="relative z-10 w-full max-w-lg rounded-2xl border border-white/10 bg-netease-bg p-5 shadow-2xl">
+            <div className="mb-4 flex items-center justify-between"><h2 className="font-medium">收藏分享码</h2><button type="button" onClick={() => setFavoriteShareOpen(false)}><X className="h-5 w-5 text-netease-muted" /></button></div>
+            <div className="flex gap-2"><input value={favoriteShareCode} onChange={e => setFavoriteShareCode(e.target.value.toUpperCase())} placeholder="输入 8 位分享码" maxLength={8} className="min-w-0 flex-1 rounded-lg border border-netease-border bg-netease-dark px-3 py-2 text-sm" /><button type="button" onClick={() => void previewShareCode()} disabled={favoriteShareLoading || favoriteShareCode.length !== 8} className="rounded-lg bg-netease-red px-3 text-sm disabled:opacity-50">预览</button></div>
+            <button type="button" onClick={() => void createShareCode()} className="mt-2 text-xs text-netease-muted hover:text-white">从我的收藏生成分享码并复制</button>
+            {favoriteShareSongs.length > 0 && <><p className="mt-4 text-xs text-netease-muted">已选 {favoriteShareSelected.size} / {favoriteShareSongs.length} 首</p><div className="mt-2 max-h-64 space-y-1 overflow-y-auto">{favoriteShareSongs.map(song => { const key = songKey(song); return <label key={key} className="flex items-center gap-2 rounded-lg p-2 hover:bg-white/5"><input type="checkbox" checked={favoriteShareSelected.has(key)} onChange={() => setFavoriteShareSelected(prev => { const next = new Set(prev); next.has(key) ? next.delete(key) : next.add(key); return next; })} /><span className="truncate text-sm">{song.name}<span className="text-xs text-netease-muted"> · {song.artist}</span></span></label>; })}</div><button type="button" onClick={() => void importShareFavorites()} disabled={!favoriteShareSelected.size} className="mt-4 w-full rounded-lg bg-netease-red py-2 text-sm disabled:opacity-50">复制选中收藏到本机</button></>}
+          </div>
+        </div>, document.body,
+      )}
+
       {favoritesOpen &&
         createPortal(
           <div className="fixed inset-0 z-[90] flex items-start justify-center px-4 pt-24 pb-8">
@@ -3579,6 +3627,11 @@ export default function Room() {
                   >
                     {importingFavorites ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
                     {favoritesImportProgress || '导入歌单'}
+                  </button>
+                </Tooltip>
+                <Tooltip content="分享收藏">
+                  <button type="button" onClick={() => { setFavoriteShareOpen(true); setFavoriteShareSongs([]); }} className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs text-netease-muted hover:bg-white/10 hover:text-white">
+                    <Share2 className="h-4 w-4" /> 分享收藏
                   </button>
                 </Tooltip>
                 <Tooltip content="导出歌单">

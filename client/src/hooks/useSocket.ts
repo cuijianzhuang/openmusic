@@ -1228,6 +1228,10 @@ export function useSocket() {
     return emitWithAck('import_favorites', { songs }, { success: false, error: '导入超时，请稍后重试' });
   }, []);
 
+  const createFavoriteShare = useCallback(() => emitWithAck<{ success: boolean; code?: string; count?: number; error?: string }>('create_favorite_share', {}, { success: false, error: '分享码创建失败，请重试' }), []);
+  const previewFavoriteShare = useCallback((code: string) => emitWithAck<{ success: boolean; code?: string; songs?: FavoriteSong[]; error?: string }>('preview_favorite_share', { code }, { success: false, error: '分享码无效或已过期' }), []);
+  const importFavoriteShare = useCallback((code: string, selectedIds: string[]) => emitWithAck<{ success: boolean; favorites?: FavoriteSong[]; imported?: number; dropped?: number; maxFavorites?: number; error?: string }>('import_favorite_share', { code, selectedIds }, { success: false, error: '分享收藏导入失败，请重试' }), []);
+
 
 
   const renameUser = useCallback((nickname: string): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
@@ -1835,6 +1839,9 @@ export function useSocket() {
 
     setFavorite,
     importFavorites,
+    createFavoriteShare,
+    previewFavoriteShare,
+    importFavoriteShare,
     renameUser,
     setUserAvatar,
 
