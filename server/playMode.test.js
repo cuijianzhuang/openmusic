@@ -12,6 +12,7 @@ import {
   normalizePlayMode,
   prepareRoomBroadcast,
   removeUser,
+  reuseIdleOwnedRoom,
   setRoomAdmin,
   setRoomPlayMode,
   skipSong,
@@ -123,6 +124,25 @@ test('仅房主、正式管理员和临时控播管理员可以切换模式', (t
   assert.equal(setRoomPlayMode(roomId, memberId, 'loop-one', memberConnection).room?.playMode, 'loop-one');
 });
 
+test('复用 QQ 漫游房间时清除上次网易预取歌曲并保留 QQ 配置', (t) => {
+  const { roomId, room } = createTestRoom(t);
+  room.neteaseFmMode = 'DEFAULT';
+  room.fmSource = 'tencent';
+  room.nextRandom = makeSong('netease-prefetch');
+  room.nextRandom.source = 'netease';
+  room.randomBatch = [makeSong('netease-batch')];
+  room.randomBatch[0].source = 'netease';
+  room.nextRandomPromise = Promise.resolve();
+  removeUser(roomId, OWNER_ID, OWNER_CONNECTION);
+
+  const reused = reuseIdleOwnedRoom(roomId, { name: '复用后的 QQ 漫游房间' });
+  assert.ok(reused);
+  assert.equal(getRoomInternal(roomId)?.fmSource, 'tencent');
+  assert.equal(getRoomInternal(roomId)?.nextRandom, null);
+  assert.deepEqual(getRoomInternal(roomId)?.randomBatch, []);
+  assert.equal(getRoomInternal(roomId)?.nextRandomPromise, null);
+});
+
 test('顺序播放自然结束后按队列顺序消费歌曲，空队列时停止', async (t) => {
   const { roomId, room } = createTestRoom(t);
   room.playMode = 'order';
@@ -152,17 +172,22 @@ test('随机播放自然结束后随机选取并消费一首待播歌曲', async
   assert.equal(advanced.room?.queue.some((song) => song.id === 'a'), false);
 });
 
-test('随机播放时房主置顶歌曲优先于随机抽样', async (t) => {
+test('随机播放时多首房主置顶歌曲按置顶先后顺序播放', async (t) => {
   const { roomId, room } = createTestRoom(t);
   room.playMode = 'shuffle';
   seedPlayback(room, 'a', ['b', 'c', 'd']);
-  room.queue[1].ownerPriority = Date.now();
+  room.queue[1].ownerPriority = 100;
+  room.queue[0].ownerPriority = 200;
   const originalRandom = Math.random;
-  Math.random = () => 0;
+  Math.random = () => 0.99;
   try {
-    const advanced = await finishCurrentSong(roomId, OWNER_ID, OWNER_CONNECTION, room.current.queueId);
-    assert.equal(advanced.error, undefined);
-    assert.equal(advanced.room?.current?.id, 'c');
+    const first = await finishCurrentSong(roomId, OWNER_ID, OWNER_CONNECTION, room.current.queueId);
+    assert.equal(first.error, undefined);
+    assert.equal(first.room?.current?.id, 'c');
+
+    const second = await finishCurrentSong(roomId, OWNER_ID, OWNER_CONNECTION, first.room.current.queueId);
+    assert.equal(second.error, undefined);
+    assert.equal(second.room?.current?.id, 'b');
   } finally {
     Math.random = originalRandom;
   }

@@ -1994,6 +1994,8 @@ export function reuseIdleOwnedRoom(roomId, { name, password } = {}) {
   room.startedAt = null;
   room.randomLoading = false;
   room.skipRequests = [];
+  // 复用后沿用漫游配置，但不能沿用旧会话的预取歌曲，否则首首可能来自旧音源。
+  clearNextRandom(room);
   room.playbackVersion = (room.playbackVersion || 0) + 1;
   room.playbackUpdatedAt = Date.now();
 
@@ -4233,10 +4235,15 @@ function takeNextFromQueue(room) {
     const pool = excludeId
       ? room.queue.map((item, index) => index).filter((index) => room.queue[index]?.queueId !== excludeId)
       : room.queue.map((_, index) => index);
-    // 房主/管理员置顶是明确的人工指令，优先级高于随机模式；同一优先级内仍随机。
-    const prioritized = pool.filter((index) => Number(room.queue[index]?.ownerPriority || 0) > 0);
+    // 房主/管理员置顶是明确的人工指令，优先级高于随机模式；多个置顶按置顶时间从早到晚消费。
+    const prioritized = pool
+      .filter((index) => Number(room.queue[index]?.ownerPriority || 0) > 0)
+      .sort((a, b) => {
+        const priorityDiff = Number(room.queue[a]?.ownerPriority || 0) - Number(room.queue[b]?.ownerPriority || 0);
+        return priorityDiff || a - b;
+      });
     const candidates = prioritized.length ? prioritized : (pool.length ? pool : room.queue.map((_, index) => index));
-    const idx = candidates[Math.floor(Math.random() * candidates.length)];
+    const idx = prioritized.length ? candidates[0] : candidates[Math.floor(Math.random() * candidates.length)];
     return room.queue.splice(idx, 1)[0] || null;
   }
   return room.queue.shift() || null;

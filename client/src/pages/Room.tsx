@@ -371,6 +371,9 @@ export default function Room() {
   const [songHistoryOpen, setSongHistoryOpen] = useState(false);
   const [favoritesLoading, setFavoritesLoading] = useState(false);
   const [favoriteShareOpen, setFavoriteShareOpen] = useState(false);
+  const [favoriteShareMode, setFavoriteShareMode] = useState<'create' | 'import'>('create');
+  const [favoriteSharePage, setFavoriteSharePage] = useState(1);
+  const [favoriteSharePageSize] = useState<FavoritesPageSize>(DEFAULT_FAVORITES_PAGE_SIZE);
   const [favoriteShareCode, setFavoriteShareCode] = useState('');
   const [favoriteShareSongs, setFavoriteShareSongs] = useState<FavoriteSong[]>([]);
   const [favoriteShareSelected, setFavoriteShareSelected] = useState<Set<string>>(new Set());
@@ -775,6 +778,7 @@ export default function Room() {
     const songs = res.songs || [];
     setFavoriteShareSongs(songs);
     setFavoriteShareSelected(new Set(songs.map(songKey)));
+    setFavoriteSharePage(1);
   }, [favoriteShareCode, previewFavoriteShare, showToast]);
 
   const importShareFavorites = useCallback(async () => {
@@ -3568,13 +3572,16 @@ export default function Room() {
         )}
 
       {favoriteShareOpen && createPortal(
-        <div className="fixed inset-0 z-[100] flex items-start justify-center px-4 pt-32">
-          <button type="button" className="absolute inset-0 bg-black/65 backdrop-blur-sm" onClick={() => setFavoriteShareOpen(false)} aria-label="关闭分享收藏" />
-          <div className="relative z-10 w-full max-w-lg rounded-2xl border border-white/10 bg-netease-bg p-5 shadow-2xl">
-            <div className="mb-4 flex items-center justify-between"><h2 className="font-medium">收藏分享码</h2><button type="button" onClick={() => setFavoriteShareOpen(false)}><X className="h-5 w-5 text-netease-muted" /></button></div>
-            <div className="flex gap-2"><input value={favoriteShareCode} onChange={e => setFavoriteShareCode(e.target.value.toUpperCase())} placeholder="输入 8 位分享码" maxLength={8} className="min-w-0 flex-1 rounded-lg border border-netease-border bg-netease-dark px-3 py-2 text-sm" /><button type="button" onClick={() => void previewShareCode()} disabled={favoriteShareLoading || favoriteShareCode.length !== 8} className="rounded-lg bg-netease-red px-3 text-sm disabled:opacity-50">预览</button></div>
-            <button type="button" onClick={() => void createShareCode()} className="mt-2 text-xs text-netease-muted hover:text-white">从我的收藏生成分享码并复制</button>
-            {favoriteShareSongs.length > 0 && <><p className="mt-4 text-xs text-netease-muted">已选 {favoriteShareSelected.size} / {favoriteShareSongs.length} 首</p><div className="mt-2 max-h-64 space-y-1 overflow-y-auto">{favoriteShareSongs.map(song => { const key = songKey(song); return <label key={key} className="flex items-center gap-2 rounded-lg p-2 hover:bg-white/5"><input type="checkbox" checked={favoriteShareSelected.has(key)} onChange={() => setFavoriteShareSelected(prev => { const next = new Set(prev); next.has(key) ? next.delete(key) : next.add(key); return next; })} /><span className="truncate text-sm">{song.name}<span className="text-xs text-netease-muted"> · {song.artist}</span></span></label>; })}</div><button type="button" onClick={() => void importShareFavorites()} disabled={!favoriteShareSelected.size} className="mt-4 w-full rounded-lg bg-netease-red py-2 text-sm disabled:opacity-50">复制选中收藏到本机</button></>}
+        <div className="fixed inset-0 z-[100] flex items-start justify-center px-4 pt-24 pb-8">
+          <button type="button" className="absolute inset-0 bg-black/65 backdrop-blur-sm" onClick={() => setFavoriteShareOpen(false)} aria-label="关闭收藏分享" />
+          <div className="relative z-10 flex max-h-[min(72vh,680px)] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-white/10 bg-netease-bg shadow-2xl">
+            <div className="flex items-center justify-between border-b border-netease-border/50 px-4 py-3"><div><h2 className="text-sm font-medium">收藏分享</h2><p className="mt-0.5 text-xs text-netease-muted">分享出去或导入他人的收藏</p></div><button type="button" onClick={() => setFavoriteShareOpen(false)}><X className="h-5 w-5 text-netease-muted" /></button></div>
+            <div className="flex border-b border-netease-border/50"><button type="button" onClick={() => { setFavoriteShareMode('create'); setFavoriteShareSongs([]); }} className={`flex-1 px-4 py-2.5 text-sm ${favoriteShareMode === 'create' ? 'border-b-2 border-netease-red text-white' : 'text-netease-muted'}`}>我的分享码</button><button type="button" onClick={() => { setFavoriteShareMode('import'); setFavoriteShareSongs([]); }} className={`flex-1 px-4 py-2.5 text-sm ${favoriteShareMode === 'import' ? 'border-b-2 border-netease-red text-white' : 'text-netease-muted'}`}>输入分享码</button></div>
+            {favoriteShareMode === 'create' ? (
+              <div className="p-5"><p className="text-sm text-netease-muted">当前收藏 {favorites.length} 首。点击按钮后才会生成分享码，有效期 7 天。</p><button type="button" onClick={() => void createShareCode()} disabled={favorites.length === 0} className="mt-5 flex w-full items-center justify-center gap-2 rounded-lg bg-netease-red py-2.5 text-sm disabled:opacity-50"><Share2 className="h-4 w-4" />生成我的分享码</button>{favoriteShareCode && <div className="mt-4 rounded-lg border border-netease-border bg-netease-dark p-3 text-center"><p className="text-xs text-netease-muted">分享码（已自动复制，可手动复制）</p><p className="mt-1 select-all text-xl font-semibold tracking-[0.2em]">{favoriteShareCode}</p></div>}</div>
+            ) : (
+              <div className="flex min-h-0 flex-1 flex-col p-5"><div className="flex gap-2"><input value={favoriteShareCode} onChange={e => setFavoriteShareCode(e.target.value.toUpperCase())} placeholder="输入 8 位分享码" maxLength={8} className="min-w-0 flex-1 rounded-lg border border-netease-border bg-netease-dark px-3 py-2 text-sm" /><button type="button" onClick={() => void previewShareCode()} disabled={favoriteShareLoading || favoriteShareCode.length !== 8} className="rounded-lg bg-netease-red px-3 text-sm disabled:opacity-50">预览</button></div>{favoriteShareSongs.length > 0 && (() => { const totalPages = Math.max(1, Math.ceil(favoriteShareSongs.length / favoriteSharePageSize)); const pageSongs = favoriteShareSongs.slice((favoriteSharePage - 1) * favoriteSharePageSize, favoriteSharePage * favoriteSharePageSize); const pageKeys = pageSongs.map(songKey); const pageAll = pageKeys.every(key => favoriteShareSelected.has(key)); return <><div className="mt-4 flex items-center justify-between text-xs text-netease-muted"><span>已选 {favoriteShareSelected.size} / {favoriteShareSongs.length} 首</span><button type="button" onClick={() => setFavoriteShareSelected(prev => { const next = new Set(prev); pageKeys.forEach(key => pageAll ? next.delete(key) : next.add(key)); return next; })} className="text-netease-red">{pageAll ? '取消本页全选' : '全选本页'}</button></div><div className="mt-2 min-h-0 flex-1 space-y-1 overflow-y-auto">{pageSongs.map(song => { const key = songKey(song); return <label key={key} className="flex items-center gap-2 rounded-lg p-2 hover:bg-white/5"><input type="checkbox" checked={favoriteShareSelected.has(key)} onChange={() => setFavoriteShareSelected(prev => { const next = new Set(prev); next.has(key) ? next.delete(key) : next.add(key); return next; })} /><span className="truncate text-sm">{song.name}<span className="text-xs text-netease-muted"> · {song.artist}</span></span></label>; })}</div><div className="mt-3 flex items-center justify-between"><button type="button" disabled={favoriteSharePage <= 1} onClick={() => setFavoriteSharePage(page => page - 1)} className="rounded px-2 py-1 text-xs text-netease-muted disabled:opacity-40">上一页</button><span className="text-xs text-netease-muted">第 {favoriteSharePage} / {totalPages} 页</span><button type="button" disabled={favoriteSharePage >= totalPages} onClick={() => setFavoriteSharePage(page => page + 1)} className="rounded px-2 py-1 text-xs text-netease-muted disabled:opacity-40">下一页</button></div><button type="button" onClick={() => void importShareFavorites()} disabled={!favoriteShareSelected.size} className="mt-3 w-full rounded-lg bg-netease-red py-2 text-sm disabled:opacity-50">导入选中收藏</button></> })()}</div>
+            )}
           </div>
         </div>, document.body,
       )}
@@ -3605,19 +3612,11 @@ export default function Room() {
                 </p>
               </div>
               <div className="flex items-center gap-1.5">
-                {showBulkAddSong && (
-                  <Tooltip content="当前页点歌">
-                    <button
-                      type="button"
-                      onClick={() => void handleAddPageFavorites()}
-                      disabled={pagedFavorites.length === 0 || addingAllFavorites || importingFavorites}
-                      className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs text-netease-red hover:bg-netease-red/10 hover:text-netease-red disabled:opacity-50"
-                    >
-                      {addingAllFavorites ? <Loader2 className="h-4 w-4 animate-spin" /> : <ListPlus className="h-4 w-4" />}
-                      一键点歌
-                    </button>
-                  </Tooltip>
-                )}
+                <Tooltip content="分享收藏">
+                  <button type="button" onClick={() => { setFavoriteShareMode('create'); setFavoriteShareOpen(true); setFavoriteShareSongs([]); }} className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs text-netease-muted hover:bg-white/10 hover:text-white">
+                    <Share2 className="h-4 w-4" /> 分享收藏
+                  </button>
+                </Tooltip>
                 <Tooltip content="导入歌单">
                   <button
                     type="button"
@@ -3627,11 +3626,6 @@ export default function Room() {
                   >
                     {importingFavorites ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
                     {favoritesImportProgress || '导入歌单'}
-                  </button>
-                </Tooltip>
-                <Tooltip content="分享收藏">
-                  <button type="button" onClick={() => { setFavoriteShareOpen(true); setFavoriteShareSongs([]); }} className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs text-netease-muted hover:bg-white/10 hover:text-white">
-                    <Share2 className="h-4 w-4" /> 分享收藏
                   </button>
                 </Tooltip>
                 <Tooltip content="导出歌单">
@@ -3645,6 +3639,19 @@ export default function Room() {
                     导出歌单
                   </button>
                 </Tooltip>
+                {showBulkAddSong && (
+                  <Tooltip content="当前页点歌">
+                    <button
+                      type="button"
+                      onClick={() => void handleAddPageFavorites()}
+                      disabled={pagedFavorites.length === 0 || addingAllFavorites || importingFavorites}
+                      className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs text-netease-red hover:bg-netease-red/10 hover:text-netease-red disabled:opacity-50"
+                    >
+                      {addingAllFavorites ? <Loader2 className="h-4 w-4 animate-spin" /> : <ListPlus className="h-4 w-4" />}
+                      一键点歌
+                    </button>
+                  </Tooltip>
+                )}
                 <button type="button" onClick={() => setFavoritesOpen(false)} className="rounded-lg p-1.5 text-netease-muted hover:bg-white/10 hover:text-white"><X className="h-5 w-5" /></button>
               </div>
             </div>
