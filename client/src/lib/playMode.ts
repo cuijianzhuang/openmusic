@@ -22,9 +22,19 @@ export const PLAY_MODE_META: Record<PlayMode, { label: string; short: string; Ic
   'shuffle-loop': { label: '列表内随机', short: '列表随机', Icon: Dices },
 };
 
-export function normalizePlayMode(value: unknown): PlayMode {
+export function resolvePlayModeSelection(value: unknown): PlayMode | null {
   const mode = String(value || '').trim().toLowerCase();
-  return (PLAY_MODE_ORDER as string[]).includes(mode) ? (mode as PlayMode) : 'order';
+  return (PLAY_MODE_ORDER as string[]).includes(mode) ? (mode as PlayMode) : null;
+}
+
+export function normalizePlayMode(value: unknown): PlayMode {
+  return resolvePlayModeSelection(value) ?? 'order';
+}
+
+export type PlayModeMenuTrigger = 'click' | 'doubleclick' | 'contextmenu';
+
+export function shouldOpenPlayModeMenu(trigger: PlayModeMenuTrigger, mobile: boolean): boolean {
+  return mobile ? trigger === 'doubleclick' : trigger === 'contextmenu';
 }
 
 export function nextPlayMode(current: unknown): PlayMode {
