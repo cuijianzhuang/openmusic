@@ -346,8 +346,9 @@ const io = new Server(httpServer, {
     threshold: 262144,
   },
   httpCompression: true,
+  // 缩短心跳间隔，确保在 CDN/代理约 16 秒空闲超时前发出心跳，避免长轮询被掐断
+  pingInterval: 10_000,
   // 人多时事件循环偶发阻塞，放宽 ping 超时减少误判断连
-  pingInterval: 25_000,
   pingTimeout: 60_000,
 });
 
