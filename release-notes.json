@@ -8,5 +8,5 @@
     "玄学修复特定情况下队列内会出现黑线",
     "新增收藏随机播放，使用切换到该模式的用户收藏"
   ],
-  "forcePrompt": true
+  "forcePrompt": false
 }

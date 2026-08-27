@@ -79,7 +79,11 @@ export function hasRedisEnvConfig() {
 }
 
 export async function initRoomStorage() {
-  if (redisClient) return enabled;
+  if (redisClient?.isOpen) return enabled;
+  if (redisClient) {
+    redisClient = null;
+    enabled = false;
+  }
 
   const options = getRedisConnectionOptions();
   if (!options) {
