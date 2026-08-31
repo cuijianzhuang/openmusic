@@ -1,13 +1,12 @@
 import type { LucideIcon } from 'lucide-react';
-import { Dices, Heart, ListOrdered, Repeat, Repeat1, Shuffle, UsersRound } from 'lucide-react';
+import { Dices, Heart, ListOrdered, Repeat, Repeat1, Shuffle } from 'lucide-react';
 
 /** 房间播放顺序 */
-export type PlayMode = 'order' | 'shuffle' | 'user-round-robin' | 'favorite-shuffle' | 'loop-one' | 'loop-all' | 'shuffle-loop';
+export type PlayMode = 'order' | 'shuffle' | 'favorite-shuffle' | 'loop-one' | 'loop-all' | 'shuffle-loop';
 
 export const PLAY_MODE_ORDER: PlayMode[] = [
   'order',
   'shuffle',
-  'user-round-robin',
   'favorite-shuffle',
   'loop-one',
   'loop-all',
@@ -17,7 +16,6 @@ export const PLAY_MODE_ORDER: PlayMode[] = [
 export const PLAY_MODE_META: Record<PlayMode, { label: string; short: string; Icon: LucideIcon }> = {
   order: { label: '顺序播放', short: '顺序', Icon: ListOrdered },
   shuffle: { label: '随机播放', short: '随机', Icon: Shuffle },
-  'user-round-robin': { label: '按用户轮流播放', short: '用户轮播', Icon: UsersRound },
   'favorite-shuffle': { label: '随机播放收藏列表', short: '收藏随机', Icon: Heart },
   'loop-one': { label: '单曲循环', short: '单曲', Icon: Repeat1 },
   'loop-all': { label: '列表循环', short: '列表', Icon: Repeat },

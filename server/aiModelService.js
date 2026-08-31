@@ -390,7 +390,6 @@ export function getAiModelConfig(config = getRuntimeConfig()) {
     visionModel: normalizeAiModel(visionPool?.model, DEFAULT_AI_VISION_MODEL),
     maxRequestsPerMinute: rateLimits.maxRequestsPerMinute,
     maxTokensPerMinute: rateLimits.maxTokensPerMinute,
-    provider: config.aiProvider === 'maibot' ? 'maibot' : 'custom_model',
     enabled: Boolean(config.aiEnabled),
     botName: String(config.aiBotName || '小音').trim().slice(0, 20) || '小音',
   };
@@ -398,16 +397,12 @@ export function getAiModelConfig(config = getRuntimeConfig()) {
 
 export function isAiModelConfigured(config = getRuntimeConfig()) {
   const cfg = getAiModelConfig(config);
-  return cfg.provider === 'maibot'
-    ? Boolean(config.maiBotWsUrl)
-    : Boolean(cfg.apiKey && cfg.apiBaseUrl);
+  return Boolean(cfg.apiKey && cfg.apiBaseUrl);
 }
 
 export function isAiModelEnabled(config = getRuntimeConfig()) {
   const cfg = getAiModelConfig(config);
-  return cfg.enabled && (cfg.provider === 'maibot'
-    ? Boolean(config.maiBotWsUrl)
-    : Boolean(cfg.apiKey && cfg.apiBaseUrl));
+  return cfg.enabled && Boolean(cfg.apiKey && cfg.apiBaseUrl);
 }
 
 function toResponsesContent(content) {
@@ -1511,9 +1506,7 @@ export function isRoomAiEnabledForRoom(room, config = getRuntimeConfig()) {
 /** 进房 / 公开接口：不含密钥；传入 room 时合并房间级设置 */
 export function getPublicRoomAiConfig(config = getRuntimeConfig(), room = null) {
   const cfg = getAiModelConfig(config);
-  const globalEnabled = cfg.provider === 'maibot'
-    ? Boolean(cfg.enabled && config.maiBotWsUrl)
-    : Boolean(cfg.enabled && cfg.apiKey);
+  const globalEnabled = Boolean(cfg.enabled && cfg.apiKey);
   const roomEnabled = room?.roomAiEnabled !== false;
   const enabled = globalEnabled && roomEnabled;
   const botName = room ? resolveRoomAiBotName(room, config) : cfg.botName;

@@ -75,7 +75,6 @@ import {
   formatAuditAction,
   formatAuditTime,
   formatRelativeTime,
-  shouldAutoRefreshAdminTab,
   type AdminRoomStatusFilter,
 } from './admin/utils';
 import { SOFT_BLOCK_CODE_HELP } from '../lib/softBlock';
@@ -188,7 +187,6 @@ function AdminPage() {
   const [rooms, setRooms] = useState<AdminRoom[]>([]);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [protectingId, setProtectingId] = useState<string | null>(null);
-  const [transferringOwnerKey, setTransferringOwnerKey] = useState<string | null>(null);
   const [permanentReviewingId, setPermanentReviewingId] = useState<string | null>(null);
   const [rejectPermanentRoom, setRejectPermanentRoom] = useState<AdminRoom | null>(null);
   const [rejectPermanentReason, setRejectPermanentReason] = useState('');
@@ -348,16 +346,11 @@ function AdminPage() {
   }, []);
 
   useEffect(() => {
-    if (!shouldAutoRefreshAdminTab(loggedIn === true, activeTab)) return undefined;
-    // 重新进入看板时即使上一次请求尚未结束，也要排队执行一次最新加载。
-    void refresh({ force: true });
+    if (!loggedIn) return;
+    void refresh();
     const timer = setInterval(() => void refresh(), 10_000);
-    return () => {
-      clearInterval(timer);
-      // 使离开看板后才完成的请求结果失效，避免覆盖其他页面的数据状态。
-      refreshGenRef.current += 1;
-    };
-  }, [activeTab, loggedIn, refresh]);
+    return () => clearInterval(timer);
+  }, [loggedIn, refresh]);
 
   const loadAudit = useCallback(async (page: number, opts?: { q?: string; action?: string }) => {
     const q = opts?.q ?? auditKeywordApplied;
@@ -612,23 +605,6 @@ function AdminPage() {
       message.error(err instanceof Error ? err.message : '违规重置失败');
     } finally {
       setViolatingUserKey(null);
-    }
-  }, [message, refresh]);
-
-  const transferRoomOwner = useCallback(async (room: AdminRoom, userId: string, nickname: string) => {
-    const actionKey = `${room.id}:${userId}`;
-    setTransferringOwnerKey(actionKey);
-    try {
-      const res = await adminFetch<{ message: string }>(`/api/admin/rooms/${room.id}/owner`, {
-        method: 'POST',
-        body: JSON.stringify({ userId }),
-      });
-      message.success(res.message || `已将房主转让给「${nickname}」`);
-      await refresh({ force: true });
-    } catch (err) {
-      message.error(err instanceof Error ? err.message : '转让房主失败');
-    } finally {
-      setTransferringOwnerKey(null);
     }
   }, [message, refresh]);
 
@@ -1006,31 +982,13 @@ function AdminPage() {
 
   const renderRoomUserActions = useCallback((
     room: AdminRoom,
-    user: { id: string; userId?: string; nickname: string; clientIp?: string; deviceId?: string; readOnly?: boolean },
+    user: { id: string; userId?: string; nickname: string; clientIp?: string; deviceId?: string },
   ) => {
     const targetUserId = user.userId || user.id;
     const actionKey = `${room.id}:${targetUserId}`;
     const canRename = Boolean(targetUserId);
-    const canTransfer = canRename && !user.readOnly && targetUserId !== room.creatorId;
     return (
       <Space size={6} wrap>
-        {canTransfer && (
-          <Popconfirm
-            title="强制转让房主？"
-            description={`将「${user.nickname}」设为房主，原房主会降为管理员。`}
-            okText="确认转让"
-            cancelText="取消"
-            onConfirm={() => void transferRoomOwner(room, targetUserId, user.nickname)}
-          >
-            <Button
-              size="small"
-              type="primary"
-              loading={transferringOwnerKey === actionKey}
-            >
-              转让房主
-            </Button>
-          </Popconfirm>
-        )}
         <Button
           size="small"
           icon={<EditOutlined />}
@@ -1073,7 +1031,7 @@ function AdminPage() {
         </Button>
       </Space>
     );
-  }, [markUserViolation, openNicknameEditor, openQuickBan, transferRoomOwner, transferringOwnerKey, violatingUserKey]);
+  }, [markUserViolation, openNicknameEditor, openQuickBan, violatingUserKey]);
 
   const roomColumns: ColumnsType<AdminRoom> = [
     {

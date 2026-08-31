@@ -203,13 +203,7 @@ npm run dev
 3. 使用后台的文本 / 视觉连通性测试确认配置有效。
 4. 进入房间设置，开启房间 AI 并设置机器人名称；之后可在聊天中 `@机器人名称` 或使用命令菜单。
 
-AI 后端可以二选一：
-
-- **自定义模型**：使用 OpenAI 兼容接口，支持点歌、切歌、识图等 OpenMusic Agent 工具。
-- **MaiBot**：填写 MaiBot WebSocket 地址与对应的 Legacy Token 或 Additional API Key，默认仅转发文本对话；安装 OpenMusic MaiBot 插件并在后台开启工具后，可调用搜歌、点歌、切歌申请和表情工具。图片识图仍不经 MaiBot 执行。MaiBot 默认本机地址为 `ws://127.0.0.1:8000/ws`。
-
-MaiBot 工具插件源码位于独立仓库目录 `E:\python\openmusic-maibot-plugin`，包含 MaiBot 要求的 `_manifest.json`、`plugin.py`、`LICENSE` 和 `README.md`。将该目录推送为公开 GitHub 仓库后，可按 [MaiBot 插件提交说明](https://docs.mai-mai.org/plugin/submission) 向官方 `plugin-repo` 提交 Add Plugin Issue。
-
+API Key 仅用于服务端请求，运行配置会进行加密存储；AI 未启用或模型不可用时，房间基础功能仍可正常使用。
 
 ### 🛠️ 首页管理入口快捷方式
 
