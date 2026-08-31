@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { DEFAULT_MAIBOT_TOOLS, DEFAULT_ENABLED_MAIBOT_TOOLS } from './maiBotToolBridge.js';
 import path from 'path';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypto';
 import { fileURLToPath } from 'url';
@@ -18,6 +19,9 @@ const SECRET_FIELDS = new Set([
   'githubClientSecret',
   'roomCredentialEncryptionKey',
   'aiApiKey',
+  'maiBotAuthToken',
+  'maiBotApiKey',
+  'maiBotToolToken',
 ]);
 const QINIU_ZONES = new Set(['z0', 'z1', 'z2', 'na0', 'as0']);
 const ENC_PREFIX = 'enc:v1:';
@@ -115,7 +119,17 @@ function envDefaults() {
     seoAboutTitle: '',
     seoAboutText: '',
     // AI 模型服务（聊天室助手）
+    aiProvider: envText('AI_PROVIDER', 'custom_model').toLowerCase() === 'maibot' ? 'maibot' : 'custom_model',
     aiApiKey: envText('AI_API_KEY'),
+    maiBotWsUrl: envText('MAIBOT_WS_URL', 'ws://127.0.0.1:8000/ws'),
+    maiBotAuthMode: envText('MAIBOT_AUTH_MODE', 'token'),
+    maiBotAuthToken: envText('MAIBOT_AUTH_TOKEN'),
+    maiBotApiKey: envText('MAIBOT_API_KEY'),
+    maiBotPlatform: envText('MAIBOT_PLATFORM', 'openmusic'),
+    maiBotAccountId: envText('MAIBOT_ACCOUNT_ID', 'openmusic'),
+    maiBotToolsEnabled: false,
+    maiBotToolToken: '',
+    maiBotAllowedTools: [...DEFAULT_ENABLED_MAIBOT_TOOLS],
     aiApiBaseUrl: envText('AI_API_BASE_URL', envText('AI_API_URL', 'https://api.siliconflow.cn/v1')),
     aiApiProtocol: envText('AI_API_PROTOCOL', 'chat_completions'),
     aiEnabled: false,
@@ -334,7 +348,19 @@ function normalize(config) {
     seoHeroSubline: String(config.seoHeroSubline || '').trim().slice(0, 80),
     seoAboutTitle: String(config.seoAboutTitle || '').trim().slice(0, 80),
     seoAboutText: String(config.seoAboutText || '').trim().slice(0, 800),
+    aiProvider: config.aiProvider === 'maibot' ? 'maibot' : 'custom_model',
     aiApiKey: String(config.aiApiKey || '').trim(),
+    maiBotWsUrl: String(config.maiBotWsUrl || 'ws://127.0.0.1:8000/ws').trim(),
+    maiBotAuthMode: config.maiBotAuthMode === 'api_key' ? 'api_key' : 'token',
+    maiBotAuthToken: String(config.maiBotAuthToken || '').trim(),
+    maiBotApiKey: String(config.maiBotApiKey || '').trim(),
+    maiBotPlatform: String(config.maiBotPlatform || 'openmusic').trim().slice(0, 40) || 'openmusic',
+    maiBotAccountId: String(config.maiBotAccountId || 'openmusic').trim().slice(0, 80) || 'openmusic',
+    maiBotToolsEnabled: config.maiBotToolsEnabled === true,
+    maiBotToolToken: String(config.maiBotToolToken || '').trim(),
+    maiBotAllowedTools: Array.isArray(config.maiBotAllowedTools)
+      ? config.maiBotAllowedTools.filter((tool) => DEFAULT_MAIBOT_TOOLS.includes(tool)).slice(0, DEFAULT_MAIBOT_TOOLS.length)
+      : [...DEFAULT_ENABLED_MAIBOT_TOOLS],
     aiApiBaseUrl: normalizeAiApiBaseUrl(config.aiApiBaseUrl || config.aiApiUrl),
     aiApiProtocol: normalizeAiApiProtocol(config.aiApiProtocol),
     aiEnabled: config.aiEnabled === true
@@ -476,6 +502,14 @@ export function isGithubConfigured(config = getRuntimeConfig()) {
   return Boolean(config.githubClientId && config.githubClientSecret && config.githubRedirectUri);
 }
 
+function validateWebSocketUrl(value, label) {
+  try {
+    const parsed = new URL(String(value || ''));
+    if (!['ws:', 'wss:'].includes(parsed.protocol)) return `${label}必须是 ws/wss 地址`;
+    if (parsed.username || parsed.password) return `${label}不能包含用户名或密码`;
+  } catch { return `${label}必须是 ws/wss 地址`; }
+  return '';
+}
 function validateHttpUrl(value, label, { allowEmpty = false, allowList = false, allowPrivate = false } = {}) {
   const values = allowList ? String(value || '').split(',') : [String(value || '')];
   for (let raw of values) {
@@ -605,6 +639,7 @@ export function setRuntimeConfig(raw = {}) {
     validateHttpUrl(normalized.apihzBaseUrl, '接口盒子地址'),
     validateHttpUrl(normalized.seoCanonicalUrl, 'SEO 规范域名', { allowEmpty: true }),
     validateHttpUrl(normalized.aiApiBaseUrl, 'AI Base URL', { allowPrivate: true }),
+    normalized.aiProvider === 'maibot' ? validateWebSocketUrl(normalized.maiBotWsUrl, 'MaiBot WebSocket 地址') : '',
   ].filter(Boolean);
   if (urlChecks.length) return { success: false, error: urlChecks[0] };
 

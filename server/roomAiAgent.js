@@ -33,6 +33,8 @@ import {
   aiChatCompletions,
 } from './aiModelService.js';
 import { appendRoomAiTurn, getRoomAiContextMessages } from './roomAiContext.js';
+import { getRuntimeConfig } from './runtimeConfig.js';
+import { getMaiBotAdapter } from './maiBotAdapter.js';
 import {
   extractUserChatSignals,
   getAiUserRapport,
@@ -785,6 +787,40 @@ async function executeTool(name, args, ctx) {
   }
 }
 
+export async function executeMaiBotOpenMusicTool({
+  tool,
+  args = {},
+  roomId,
+  userId,
+  userNickname = '',
+  requestText = '',
+  emitChat,
+  emitSystem,
+  broadcastRoom,
+} = {}) {
+  const operation = String(tool || '').trim();
+  const actionEvidence = hasExplicitRoomActionEvidence(requestText, operation);
+  const intent = {
+    valid: true,
+    operation,
+    explicitAction: actionEvidence,
+    requiresConfirmation: !actionEvidence,
+    confidence: actionEvidence ? 1 : 0,
+    actionEvidence,
+  };
+  return executeTool(operation, args, {
+    roomId: String(roomId || '').trim(),
+    userId: String(userId || '').trim(),
+    userNickname: String(userNickname || '').trim(),
+    botName: getAiModelConfig().botName,
+    requestText: String(requestText || '').trim(),
+    intent,
+    emitChat,
+    emitSystem,
+    broadcastRoom,
+  });
+}
+
 function buildSystemPrompt(botName, snapshot, permissions, rapport, userProfile, timeContext) {
   return buildOpenMusicAiSystemPrompt({
     botName,
@@ -888,7 +924,7 @@ export async function handleRoomAiChat(params = {}) {
       userPrompt = `${userPrompt}\n\n[识图失败] ${vision.error || '无法识别图片'}`;
     }
   }
-  if (replyContext?.imageUrl && !replyContext.asSticker && replyContext.imageUrl !== imageUrl) {
+  if (cfg.provider !== 'maibot' && replyContext?.imageUrl && !replyContext.asSticker && replyContext.imageUrl !== imageUrl) {
     const vision = await describeImageWithVision(replyContext.imageUrl, [
       `用户正在回复这张图片，并说：“${requestText}”。`,
       '请识别图片中正在展示的单首歌曲，并严格按一行输出：歌曲：<歌名>｜歌手：<歌手>。',
@@ -910,6 +946,32 @@ export async function handleRoomAiChat(params = {}) {
     });
     if (posted.message && params.emitChat) params.emitChat(posted.message);
     return { handled: true, denied: true };
+  }
+  if (cfg.provider === 'maibot') {
+    try {
+      const reply = await getMaiBotAdapter(getRuntimeConfig()).sendMessage({
+        messageId: `${roomId}:${userId}:${Date.now()}`,
+        platform: getRuntimeConfig().maiBotPlatform,
+        accountId: getRuntimeConfig().maiBotAccountId,
+        roomId,
+        userId,
+        userNickname: params.userNickname,
+        text: requestText,
+      });
+      const safeReply = sanitizeAiUserFacingText(reply).slice(0, 500);
+      if (safeReply) {
+        const posted = postBotChatMessage(roomId, { text: safeReply, replyTo: triggerMessage });
+        if (posted.message && params.emitChat) params.emitChat(posted.message);
+        appendRoomAiTurn(roomId, userId, 'user', userPrompt);
+        appendRoomAiTurn(roomId, userId, 'assistant', safeReply);
+      }
+      return { handled: true, reply: safeReply || undefined };
+    } catch (err) {
+      console.warn('[room-ai/maibot]', err?.message || err);
+      const posted = postBotChatMessage(roomId, { text: 'MaiBot 暂时没有回应，请稍后再试。', replyTo: triggerMessage });
+      if (posted.message && params.emitChat) params.emitChat(posted.message);
+      return { handled: true, error: 'maibot_unavailable' };
+    }
   }
   const roomHistory = getRoomAiContextMessages(roomId, userId);
   const persistedSongCandidates = getAiSongCandidates(roomId, userId);

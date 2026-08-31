@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
+import { Checkbox } from 'antd';
 import {
   App,
   Button,
@@ -41,6 +42,10 @@ type RuntimeTextField = Exclude<
   | 'svipQualityEnabled'
   | 'sharedMembershipEnabled'
   | 'aiEnabled'
+  | 'aiProvider'
+  | 'maiBotAuthMode'
+  | 'maiBotToolsEnabled'
+  | 'maiBotAllowedTools'
   | 'aiApiProtocol'
   | 'aiMaxRequestsPerMinute'
   | 'aiMaxTokensPerMinute'
@@ -155,6 +160,12 @@ const RUNTIME_FIELD_GROUPS: RuntimeFieldGroup[] = [
     ),
     fields: [
       { key: 'aiBotName', label: '助手昵称', placeholder: '小音' },
+      { key: 'maiBotWsUrl', label: 'MaiBot WebSocket', placeholder: 'ws://127.0.0.1:8000/ws' },
+      { key: 'maiBotPlatform', label: 'MaiBot 平台名', placeholder: 'openmusic' },
+      { key: 'maiBotAccountId', label: 'MaiBot 账号 ID', placeholder: 'openmusic' },
+      { key: 'maiBotAuthToken', label: 'MaiBot Token', secret: true },
+      { key: 'maiBotApiKey', label: 'MaiBot API Key', secret: true },
+      { key: 'maiBotToolToken', label: 'OpenMusic 工具 Token', secret: true },
     ],
   },
   {
@@ -325,6 +336,10 @@ export default function RuntimeConfigPanel({
       svipQualityEnabled: Boolean(config.svipQualityEnabled),
       sharedMembershipEnabled: config.sharedMembershipEnabled !== false,
       aiEnabled: Boolean(config.aiEnabled),
+      aiProvider: config.aiProvider === 'maibot' ? 'maibot' : 'custom_model',
+      maiBotAuthMode: config.maiBotAuthMode === 'api_key' ? 'api_key' : 'token',
+      maiBotToolsEnabled: config.maiBotToolsEnabled === true,
+      maiBotAllowedTools: Array.isArray(config.maiBotAllowedTools) ? config.maiBotAllowedTools : [],
       aiApiBaseUrl: config.aiApiBaseUrl || 'https://api.siliconflow.cn/v1',
       aiApiProtocol: config.aiApiProtocol || 'chat_completions',
       aiBotName: config.aiBotName || '小音',
@@ -406,20 +421,12 @@ export default function RuntimeConfigPanel({
     };
   }, [onError]);
 
-  useEffect(() => {
-    if (!draft) return undefined;
-    const timer = window.setInterval(() => {
-      void loadMusicApiStatus();
-    }, 10_000);
-    return () => window.clearInterval(timer);
-  }, [Boolean(draft)]);
-
   const save = async () => {
     if (!draft || saving) return;
-    const invalidModelIndex = draft.aiModelPools.findIndex((pool) => {
+    const invalidModelIndex = draft.aiProvider === 'custom_model' ? draft.aiModelPools.findIndex((pool) => {
       const model = pool.model.trim();
       return !model || /\s/.test(model);
-    });
+    }) : -1;
     if (invalidModelIndex >= 0) {
       const model = draft.aiModelPools[invalidModelIndex].model;
       onError(model.trim()
@@ -1333,9 +1340,57 @@ export default function RuntimeConfigPanel({
     }
   };
 
+  const runMaiBotTest = async () => {
+    if (aiTestLoading) return;
+    setAiTestLoading(true);
+    setAiTestingPoolId('maibot');
+    setAiTestResult({ success: undefined, rawResponse: '' });
+    try {
+      const payload: Record<string, string> = {
+        provider: 'maibot',
+        message: '你好',
+        wsUrl: draft.maiBotWsUrl,
+        authMode: draft.maiBotAuthMode,
+        platform: draft.maiBotPlatform,
+        accountId: draft.maiBotAccountId,
+      };
+      if (draft.maiBotAuthMode === 'token' && String(draft.maiBotAuthToken || '').trim()) payload.authToken = draft.maiBotAuthToken.trim();
+      if (draft.maiBotAuthMode === 'api_key' && String(draft.maiBotApiKey || '').trim()) payload.apiKey = draft.maiBotApiKey.trim();
+      const response = await fetch('/api/admin/ai/test', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json().catch(() => ({ success: false, error: `请求失败（${response.status}）` }));
+      setAiTestResult(result);
+      if (result.success) message.success('MaiBot 测试成功');
+      else onError(result.error || 'MaiBot 测试失败');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'MaiBot 测试失败';
+      setAiTestResult({ success: false, error: msg });
+      onError(msg);
+    } finally {
+      setAiTestLoading(false);
+      setAiTestingPoolId('');
+    }
+  };
+
+  const maiBotToolOptions = [
+    { label: '查询房间状态', value: 'get_room_status' },
+    { label: '查询我的权限', value: 'get_my_permissions' },
+    { label: '搜索歌曲', value: 'search_songs' },
+    { label: '点歌', value: 'request_song' },
+    { label: '歌曲推荐', value: 'recommend_songs' },
+    { label: '申请切歌', value: 'request_skip_song' },
+    { label: '直接切歌（仅房主/管理员）', value: 'skip_song' },
+    { label: '发送表情包', value: 'send_sticker' },
+    { label: '发送 QQ 表情', value: 'send_emoji' },
+  ];
+
   const aiModelSection = (
     <>
-      <SettingsSection title="聊天室 AI" description={`开启后可用「@${draft.aiBotName || '小音'}」「/${draft.aiBotName || '小音'}」唤醒；图片识图走视觉模型。改完后点下方保存。`}>
+      <SettingsSection title="聊天室 AI" description={`开启后可用「@${draft.aiBotName || '小音'}」「/${draft.aiBotName || '小音'}」唤醒。MaiBot 模式可选择仅文本对话，或由 MaiBot 插件调用 OpenMusic 工具。改完后点下方保存。`}>
         <Switch
           checked={Boolean(draft.aiEnabled)}
           checkedChildren="已启用"
@@ -1344,8 +1399,50 @@ export default function RuntimeConfigPanel({
           aria-label="启用聊天室 AI"
         />
       </SettingsSection>
-      {fieldGroup('aiModel')}
-      <SettingsSection title="模型池" description="文本与识图分别调度；同优先级模型按当前并发负载均衡。">
+      <SettingsSection title="AI 后端" description="选择一种房间 AI 后端；MaiBot 使用 WebSocket 连接，Token/API Key 仅保存在服务端。">
+        <Row gutter={[12, 12]}>
+          {renderField({ key: 'aiBotName', label: '助手昵称', placeholder: '小音' })}
+          <Col xs={24} sm={12}>
+            <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>AI 后端</Typography.Text>
+            <Select value={draft.aiProvider} style={{ width: '100%' }} options={[{ value: 'custom_model', label: '自定义模型（支持点歌工具）' }, { value: 'maibot', label: 'MaiBot（文本对话）' }]} onChange={(aiProvider) => setDraft({ ...draft, aiProvider })} />
+          </Col>
+          {draft.aiProvider === 'maibot' && (
+            <>
+              <Col xs={24} sm={12}>
+                <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>认证方式</Typography.Text>
+                <Select value={draft.maiBotAuthMode} style={{ width: '100%' }} options={[{ value: 'token', label: 'Legacy Token' }, { value: 'api_key', label: 'Additional API Key' }]} onChange={(maiBotAuthMode) => setDraft({ ...draft, maiBotAuthMode })} />
+              </Col>
+              {renderField({ key: 'maiBotWsUrl', label: 'MaiBot WebSocket', placeholder: 'ws://127.0.0.1:8000/ws' })}
+              {renderField({ key: 'maiBotPlatform', label: 'MaiBot 平台名', placeholder: 'openmusic' })}
+              {renderField({ key: 'maiBotAccountId', label: 'MaiBot 账号 ID', placeholder: 'openmusic' })}
+              {draft.maiBotAuthMode === 'token'
+                ? renderField({ key: 'maiBotAuthToken', label: 'MaiBot Token', secret: true })
+                : renderField({ key: 'maiBotApiKey', label: 'MaiBot API Key', secret: true })}
+              <Col span={24}>
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  MaiBot 默认仅文本聊天；开启 OpenMusic 工具后，可由 MaiBot 插件调用搜歌、点歌、切歌申请和表情能力。图片识图仍不经 MaiBot 执行。推荐本机默认地址：ws://127.0.0.1:8000/ws。
+                </Typography.Text>
+              </Col>
+              <Col span={24}>
+                <Button loading={aiTestLoading && aiTestingPoolId === 'maibot'} onClick={() => void runMaiBotTest()}>测试 MaiBot</Button>
+              </Col>
+              <Col span={24}>
+                <Space orientation="vertical" size="small" style={{ width: '100%' }}>
+                  <Switch checked={draft.maiBotToolsEnabled} checkedChildren="允许 OpenMusic 工具" unCheckedChildren="仅文本对话" onChange={(maiBotToolsEnabled) => setDraft({ ...draft, maiBotToolsEnabled })} />
+                  {draft.maiBotToolsEnabled && (
+                    <>
+                      {renderField({ key: 'maiBotToolToken', label: 'OpenMusic 工具 Token', secret: true })}
+                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>MaiBot 插件调用 OpenMusic 时使用此 Token；工具仍会由 OpenMusic 服务端重新校验房间和用户权限。</Typography.Text>
+                      <Checkbox.Group options={maiBotToolOptions} value={draft.maiBotAllowedTools} onChange={(maiBotAllowedTools) => setDraft({ ...draft, maiBotAllowedTools: maiBotAllowedTools as string[] })} />
+                    </>
+                  )}
+                </Space>
+              </Col>
+            </>
+          )}
+        </Row>
+      </SettingsSection>
+      {draft.aiProvider === 'custom_model' && <SettingsSection title="模型池" description="文本与识图分别调度；同优先级模型按当前并发负载均衡。">
         <Space orientation="vertical" style={{ width: '100%' }} size="middle">
           {draft.aiModelPools.map((pool, index) => (
             <Card
@@ -1379,7 +1476,7 @@ export default function RuntimeConfigPanel({
           ))}
           <Button type="dashed" icon={<PlusOutlined />} disabled={draft.aiModelPools.length >= 20} onClick={() => setDraft({ ...draft, aiModelPools: [...draft.aiModelPools, createAiModelPool()] })}>添加模型</Button>
         </Space>
-      </SettingsSection>
+      </SettingsSection>}
       {aiTestResult && (
         <SettingsSection title="测试结果">
           {aiTestResult.success !== true && (

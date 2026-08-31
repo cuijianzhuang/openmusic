@@ -118,6 +118,17 @@ export interface RuntimeConfig {
   apihzBaseUrl: string;
   apihzId: string;
   apihzKey: string;
+  /** AI provider：自定义模型或 MaiBot */
+  aiProvider: 'custom_model' | 'maibot';
+  maiBotWsUrl: string;
+  maiBotAuthMode: 'token' | 'api_key';
+  maiBotAuthToken: string;
+  maiBotApiKey: string;
+  maiBotPlatform: string;
+  maiBotAccountId: string;
+  maiBotToolsEnabled: boolean;
+  maiBotToolToken: string;
+  maiBotAllowedTools: string[];
   /** 硅基流动 API Key（密钥字段，回显掩码） */
   aiApiKey: string;
   /** AI 服务 Base URL，例如 https://api.siliconflow.cn/v1 */
@@ -303,7 +314,7 @@ export interface AdminRoom {
   id: string;
   name: string;
   userCount: number;
-  users: { id: string; nickname: string; clientIp?: string; deviceId?: string }[];
+  users: { id: string; nickname: string; clientIp?: string; deviceId?: string; readOnly?: boolean }[];
   hasPassword: boolean;
   isLocked: boolean;
   isPlaying: boolean;

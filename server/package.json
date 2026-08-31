@@ -17,11 +17,12 @@
     "qiniu": "^7.15.2",
     "qrcode": "^1.5.4",
     "redis": "^6.0.0",
-    "socket.io": "^4.8.1"
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.3",
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "eslint": "^10.8.1",
-    "globals": "^17.11.0",
-    "socket.io-client": "^4.8.3"
+    "globals": "^17.11.0"
   }
 }

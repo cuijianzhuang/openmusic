@@ -1,4 +1,8 @@
-import type { AdminAuditEntry, AdminRoom } from './types';
+import type { AdminAuditEntry, AdminRoom, AdminTabId } from './types';
+
+export function shouldAutoRefreshAdminTab(loggedIn: boolean, activeTab: AdminTabId): boolean {
+  return loggedIn && activeTab === 'overview';
+}
 
 export async function adminFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(path, {

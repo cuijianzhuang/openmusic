@@ -157,7 +157,7 @@ export const GUIDE_STEPS: GuideStep[] = [
     id: 'room-player',
     scope: 'room',
     title: '底部播放器',
-    body: '展开：点封面或歌词，打开大播放器\n播控：房主/管理可播放、暂停和切歌；普通成员可申请切歌\n播放模式：循环、随机等；音量只影响本机\n收藏：点心形收藏，可在「我的收藏」再次点播',
+    body: '展开：点封面或歌词，打开大播放器\n播控：房主/管理可播放、暂停和切歌；普通成员可申请切歌\n播放模式：顺序播放（按队列顺序）；随机播放（随机抽取待播歌曲）；按用户轮流播放（每轮尽量让每位点歌用户播放一首，在线用户优先）；随机播放收藏列表（从当前用户收藏中随机点播）；单曲循环（自然播放结束后重播当前歌曲，手动切歌仍会前进）；列表循环（播放后回收到队尾）；列表内随机（随机播放并循环队列，避免立即重复）；音量只影响本机\n收藏：点心形收藏，可在「我的收藏」再次点播',
     side: 'top',
   },
   {
@@ -455,3 +455,5 @@ export function subscribeGuideFeatureUsed(handler: (id: GuideFeatureId) => void)
   window.addEventListener(GUIDE_EVENT, onEvent);
   return () => window.removeEventListener(GUIDE_EVENT, onEvent);
 }
+
+// AI 后端与 MaiBot 工具均在管理后台的运行配置中维护。

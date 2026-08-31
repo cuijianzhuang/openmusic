@@ -74,6 +74,7 @@ test('播放模式使用固定六种顺序，未知值降级为顺序播放', ()
   assert.deepEqual(PLAY_MODES, [
     'order',
     'shuffle',
+    'user-round-robin',
     'favorite-shuffle',
     'loop-one',
     'loop-all',

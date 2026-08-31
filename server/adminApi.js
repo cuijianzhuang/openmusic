@@ -4,6 +4,7 @@ import {
   listRoomsForAdminDetailed,
   getRoomPasswordForAdmin,
   adminDestroyRoom,
+  adminTransferOwner,
   adminRenameRoomUser,
   adminResetRoomUserNickname,
   isRedisEnabled,
@@ -51,6 +52,9 @@ import {
 import { sanitizeDeviceId } from './deviceIdentity.js';
 import { getRuntimeConfigForAdmin, setRuntimeConfig, getRuntimeConfig } from './runtimeConfig.js';
 import { testAiModelChat, testAiModelVision, getAiModelConfig, isAiModelConfigured } from './aiModelService.js';
+import { MaiBotAdapter } from './maiBotAdapter.js';
+import { isMaiBotToolAllowed, normalizeMaiBotToolCall } from './maiBotToolBridge.js';
+import { executeMaiBotOpenMusicTool } from './roomAiAgent.js';
 import { patchClientIndexHtml } from './seoIndexHtml.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -293,6 +297,7 @@ const AUDIT_ACTION_GROUPS = {
     'review_permanent_application',
     'destroy_room',
     'destroy_room_fail',
+    'admin_transfer_owner',
     'owner_destroy_room',
     'owner_destroy_room_denied',
   ],
@@ -933,11 +938,51 @@ export function mountAdminApi(app, {
     res.json({ config: getRuntimeConfigForAdmin() });
   });
 
+  app.post('/api/maibot/tools/call', async (req, res) => {
+    const config = getRuntimeConfig();
+    const expected = String(config.maiBotToolToken || '');
+    const authorization = String(req.headers.authorization || '');
+    const provided = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
+    if (!config.maiBotToolsEnabled || !expected || !provided) {
+      return res.status(401).json({ success: false, error: 'MaiBot 工具接口未启用或认证失败' });
+    }
+    const expectedBuffer = Buffer.from(expected);
+    const providedBuffer = Buffer.from(provided);
+    if (expectedBuffer.length !== providedBuffer.length || !timingSafeEqual(expectedBuffer, providedBuffer)) {
+      return res.status(401).json({ success: false, error: 'MaiBot 工具接口未启用或认证失败' });
+    }
+    const call = normalizeMaiBotToolCall(req.body || {});
+    if (!isMaiBotToolAllowed(call.tool, config.maiBotAllowedTools)) {
+      return res.status(403).json({ success: false, error: '该 MaiBot 工具未被 OpenMusic 管理后台允许' });
+    }
+    if (!call.context.roomId || !call.context.userId) {
+      return res.status(400).json({ success: false, error: '缺少房间或用户上下文' });
+    }
+    try {
+      const result = await executeMaiBotOpenMusicTool({
+        tool: call.tool,
+        args: call.arguments,
+        roomId: call.context.roomId,
+        userId: call.context.userId,
+        userNickname: call.context.userNickname,
+        requestText: call.context.requestText,
+        emitChat: (message) => io.to(call.context.roomId).emit('chat_message', message),
+        emitSystem: (message) => io.to(call.context.roomId).emit('chat_message', message),
+        broadcastRoom: () => broadcastRoomUpdate?.(call.context.roomId, { immediate: true }),
+      });
+      res.json(result);
+    } catch (error) {
+      console.warn('[maibot/tool]', error?.message || error);
+      res.status(500).json({ success: false, error: 'OpenMusic 工具执行失败' });
+    }
+  });
+
   app.get('/api/admin/ai/status', requireAdmin, (_req, res) => {
     const cfg = getAiModelConfig();
     res.json({
       configured: isAiModelConfigured(),
       enabled: cfg.enabled,
+      provider: cfg.provider,
       botName: cfg.botName,
       textModel: cfg.textModel,
       visionModel: cfg.visionModel,
@@ -947,6 +992,40 @@ export function mountAdminApi(app, {
   app.post('/api/admin/ai/test', requireAdminOrigin, requireAdmin, requireAdminSetupComplete, async (req, res) => {
     const ip = getClientIp?.(req) || req.ip || '';
     const message = String(req.body?.message || '你好').trim().slice(0, 500) || '你好';
+    if (req.body?.provider === 'maibot') {
+      const savedConfig = getRuntimeConfig();
+      const wsUrl = String(req.body?.wsUrl || savedConfig.maiBotWsUrl || '').trim();
+      const authMode = req.body?.authMode === 'api_key' ? 'api_key' : 'token';
+      const authToken = String(req.body?.authToken || savedConfig.maiBotAuthToken || '');
+      const apiKey = String(req.body?.apiKey || savedConfig.maiBotApiKey || '');
+      const platform = String(req.body?.platform || savedConfig.maiBotPlatform || 'openmusic').trim().slice(0, 40) || 'openmusic';
+      const accountId = String(req.body?.accountId || savedConfig.maiBotAccountId || 'openmusic').trim().slice(0, 80) || 'openmusic';
+      if (!/^wss?:\/\//i.test(wsUrl)) {
+        return res.status(400).json({ success: false, error: 'MaiBot WebSocket 地址必须以 ws:// 或 wss:// 开头' });
+      }
+      const startedAt = Date.now();
+      const adapter = new MaiBotAdapter({ wsUrl, authMode, authToken, apiKey });
+      try {
+        const reply = await adapter.sendMessage({
+          messageId: `admin-test-${randomUUID()}`,
+          platform,
+          accountId,
+          roomId: `admin-ai-test-${Date.now()}`,
+          userId: 'admin-test',
+          userNickname: '管理员测试',
+          text: message,
+        });
+        const result = { success: true, reply, model: 'MaiBot', latencyMs: Date.now() - startedAt };
+        audit('ai_test', { success: true, model: result.model, latencyMs: result.latencyMs }, ip);
+        adapter.close();
+        return res.json(result);
+      } catch (error) {
+        const result = { success: false, model: 'MaiBot', latencyMs: Date.now() - startedAt, error: error?.message || 'MaiBot 测试失败' };
+        audit('ai_test', { success: false, model: result.model, latencyMs: result.latencyMs, error: result.error }, ip);
+        adapter.close();
+        return res.status(400).json(result);
+      }
+    }
     // 允许测试未保存的草稿配置（不落盘）
     const draftKey = String(req.body?.apiKey || '').trim();
     const draftModel = String(req.body?.model || '').trim();
@@ -1079,6 +1158,27 @@ export function mountAdminApi(app, {
 
   app.get('/api/admin/rooms', requireAdmin, async (_req, res) => {
     res.json({ rooms: await listRoomsForAdminDetailed() });
+  });
+
+  app.post('/api/admin/rooms/:id/owner', requireAdminOrigin, requireAdmin, requireAdminSetupComplete, (req, res) => {
+    const roomId = String(req.params.id || '').toUpperCase();
+    const targetUserId = String(req.body?.userId || '').trim();
+    const ip = getClientIp?.(req) || req.ip || '';
+    const result = adminTransferOwner(roomId, targetUserId);
+    if (result.error) {
+      const status = result.error === '房间不存在' || result.error === '用户不在房间中' ? 404 : 400;
+      audit('admin_transfer_owner', { roomId, targetUserId, error: result.error }, ip);
+      return res.status(status).json({ error: result.error });
+    }
+    if (typeof broadcastRoomUpdate === 'function') broadcastRoomUpdate(roomId, { immediate: true });
+    if (result.systemMessage) io.to(roomId).emit('chat_message', result.systemMessage);
+    audit('admin_transfer_owner', {
+      roomId,
+      targetUserId,
+      targetNickname: result.room?.users?.find?.((user) => user.id === targetUserId)?.nickname || '',
+      previousOwnerNickname: result.previousOwnerNickname || '',
+    }, ip);
+    res.json({ success: true, room: result.room, message: result.message });
   });
 
   // 按需查看房间明文密码：列表不下发，每次查看写审计
