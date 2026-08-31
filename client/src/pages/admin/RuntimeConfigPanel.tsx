@@ -406,14 +406,6 @@ export default function RuntimeConfigPanel({
     };
   }, [onError]);
 
-  useEffect(() => {
-    if (!draft) return undefined;
-    const timer = window.setInterval(() => {
-      void loadMusicApiStatus();
-    }, 10_000);
-    return () => window.clearInterval(timer);
-  }, [Boolean(draft)]);
-
   const save = async () => {
     if (!draft || saving) return;
     const invalidModelIndex = draft.aiModelPools.findIndex((pool) => {
