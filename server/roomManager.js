@@ -43,6 +43,7 @@ import {
   reviewPermanentApplication,
   toPublicPermanentApplication,
 } from "./permanentApplication.js";
+import { buildUserRoundRobinOrder } from "./playbackOrder.js";
 
 const generateRoomId = customAlphabet("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", 6);
 const generateId = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 12);
@@ -225,7 +226,7 @@ const MAX_RANDOM_PREFETCH_ATTEMPTS = 20;
 const MIN_REPORTABLE_DURATION_MS = 1000;
 
 /** 播放顺序：顺序 / 乱序 / 收藏随机 / 单曲循环 / 列表循环 / 列表内随机 */
-export const PLAY_MODES = ["order", "shuffle", "favorite-shuffle", "loop-one", "loop-all", "shuffle-loop"];
+export const PLAY_MODES = ["order", "shuffle", "user-round-robin", "favorite-shuffle", "loop-one", "loop-all", "shuffle-loop"];
 export const DEFAULT_PLAY_MODE = "order";
 
 export function normalizePlayMode(value) {
@@ -636,6 +637,8 @@ function snapshotRoomForStorage(room) {
     musicAccounts: normalizeMusicAccounts(room.musicAccounts),
     musicAccountSecrets: normalizeMusicAccountSecrets(room.musicAccountSecrets),
     playMode: normalizePlayMode(room.playMode),
+    lastPlaybackRequesterId: room.lastPlaybackRequesterId || null,
+    playbackRequesterOrder: Array.isArray(room.playbackRequesterOrder) ? room.playbackRequesterOrder : [],
     favoriteShuffleUserId: room.favoriteShuffleUserId || null,
     announcementEnabled: Boolean(room.announcementEnabled),
     announcementText: String(room.announcementText || "").slice(0, MAX_ANNOUNCEMENT_LENGTH),
@@ -714,6 +717,8 @@ function restoreRoomFromStorage(data) {
   room.musicAccounts = normalizeMusicAccounts(data.musicAccounts);
   room.musicAccountSecrets = normalizeMusicAccountSecrets(data.musicAccountSecrets);
   room.playMode = normalizePlayMode(data.playMode);
+  room.lastPlaybackRequesterId = String(data.lastPlaybackRequesterId || "").trim() || null;
+  room.playbackRequesterOrder = Array.isArray(data.playbackRequesterOrder) ? data.playbackRequesterOrder.map(String) : [];
   room.favoriteShuffleUserId = String(data.favoriteShuffleUserId || "").trim() || null;
   room.announcementEnabled = Boolean(data.announcementEnabled);
   room.announcementText = String(data.announcementText || "").slice(0, MAX_ANNOUNCEMENT_LENGTH);
@@ -1107,6 +1112,9 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
     /** 房间私有音源凭证（不广播；仅开启共享时同步到 Meting 池） */
     musicAccountSecrets: { netease: null, tencent: null, qishui: null },
     playMode: DEFAULT_PLAY_MODE,
+    /** 用户轮转模式上一次实际播放的用户，用于保证跨轮次公平 */
+    lastPlaybackRequesterId: null,
+    playbackRequesterOrder: [],
     /** 收藏随机模式使用的收藏列表所属用户；不向客户端广播 */
     favoriteShuffleUserId: null,
     /** 列表内随机：上一首回收进队列的 queueId，避免立刻抽到自己 */
@@ -2900,6 +2908,10 @@ export function setRoomPlayMode(roomId, actorId, mode, connectionId = null) {
   const nextMode = normalizePlayMode(mode);
   const sameMode = normalizePlayMode(room.playMode) === nextMode;
   room.playMode = nextMode;
+  if (room.playMode !== "user-round-robin") {
+    room.lastPlaybackRequesterId = null;
+    room.playbackRequesterOrder = [];
+  }
   room.favoriteShuffleUserId = nextMode === "favorite-shuffle" ? String(actorId || "").trim() || null : null;
   if (sameMode && nextMode !== "favorite-shuffle") {
     return { room: serializeRoom(room) };
@@ -3717,6 +3729,7 @@ export function transferOwner(roomId, actorId, targetUserId, connectionId = null
   };
 }
 
+
 export function removeUser(roomId, userId, connectionId = null) {
   const room = rooms.get(roomId);
   if (!room) return null;
@@ -4265,6 +4278,43 @@ function restartCurrentSong(room) {
 function takeNextFromQueue(room) {
   if (!room.queue.length) return null;
   const mode = normalizePlayMode(room.playMode);
+  if (mode === "user-round-robin") {
+    // 房主/管理员置顶是明确的人工指令，仍高于用户轮转和在线状态。
+    const pinnedIndex = room.queue.findIndex((item) => Number(item.ownerPriority || 0) > 0);
+    if (pinnedIndex >= 0) {
+      return room.queue.splice(pinnedIndex, 1)[0] || null;
+    }
+
+    const queuedUserIds = [];
+    const seen = new Set();
+    for (const item of room.queue) {
+      const userId = String(item.requestedById || "").trim();
+      if (!userId || seen.has(userId)) continue;
+      seen.add(userId);
+      queuedUserIds.push(userId);
+    }
+    if (!queuedUserIds.length) return null;
+    room.playbackRequesterOrder = [
+      ...room.playbackRequesterOrder,
+      ...queuedUserIds.filter((userId) => !room.playbackRequesterOrder.includes(userId)),
+    ];
+    const onlineUserIds = queuedUserIds.filter((userId) => room.users.has(userId));
+    // 仍有人在线时只消费在线用户的歌曲；所有点歌用户都离开后才回退消费离房用户的歌曲。
+    const eligibleUserIds = onlineUserIds.length ? onlineUserIds : queuedUserIds;
+    const orderedUsers = room.playbackRequesterOrder.filter((userId) => eligibleUserIds.includes(userId));
+    const allOrder = room.playbackRequesterOrder;
+    const previousIndex = allOrder.indexOf(room.lastPlaybackRequesterId);
+    const rotatedAll = previousIndex >= 0 && allOrder.length > 1
+      ? [...allOrder.slice(previousIndex + 1), ...allOrder.slice(0, previousIndex + 1)]
+      : allOrder;
+    const rotated = rotatedAll.filter((userId) => eligibleUserIds.includes(userId));
+    const next = buildUserRoundRobinOrder(room.queue.filter((item) => eligibleUserIds.includes(item.requestedById)), { userOrder: rotated.length ? rotated : orderedUsers })[0];
+    if (!next) return null;
+    const index = room.queue.findIndex((item) => item.queueId === next.queueId);
+    if (index >= 0) room.queue.splice(index, 1);
+    room.lastPlaybackRequesterId = String(next.requestedById || "").trim() || null;
+    return next;
+  }
   if (mode === "shuffle" || mode === "shuffle-loop") {
     // 列表内随机：刚回收的那首排除在外，否则两首以上时会原地重播
     const excludeId = mode === "shuffle-loop" ? room.lastRecycledQueueId : null;
@@ -5749,6 +5799,7 @@ function serializeRoom(room, options = {}) {
     fmModeBeforeOff: normalizeFmMode(room.fmModeBeforeOff),
     musicAccounts: normalizeMusicAccounts(room.musicAccounts),
     playMode: normalizePlayMode(room.playMode),
+    lastPlaybackRequesterId: room.lastPlaybackRequesterId || null,
     announcementEnabled: Boolean(room.announcementEnabled),
     announcementText: String(room.announcementText || "").slice(0, MAX_ANNOUNCEMENT_LENGTH),
     customCoverUrl: normalizeCustomCoverUrl(room.customCoverUrl) || undefined,
@@ -5824,6 +5875,7 @@ export function prepareRoomBroadcast(roomId) {
     fmModeBeforeOff: normalizeFmMode(room.fmModeBeforeOff),
     musicAccounts: normalizeMusicAccounts(room.musicAccounts),
     playMode: normalizePlayMode(room.playMode),
+    lastPlaybackRequesterId: room.lastPlaybackRequesterId || null,
     announcementEnabled: Boolean(room.announcementEnabled),
     announcementText: String(room.announcementText || "").slice(0, MAX_ANNOUNCEMENT_LENGTH),
     customCoverUrl: normalizeCustomCoverUrl(room.customCoverUrl) || undefined,

@@ -75,6 +75,7 @@ import {
   formatAuditAction,
   formatAuditTime,
   formatRelativeTime,
+  shouldAutoRefreshAdminTab,
   type AdminRoomStatusFilter,
 } from './admin/utils';
 import { SOFT_BLOCK_CODE_HELP } from '../lib/softBlock';
@@ -346,11 +347,16 @@ function AdminPage() {
   }, []);
 
   useEffect(() => {
-    if (!loggedIn) return;
-    void refresh();
+    if (!shouldAutoRefreshAdminTab(loggedIn === true, activeTab)) return undefined;
+    // 重新进入看板时即使上一次请求尚未结束，也要排队执行一次最新加载。
+    void refresh({ force: true });
     const timer = setInterval(() => void refresh(), 10_000);
-    return () => clearInterval(timer);
-  }, [loggedIn, refresh]);
+    return () => {
+      clearInterval(timer);
+      // 使离开看板后才完成的请求结果失效，避免覆盖其他页面的数据状态。
+      refreshGenRef.current += 1;
+    };
+  }, [activeTab, loggedIn, refresh]);
 
   const loadAudit = useCallback(async (page: number, opts?: { q?: string; action?: string }) => {
     const q = opts?.q ?? auditKeywordApplied;

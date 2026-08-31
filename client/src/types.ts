@@ -258,7 +258,7 @@ export interface RoomState {
   /** 房间播放音质（网易 / QQ） */
   audioQuality?: RoomAudioQuality;
   /** 播放顺序：顺序 / 随机 / 收藏随机 / 单曲循环 / 列表循环 / 列表内随机 */
-  playMode?: 'order' | 'shuffle' | 'favorite-shuffle' | 'loop-one' | 'loop-all' | 'shuffle-loop';
+  playMode?: 'order' | 'shuffle' | 'user-round-robin' | 'favorite-shuffle' | 'loop-one' | 'loop-all' | 'shuffle-loop';
   /** 队列为空时私人漫游推荐模式 */
   neteaseFmMode?: string;
   /** 私人漫游使用的推荐平台 */
