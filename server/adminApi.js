@@ -4,6 +4,7 @@ import {
   listRoomsForAdminDetailed,
   getRoomPasswordForAdmin,
   adminDestroyRoom,
+  adminTransferOwner,
   adminRenameRoomUser,
   adminResetRoomUserNickname,
   isRedisEnabled,
@@ -1079,6 +1080,27 @@ export function mountAdminApi(app, {
 
   app.get('/api/admin/rooms', requireAdmin, async (_req, res) => {
     res.json({ rooms: await listRoomsForAdminDetailed() });
+  });
+
+  app.post('/api/admin/rooms/:id/owner', requireAdminOrigin, requireAdmin, requireAdminSetupComplete, (req, res) => {
+    const roomId = String(req.params.id || '').toUpperCase();
+    const targetUserId = String(req.body?.userId || '').trim();
+    const ip = getClientIp?.(req) || req.ip || '';
+    const result = adminTransferOwner(roomId, targetUserId);
+    if (result.error) {
+      const status = result.error === '房间不存在' || result.error === '用户不在房间中' ? 404 : 400;
+      audit('admin_transfer_owner', { roomId, targetUserId, error: result.error }, ip);
+      return res.status(status).json({ error: result.error });
+    }
+    if (typeof broadcastRoomUpdate === 'function') broadcastRoomUpdate(roomId, { immediate: true });
+    if (result.systemMessage) io.to(roomId).emit('chat_message', result.systemMessage);
+    audit('admin_transfer_owner', {
+      roomId,
+      targetUserId,
+      targetNickname: result.room?.users?.find?.((user) => user.id === targetUserId)?.nickname || '',
+      previousOwnerNickname: result.previousOwnerNickname || '',
+    }, ip);
+    res.json({ success: true, room: result.room, message: result.message });
   });
 
   // 按需查看房间明文密码：列表不下发，每次查看写审计

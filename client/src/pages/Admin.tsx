@@ -188,6 +188,7 @@ function AdminPage() {
   const [rooms, setRooms] = useState<AdminRoom[]>([]);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [protectingId, setProtectingId] = useState<string | null>(null);
+  const [transferringOwnerKey, setTransferringOwnerKey] = useState<string | null>(null);
   const [permanentReviewingId, setPermanentReviewingId] = useState<string | null>(null);
   const [rejectPermanentRoom, setRejectPermanentRoom] = useState<AdminRoom | null>(null);
   const [rejectPermanentReason, setRejectPermanentReason] = useState('');
@@ -614,6 +615,23 @@ function AdminPage() {
     }
   }, [message, refresh]);
 
+  const transferRoomOwner = useCallback(async (room: AdminRoom, userId: string, nickname: string) => {
+    const actionKey = `${room.id}:${userId}`;
+    setTransferringOwnerKey(actionKey);
+    try {
+      const res = await adminFetch<{ message: string }>(`/api/admin/rooms/${room.id}/owner`, {
+        method: 'POST',
+        body: JSON.stringify({ userId }),
+      });
+      message.success(res.message || `已将房主转让给「${nickname}」`);
+      await refresh({ force: true });
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '转让房主失败');
+    } finally {
+      setTransferringOwnerKey(null);
+    }
+  }, [message, refresh]);
+
   const toggleRoomProtection = useCallback(async (room: AdminRoom) => {
     setProtectingId(room.id);
     const nextProtected = !room.protectedFromDestroy;
@@ -993,8 +1011,26 @@ function AdminPage() {
     const targetUserId = user.userId || user.id;
     const actionKey = `${room.id}:${targetUserId}`;
     const canRename = Boolean(targetUserId);
+    const canTransfer = canRename && targetUserId !== room.creatorId;
     return (
       <Space size={6} wrap>
+        {canTransfer && (
+          <Popconfirm
+            title="强制转让房主？"
+            description={`将「${user.nickname}」设为房主，原房主会降为管理员。`}
+            okText="确认转让"
+            cancelText="取消"
+            onConfirm={() => void transferRoomOwner(room, targetUserId, user.nickname)}
+          >
+            <Button
+              size="small"
+              type="primary"
+              loading={transferringOwnerKey === actionKey}
+            >
+              转让房主
+            </Button>
+          </Popconfirm>
+        )}
         <Button
           size="small"
           icon={<EditOutlined />}
@@ -1037,7 +1073,7 @@ function AdminPage() {
         </Button>
       </Space>
     );
-  }, [markUserViolation, openNicknameEditor, openQuickBan, violatingUserKey]);
+  }, [markUserViolation, openNicknameEditor, openQuickBan, transferRoomOwner, transferringOwnerKey, violatingUserKey]);
 
   const roomColumns: ColumnsType<AdminRoom> = [
     {

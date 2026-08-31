@@ -2198,6 +2198,7 @@ export function listRoomsForAdmin() {
           nickname: u.nickname,
           clientIp: u.clientIp || "",
           deviceId: u.deviceId || "",
+          readOnly: Boolean(u.readOnly),
         })),
         hasPassword: Boolean(room.passwordHash),
         isLocked: Boolean(room.isLocked),
@@ -3729,6 +3730,52 @@ export function transferOwner(roomId, actorId, targetUserId, connectionId = null
   };
 }
 
+
+/** 管理后台强制转让房主；不依赖原房主在线连接，但目标必须是在线可控成员。 */
+export function adminTransferOwner(roomId, targetUserId) {
+  const room = rooms.get(String(roomId || '').toUpperCase());
+  if (!room) return { error: '房间不存在' };
+
+  const targetId = sanitizeCreatorId(targetUserId) || String(targetUserId || '').trim();
+  if (!/^[a-zA-Z0-9_-]{8,64}$/.test(targetId)) return { error: '无效用户' };
+  if (targetId === room.creatorId) return { error: '对方已是房主' };
+
+  const target = room.users.get(targetId);
+  if (!target) return { error: '用户不在房间中' };
+  if (!isEligibleOwner(target)) return { error: '不能转让给 TV / 只读用户' };
+
+  const previousOwnerId = room.creatorId;
+  const previousOwnerLabel = resolveStoredNickname(room, previousOwnerId);
+  const targetLabel = resolveStoredNickname(room, targetId);
+  const admins = ensureAdminIds(room);
+  const auto = ensureAutoPromotedAdminIds(room);
+
+  admins.delete(targetId);
+  auto.delete(targetId);
+  room.creatorId = targetId;
+  room.creatorDeviceId = sanitizeCreatorId(target.deviceId) || null;
+
+  if (previousOwnerId && previousOwnerId !== targetId) {
+    auto.delete(previousOwnerId);
+    if (getAppointedAdminIds(room).filter((id) => id !== previousOwnerId).length < getRoomMaxAdmins(room)) {
+      admins.add(previousOwnerId);
+    } else {
+      admins.delete(previousOwnerId);
+    }
+  }
+
+  refreshRoomOwner(room, { preferCreator: true });
+  persistRoom(room);
+  invalidateRoomsListCache();
+
+  const systemMessage = appendSystemChatMessage(room, `站点管理员将房主从 ${previousOwnerLabel} 转让给了 ${targetLabel}`);
+  return {
+    room: serializeRoom(room),
+    message: `已将房主转让给「${targetLabel}」`,
+    systemMessage,
+    previousOwnerNickname: previousOwnerLabel,
+  };
+}
 
 export function removeUser(roomId, userId, connectionId = null) {
   const room = rooms.get(roomId);
