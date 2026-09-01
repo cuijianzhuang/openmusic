@@ -668,6 +668,7 @@ function snapshotRoomForStorage(room) {
     forbiddenWords: serializeForbiddenWords(ensureForbiddenWords(room)),
     memberTiers: serializeMemberTiersMap(room.memberTiers),
     memberSettings: serializeMemberSettings(room.memberSettings),
+    adminSelfManageMemberTierEnabled: Boolean(room.adminSelfManageMemberTierEnabled),
     createdAt: room.createdAt,
     lastJoinedAt: Number(room.lastJoinedAt) || room.createdAt || Date.now(),
     emptySince: room.users.size === 0
@@ -1163,6 +1164,8 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
     lastSongRequestAt: new Map(),
     memberTiers: new Map(),
     memberSettings: { ...DEFAULT_MEMBER_SETTINGS },
+    /** 是否允许管理员仅修改自己的贵宾标识；默认关闭 */
+    adminSelfManageMemberTierEnabled: false,
     createdAt: Date.now(),
     /** 最近一次非 TV 成员进房时间（管理后台闲置判断） */
     lastJoinedAt: Date.now(),
@@ -2931,10 +2934,11 @@ export function setRoomMemberTier(roomId, actorId, targetUserId, payload = {}, c
 
   const userId = String(targetUserId || "").trim();
   if (!userId) return { error: "无效用户" };
-  // 普通管理员只能管理成员贵宾，房主与其他管理员的贵宾身份由房主维护。
-  if (!isRoomCreator(room, actorId)
-    && (isRoomCreator(room, userId) || isAppointedAdmin(room, userId))) {
-    return { error: "仅房主可修改房主或管理员的贵宾设置" };
+  // 房主可管理所有人；管理员仅在房主开启后管理自己的贵宾标识。
+  if (!isRoomCreator(room, actorId)) {
+    if (!room.adminSelfManageMemberTierEnabled || userId !== actorId) {
+      return { error: userId === actorId ? "仅房主可修改房主或管理员的贵宾设置" : "仅房主可修改其他用户的贵宾设置" };
+    }
   }
 
   if (!room.memberTiers) room.memberTiers = new Map();
@@ -2959,13 +2963,25 @@ export function removeRoomMemberTier(roomId, actorId, targetUserId, connectionId
 
   const userId = String(targetUserId || "").trim();
   if (!userId) return { error: "无效用户" };
-  if (!isRoomCreator(room, actorId)
-    && (isRoomCreator(room, userId) || isAppointedAdmin(room, userId))) {
-    return { error: "仅房主可修改房主或管理员的贵宾设置" };
+  if (!isRoomCreator(room, actorId)) {
+    if (!room.adminSelfManageMemberTierEnabled || userId !== actorId) {
+      return { error: userId === actorId ? "仅房主可修改房主或管理员的贵宾设置" : "仅房主可修改其他用户的贵宾设置" };
+    }
   }
   if (!room.memberTiers?.has(userId)) return { error: "该用户不是贵宾" };
 
   room.memberTiers.delete(userId);
+  persistRoom(room);
+  return { room: serializeRoom(room) };
+}
+
+export function setRoomAdminSelfManageMemberTier(roomId, actorId, enabled, connectionId = null) {
+  const room = rooms.get(roomId);
+  if (!room) return { error: "房间不存在" };
+  const denied = requireCreator(room, actorId, connectionId);
+  if (denied) return denied;
+
+  room.adminSelfManageMemberTierEnabled = Boolean(enabled);
   persistRoom(room);
   return { room: serializeRoom(room) };
 }
@@ -3777,6 +3793,46 @@ export function adminTransferOwner(roomId, targetUserId) {
   };
 }
 
+/** 微信身份找回房主：将已绑定身份提升为房主，原房主退为正式管理员。 */
+export function recoverRoomOwner(roomId, recoveredUserId, recoveryDeviceId = null) {
+  const room = rooms.get(String(roomId || '').toUpperCase());
+  if (!room) return { error: '房间不存在' };
+
+  const targetId = sanitizeCreatorId(recoveredUserId) || String(recoveredUserId || '').trim();
+  if (!/^[a-zA-Z0-9_-]{8,64}$/.test(targetId)) return { error: '无效用户' };
+  if (targetId === room.creatorId) return { ok: true, room: serializeRoom(room), changed: false };
+  if (!wasKnownRoomUser(room, targetId) && !room.users.has(targetId)) {
+    return { error: '该身份不是当前房间成员' };
+  }
+
+  const previousOwnerId = room.creatorId;
+  const previousOwnerLabel = resolveStoredNickname(room, previousOwnerId);
+  const targetLabel = resolveStoredNickname(room, targetId);
+  const target = room.users.get(targetId);
+  const admins = ensureAdminIds(room);
+  const auto = ensureAutoPromotedAdminIds(room);
+
+  admins.delete(targetId);
+  auto.delete(targetId);
+  room.creatorId = targetId;
+  room.creatorDeviceId = sanitizeCreatorId(target?.deviceId || recoveryDeviceId) || null;
+
+  if (previousOwnerId && previousOwnerId !== targetId) {
+    auto.delete(previousOwnerId);
+    if (getAppointedAdminIds(room).filter((id) => id !== previousOwnerId).length < getRoomMaxAdmins(room)) {
+      admins.add(previousOwnerId);
+    } else {
+      admins.delete(previousOwnerId);
+    }
+  }
+
+  refreshRoomOwner(room, { preferCreator: true });
+  persistRoom(room);
+  invalidateRoomsListCache();
+  notifyRoomStructureChanged(room.id);
+  const systemMessage = appendSystemChatMessage(room, `${previousOwnerLabel} 找回了房主身份，${targetLabel} 成为新房主`);
+  return { ok: true, changed: true, room: serializeRoom(room), systemMessage, previousOwnerId };
+}
 export function removeUser(roomId, userId, connectionId = null) {
   const room = rooms.get(roomId);
   if (!room) return null;
@@ -5875,6 +5931,7 @@ function serializeRoom(room, options = {}) {
     forbiddenWords: viewerCanModerate ? serializeForbiddenWords(ensureForbiddenWords(room)) : undefined,
     memberTiers: serializeMemberTiersMap(room.memberTiers),
     memberSettings: serializeMemberSettings(room.memberSettings),
+    adminSelfManageMemberTierEnabled: Boolean(room.adminSelfManageMemberTierEnabled),
     // 仅创建者可见：常驻状态与申请进度
     ...(forUserId && isRoomCreator(room, forUserId)
       ? {
@@ -5949,6 +6006,7 @@ export function prepareRoomBroadcast(roomId) {
     clearSongsOnLeaveDelaySec: normalizeClearSongsOnLeaveDelaySec(room.clearSongsOnLeaveDelaySec),
     memberTiers: serializeMemberTiersMap(room.memberTiers),
     memberSettings: serializeMemberSettings(room.memberSettings),
+    adminSelfManageMemberTierEnabled: Boolean(room.adminSelfManageMemberTierEnabled),
   };
 
   const moderatorExtras = {

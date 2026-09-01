@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Crown, Minus, Plus, Sparkles, ShieldCheck, Trash2, X } from 'lucide-react';
+import WechatUinBindModal from './WechatUinBindModal';
 import { getFmModeOptions, getFmModeLabel, normalizeFmMode, FM_MODE_OFF, DEFAULT_FM_MODE, type FmSource } from '../api/music/fmMode';
 import type { BannedSong, ForbiddenWord, RoomUser, RoomMusicAccounts } from '../types';
 import type { DislikeSkipMode } from '../lib/dislikeSkip';
@@ -14,6 +15,11 @@ import {
   unbindLinuxdo,
   type LinuxdoBinding,
 } from '../lib/linuxdoAuth';
+import {
+  fetchWechatUinStatus,
+  unbindWechatUin,
+  type WechatUinBinding,
+} from '../lib/wechatUinAuth';
 import {
   fetchGithubStatus,
   startGithubBind,
@@ -118,6 +124,8 @@ interface Props {
   } | null;
   permanentSaving?: boolean;
   /** 进房已预取：避免打开弹窗后「身份」栏才闪现 */
+  identityWechatUinEnabled?: boolean;
+  identityWechatUinBound?: WechatUinBinding | null;
   identityLinuxdoEnabled?: boolean;
   identityGithubEnabled?: boolean;
   identityLinuxdoBound?: LinuxdoBinding | null;
@@ -148,7 +156,10 @@ interface Props {
   onCancelPermanent?: () => void | Promise<void>;
   maxAdmins?: number;
   maxAdminsSaving?: boolean;
+  adminSelfManageMemberTierEnabled?: boolean;
+  adminSelfManageMemberTierSaving?: boolean;
   onSaveMaxAdmins?: (maxAdmins: number) => void | Promise<void>;
+  onSaveAdminSelfManageMemberTier?: (enabled: boolean) => void | Promise<void>;
   playbackRate?: number;
   playbackRateSaving?: boolean;
   onSavePlaybackRate?: (playbackRate: number) => void | Promise<void>;
@@ -301,6 +312,8 @@ export default function RoomSettingsModal({
   protectedFromDestroy = false,
   permanentApplication = null,
   permanentSaving = false,
+  identityWechatUinEnabled = true,
+  identityWechatUinBound = null,
   identityLinuxdoEnabled = false,
   identityGithubEnabled = false,
   identityLinuxdoBound = null,
@@ -328,9 +341,12 @@ export default function RoomSettingsModal({
   onCancelPermanent,
   maxAdmins = 5,
   maxAdminsSaving = false,
+  adminSelfManageMemberTierEnabled = false,
+  adminSelfManageMemberTierSaving = false,
   playbackRate = 1,
   playbackRateSaving = false,
   onSaveMaxAdmins,
+  onSaveAdminSelfManageMemberTier,
   onSavePlaybackRate,
 }: Props) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('announcement');
@@ -349,6 +365,10 @@ export default function RoomSettingsModal({
   const [permanentNote, setPermanentNote] = useState('');
   const [draftMaxAdmins, setDraftMaxAdmins] = useState(maxAdmins);
   const [draftPlaybackRate, setDraftPlaybackRate] = useState(String(playbackRate));
+  const [wechatUinEnabled, setWechatUinEnabled] = useState(identityWechatUinEnabled);
+  const [wechatUinBound, setWechatUinBound] = useState<WechatUinBinding | null>(identityWechatUinBound);
+  const [wechatUinUnbinding, setWechatUinUnbinding] = useState(false);
+  const [wechatUinModalMode, setWechatUinModalMode] = useState<'bind' | 'recover' | null>(null);
   const [linuxdoEnabled, setLinuxdoEnabled] = useState(identityLinuxdoEnabled);
   const [linuxdoBound, setLinuxdoBound] = useState<LinuxdoBinding | null>(identityLinuxdoBound);
   const [linuxdoUnbinding, setLinuxdoUnbinding] = useState(false);
@@ -395,11 +415,11 @@ export default function RoomSettingsModal({
       items.push({ id: 'songRequest', label: '点歌' });
     }
     // 非房主仅用于找回身份
-    if (!isOwner && (linuxdoEnabled || githubEnabled)) {
+    if (!isOwner && (wechatUinEnabled || linuxdoEnabled || githubEnabled)) {
       items.push({ id: 'room', label: '身份' });
     }
     return items;
-  }, [isOwner, canModerate, linuxdoEnabled, githubEnabled]);
+  }, [isOwner, canModerate, wechatUinEnabled, linuxdoEnabled, githubEnabled]);
 
   // 打开弹窗时 tabs 可能刚因预取变为含「身份」；若仍停留在旧首 tab 则不强制跳转
   useEffect(() => {
@@ -430,7 +450,7 @@ export default function RoomSettingsModal({
     if (canModerate) {
       initialTabs.push('member', 'announcement', 'chat', 'songRequest');
     }
-    if (!isOwner && (identityLinuxdoEnabled || identityGithubEnabled)) {
+    if (!isOwner && (identityWechatUinEnabled || identityLinuxdoEnabled || identityGithubEnabled)) {
       initialTabs.push('room');
     }
     setActiveTab(initialTabs[0] ?? 'announcement');
@@ -445,10 +465,19 @@ export default function RoomSettingsModal({
     songRequest,
     isOwner,
     canModerate,
+    identityWechatUinEnabled,
     identityLinuxdoEnabled,
     identityGithubEnabled,
     maxAdmins,
   ]);
+
+  useEffect(() => {
+    if (!open) return;
+    void fetchWechatUinStatus(roomId).then((status) => {
+      setWechatUinEnabled(status.enabled);
+      setWechatUinBound(status.bound);
+    });
+  }, [open, roomId]);
 
   useEffect(() => {
     if (!open) {
@@ -464,27 +493,31 @@ export default function RoomSettingsModal({
 
   useEffect(() => {
     if (open) return;
+    setWechatUinEnabled(identityWechatUinEnabled);
+    setWechatUinBound(identityWechatUinBound);
     setLinuxdoEnabled(identityLinuxdoEnabled);
     setGithubEnabled(identityGithubEnabled);
     setLinuxdoBound(identityLinuxdoBound);
     setGithubBound(identityGithubBound);
-  }, [open, identityLinuxdoEnabled, identityGithubEnabled, identityLinuxdoBound, identityGithubBound]);
+  }, [open, roomId, identityWechatUinEnabled, identityWechatUinBound, identityLinuxdoEnabled, identityGithubEnabled, identityLinuxdoBound, identityGithubBound]);
 
   useEffect(() => {
     if (!open) return;
     // 打开瞬间先用进房预取值，避免「身份」栏后闪
+    setWechatUinEnabled(identityWechatUinEnabled);
+    setWechatUinBound(identityWechatUinBound);
     setLinuxdoEnabled(identityLinuxdoEnabled);
     setGithubEnabled(identityGithubEnabled);
     setLinuxdoBound(identityLinuxdoBound);
     setGithubBound(identityGithubBound);
 
     let cancelled = false;
-    void fetchLinuxdoStatus().then((status) => {
+    void fetchLinuxdoStatus(roomId).then((status) => {
       if (cancelled) return;
       setLinuxdoEnabled(status.enabled);
       setLinuxdoBound(status.bound);
     });
-    void fetchGithubStatus().then((status) => {
+    void fetchGithubStatus(roomId).then((status) => {
       if (cancelled) return;
       setGithubEnabled(status.enabled);
       setGithubBound(status.bound);
@@ -492,7 +525,7 @@ export default function RoomSettingsModal({
     return () => {
       cancelled = true;
     };
-  }, [open, identityLinuxdoEnabled, identityGithubEnabled, identityLinuxdoBound, identityGithubBound]);
+  }, [open, roomId, identityWechatUinEnabled, identityWechatUinBound, identityLinuxdoEnabled, identityGithubEnabled, identityLinuxdoBound, identityGithubBound]);
 
   // 打开期间：服务端公告变化时，若用户未编辑（草稿仍等于上次应用值），则跟随服务端
   useEffect(() => {
@@ -732,6 +765,18 @@ export default function RoomSettingsModal({
 
               {isOwner && (
                 <section>
+                  <Toggle
+                    checked={adminSelfManageMemberTierEnabled}
+                    disabled={adminSelfManageMemberTierSaving || !onSaveAdminSelfManageMemberTier}
+                    onChange={(enabled) => void onSaveAdminSelfManageMemberTier?.(enabled)}
+                    label="允许管理员自助设置贵宾标识"
+                    description="开启后，管理员只能修改或移除自己的贵宾标识，不能操作其他用户"
+                  />
+                </section>
+              )}
+
+              {isOwner && (
+                <section>
                   <div className="mb-2 flex items-center gap-2">
                     <ShieldCheck className="h-4 w-4 text-sky-400" />
                     <h3 className="text-sm font-medium text-white">管理员人数</h3>
@@ -877,7 +922,7 @@ export default function RoomSettingsModal({
                 </section>
               )}
 
-              {(linuxdoEnabled || githubEnabled) && (
+              {(wechatUinEnabled || linuxdoEnabled || githubEnabled) && (
                 <section className="space-y-3">
                   <h3 className="text-sm font-medium text-white">身份绑定</h3>
                   {isOwner ? (
@@ -886,6 +931,38 @@ export default function RoomSettingsModal({
                         绑定后换设备可用同一账号找回房主身份。
                       </p>
                       <div className="space-y-2">
+                        {wechatUinEnabled && (
+                          <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5">
+                            <span className="w-16 flex-shrink-0 text-xs text-white/50">微信</span>
+                            {wechatUinBound ? (
+                              <>
+                                <span className="min-w-0 flex-1 truncate text-sm text-white">已绑定</span>
+                                <button
+                                  type="button"
+                                  disabled={wechatUinUnbinding}
+                                  onClick={async () => {
+                                    setWechatUinUnbinding(true);
+                                    const result = await unbindWechatUin(roomId);
+                                    setWechatUinUnbinding(false);
+                                    if (result.success) setWechatUinBound(null);
+                                  }}
+                                  className="flex-shrink-0 rounded-lg px-2.5 py-1 text-xs text-red-300 transition-colors hover:bg-red-500/10 disabled:opacity-50"
+                                >
+                                  {wechatUinUnbinding ? '…' : '解绑'}
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                type="button"
+                                disabled={!roomId}
+                                onClick={() => setWechatUinModalMode('bind')}
+                                className="ml-auto flex-shrink-0 rounded-lg bg-amber-500 px-3 py-1 text-xs font-medium text-black transition-colors hover:bg-amber-400 disabled:opacity-50"
+                              >
+                                绑定
+                              </button>
+                            )}
+                          </div>
+                        )}
                         {linuxdoEnabled && (
                           <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5">
                             <span className="w-16 flex-shrink-0 text-xs text-white/50">Linux.do</span>
@@ -899,7 +976,7 @@ export default function RoomSettingsModal({
                                   disabled={linuxdoUnbinding}
                                   onClick={async () => {
                                     setLinuxdoUnbinding(true);
-                                    const result = await unbindLinuxdo();
+                                    const result = await unbindLinuxdo(roomId);
                                     setLinuxdoUnbinding(false);
                                     if (result.success) setLinuxdoBound(null);
                                   }}
@@ -933,7 +1010,7 @@ export default function RoomSettingsModal({
                                   disabled={githubUnbinding}
                                   onClick={async () => {
                                     setGithubUnbinding(true);
-                                    const result = await unbindGithub();
+                                    const result = await unbindGithub(roomId);
                                     setGithubUnbinding(false);
                                     if (result.success) setGithubBound(null);
                                   }}
@@ -962,10 +1039,19 @@ export default function RoomSettingsModal({
                         换设备或清除 Cookie 后，可用当初绑定的账号找回房主身份。
                       </p>
                       <div className="space-y-2">
+                        {wechatUinEnabled && (
+                          <button
+                            type="button"
+                            onClick={() => setWechatUinModalMode('recover')}
+                            className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white transition-colors hover:bg-white/[0.06]"
+                          >
+                            微信找回
+                          </button>
+                        )}
                         {linuxdoEnabled && (
                           <button
                             type="button"
-                            onClick={() => startLinuxdoRecover(window.location.pathname)}
+                            onClick={() => startLinuxdoRecover(roomId || '', window.location.pathname)}
                             className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white transition-colors hover:bg-white/[0.06]"
                           >
                             Linux.do 找回
@@ -974,7 +1060,7 @@ export default function RoomSettingsModal({
                         {githubEnabled && (
                           <button
                             type="button"
-                            onClick={() => startGithubRecover(window.location.pathname)}
+                            onClick={() => startGithubRecover(roomId || '', window.location.pathname)}
                             className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-white transition-colors hover:bg-white/[0.06]"
                           >
                             GitHub 找回
@@ -1577,6 +1663,21 @@ export default function RoomSettingsModal({
     </div>,
     document.body,
       )}
+      <WechatUinBindModal
+        open={wechatUinModalMode !== null}
+        mode={wechatUinModalMode || 'bind'}
+        roomId={roomId}
+        onClose={() => {
+          setWechatUinModalMode(null);
+          onClose();
+        }}
+        onCompleted={() => {
+          void fetchWechatUinStatus(roomId).then((status) => {
+            setWechatUinEnabled(status.enabled);
+            setWechatUinBound(status.bound);
+          });
+        }}
+      />
       {confirmTransfer && selectedTransferUser && (
         <ConfirmModal
           title="确认转让房主"

@@ -1,6 +1,6 @@
 import { buildRoomEntryUrl } from './roomPassword';
 
-export function buildRoomShareText(options: {
+export interface RoomShareOptions {
   inviterNickname: string;
   roomId: string;
   roomName: string;
@@ -8,7 +8,9 @@ export function buildRoomShareText(options: {
   currentSong?: { name: string; artist: string } | null;
   isPlaying?: boolean;
   origin?: string;
-}): string {
+}
+
+export function buildRoomSharePayload(options: RoomShareOptions): { url: string; text: string } {
   const {
     inviterNickname,
     roomId,
@@ -37,5 +39,9 @@ export function buildRoomShareText(options: {
   ];
   if (pwd) lines.push(`密码：${pwd}`);
   lines.push(`👉 ${url}`);
-  return lines.join('\n');
+  return { url, text: lines.join('\n') };
+}
+
+export function buildRoomShareText(options: RoomShareOptions): string {
+  return buildRoomSharePayload(options).text;
 }

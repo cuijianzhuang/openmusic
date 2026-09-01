@@ -46,6 +46,12 @@ export function sanitizeReturnPath(path) {
 export function createOAuthProvider(opts) {
   const stateTtlSec = opts.stateTtlSec ?? 10 * 60;
   const { idField, bindPrefix, profilePrefix } = opts;
+  const normalizeRoomId = (value) => {
+    const normalized = String(value ?? '').trim().toUpperCase();
+    return /^[A-Z0-9]{4,16}$/.test(normalized) ? normalized : null;
+  };
+  const bindKey = (providerId, roomId) => roomId ? `${bindPrefix}${providerId}:${roomId}` : `${bindPrefix}${providerId}`;
+  const profileKey = (userId, roomId) => roomId ? `${profilePrefix}${userId}:${roomId}` : `${profilePrefix}${userId}`;
 
   /**
    * 无状态签名 state，避免额外的服务端会话存储。
@@ -79,35 +85,43 @@ export function createOAuthProvider(opts) {
     }
   }
 
-  async function getProfileForUser(userId) {
+  async function getProfileForUser(userId, roomId) {
     const client = getRedisClient();
     if (!isRedisEnabled() || !client) return null;
     const id = String(userId || '').trim();
     if (!id) return null;
     try {
-      const raw = await client.get(`${profilePrefix}${id}`);
-      if (!raw) return null;
-      return JSON.parse(raw);
+      const rid = normalizeRoomId(roomId);
+      const keys = rid ? [profileKey(id, rid), profileKey(id, null)] : [profileKey(id, null)];
+      for (const key of keys) {
+        const raw = await client.get(key);
+        if (!raw) continue;
+        return JSON.parse(raw);
+      }
+      return null;
     } catch {
       return null;
     }
   }
 
-  async function bindToUser(providerId, userId, profile) {
+  async function bindToUser(providerId, userId, profile, roomId) {
     const client = getRedisClient();
     if (!isRedisEnabled() || !client) throw new Error('Redis 不可用，无法保存绑定');
 
-    const existingUserId = await client.get(`${bindPrefix}${providerId}`);
+    const rid = normalizeRoomId(roomId);
+    const currentBindKey = bindKey(providerId, rid);
+    const existingUserId = await client.get(currentBindKey);
     if (existingUserId && existingUserId !== userId) {
-      // 这个第三方账号之前绑定给别的 userId 的旧关联需要先清掉，避免同一账号悬挂多份 profile
+      if (rid) throw new Error('该房间已绑定其他房主身份');
+      // 兼容旧的全局绑定：这个第三方账号之前绑定给别的 userId 的旧关联需要清掉。
       await client.del(`${profilePrefix}${existingUserId}`);
     }
 
     // 这个 userId 之前绑定过别的第三方账号也要一并清掉，否则旧账号仍能找回这个身份
     // （换绑后旧账号继续拥有恢复权限，等于换绑形同虚设）
-    const previousProfile = await getProfileForUser(userId);
+    const previousProfile = rid ? null : await getProfileForUser(userId);
     if (previousProfile?.[idField] && previousProfile[idField] !== providerId) {
-      await client.del(`${bindPrefix}${previousProfile[idField]}`);
+      await client.del(bindKey(previousProfile[idField], null));
     }
 
     const record = {
@@ -115,27 +129,34 @@ export function createOAuthProvider(opts) {
       username: profile?.username || '',
       avatarUrl: profile?.avatarUrl || '',
       boundAt: Date.now(),
+      ...(rid ? { roomId: rid } : {}),
     };
-    await client.set(`${bindPrefix}${providerId}`, userId);
-    await client.set(`${profilePrefix}${userId}`, JSON.stringify(record));
+    await client.set(currentBindKey, userId);
+    await client.set(profileKey(userId, rid), JSON.stringify(record));
     return record;
   }
 
-  async function getUserIdFor(providerId) {
+  async function getUserIdFor(providerId, roomId) {
     const client = getRedisClient();
     if (!isRedisEnabled() || !client) return null;
     const id = String(providerId || '').trim();
     if (!id) return null;
-    const userId = await client.get(`${bindPrefix}${id}`);
-    return userId || null;
+    const rid = normalizeRoomId(roomId);
+    const userId = await client.get(bindKey(id, rid));
+    if (userId) return userId;
+    return rid ? client.get(bindKey(id, null)) : null;
   }
 
-  async function unbindForUser(userId) {
+  async function unbindForUser(userId, roomId) {
     const client = getRedisClient();
     if (!isRedisEnabled() || !client) return false;
-    const profile = await getProfileForUser(userId);
-    if (profile?.[idField]) await client.del(`${bindPrefix}${profile[idField]}`);
-    await client.del(`${profilePrefix}${userId}`);
+    const rid = normalizeRoomId(roomId);
+    const profile = await getProfileForUser(userId, rid);
+    if (profile?.[idField]) {
+      await client.del(bindKey(profile[idField], rid));
+      if (!profile.roomId) await client.del(bindKey(profile[idField], null));
+    }
+    await client.del(profileKey(userId, rid));
     return true;
   }
 

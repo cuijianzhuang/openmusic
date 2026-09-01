@@ -573,6 +573,11 @@ export function hasWechatFileHelperSession(): boolean {
   return activeSession !== null;
 }
 
+/** 返回当前文件传输助手会话的 wxuin；仅用于完成一次绑定请求。 */
+export function getWechatFileHelperUin(): string | null {
+  return activeSession?.uin || null;
+}
+
 const WX_BROWSER_COOKIE_NAMES = [
   'wxuin', 'wxsid', 'wxloadtime', 'mm_lang', 'skey',
   'webwxuvid', 'webwx_data_ticket', 'webwx_auth_ticket',

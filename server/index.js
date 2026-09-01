@@ -43,6 +43,11 @@ import {
 } from './musicQrSessions.js';
 import { hasRoomCredentialEncryptionKey } from './roomCredentialCrypto.js';
 import { mountWechatFileHelperProxy } from './wechatFileHelperProxy.js';
+import {
+  WECHAT_UIN_CONFLICT,
+  createWechatUinStore,
+  normalizeWechatUin,
+} from './wechatUinAuth.js';
 import { mountAdminApi, appendAdminAudit } from './adminApi.js';
 import { initAdminCredentials } from './adminCredentials.js';
 import { getAdminEntryPath } from './adminConfig.js';
@@ -57,6 +62,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
+import QRCode from 'qrcode';
 import { isIP } from 'net';
 import {
   deriveApiSignKey,
@@ -97,6 +103,7 @@ import {
   setRoomMemberTier,
   removeRoomMemberTier,
   setRoomMemberSettings,
+  setRoomAdminSelfManageMemberTier,
   postMemberWelcomeMessage,
   setRoomJoinNotice,
   setRoomAiSettings,
@@ -157,6 +164,7 @@ import {
   canUserMutate,
   kickUser,
   transferOwner,
+  recoverRoomOwner,
   setRoomAdmin,
   reportTrackDuration,
   setOnRoomPrefetchReady,
@@ -248,6 +256,8 @@ import {
 // 详见下方 /api/auth/{provider}/callback 路由与 adminApi.js 内的处理函数。
 let handleLinuxdoAdminCallback = null;
 let handleGithubAdminCallback = null;
+
+const wechatUinStore = createWechatUinStore();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const clientDist = path.join(__dirname, '../client/dist');
@@ -653,6 +663,7 @@ const limitJoinPasswordFail = createRateLimiter({ windowMs: 60_000, max: 8 });
 const limitProxyRequest = createRateLimiter({ windowMs: 60_000, max: 120 });
 const limitSocketAction = createRateLimiter({ windowMs: 60_000, max: 90 });
 const limitContributionQr = createRateLimiter({ windowMs: 60_000, max: 45 });
+const limitRoomShareQr = createRateLimiter({ windowMs: 60_000, max: 30 });
 const limitContributionBind = createRateLimiter({ windowMs: 10 * 60_000, max: 8 });
 const limitSocketChat = createRateLimiter({ windowMs: 60_000, max: 30 });
 const limitOwnerDestroyRoom = createRateLimiter({ windowMs: 60_000, max: 3 });
@@ -661,6 +672,7 @@ const limitSessionBootstrap = createRateLimiter({ windowMs: 60_000, max: 90 });
 const limitNewSessionBootstrap = createRateLimiter({ windowMs: 60_000, max: 45 });
 const limitLinuxdoAuth = createRateLimiter({ windowMs: 60_000, max: 10 });
 const limitGithubAuth = createRateLimiter({ windowMs: 60_000, max: 10 });
+const limitWechatUinAuth = createRateLimiter({ windowMs: 10 * 60_000, max: 10 });
 const socketRateLog = createLogger('socket-rate-limit');
 let lastSocketRateRedisErrorAt = 0;
 const distributedSocketRateLimiter = createDistributedSocketRateLimiter({
@@ -1227,6 +1239,26 @@ app.get('/api/app-version', (_req, res) => {
     console.error('app-version read error:', err?.message || err);
   }
   return res.json({ buildId: 'dev', version: 'dev', notes: [], builtAt: null, forcePrompt: false });
+});
+
+app.post('/api/room-share-qr', async (req, res) => {
+  const requestIp = getRequestIp(req);
+  if (!limitRoomShareQr(`room-share-qr:${requestIp}`)) {
+    return res.status(429).json({ error: '二维码生成过于频繁，请稍后再试' });
+  }
+
+  const text = String(req.body?.text || '').trim();
+  if (!text || text.length > 2048) {
+    return res.status(400).json({ error: '分享链接无效' });
+  }
+
+  try {
+    const image = await QRCode.toDataURL(text, { width: 640, margin: 1, errorCorrectionLevel: 'M' });
+    return res.json({ image });
+  } catch (error) {
+    console.error('房间分享二维码生成失败:', error?.message || error);
+    return res.status(500).json({ error: '二维码生成失败，请稍后重试' });
+  }
 });
 
 app.post('/api/music-account-contribution/qr/create', async (req, res) => {
@@ -2032,8 +2064,9 @@ app.get('/api/auth/linuxdo/status', async (req, res) => {
   if (!enabled) return res.json({ enabled: false, bound: null });
 
   const identity = resolveIdentityFromRequest(req);
-  const bound = identity?.userId ? await getLinuxdoProfileForUser(identity.userId) : null;
-  res.json({ enabled: true, bound });
+  const roomId = String(req.query?.roomId || '').trim().toUpperCase();
+  const bound = identity?.userId ? await getLinuxdoProfileForUser(identity.userId, roomId) : null;
+  res.json({ enabled, bound });
 });
 
 app.get('/api/auth/linuxdo/start', (req, res) => {
@@ -2053,12 +2086,14 @@ app.get('/api/auth/linuxdo/start', (req, res) => {
     if (!room || room.creatorId !== identity.userId) {
       return res.status(403).json({ error: '只有房主本人可以绑定 Linux.do 账号' });
     }
-    const state = signLinuxdoState({ purpose: 'bind', userId: identity.userId, returnPath });
+    const state = signLinuxdoState({ purpose: 'bind', userId: identity.userId, roomId, returnPath });
     return res.redirect(buildLinuxdoAuthorizeUrl(state));
   }
 
   // recover：此时大概率已不是原身份，不要求当前必须有身份
-  const state = signLinuxdoState({ purpose: 'recover', returnPath });
+  const roomId = String(req.query?.roomId || '').trim().toUpperCase();
+  if (!roomId) return res.status(400).json({ error: '房间号不能为空' });
+  const state = signLinuxdoState({ purpose: 'recover', roomId, returnPath });
   res.redirect(buildLinuxdoAuthorizeUrl(state));
 });
 
@@ -2095,7 +2130,7 @@ app.get('/api/auth/linuxdo/callback', async (req, res) => {
       return fail(returnPath, 'expired');
     }
     try {
-      await bindLinuxdoToUser(profile.id, identity.userId, profile);
+      await bindLinuxdoToUser(profile.id, identity.userId, profile, state.roomId);
     } catch (err) {
       console.error('Linux.do 绑定写入失败:', err?.message || err);
       return fail(returnPath, 'error');
@@ -2103,22 +2138,26 @@ app.get('/api/auth/linuxdo/callback', async (req, res) => {
     return fail(returnPath, 'bound');
   }
 
-  // recover：查已绑定的 userId，重新签发身份 Cookie（不改变房间归属逻辑本身）
-  const boundUserId = await getUserIdForLinuxdo(profile.id);
+  // recover：查已绑定的 userId，转移当前房间房主关系并重新签发身份 Cookie
+  const boundUserId = await getUserIdForLinuxdo(profile.id, state.roomId);
   if (!boundUserId) return fail(returnPath, 'notfound');
+  const recovery = recoverRoomOwner(state.roomId, boundUserId, resolveDeviceIdFromCookieHeader(req.headers?.cookie || '') || createServerClientId());
+  if (recovery.error) return fail(returnPath, recovery.error === '房间不存在' ? 'room-notfound' : 'denied');
 
   const now = Math.floor(Date.now() / 1000);
   const cookieDeviceId = resolveDeviceIdFromCookieHeader(req.headers?.cookie || '');
   const deviceId = cookieDeviceId || createServerClientId();
   await linkDeviceToUser(deviceId, boundUserId);
   setIdentityCookieHeaders(res, boundUserId, signClientId(boundUserId, now), deviceId);
+  broadcastRoomUpdate(state.roomId, { immediate: true });
+  if (recovery.systemMessage) emitSystemChat(state.roomId, recovery.systemMessage);
   return fail(returnPath, 'recovered');
 });
 
 app.post('/api/auth/linuxdo/unbind', async (req, res) => {
   const identity = requireSessionIdentity(req, res);
   if (!identity) return;
-  await unbindLinuxdoForUser(identity.userId);
+  await unbindLinuxdoForUser(identity.userId, String(req.body?.roomId || '').trim().toUpperCase());
   res.json({ success: true });
 });
 
@@ -2129,7 +2168,8 @@ app.get('/api/auth/github/status', async (req, res) => {
   if (!enabled) return res.json({ enabled: false, bound: null });
 
   const identity = resolveIdentityFromRequest(req);
-  const bound = identity?.userId ? await getGithubProfileForUser(identity.userId) : null;
+  const roomId = String(req.query?.roomId || '').trim().toUpperCase();
+  const bound = identity?.userId ? await getGithubProfileForUser(identity.userId, roomId) : null;
   res.json({ enabled: true, bound });
 });
 
@@ -2150,11 +2190,13 @@ app.get('/api/auth/github/start', (req, res) => {
     if (!room || room.creatorId !== identity.userId) {
       return res.status(403).json({ error: '只有房主本人可以绑定 GitHub 账号' });
     }
-    const state = signGithubState({ purpose: 'bind', userId: identity.userId, returnPath });
+    const state = signGithubState({ purpose: 'bind', userId: identity.userId, roomId, returnPath });
     return res.redirect(buildGithubAuthorizeUrl(state));
   }
 
-  const state = signGithubState({ purpose: 'recover', returnPath });
+  const roomId = String(req.query?.roomId || '').trim().toUpperCase();
+  if (!roomId) return res.status(400).json({ error: '房间号不能为空' });
+  const state = signGithubState({ purpose: 'recover', roomId, returnPath });
   res.redirect(buildGithubAuthorizeUrl(state));
 });
 
@@ -2190,7 +2232,7 @@ app.get('/api/auth/github/callback', async (req, res) => {
       return fail(returnPath, 'expired');
     }
     try {
-      await bindGithubToUser(profile.id, identity.userId, profile);
+      await bindGithubToUser(profile.id, identity.userId, profile, state.roomId);
     } catch (err) {
       console.error('GitHub 绑定写入失败:', err?.message || err);
       return fail(returnPath, 'error');
@@ -2198,21 +2240,100 @@ app.get('/api/auth/github/callback', async (req, res) => {
     return fail(returnPath, 'bound');
   }
 
-  const boundUserId = await getUserIdForGithub(profile.id);
+  const boundUserId = await getUserIdForGithub(profile.id, state.roomId);
   if (!boundUserId) return fail(returnPath, 'notfound');
+  const recovery = recoverRoomOwner(state.roomId, boundUserId, resolveDeviceIdFromCookieHeader(req.headers?.cookie || '') || createServerClientId());
+  if (recovery.error) return fail(returnPath, recovery.error === '房间不存在' ? 'room-notfound' : 'denied');
 
   const now = Math.floor(Date.now() / 1000);
   const cookieDeviceId = resolveDeviceIdFromCookieHeader(req.headers?.cookie || '');
   const deviceId = cookieDeviceId || createServerClientId();
   await linkDeviceToUser(deviceId, boundUserId);
   setIdentityCookieHeaders(res, boundUserId, signClientId(boundUserId, now), deviceId);
+  broadcastRoomUpdate(state.roomId, { immediate: true });
+  if (recovery.systemMessage) emitSystemChat(state.roomId, recovery.systemMessage);
   return fail(returnPath, 'recovered');
 });
 
 app.post('/api/auth/github/unbind', async (req, res) => {
   const identity = requireSessionIdentity(req, res);
   if (!identity) return;
-  await unbindGithubForUser(identity.userId);
+  await unbindGithubForUser(identity.userId, String(req.body?.roomId || '').trim().toUpperCase());
+  res.json({ success: true });
+});
+
+
+// ---------- 文件传输助手 UIN：房主身份绑定 / 找回 ----------
+// 这里只接收前端登录流程解析出的 wxuin；会话凭证仍只保留在浏览器内，
+// 不上传 sid / skey / pass_ticket，也不把它们写入 Redis。
+app.get('/api/auth/wechat-uin/status', async (req, res) => {
+  const identity = resolveIdentityFromRequest(req);
+  const bound = identity?.userId
+    ? await wechatUinStore.getProfileForUser(identity.userId, String(req.query?.roomId || '').trim().toUpperCase())
+    : null;
+  res.json({ enabled: wechatUinStore.isEnabled(), bound });
+});
+
+app.post('/api/auth/wechat-uin/bind', async (req, res) => {
+  if (!limitWechatUinAuth(`wechat-uin-bind:${getRequestIp(req)}`)) {
+    return res.status(429).json({ error: '微信绑定请求过于频繁，请稍后再试' });
+  }
+  const identity = requireSessionIdentity(req, res);
+  if (!identity) return;
+
+  const roomId = String(req.body?.roomId || '').trim().toUpperCase();
+  const room = roomId ? getRoomInternal(roomId) : null;
+  if (!room || room.creatorId !== identity.userId) {
+    return res.status(403).json({ error: '只有房主本人可以绑定微信身份' });
+  }
+
+  try {
+    const binding = await wechatUinStore.bindToUser(req.body?.uin, identity.userId, roomId);
+    return res.json({ success: true, binding });
+  } catch (err) {
+    if (err?.code === WECHAT_UIN_CONFLICT) {
+      return res.status(409).json({ error: err.message });
+    }
+    console.error('微信 UIN 绑定失败:', err?.message || err);
+    return res.status(500).json({ error: err?.message || '微信绑定失败' });
+  }
+});
+
+app.post('/api/auth/wechat-uin/recover', async (req, res) => {
+  const roomId = String(req.body?.roomId || '').trim().toUpperCase();
+  if (!roomId) return res.status(400).json({ error: '房间号不能为空' });
+  if (!normalizeWechatUin(req.body?.uin)) {
+    return res.status(400).json({ error: '微信 UIN 无效' });
+  }
+  if (!limitWechatUinAuth(`wechat-uin-recover:${getRequestIp(req)}`)) {
+    return res.status(429).json({ error: '微信找回请求过于频繁，请稍后再试' });
+  }
+  const userId = await wechatUinStore.getUserIdForUin(req.body?.uin, roomId);
+  if (!userId) return res.status(404).json({ error: '这个微信账号还没有绑定过房主身份' });
+
+  const cookieDeviceId = resolveDeviceIdFromCookieHeader(req.headers?.cookie || '');
+  const deviceId = cookieDeviceId || createServerClientId();
+  const recovery = recoverRoomOwner(roomId, userId, deviceId);
+  if (recovery.error) {
+    const status = recovery.error === '房间不存在' ? 404 : 403;
+    return res.status(status).json({ error: recovery.error });
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  await linkDeviceToUser(deviceId, userId);
+  setIdentityCookieHeaders(res, userId, signClientId(userId, now), deviceId);
+  if (recovery.systemMessage) {
+    broadcastRoomUpdate(roomId, { immediate: true });
+    emitSystemChat(roomId, recovery.systemMessage);
+  }
+  return res.json({ success: true, roomId, recoveredUserId: userId });
+});
+
+app.post('/api/auth/wechat-uin/unbind', async (req, res) => {
+  const identity = requireSessionIdentity(req, res);
+  if (!identity) return;
+  const roomId = String(req.body?.roomId || '').trim().toUpperCase();
+  await wechatUinStore.unbindForUser(identity.userId, roomId);
   res.json({ success: true });
 });
 
@@ -4118,6 +4239,26 @@ io.on('connection', (socket) => {
     }
 
     const result = removeRoomMemberTier(roomId, getSocketUserId(socket), userId, socket.id);
+    if (result.error) {
+      callback?.({ success: false, error: result.error });
+      return;
+    }
+
+    broadcastRoomUpdate(roomId);
+    callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
+  });
+
+  socket.on('set_room_admin_self_manage_member_tier', ({ enabled }, callback) => {
+    if (rejectReadOnly(socket, callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, 'set_room_admin_self_manage_member_tier', callback)) return;
+
+    const roomId = socketToRoom.get(socket.id);
+    if (!roomId) {
+      callback?.({ success: false, error: '未加入房间' });
+      return;
+    }
+
+    const result = setRoomAdminSelfManageMemberTier(roomId, getSocketUserId(socket), enabled, socket.id);
     if (result.error) {
       callback?.({ success: false, error: result.error });
       return;

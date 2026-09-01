@@ -13,9 +13,9 @@ export interface LinuxdoStatus {
 }
 
 /** 当前浏览器身份是否已绑定 Linux.do（未配置该功能时 enabled 为 false） */
-export async function fetchLinuxdoStatus(): Promise<LinuxdoStatus> {
+export async function fetchLinuxdoStatus(roomId?: string): Promise<LinuxdoStatus> {
   try {
-    const res = await fetchWithTimeout('/api/auth/linuxdo/status', {}, 8000);
+    const res = await fetchWithTimeout(`/api/auth/linuxdo/status${roomId ? `?roomId=${encodeURIComponent(roomId)}` : ''}`, {}, 8000);
     if (!res.ok) return { enabled: false, bound: null };
     const data = await res.json().catch(() => ({}));
     return { enabled: Boolean(data.enabled), bound: data.bound ?? null };
@@ -31,14 +31,14 @@ export function startLinuxdoBind(roomId: string, returnPath: string): void {
 }
 
 /** 跳转到 Linux.do 完成身份找回（任何人都可发起，只有此前绑定过的账号才能找回成功） */
-export function startLinuxdoRecover(returnPath: string): void {
-  const params = new URLSearchParams({ purpose: 'recover', returnPath });
+export function startLinuxdoRecover(roomId: string, returnPath: string): void {
+  const params = new URLSearchParams({ purpose: 'recover', roomId, returnPath });
   window.location.href = `/api/auth/linuxdo/start?${params.toString()}`;
 }
 
-export async function unbindLinuxdo(): Promise<{ success: boolean; error?: string }> {
+export async function unbindLinuxdo(roomId?: string): Promise<{ success: boolean; error?: string }> {
   try {
-    const res = await fetchWithTimeout('/api/auth/linuxdo/unbind', { method: 'POST' }, 10000);
+    const res = await fetchWithTimeout('/api/auth/linuxdo/unbind', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roomId }) }, 10000);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return { success: false, error: data.error || '解绑失败' };
     return { success: true };
@@ -50,6 +50,8 @@ export async function unbindLinuxdo(): Promise<{ success: boolean; error?: strin
 const LINUXDO_RESULT_MESSAGES: Record<string, { message: string; type: 'success' | 'error' }> = {
   bound: { message: '已绑定 Linux.do 账号', type: 'success' },
   recovered: { message: '已通过 Linux.do 找回房间身份', type: 'success' },
+  'room-notfound': { message: '房间不存在', type: 'error' },
+  denied: { message: '该身份不能找回此房间', type: 'error' },
   notfound: { message: '这个 Linux.do 账号还没有绑定过任何身份', type: 'error' },
   expired: { message: '登录已过期或身份已变化，请重试', type: 'error' },
   error: { message: 'Linux.do 登录失败，请稍后再试', type: 'error' },

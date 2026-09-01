@@ -6,7 +6,7 @@ import { mergeFavoriteImportStats } from '../lib/favoriteImport';
 
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 
-import { Search, Loader2, Copy, Check, LogOut, X, Heart, Plus, Download, ListMusic, Upload, History, ListPlus, Pencil, Share2, Lock, LockOpen, ChevronLeft, SlidersHorizontal, Shield, Maximize2, Smartphone, ImagePlus, MoreHorizontal, RefreshCw, Users } from 'lucide-react';
+import { Search, Loader2, Check, LogOut, X, Heart, Plus, Download, ListMusic, Upload, History, ListPlus, Pencil, Share2, Lock, LockOpen, ChevronLeft, SlidersHorizontal, Shield, Maximize2, Smartphone, ImagePlus, MoreHorizontal, RefreshCw, Users } from 'lucide-react';
 
 import { searchAllSongs, getAvailableSources, listRooms, type SearchFilterMode } from '../api/music';
 import { importPlaylist, searchPlaylists, type PlaylistSearchItem, type PlaylistPlatform, type PlaylistChannelFilter as PlaylistChannelFilterMode } from '../api/music/playlist';
@@ -18,6 +18,7 @@ import { rememberPlaylistImportHistory } from '../lib/playlistImportHistory';
 import { detectPlaylistLink } from '../lib/playlistLink';
 import { consumeLinuxdoReturnParam, fetchLinuxdoStatus, type LinuxdoBinding } from '../lib/linuxdoAuth';
 import { consumeGithubReturnParam, fetchGithubStatus, type GithubBinding } from '../lib/githubAuth';
+import { fetchWechatUinStatus, type WechatUinBinding } from '../lib/wechatUinAuth';
 
 import type { FavoriteSong, MusicSource, RoomAudioQuality, RoomMemberSettings, RoomMemberTier, RoomSummary, SearchResult, Song, SongHistoryItem } from '../types';
 
@@ -79,12 +80,11 @@ import QueueSystemToast from '../components/QueueSystemToast';
 import Tooltip from '../components/Tooltip';
 import RoomThemeColorPicker from '../components/RoomThemeColorPicker';
 import UserRoleMarks from '../components/UserRoleMarks';
-import { copyToClipboard } from '../lib/copyToClipboard';
-import { shareWithNative } from '../lib/nativeWebView';
 import { getRecentRoomIds, rememberRoomVisit } from '../lib/recentRooms';
 import { sortRoomSwitcherRooms } from '../lib/roomSwitcher';
 import { ensureRoomChromeInit } from '../lib/roomChromeInit';
-import { buildRoomShareText } from '../lib/roomShare';
+import { buildRoomSharePayload } from '../lib/roomShare';
+import RoomShareModal from '../components/RoomShareModal';
 import {
   getStoredRoomPassword,
   parseRoomPasswordFromSearch,
@@ -301,7 +301,7 @@ export default function Room() {
     noindex: true,
   });
 
-  const { joinRoom, addSong, leaveRoom, listFavorites, setFavorite, importFavorites, createFavoriteShare, previewFavoriteShare, importFavoriteShare, renameRoomName, setRoomLock, setRoomFmMode, setRoomAnnouncement, setRoomCustomCover, setChatHistoryVisibleOnJoin, setChatShowAvatars, setRoomJoinNotice, setRoomAiSettings, setRoomMaxAdmins, setRoomPlaybackRate, setSongRequestEnabled, unbanRoomSong, addRoomForbiddenWord, removeRoomForbiddenWord, setRoomMemberTier, removeRoomMemberTier, setRoomMemberSettings, loadSongHistory, transferOwner, destroyRoom, applyRoomPermanent, cancelRoomPermanent, clearQueue, createMusicAccountQr, checkMusicAccountQr, bindMusicAccount, listMusicAccounts, setMusicAccountShared, unbindMusicAccount, skipSong, togglePlay } = useSocket();
+  const { joinRoom, addSong, leaveRoom, listFavorites, setFavorite, importFavorites, createFavoriteShare, previewFavoriteShare, importFavoriteShare, renameRoomName, setRoomLock, setRoomFmMode, setRoomAnnouncement, setRoomCustomCover, setChatHistoryVisibleOnJoin, setChatShowAvatars, setRoomJoinNotice, setRoomAiSettings, setRoomMaxAdmins, setRoomAdminSelfManageMemberTier, setRoomPlaybackRate, setSongRequestEnabled, unbanRoomSong, addRoomForbiddenWord, removeRoomForbiddenWord, setRoomMemberTier, removeRoomMemberTier, setRoomMemberSettings, loadSongHistory, transferOwner, destroyRoom, applyRoomPermanent, cancelRoomPermanent, clearQueue, createMusicAccountQr, checkMusicAccountQr, bindMusicAccount, listMusicAccounts, setMusicAccountShared, unbindMusicAccount, skipSong, togglePlay } = useSocket();
   const { applyFavorites } = useFavorites();
   const { queueKeys, playedKeys } = useRoomSongKeySets();
 
@@ -323,7 +323,7 @@ export default function Room() {
   const [clearQueueConfirmOpen, setClearQueueConfirmOpen] = useState(false);
   const [clearingQueue, setClearingQueue] = useState(false);
 
-  const [copied, setCopied] = useState(false);
+  const [sharePayload, setSharePayload] = useState<{ url: string; text: string } | null>(null);
   const [searchedKeyword, setSearchedKeyword] = useState('');
   const [searchMode, setSearchMode] = useState<SearchMode>('song');
   const [activeSearchMode, setActiveSearchMode] = useState<SearchMode>('song');
@@ -415,6 +415,7 @@ export default function Room() {
   const [joinNoticeSaving, setJoinNoticeSaving] = useState(false);
   const [roomAiSaving, setRoomAiSaving] = useState(false);
   const [maxAdminsSaving, setMaxAdminsSaving] = useState(false);
+  const [adminSelfManageMemberTierSaving, setAdminSelfManageMemberTierSaving] = useState(false);
   const [playbackRateSaving, setPlaybackRateSaving] = useState(false);
   const [forbiddenWordSaving, setForbiddenWordSaving] = useState(false);
   const lastSongRequestAtRef = useRef(0);
@@ -522,22 +523,28 @@ export default function Room() {
   // 不能把这个入口也一起挡在 canModerate 后面，否则找回功能在它本该生效的场景里反而打不开。
   // 进房预取 OAuth 状态，避免打开设置时「身份」栏异步闪现。
   const [identityProviders, setIdentityProviders] = useState<{
+    wechatUinEnabled: boolean;
+    wechatUinBound: WechatUinBinding | null;
     linuxdoEnabled: boolean;
     githubEnabled: boolean;
     linuxdoBound: LinuxdoBinding | null;
     githubBound: GithubBinding | null;
   }>({
+    wechatUinEnabled: false,
+    wechatUinBound: null,
     linuxdoEnabled: false,
     githubEnabled: false,
     linuxdoBound: null,
     githubBound: null,
   });
-  const identityRecoveryAvailable = identityProviders.linuxdoEnabled || identityProviders.githubEnabled;
+  const identityRecoveryAvailable = identityProviders.wechatUinEnabled || identityProviders.linuxdoEnabled || identityProviders.githubEnabled;
   useEffect(() => {
     let cancelled = false;
-    void Promise.all([fetchLinuxdoStatus(), fetchGithubStatus()]).then(([linuxdo, github]) => {
+    void Promise.all([fetchWechatUinStatus(roomId), fetchLinuxdoStatus(roomId), fetchGithubStatus(roomId)]).then(([wechat, linuxdo, github]) => {
       if (cancelled) return;
       setIdentityProviders({
+        wechatUinEnabled: wechat.enabled,
+        wechatUinBound: wechat.bound,
         linuxdoEnabled: linuxdo.enabled,
         githubEnabled: github.enabled,
         linuxdoBound: linuxdo.bound,
@@ -547,7 +554,7 @@ export default function Room() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [roomId]);
 
   const isCreator = Boolean(room?.creatorId && mySocketId && room.creatorId === mySocketId);
   const songRequestBlockReason = getSongRequestBlockReason(
@@ -1605,6 +1612,14 @@ export default function Room() {
     }
   }, [roomAiSaving, setRoomAiSettings, showToast]);
 
+  const handleSaveAdminSelfManageMemberTier = useCallback(async (enabled: boolean) => {
+    if (adminSelfManageMemberTierSaving) return;
+    setAdminSelfManageMemberTierSaving(true);
+    const res = await setRoomAdminSelfManageMemberTier(enabled);
+    setAdminSelfManageMemberTierSaving(false);
+    if (!res.success) showToast(res.error || '贵宾权限设置失败', 'error');
+  }, [adminSelfManageMemberTierSaving, setRoomAdminSelfManageMemberTier, showToast]);
+
   const handleSaveMaxAdmins = useCallback(async (next: number) => {
     if (maxAdminsSaving) return;
     setMaxAdminsSaving(true);
@@ -1752,7 +1767,7 @@ export default function Room() {
     void handleAddMany(listPageSongs);
   }, [handleAddMany, listPageSongs]);
 
-  const handleCopyRoom = async () => {
+  const handleOpenRoomShare = () => {
     if (!room?.id) return;
     let sharePassword: string | undefined;
     if (room.hasPassword) {
@@ -1762,7 +1777,7 @@ export default function Room() {
         return;
       }
     }
-    const text = buildRoomShareText({
+    const payload = buildRoomSharePayload({
       inviterNickname: nickname,
       roomId: room.id,
       roomName: room.name,
@@ -1772,13 +1787,7 @@ export default function Room() {
         : null,
       isPlaying: room.isPlaying,
     });
-    const ok = await shareWithNative(text) || await copyToClipboard(text);
-    if (ok) {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } else {
-      showToast('复制失败，请手动复制地址栏链接', 'error');
-    }
+    setSharePayload(payload);
   };
 
   const displayVisualMode: RoomVisualMode = pureMode ? 'off' : visualMode;
@@ -2777,6 +2786,8 @@ export default function Room() {
         protectedFromDestroy={Boolean(room?.protectedFromDestroy)}
         permanentApplication={room?.permanentApplication ?? null}
         permanentSaving={permanentSaving}
+        identityWechatUinEnabled={identityProviders.wechatUinEnabled}
+        identityWechatUinBound={identityProviders.wechatUinBound}
         identityLinuxdoEnabled={identityProviders.linuxdoEnabled}
         identityGithubEnabled={identityProviders.githubEnabled}
         identityLinuxdoBound={identityProviders.linuxdoBound}
@@ -2804,9 +2815,12 @@ export default function Room() {
         onCancelPermanent={handleCancelPermanent}
         maxAdmins={room?.maxAdmins ?? 5}
         maxAdminsSaving={maxAdminsSaving}
+        adminSelfManageMemberTierEnabled={Boolean(room?.adminSelfManageMemberTierEnabled)}
+        adminSelfManageMemberTierSaving={adminSelfManageMemberTierSaving}
         playbackRate={room?.playbackRate ?? 1}
         playbackRateSaving={playbackRateSaving}
         onSaveMaxAdmins={handleSaveMaxAdmins}
+        onSaveAdminSelfManageMemberTier={handleSaveAdminSelfManageMemberTier}
         onSavePlaybackRate={handleSavePlaybackRate}
       />
       </Suspense>
@@ -2819,6 +2833,8 @@ export default function Room() {
         creatorId={room?.creatorId ?? undefined}
         adminIds={room?.adminIds ?? []}
         isOwner={isOwner}
+        myUserId={mySocketId}
+        adminSelfManageMemberTierEnabled={Boolean(room?.adminSelfManageMemberTierEnabled)}
         memberTiers={room?.memberTiers ?? {}}
         memberSettings={room?.memberSettings ?? DEFAULT_MEMBER_SETTINGS}
         saving={memberSaving}
@@ -2846,6 +2862,14 @@ export default function Room() {
           onSave={handleSaveFmMode}
         />
       </Suspense>
+
+      <RoomShareModal
+        open={sharePayload !== null}
+        shareUrl={sharePayload?.url || ''}
+        shareText={sharePayload?.text || ''}
+        onClose={() => setSharePayload(null)}
+        onCopied={() => showToast('邀请文案已复制', 'success')}
+      />
 
       <RoomAnnouncementPopup
         open={announcementPopupOpen}
@@ -3138,12 +3162,12 @@ export default function Room() {
                 <button
                   onClick={() => {
                     markGuideFeatureUsed('room-header');
-                    handleCopyRoom();
+                    handleOpenRoomShare();
                   }}
                   className="flex items-center gap-1.5 text-xs text-netease-muted hover:text-white transition-colors px-2.5 sm:px-3 py-1.5 rounded-lg hover:bg-netease-card"
                 >
-                  {copied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
-                  <span className="hidden sm:inline">{copied ? '已复制' : '分享房间'}</span>
+                  <Share2 className="w-4 h-4" />
+                  <span className="hidden sm:inline">分享房间</span>
                 </button>
               </Tooltip>
 
@@ -3164,7 +3188,7 @@ export default function Room() {
 
                 {roomSwitcherOpen && (
                   <div
-                    className="room-switcher-menu absolute right-0 top-[calc(100%+0.6rem)] z-50 w-[min(21rem,calc(100vw-1.5rem))] overflow-hidden rounded-2xl border border-white/10 shadow-2xl shadow-black/40"
+                    className="room-switcher-menu fixed right-3 top-[calc(env(safe-area-inset-top)+7rem)] z-50 w-[min(21rem,calc(100vw-1.5rem))] overflow-hidden rounded-2xl border border-white/10 shadow-2xl shadow-black/40 sm:absolute sm:right-0 sm:top-[calc(100%+0.6rem)]"
                     role="menu"
                     aria-label="房间选项"
                   >

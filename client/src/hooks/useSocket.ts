@@ -1720,6 +1720,19 @@ export function useSocket() {
     });
   }, []);
 
+  const setRoomAdminSelfManageMemberTier = useCallback((enabled: boolean): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
+    return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
+      'set_room_admin_self_manage_member_tier',
+      { enabled },
+      { success: false, error: '连接超时，请重试' },
+    ).then((res) => {
+      if (res.success && res.room) {
+        applyRoomSnapshot(res.room);
+      }
+      return res;
+    });
+  }, []);
+
   const setRoomMemberSettings = useCallback((settings: {
     welcomeEnabled: boolean;
     welcomeTemplateId: string;
@@ -1901,6 +1914,7 @@ export function useSocket() {
     removeRoomMemberTier,
 
     setRoomMemberSettings,
+    setRoomAdminSelfManageMemberTier,
 
     setChatMute,
 

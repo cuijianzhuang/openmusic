@@ -17,6 +17,7 @@
   <a href="#-ai-功能">🤖 AI</a> ·
   <a href="#-站点管理后台">🛡️ 管理后台</a> ·
   <a href="#-文档">📖 文档</a> ·
+  <a href="#-交流群">👥 交流群</a> ·
   <a href="#-请作者喝一杯咖啡">☕ 请喝咖啡</a> ·
   <a href="docs/DEPLOY.md">📖 部署文档</a> ·
   <a href="deploy/DEPLOY-BAOTA.md">🛠️ 宝塔部署</a>
@@ -291,6 +292,16 @@ npm run package:build # 组装发版包
 ```
 
 健康检查：`GET /api/health`
+
+---
+
+## 👥 交流群
+
+欢迎加入 OpenMusic QQ 交流群，交流使用体验、部署问题与功能建议：
+
+<p align="center">
+  <img src="docs/community/qq.jpg" alt="OpenMusic QQ 交流群二维码" width="360" />
+</p>
 
 ---
 

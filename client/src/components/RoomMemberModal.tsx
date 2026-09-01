@@ -28,6 +28,8 @@ interface Props {
   creatorId?: string;
   adminIds?: string[];
   isOwner?: boolean;
+  myUserId?: string | null;
+  adminSelfManageMemberTierEnabled?: boolean;
   memberTiers: Record<string, RoomMemberTier>;
   memberSettings: RoomMemberSettings;
   saving?: boolean;
@@ -111,6 +113,8 @@ export default function RoomMemberModal({
   creatorId,
   adminIds = [],
   isOwner = false,
+  myUserId = null,
+  adminSelfManageMemberTierEnabled = false,
   memberTiers,
   memberSettings,
   saving = false,
@@ -190,7 +194,8 @@ export default function RoomMemberModal({
   const selectedIsVip = Boolean(selectedUser && memberTiers[selectedUser.id]);
   const selectedIsOwner = Boolean(selectedUser && creatorId && selectedUser.id === creatorId);
   const selectedIsAdmin = Boolean(selectedUser && adminIds.includes(selectedUser.id) && !selectedIsOwner);
-  const canEditSelected = isOwner || (!selectedIsOwner && !selectedIsAdmin);
+  const canEditSelected = isOwner
+    || (adminSelfManageMemberTierEnabled ? selectedUser?.id === myUserId : (!selectedIsOwner && !selectedIsAdmin));
   const cooldownMinutes = Math.floor(normalizeWelcomeCooldownSec(draft.welcomeCooldownSec) / 60);
   const cooldownIsPreset = (WELCOME_COOLDOWN_MINUTE_OPTIONS as readonly number[]).includes(cooldownMinutes);
   const previewNickname = selectedUser?.nickname || '贵宾昵称';
@@ -368,7 +373,7 @@ export default function RoomMemberModal({
                       </span>
                     </div>
                     {!canEditSelected && (
-                      <p className="text-[11px] text-amber-200/75">房主或管理员的贵宾设置仅限房主修改</p>
+                      <p className="text-[11px] text-amber-200/75">{adminSelfManageMemberTierEnabled && !isOwner ? '当前仅允许修改自己的贵宾标识' : '房主或管理员的贵宾设置仅限房主修改'}</p>
                     )}
                     <MemberQueueFrame tier={draft} variant="preview" innerClassName="bg-netease-card px-3 py-2">
                       <p className="text-sm font-medium text-white">点歌边框预览</p>

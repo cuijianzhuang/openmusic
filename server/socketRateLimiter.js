@@ -40,6 +40,7 @@ const ACTION_EVENTS = new Set([
   'set_room_member_tier',
   'remove_room_member_tier',
   'set_room_member_settings',
+  'set_room_admin_self_manage_member_tier',
   'set_chat_mute',
   'kick_user',
   'transfer_owner',

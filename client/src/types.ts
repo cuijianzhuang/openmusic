@@ -332,6 +332,8 @@ export interface RoomState {
   memberTiers?: Record<string, RoomMemberTier>;
   /** 贵宾欢迎语等房间级设置 */
   memberSettings?: RoomMemberSettings;
+  /** 房主是否允许管理员仅修改自己的贵宾标识（默认关闭） */
+  adminSelfManageMemberTierEnabled?: boolean;
   /** 房间 AI 助手公开配置（进房时下发） */
   roomAi?: RoomAiConfig;
 }

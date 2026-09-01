@@ -222,5 +222,6 @@ export function isRoomStateEquivalent(a: RoomState, b: RoomState): boolean {
     && bannedSongsEqual(a.bannedSongs, b.bannedSongs)
     && forbiddenWordsEqual(a.forbiddenWords, b.forbiddenWords)
     && memberTiersEqual(a.memberTiers, b.memberTiers)
-    && memberSettingsEqual(a.memberSettings, b.memberSettings);
+    && memberSettingsEqual(a.memberSettings, b.memberSettings)
+    && a.adminSelfManageMemberTierEnabled === b.adminSelfManageMemberTierEnabled;
 }
