@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # CI 只使用公开 pub.dev 包；隔离用户级 Dart 配置以避免缓存或 runner 中的无效令牌导致 403。
-      XDG_CONFIG_HOME: ${{ runner.temp }}/dart-config
+      XDG_CONFIG_HOME: /tmp/dart-config
     steps:
       - uses: actions/checkout@v4
 
