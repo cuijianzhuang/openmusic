@@ -100,7 +100,7 @@ export function decryptRoomCredential(value, roomId, platform, now = Date.now())
 
 export function encryptRoomSecrets(secrets, roomId) {
   const source = secrets && typeof secrets === 'object' ? secrets : {};
-  return Object.fromEntries(['netease', 'tencent', 'qishui'].map((platform) => [
+  return Object.fromEntries(['netease', 'tencent', 'kugou', 'qishui'].map((platform) => [
     platform,
     encryptRoomCredential(source[platform], roomId, platform),
   ]));
@@ -108,7 +108,7 @@ export function encryptRoomSecrets(secrets, roomId) {
 
 export function decryptRoomSecrets(secrets, roomId) {
   const source = secrets && typeof secrets === 'object' ? secrets : {};
-  return Object.fromEntries(['netease', 'tencent', 'qishui'].map((platform) => [
+  return Object.fromEntries(['netease', 'tencent', 'kugou', 'qishui'].map((platform) => [
     platform,
     decryptRoomCredential(source[platform], roomId, platform),
   ]));

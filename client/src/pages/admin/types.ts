@@ -97,7 +97,7 @@ export interface RuntimeConfig {
   githubScope: string;
   roomCredentialEncryptionKey: string;
   /** 是否开放 SVIP 音质选项（需上游 Cookie 具备对应权益） */
-  svipQualityEnabled: boolean;
+  svipQualityEnabled: Record<MusicApiPlatform, boolean>;
   /** 是否开放全站共享会员入口 */
   sharedMembershipEnabled: boolean;
   metingApiUrl: string;
@@ -110,6 +110,7 @@ export interface RuntimeConfig {
     clearAuth?: boolean;
   }[];
   musicApis: CustomMusicApi[];
+  musicSourcesEnabled: Record<MusicApiPlatform, boolean>;
   qiniuAccessKey: string;
   qiniuSecretKey: string;
   qiniuBucket: string;
@@ -311,6 +312,7 @@ export interface AdminRoom {
   queueLength: number;
   createdAt: number;
   lastJoinedAt?: number | null;
+  ownerLastJoinedAt?: number | null;
   protectedFromDestroy: boolean;
   ownerNickname?: string;
   creatorId?: string | null;

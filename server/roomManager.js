@@ -44,6 +44,7 @@ import {
   toPublicPermanentApplication,
 } from "./permanentApplication.js";
 import { buildUserRoundRobinOrder } from "./playbackOrder.js";
+import { resolveAdminOwnerLastJoinedAt } from "./adminRoomUtils.js";
 
 const generateRoomId = customAlphabet("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", 6);
 const generateId = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 12);
@@ -341,6 +342,14 @@ const TENCENT_CANONICAL = new Set([
   "atmos",
   "master",
 ]);
+const KUGOU_CANONICAL = new Set([
+  "standard",
+  "exhigh",
+  "lossless",
+  "hires",
+  "atmos",
+  "master",
+]);
 const QUALITY_ALIASES = {
   128: "standard",
   320: "exhigh",
@@ -350,11 +359,14 @@ const QUALITY_ALIASES = {
 function normalizeRoomAudioQuality(input) {
   const rawNetease = String(input?.netease || "jyeffect");
   const rawTencent = String(input?.tencent || "lossless");
+  const rawKugou = String(input?.kugou || "exhigh");
   const netease = QUALITY_ALIASES[rawNetease] || rawNetease;
   const tencent = QUALITY_ALIASES[rawTencent] || rawTencent;
+  const kugou = QUALITY_ALIASES[rawKugou] || rawKugou;
   return {
     netease: NETEASE_CANONICAL.has(netease) ? netease : "jyeffect",
     tencent: TENCENT_CANONICAL.has(tencent) ? tencent : "lossless",
+    kugou: KUGOU_CANONICAL.has(kugou) ? kugou : "exhigh",
   };
 }
 
@@ -367,7 +379,7 @@ function normalizeMusicAccountEntry(raw) {
   if (!id) return null;
   return {
     cookieId: id,
-    platform: raw.platform === "tencent" ? "tencent" : raw.platform === "qishui" ? "qishui" : "netease",
+    platform: raw.platform === "tencent" ? "tencent" : raw.platform === "kugou" ? "kugou" : raw.platform === "qishui" ? "qishui" : "netease",
     shared: hasVip ? Boolean(raw.shared) : false,
     hasVip,
     hasSvip: hasVip && Boolean(raw.hasSvip),
@@ -388,24 +400,64 @@ export function normalizeMusicAccounts(input) {
   return {
     netease: normalizeMusicAccountEntry(src.netease),
     tencent: normalizeMusicAccountEntry(src.tencent),
+    kugou: normalizeMusicAccountEntry(src.kugou),
     qishui: normalizeMusicAccountEntry(src.qishui),
   };
 }
+
+/** 上游共享接口可能只返回状态，不返回完整账号资料；保留本地登录资料，避免界面回到未绑定。 */
+export function mergeSharedMusicAccount(current, upstream) {
+  const local = normalizeMusicAccountEntry(current);
+  const remote = normalizeMusicAccountEntry(upstream);
+  if (!local && !remote) return null;
+  return normalizeMusicAccountEntry({
+    ...(local || {}),
+    ...(remote || {}),
+    cookieId: remote?.cookieId || local?.cookieId,
+    platform: remote?.platform || local?.platform,
+    shared: true,
+    hasVip: remote?.hasVip ?? local?.hasVip ?? true,
+    hasSvip: remote?.hasSvip ?? local?.hasSvip ?? false,
+    nickname: remote?.nickname || local?.nickname,
+    providerName: remote?.providerName || local?.providerName,
+    avatarUrl: remote?.avatarUrl || local?.avatarUrl,
+    userId: remote?.userId || local?.userId,
+    isValid: remote?.isValid ?? local?.isValid ?? true,
+    updatedAt: remote?.updatedAt || Date.now(),
+  });
+}
+
+/** 合并 Meting 刷新结果，避免并发刷新用旧快照覆盖刚完成的共享切换。 */
+export function mergeRoomMusicAccountsWithUpstream(localAccounts, upstreamAccounts) {
+  const local = normalizeMusicAccounts(localAccounts);
+  const upstream = normalizeMusicAccounts(upstreamAccounts);
+  const merged = { ...local };
+  for (const platform of ["netease", "tencent", "kugou", "qishui"]) {
+    if (upstream[platform]) {
+      merged[platform] = mergeSharedMusicAccount(local[platform], upstream[platform]);
+    }
+  }
+  return merged;
+}
+
 
 /** 房间音源凭证仅存服务端，不进房间广播 */
 function normalizeMusicAccountSecrets(input) {
   const src = input && typeof input === "object" ? input : {};
   const netease = String(src.netease || "").trim();
   const tencent = String(src.tencent || "").trim();
+  const kugou = String(src.kugou || "").trim();
   const qishui = String(src.qishui || "").trim();
   return {
     netease: netease || null,
     tencent: tencent || null,
+    kugou: kugou || null,
     qishui: qishui || null,
   };
 }
 
 function normalizeFmSource(value) {
+  if (value === "kugou") return "kugou";
   if (value === "qishui") return "qishui";
   if (value === "tencent") return "tencent";
   return "netease";
@@ -608,6 +660,7 @@ function snapshotRoomForStorage(room) {
     creatorId: room.creatorId ?? null,
     creatorDeviceId: room.creatorDeviceId ?? null,
     creatorIp: room.creatorIp || null,
+    ownerLastJoinedAtByUserId: Object.fromEntries(room.ownerLastJoinedAtByUserId || []),
     bannedUserIds: Array.from(room.bannedUserIds || []),
     bannedDeviceIds: Array.from(room.bannedDeviceIds || []),
     queue: room.queue.map(serializeQueueItemForRoom).filter(Boolean),
@@ -630,7 +683,7 @@ function snapshotRoomForStorage(room) {
     maxAdmins: getRoomMaxAdmins(room),
     userNicknames: Object.fromEntries(room.userNicknames || []),
     userAvatarUrls: Object.fromEntries(room.userAvatarUrls || []),
-    audioQuality: room.audioQuality ?? { netease: "jyeffect", tencent: "lossless" },
+    audioQuality: room.audioQuality ?? { netease: "jyeffect", tencent: "lossless", kugou: "exhigh" },
     neteaseFmMode: normalizeFmMode(room.neteaseFmMode),
     fmSource: normalizeFmSource(room.fmSource),
     fmModeBeforeOff: normalizeFmMode(room.fmModeBeforeOff),
@@ -700,6 +753,11 @@ function restoreRoomFromStorage(data) {
   room.creatorId = data.creatorId ?? null;
   room.creatorDeviceId = sanitizeCreatorId(data.creatorDeviceId) || null;
   room.creatorIp = String(data.creatorIp || "").trim().slice(0, 64) || null;
+  room.ownerLastJoinedAtByUserId = new Map(
+    Object.entries(data.ownerLastJoinedAtByUserId || {})
+      .map(([id, at]) => [id, Number(at) || 0])
+      .filter(([, at]) => at > 0),
+  );
   room.bannedUserIds = new Set(data.bannedUserIds || []);
   room.bannedDeviceIds = new Set(data.bannedDeviceIds || []);
   room.isLocked = Boolean(data.isLocked);
@@ -1059,6 +1117,7 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
     creatorId: null,
     creatorDeviceId: null,
     creatorIp: null,
+    ownerLastJoinedAtByUserId: new Map(),
     ownerId: null,
     bannedUserIds: new Set(),
     bannedDeviceIds: new Set(),
@@ -1104,14 +1163,15 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
     audioQuality: {
       netease: "jyeffect",
       tencent: "lossless",
+      kugou: "exhigh",
     },
     neteaseFmMode: DEFAULT_FM_MODE,
     fmSource: "netease",
     fmModeBeforeOff: DEFAULT_FM_MODE,
     /** 房主扫码绑定的音源账号公开信息 */
-    musicAccounts: { netease: null, tencent: null, qishui: null },
+    musicAccounts: { netease: null, tencent: null, kugou: null, qishui: null },
     /** 房间私有音源凭证（不广播；仅开启共享时同步到 Meting 池） */
-    musicAccountSecrets: { netease: null, tencent: null, qishui: null },
+    musicAccountSecrets: { netease: null, tencent: null, kugou: null, qishui: null },
     playMode: DEFAULT_PLAY_MODE,
     /** 用户轮转模式上一次实际播放的用户，用于保证跨轮次公平 */
     lastPlaybackRequesterId: null,
@@ -2215,6 +2275,7 @@ export function listRoomsForAdmin() {
         creatorId: room.creatorId || null,
         creatorDeviceId: room.creatorDeviceId || null,
         creatorIp: room.creatorIp || null,
+        ownerLastJoinedAt: resolveAdminOwnerLastJoinedAt(room),
         creatorNickname: (() => {
           const oid = room.creatorId || room.ownerId;
           if (!oid) return "";
@@ -2596,6 +2657,9 @@ export function addUser(roomId, userId, nickname, options = {}) {
 
   const readOnly = Boolean(options.readOnly);
   const chatVisibleSince = resolveChatVisibleSince(room, userId, existing);
+  if (!readOnly) {
+    room.ownerLastJoinedAtByUserId.set(userId, Date.now());
+  }
 
   // 非 TV 进房刷新「最后进房时间」（含重连重进；多标签同会话也刷新无妨）
   if (!readOnly) {
@@ -2800,8 +2864,8 @@ export function setRoomFmMode(roomId, actorId, mode, connectionId = null, source
 
   let nextMode = normalizeFmMode(mode);
   const nextSource = normalizeFmSource(source ?? room.fmSource);
-  // QQ 官方仅猜你喜欢，无其它模式；切到 QQ 时强制 DEFAULT
-  if (nextSource === "tencent" && nextMode !== FM_MODE_OFF) {
+  // QQ、酷狗仅提供默认私人漫游；切换时强制 DEFAULT。
+  if (["tencent", "kugou"].includes(nextSource) && nextMode !== FM_MODE_OFF) {
     nextMode = DEFAULT_FM_MODE;
   }
   if (room.neteaseFmMode === nextMode && normalizeFmSource(room.fmSource) === nextSource) {
@@ -2831,7 +2895,7 @@ export function setRoomMusicAccountsCache(roomId, accounts) {
   const next = normalizeMusicAccounts(accounts);
   // 刷新 VIP 列表时保留本地无 VIP 漫游账号元数据
   const prev = normalizeMusicAccounts(room.musicAccounts);
-  for (const platform of ["netease", "tencent", "qishui"]) {
+  for (const platform of ["netease", "tencent", "kugou", "qishui"]) {
     if (prev[platform]?.usage === "fm" && !next[platform]) {
       next[platform] = prev[platform];
     }
@@ -2844,7 +2908,7 @@ export function setRoomMusicAccountsCache(roomId, accounts) {
 export function patchRoomMusicAccountCache(roomId, platform, account, options = {}) {
   const room = rooms.get(String(roomId || "").toUpperCase());
   if (!room) return { error: "房间不存在" };
-  const plat = platform === "tencent" ? "tencent" : platform === "qishui" ? "qishui" : "netease";
+  const plat = platform === "tencent" ? "tencent" : platform === "kugou" ? "kugou" : platform === "qishui" ? "qishui" : "netease";
   const next = normalizeMusicAccounts(room.musicAccounts);
   next[plat] = normalizeMusicAccountEntry(account);
   room.musicAccounts = next;
@@ -2864,7 +2928,7 @@ export function patchRoomMusicAccountCache(roomId, platform, account, options = 
 export function getRoomMusicAccountCookie(roomId, platform) {
   const room = rooms.get(String(roomId || "").toUpperCase());
   if (!room) return null;
-  const plat = platform === "tencent" ? "tencent" : platform === "qishui" ? "qishui" : "netease";
+  const plat = platform === "tencent" ? "tencent" : platform === "kugou" ? "kugou" : platform === "qishui" ? "qishui" : "netease";
   return normalizeMusicAccountSecrets(room.musicAccountSecrets)[plat] || null;
 }
 
@@ -2881,7 +2945,7 @@ export function getRoomNeteaseFmCookie(roomId) {
 export function getRoomFmCookie(roomId, platform) {
   const room = rooms.get(String(roomId || "").toUpperCase());
   if (!room) return null;
-  const plat = platform === "qishui" ? "qishui" : platform === "tencent" ? "tencent" : "netease";
+  const plat = platform === "qishui" ? "qishui" : platform === "kugou" ? "kugou" : platform === "tencent" ? "tencent" : "netease";
   const secret = normalizeMusicAccountSecrets(room.musicAccountSecrets)[plat];
   if (!secret) return null;
   const meta = normalizeMusicAccounts(room.musicAccounts)[plat];
@@ -2896,6 +2960,7 @@ export function clearRoomMusicAccountSecret(roomId, platform = "netease") {
   const secrets = normalizeMusicAccountSecrets(room.musicAccountSecrets);
   if (platform === "netease" || platform === "all") secrets.netease = null;
   if (platform === "tencent" || platform === "all") secrets.tencent = null;
+  if (platform === "kugou" || platform === "all") secrets.kugou = null;
   if (platform === "qishui" || platform === "all") secrets.qishui = null;
   room.musicAccountSecrets = secrets;
   persistRoom(room);

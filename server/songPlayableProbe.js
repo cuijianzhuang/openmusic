@@ -1,5 +1,4 @@
 import { fetchMetingApi } from './metingUpstream.js';
-import { fetchCustomMusicApi, hasCustomMusicApi } from './customMusicApi.js';
 
 const QQ_PLACEHOLDER_HOST = 'aqqmusic.tc.qq.com';
 const MEDIA_FILE_EXT = /\.(mp3|m4a|flac|ogg|wav|aac|wma)$/i;
@@ -93,42 +92,8 @@ async function probeMetingUrl(source, id) {
 }
 
 async function probeKugouUrl(id) {
-  if (!hasCustomMusicApi('kugou', 'url') && !hasCustomMusicApi('kugou', 'song')) {
-    return false;
-  }
-
-  try {
-    if (hasCustomMusicApi('kugou', 'url')) {
-      const custom = await fetchCustomMusicApi({
-        server: 'kugou',
-        type: 'url',
-        id,
-      });
-      if (custom) {
-        const text = await custom.text();
-        const url = parseUrlPayload(text);
-        if (isPlayableHttpUrl(url)) return true;
-        if (custom.status >= 400) return false;
-      }
-    }
-
-    if (hasCustomMusicApi('kugou', 'song')) {
-      const custom = await fetchCustomMusicApi({
-        server: 'kugou',
-        type: 'song',
-        id,
-      });
-      if (custom) {
-        const songs = await custom.json();
-        const detail = Array.isArray(songs) ? songs[0] : songs;
-        return isPlayableHttpUrl(detail?.url);
-      }
-    }
-  } catch {
-    return false;
-  }
-
-  return false;
+  // 与实际播放链路保持一致：Meting 为默认来源，管理后台自定义接口仅在 Meting 无结果时兜底。
+  return probeMetingUrl('kugou', id);
 }
 
 /**
@@ -142,7 +107,7 @@ export async function isSongPlayableOnServer(song) {
   const source = String(song?.source || 'netease').toLowerCase();
   try {
     if (source === 'kugou') return await probeKugouUrl(id);
-    if (source === 'netease' || source === 'tencent' || source === 'qishui') {
+    if (source === 'netease' || source === 'tencent' || source === 'kugou' || source === 'qishui') {
       return await probeMetingUrl(source, id);
     }
     return false;

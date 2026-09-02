@@ -12,6 +12,7 @@ interface Props {
   open: boolean;
   value: string;
   source?: FmSource;
+  enabledSources?: FmSource[];
   saving?: boolean;
   onClose: () => void;
   onSave: (mode: string, source: FmSource) => void;
@@ -20,6 +21,7 @@ interface Props {
 const FM_SOURCE_TABS: Array<{ value: FmSource; label: string }> = [
   { value: 'netease', label: '网易' },
   { value: 'tencent', label: 'QQ' },
+  { value: 'kugou', label: '酷狗' },
   { value: 'qishui', label: '汽水' },
 ];
 
@@ -27,14 +29,19 @@ export default function RoomFmModeModal({
   open,
   value,
   source = 'netease',
+  enabledSources,
   saving = false,
   onClose,
   onSave,
 }: Props) {
   if (!open) return null;
 
+  const availableSources = FM_SOURCE_TABS.filter((tab) => !enabledSources || enabledSources.includes(tab.value));
   const current = normalizeFmMode(value);
-  const currentSource = normalizeFmSource(source);
+  const normalizedSource = normalizeFmSource(source);
+  const currentSource = availableSources.some((tab) => tab.value === normalizedSource)
+    ? normalizedSource
+    : (availableSources[0]?.value || normalizedSource);
   const options = getFmModeOptions(currentSource);
 
   return createPortal(
@@ -65,8 +72,11 @@ export default function RoomFmModeModal({
           队列为空时通过私人漫游自动推荐下一首
         </p>
 
-        <div className="mb-4 grid grid-cols-3 gap-1 rounded-lg border border-white/10 bg-black/20 p-1">
-          {FM_SOURCE_TABS.map(({ value: item, label }) => {
+        <div
+          className="mb-4 grid gap-1 rounded-lg border border-white/10 bg-black/20 p-1"
+          style={{ gridTemplateColumns: `repeat(${Math.max(availableSources.length, 1)}, minmax(0, 1fr))` }}
+        >
+          {availableSources.map(({ value: item, label }) => {
             const nextOptions = getFmModeOptions(item);
             const nextMode = nextOptions.some((opt) => opt.value === current)
               ? current

@@ -62,7 +62,6 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
-import QRCode from 'qrcode';
 import { isIP } from 'net';
 import {
   deriveApiSignKey,
@@ -116,6 +115,8 @@ import {
   setRoomPlayMode,
   setRoomMusicAccountsCache,
   patchRoomMusicAccountCache,
+  mergeSharedMusicAccount,
+  mergeRoomMusicAccountsWithUpstream,
   getRoomMusicAccountCookie,
   setRoomAnnouncement,
   setRoomCustomCover,
@@ -185,7 +186,7 @@ import {
   listPendingPermanentNoticesForUser,
   ackPermanentDecisionNotice,
 } from './permanentApplication.js';
-import { importNeteasePlaylist, importQqPlaylist, importQishuiPlaylist, fetchNeteasePlaylistMetas } from './playlistImport.js';
+import { importNeteasePlaylist, importQqPlaylist, importKugouPlaylist, importQishuiPlaylist, fetchNeteasePlaylistMetas } from './playlistImport.js';
 import { fetchNeteaseHotToplist } from './neteaseToplist.js';
 import { createNeteasePlaylistSearchHandler } from './neteasePlaylistSearch.js';
 import { getHotSongs } from './songHotRank.js';
@@ -216,6 +217,7 @@ import {
 import { kickConnectionsMatchingBan } from './kickSiteBan.js';
 import { createErrorReport, listPendingSolutionsForUser, ackErrorReportSolution } from './errorReports.js';
 import { getRuntimeConfig, getPublicSiteSeo, setRuntimeConfig } from './runtimeConfig.js';
+import { isMusicSourceEnabled } from './musicSources.js';
 import { socketPayload } from './socketPayload.js';
 import { hardenSocketHandlers } from './socketHandlerGuard.js';
 import {
@@ -663,7 +665,6 @@ const limitJoinPasswordFail = createRateLimiter({ windowMs: 60_000, max: 8 });
 const limitProxyRequest = createRateLimiter({ windowMs: 60_000, max: 120 });
 const limitSocketAction = createRateLimiter({ windowMs: 60_000, max: 90 });
 const limitContributionQr = createRateLimiter({ windowMs: 60_000, max: 45 });
-const limitRoomShareQr = createRateLimiter({ windowMs: 60_000, max: 30 });
 const limitContributionBind = createRateLimiter({ windowMs: 10 * 60_000, max: 8 });
 const limitSocketChat = createRateLimiter({ windowMs: 60_000, max: 30 });
 const limitOwnerDestroyRoom = createRateLimiter({ windowMs: 60_000, max: 3 });
@@ -1241,26 +1242,6 @@ app.get('/api/app-version', (_req, res) => {
   return res.json({ buildId: 'dev', version: 'dev', notes: [], builtAt: null, forcePrompt: false });
 });
 
-app.post('/api/room-share-qr', async (req, res) => {
-  const requestIp = getRequestIp(req);
-  if (!limitRoomShareQr(`room-share-qr:${requestIp}`)) {
-    return res.status(429).json({ error: '二维码生成过于频繁，请稍后再试' });
-  }
-
-  const text = String(req.body?.text || '').trim();
-  if (!text || text.length > 2048) {
-    return res.status(400).json({ error: '分享链接无效' });
-  }
-
-  try {
-    const image = await QRCode.toDataURL(text, { width: 640, margin: 1, errorCorrectionLevel: 'M' });
-    return res.json({ image });
-  } catch (error) {
-    console.error('房间分享二维码生成失败:', error?.message || error);
-    return res.status(500).json({ error: '二维码生成失败，请稍后重试' });
-  }
-});
-
 app.post('/api/music-account-contribution/qr/create', async (req, res) => {
   const identity = requireSessionIdentity(req, res);
   if (!identity) return;
@@ -1270,8 +1251,11 @@ app.post('/api/music-account-contribution/qr/create', async (req, res) => {
   if (!limitContributionQr(`contribution-qr:${getRequestIp(req)}:${identity.userId}`)) {
     return res.status(429).json({ success: false, error: '操作有点频繁，请稍等一会儿再试' });
   }
-  const platform = ['netease', 'tencent', 'qishui'].includes(req.body?.platform) ? req.body.platform : '';
+  const platform = ['netease', 'tencent', 'kugou', 'qishui'].includes(req.body?.platform) ? req.body.platform : '';
   if (!platform) return res.status(400).json({ success: false, error: '请选择音乐平台' });
+  if (!isMusicSourceEnabled(platform, getRuntimeConfig().musicSourcesEnabled)) {
+    return res.status(503).json({ success: false, error: '该音源已关闭' });
+  }
   const result = await createManagedMusicQrSession({
     ownerId: identity.userId,
     platform,
@@ -1360,6 +1344,10 @@ app.post('/api/music-account-contribution/bind', async (req, res) => {
   };
   const credential = await getManagedMusicQrCredential(context);
   if (!credential.ok) return res.status(400).json({ success: false, error: credential.error });
+  if (!isMusicSourceEnabled(credential.platform, getRuntimeConfig().musicSourcesEnabled)) {
+    await releaseManagedMusicQrCredential(context);
+    return res.status(503).json({ success: false, error: '该音源已关闭' });
+  }
   const revokeToken = randomBytes(12).toString('base64url');
   const result = await contributeMusicAccount(
     credential.platform,
@@ -1421,6 +1409,9 @@ app.get('/api/music/hot', async (req, res) => {
 
 app.get('/api/music/toplist/netease', async (req, res) => {
   if (!requireSessionIdentity(req, res)) return;
+  if (!isMusicSourceEnabled('netease', getRuntimeConfig().musicSourcesEnabled)) {
+    return res.status(503).json({ error: '网易音源已关闭' });
+  }
   if (!limitProxyRequest(proxyLimitKey('toplist', req))) {
     return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
   }
@@ -1436,6 +1427,9 @@ app.get('/api/music/toplist/netease', async (req, res) => {
 
 app.get('/api/music/netease/playlists/meta', async (req, res) => {
   if (!requireSessionIdentity(req, res)) return;
+  if (!isMusicSourceEnabled('netease', getRuntimeConfig().musicSourcesEnabled)) {
+    return res.status(503).json({ error: '网易音源已关闭' });
+  }
   if (!limitProxyRequest(proxyLimitKey('playlist-meta', req))) {
     return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
   }
@@ -1459,13 +1453,19 @@ app.get('/api/music/netease/playlists/meta', async (req, res) => {
   }
 });
 
-app.get('/api/music/netease/playlists/search', createNeteasePlaylistSearchHandler({
+app.get('/api/music/netease/playlists/search', (req, res, next) => {
+  if (!isMusicSourceEnabled('netease', getRuntimeConfig().musicSourcesEnabled)) {
+    return res.status(503).json({ error: '网易音源已关闭' });
+  }
+  return next();
+}, createNeteasePlaylistSearchHandler({
   requireIdentity: requireSessionIdentity,
   consumeLimit: (req) => limitProxyRequest(proxyLimitKey('playlist-search', req)),
   findPresence: findUserRoomPresence,
 }));
 
 app.get('/api/music/sources', async (_req, res) => {
+  const enabled = getRuntimeConfig().musicSourcesEnabled;
   const sources = [
     {
       id: 'netease',
@@ -1483,10 +1483,10 @@ app.get('/api/music/sources', async (_req, res) => {
       supportsSearch: true,
       supportsIdLookup: false,
     },
-  ];
+  ].filter((source) => isMusicSourceEnabled(source.id, enabled));
   try {
     const metingQishui = await hasMetingVipAccount('qishui');
-    if (metingQishui.ok && metingQishui.hasVip) {
+    if (isMusicSourceEnabled('qishui', enabled) && metingQishui.ok && metingQishui.hasVip) {
       sources.push({
         id: 'qishui',
         name: '汽水',
@@ -1500,16 +1500,15 @@ app.get('/api/music/sources', async (_req, res) => {
   } catch {
     // 汽水会员状态未知时保持关闭，避免展示无法使用的搜索入口。
   }
-  // 酷狗仅在管理后台「自定义接口」启用搜索时下发，客户端据此隐藏入口
-  if (hasCustomMusicApi('kugou', 'search')) {
+  if (isMusicSourceEnabled('kugou', enabled)) {
     sources.push({
       id: 'kugou',
       name: '酷狗',
       shortName: '酷狗',
       color: '#2688ee',
       supportsSearch: true,
-      supportsIdLookup: false,
-      description: '通过自定义接口搜索',
+      supportsIdLookup: true,
+      description: '酷狗音乐曲库与会员音源',
     });
   }
   res.json(sources);
@@ -1518,7 +1517,7 @@ app.get('/api/music/sources', async (_req, res) => {
 /** 本机音质能力：是否开放 SVIP 档（管理后台可开关） */
 app.get('/api/music/quality-capabilities', async (req, res) => {
   if (!requireSessionIdentity(req, res)) return;
-  const { svipQualityEnabled } = getRuntimeConfig();
+  const { svipQualityEnabled = {} } = getRuntimeConfig();
   let sharedSvip = false;
   let neteaseSvip = false;
   let tencentSvip = false;
@@ -1545,14 +1544,14 @@ app.get('/api/music/quality-capabilities', async (req, res) => {
       });
     }
     sharedSvip = neteaseSvip || tencentSvip;
-    if (sharedSvip && !svipQualityEnabled) {
-      setRuntimeConfig({ svipQualityEnabled: true });
-    }
+    // 能力探测只反映上游会员状态，是否对前端开放由后台按平台开关决定。
   } catch {
     // 共享池暂时不可用时保留管理后台开关状态。
   }
   res.json({
-    svipQualityEnabled: Boolean(svipQualityEnabled || sharedSvip),
+    svipQualityEnabled: Object.fromEntries(['netease', 'tencent', 'kugou', 'qishui'].map((platform) => [
+      platform, Boolean(svipQualityEnabled?.[platform]),
+    ])),
     sharedSvip,
     neteaseSvip,
     tencentSvip,
@@ -1564,6 +1563,10 @@ app.get('/api/music/quality-capabilities', async (req, res) => {
 app.get('/api/meting', async (req, res) => {
   const identity = requireSessionIdentity(req, res);
   if (!identity) return;
+
+  const source = String(req.query.server || '').trim().toLowerCase();
+  const enabled = getRuntimeConfig().musicSourcesEnabled;
+  if (!isMusicSourceEnabled(source, enabled)) return res.status(503).json({ error: '该音源已关闭' });
 
   try {
     const thumbPx = parseInt(String(req.query.size || ''), 10) || 0;
@@ -1641,6 +1644,7 @@ async function resolveQishuiPlaybackSource(rawUrl, signal) {
 app.get('/api/qishui-source', async (req, res) => {
   const identity = requireSessionIdentity(req, res);
   if (!identity) return;
+  if (!isMusicSourceEnabled('qishui', getRuntimeConfig().musicSourcesEnabled)) return res.status(503).json({ error: '汽水音源已关闭' });
 
   const token = String(req.query.t || '').trim();
   const rawUrl = token ? await resolveQishuiSourceToken(token) : '';
@@ -1742,6 +1746,7 @@ app.get('/api/media-proxy', async (req, res) => {
 /** 酷狗音乐搜索：走管理后台自定义接口 */
 async function handleKugouSearch(req, res) {
   if (!requireSessionIdentity(req, res)) return;
+  if (!isMusicSourceEnabled('kugou', getRuntimeConfig().musicSourcesEnabled)) return res.status(503).json({ error: '酷狗音源已关闭' });
   if (!limitProxyRequest(proxyLimitKey('kugou', req))) {
     return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
   }
@@ -1752,15 +1757,14 @@ async function handleKugouSearch(req, res) {
   if (!keyword) return res.json([]);
 
   try {
-    const custom = await fetchCustomMusicApi({
+    const response = await fetchMetingApi({
       server: 'kugou',
       type: 'search',
       id: keyword,
-      keyword,
       limit: num,
     });
-    if (custom) return res.json(await custom.json());
-    return res.status(503).json({ error: '未配置酷狗自定义接口' });
+    if (!response.ok) return res.status(response.status).json({ error: '酷狗音乐搜索失败' });
+    return res.json(await response.json());
   } catch (err) {
     console.error('Kugou search error:', err.message);
     res.status(502).json({ error: '酷狗音乐搜索失败' });
@@ -1779,14 +1783,20 @@ app.post('/api/music/playlist/import', async (req, res) => {
   const platform = String(req.body?.platform || '').trim();
   const input = String(req.body?.input || '').trim();
   if (!input) return res.status(400).json({ error: '请粘贴歌单分享链接' });
-  if (platform !== 'netease' && platform !== 'qq' && platform !== 'qishui') {
+  if (platform !== 'netease' && platform !== 'qq' && platform !== 'kugou' && platform !== 'qishui') {
     return res.status(400).json({ error: '不支持的平台' });
+  }
+  const source = platform === 'qq' ? 'tencent' : platform;
+  if (!isMusicSourceEnabled(source, getRuntimeConfig().musicSourcesEnabled)) {
+    return res.status(503).json({ error: `${platform === 'qq' ? 'QQ' : platform === 'kugou' ? '酷狗' : platform === 'qishui' ? '汽水' : '网易'}音源已关闭` });
   }
 
   try {
     const result = platform === 'netease'
       ? await importNeteasePlaylist(input)
-      : platform === 'qq' ? await importQqPlaylist(input) : await importQishuiPlaylist(input);
+      : platform === 'qq' ? await importQqPlaylist(input)
+        : platform === 'kugou' ? await importKugouPlaylist(input)
+          : await importQishuiPlaylist(input);
     res.json(result);
   } catch (err) {
     console.error('Playlist import error:', err.message);
@@ -1794,9 +1804,10 @@ app.post('/api/music/playlist/import', async (req, res) => {
   }
 });
 
-/** 酷狗音乐详情（播放链接、歌词）：走管理后台自定义接口 */
+/** 酷狗音乐详情兼容接口：默认走 Meting，自定义接口由 Meting 上游层兜底。 */
 async function handleKugouSong(req, res) {
   if (!requireSessionIdentity(req, res)) return;
+  if (!isMusicSourceEnabled('kugou', getRuntimeConfig().musicSourcesEnabled)) return res.status(503).json({ error: '酷狗音源已关闭' });
   if (!limitProxyRequest(proxyLimitKey('kugou-song', req))) {
     return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
   }
@@ -1805,41 +1816,14 @@ async function handleKugouSong(req, res) {
   if (!id) return res.status(400).json({ error: '缺少歌曲 id' });
 
   try {
-    const customOperations = ['song', 'url', 'lrc', 'pic'].filter((operation) => (
-      hasCustomMusicApi('kugou', operation)
-    ));
-    if (customOperations.length === 0) {
-      return res.status(503).json({ error: '未配置酷狗自定义接口' });
-    }
-    const results = await Promise.allSettled(customOperations.map(async (operation) => {
-      const response = await fetchCustomMusicApi({ server: 'kugou', type: operation, id });
-      if (!response) return [operation, null];
-      if (operation === 'song') {
-        const songs = await response.json();
-        return [operation, Array.isArray(songs) ? songs[0] : songs];
-      }
-      return [operation, await response.text()];
-    }));
-    const customDetail = { id, source: 'kugou' };
-    let customHit = false;
-    for (const result of results) {
-      if (result.status !== 'fulfilled') {
-        console.warn(`自定义酷狗详情字段失败：${result.reason?.message || result.reason}`);
-        continue;
-      }
-      const [operation, value] = result.value;
-      if (operation === 'song' && value && typeof value === 'object') {
-        Object.assign(customDetail, value);
-        customHit = true;
-      } else if (value) {
-        customDetail[operation] = value;
-        customHit = true;
-      }
-    }
-    if (!customHit) {
+    const response = await fetchMetingApi({ server: 'kugou', type: 'song', id });
+    if (!response.ok) return res.status(response.status).json({ error: '歌曲不存在或接口未返回可用结果' });
+    const data = await response.json();
+    const detail = Array.isArray(data) ? data[0] : data;
+    if (!detail || typeof detail !== 'object') {
       return res.status(404).json({ error: '歌曲不存在或接口未返回可用结果' });
     }
-    res.json(customDetail);
+    return res.json({ id, source: 'kugou', ...detail });
   } catch (err) {
     console.error('Kugou song error:', err.message);
     res.status(502).json({ error: '酷狗音乐获取失败' });
@@ -1980,8 +1964,9 @@ function sendBootstrapResponse(res, userId, iat, token, deviceId = null) {
   const payload = {
     clientId: userId,
     features: {
-      svipQualityEnabled: Boolean(runtime.svipQualityEnabled),
+      svipQualityEnabled: runtime.svipQualityEnabled,
       sharedMembershipEnabled: Boolean(runtime.sharedMembershipEnabled),
+      musicSourcesEnabled: runtime.musicSourcesEnabled,
     },
   };
   const requireRequestSign = res.req?.secure || !ALLOW_INSECURE_HTTP_API;
@@ -3618,7 +3603,13 @@ io.on('connection', (socket) => {
       return;
     }
 
-    if (source === 'qishui') {
+    const fmSource = source === 'qq' ? 'tencent' : source;
+    if (!isMusicSourceEnabled(fmSource, getRuntimeConfig().musicSourcesEnabled)) {
+      callback?.({ success: false, error: '该音源已关闭' });
+      return;
+    }
+
+    if (fmSource === 'qishui') {
       const room = getRoomInternal(roomId);
       const roomCookie = String(room?.musicAccountSecrets?.qishui || '').trim();
       if (!roomCookie) {
@@ -3630,7 +3621,7 @@ io.on('connection', (socket) => {
       }
     }
 
-    const result = setRoomFmMode(roomId, getSocketUserId(socket), mode, socket.id, source);
+    const result = setRoomFmMode(roomId, getSocketUserId(socket), mode, socket.id, fmSource);
     if (result.error) {
       callback?.({ success: false, error: result.error });
       return;
@@ -3652,6 +3643,10 @@ io.on('connection', (socket) => {
     const room = getRoomInternal(roomId);
     if (!room || room.creatorId !== getSocketUserId(socket)) {
       callback?.({ success: false, error: '仅房主可绑定音源账号' });
+      return;
+    }
+    if (!isMusicSourceEnabled(platform, getRuntimeConfig().musicSourcesEnabled)) {
+      callback?.({ success: false, error: '该音源已关闭' });
       return;
     }
     const result = await createManagedMusicQrSession({
@@ -3725,6 +3720,11 @@ io.on('connection', (socket) => {
       callback?.({ success: false, error: credential.error });
       return;
     }
+    if (!isMusicSourceEnabled(credential.platform, getRuntimeConfig().musicSourcesEnabled)) {
+      await releaseManagedMusicQrCredential(context);
+      callback?.({ success: false, error: '该音源已关闭' });
+      return;
+    }
     if (!hasRoomCredentialEncryptionKey()) {
       await releaseManagedMusicQrCredential(context);
       callback?.({ success: false, error: '服务端未配置 ROOM_CREDENTIAL_ENCRYPTION_KEY，暂不能保存房间账号' });
@@ -3776,10 +3776,10 @@ io.on('connection', (socket) => {
       callback?.({ success: false, error: '仅房主可查看音源账号' });
       return;
     }
-    let localAccounts = room.musicAccounts || { netease: null, tencent: null, qishui: null };
+    let localAccounts = room.musicAccounts || { netease: null, tencent: null, kugou: null, qishui: null };
     const credentials = await fetchRoomMusicAccountCredentials(roomId);
     if (credentials.ok) {
-      for (const plat of ['netease', 'tencent', 'qishui']) {
+      for (const plat of ['netease', 'tencent', 'kugou', 'qishui']) {
         const migrated = credentials.data?.[plat];
         if (!migrated?.cookie) continue;
         patchRoomMusicAccountCache(
@@ -3796,12 +3796,10 @@ io.on('connection', (socket) => {
       callback?.({ success: true, data: localAccounts });
       return;
     }
+    // 重新读取最新缓存，避免本次请求开始后的共享切换被旧快照覆盖。
+    const latestAccounts = getRoomInternal(roomId)?.musicAccounts || localAccounts;
     // Meting 只返回已共享账号；未共享账号以房间本地缓存为准。
-    const merged = {
-      netease: result.data.netease || localAccounts.netease || null,
-      tencent: result.data.tencent || localAccounts.tencent || null,
-      qishui: result.data.qishui || localAccounts.qishui || null,
-    };
+    const merged = mergeRoomMusicAccountsWithUpstream(latestAccounts, result.data);
     setRoomMusicAccountsCache(roomId, merged);
     broadcastRoomUpdate(roomId);
     callback?.({ success: true, data: merged, room: getViewerRoomPayload(socket, roomId) });
@@ -3824,7 +3822,15 @@ io.on('connection', (socket) => {
       callback?.({ success: false, error: '仅房主可设置共享' });
       return;
     }
-    const plat = platform === 'tencent' ? 'tencent' : platform === 'qishui' ? 'qishui' : 'netease';
+    const plat = ['netease', 'tencent', 'kugou', 'qishui'].includes(platform) ? platform : '';
+    if (!plat) {
+      callback?.({ success: false, error: '不支持的音源平台' });
+      return;
+    }
+    if (!isMusicSourceEnabled(plat, getRuntimeConfig().musicSourcesEnabled)) {
+      callback?.({ success: false, error: '该音源已关闭' });
+      return;
+    }
     const current = room.musicAccounts?.[plat];
     if (current && !current.hasVip) {
       callback?.({ success: false, error: '这个账号目前是漫游专用，不能加入共享池；留在当前房间里听歌还是可以的哦～' });
@@ -3848,7 +3854,7 @@ io.on('connection', (socket) => {
       return;
     }
     const nextAccount = shared
-      ? result.data
+      ? mergeSharedMusicAccount(current, result.data)
       : current
         ? {
             ...current,
@@ -3882,9 +3888,17 @@ io.on('connection', (socket) => {
       callback?.({ success: false, error: '仅房主可解绑音源账号' });
       return;
     }
-    const plat = platform === 'tencent' ? 'tencent' : platform === 'qishui' ? 'qishui' : 'netease';
+    const plat = ['netease', 'tencent', 'kugou', 'qishui'].includes(platform) ? platform : '';
+    if (!plat) {
+      callback?.({ success: false, error: '不支持的音源平台' });
+      return;
+    }
+    if (!isMusicSourceEnabled(plat, getRuntimeConfig().musicSourcesEnabled)) {
+      callback?.({ success: false, error: '该音源已关闭' });
+      return;
+    }
     const current = room.musicAccounts?.[plat];
-    if (current?.hasVip || plat === 'tencent' || plat === 'qishui') {
+    if (current?.hasVip || plat === 'tencent' || plat === 'kugou' || plat === 'qishui') {
       const result = await unbindRoomMusicAccount(roomId, platform);
       if (!result.ok) {
         callback?.({ success: false, error: result.error });

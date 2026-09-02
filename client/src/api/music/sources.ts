@@ -1,6 +1,5 @@
 import type { MusicProviderMeta, MusicProvider } from './types';
-import { neteaseProvider, qishuiProvider, tencentProvider } from './providers/meting';
-import { kugouProvider } from './providers/kugou';
+import { kugouProvider, neteaseProvider, qishuiProvider, tencentProvider } from './providers/meting';
 import type { MusicSource } from '../../types';
 
 export const providers: Record<MusicSource, MusicProvider> = {

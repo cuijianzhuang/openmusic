@@ -1373,7 +1373,7 @@ export function useSocket() {
     });
   }, []);
 
-  const setRoomFmMode = useCallback((mode: string, source?: 'netease' | 'tencent' | 'qishui'): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
+  const setRoomFmMode = useCallback((mode: string, source?: 'netease' | 'tencent' | 'kugou' | 'qishui'): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
     return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
       'set_room_fm_mode',
       { mode, source },
@@ -1387,7 +1387,7 @@ export function useSocket() {
     });
   }, []);
 
-  const createMusicAccountQr = useCallback((platform: 'netease' | 'tencent' | 'qishui') => {
+  const createMusicAccountQr = useCallback((platform: 'netease' | 'tencent' | 'kugou' | 'qishui') => {
     return emitWithAck<{ success: boolean; error?: string; data?: Record<string, unknown> }>(
       'music_account_qr_create',
       { platform },
@@ -1442,7 +1442,7 @@ export function useSocket() {
     });
   }, []);
 
-  const setMusicAccountShared = useCallback((platform: 'netease' | 'tencent' | 'qishui', shared: boolean) => {
+  const setMusicAccountShared = useCallback((platform: 'netease' | 'tencent' | 'kugou' | 'qishui', shared: boolean) => {
     return emitWithAck<{
       success: boolean;
       error?: string;
@@ -1458,7 +1458,7 @@ export function useSocket() {
     });
   }, []);
 
-  const unbindMusicAccount = useCallback((platform: 'netease' | 'tencent' | 'qishui') => {
+  const unbindMusicAccount = useCallback((platform: 'netease' | 'tencent' | 'kugou' | 'qishui') => {
     return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
       'music_account_unbind',
       { platform },

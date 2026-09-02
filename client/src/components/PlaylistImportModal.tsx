@@ -18,6 +18,7 @@ export { rememberPlaylistImportHistory } from '../lib/playlistImportHistory';
 
 const HINTS: Record<PlaylistPlatform, string> = {
   netease: '粘贴歌单分享文案或链接到下方。',
+  kugou: '',
   qq: '请在 QQ 音乐打开歌单 → 分享到「QQ」或「我的电脑」，再把链接粘贴到下方。链接必须带 id= 参数才可解析。',
   qishui: '粘贴汽水歌单 ID 或分享链接到下方。',
 };
@@ -27,12 +28,14 @@ const QQ_EXAMPLE_LINK =
 
 const PLATFORM_LABELS: Record<PlaylistPlatform, string> = {
   netease: '网易',
+  kugou: '酷狗',
   qq: 'QQ',
   qishui: '汽水',
 };
 
 const TITLES: Record<PlaylistPlatform, string> = {
   netease: '导入网易歌单',
+  kugou: '导入酷狗歌单',
   qq: '导入 QQ 歌单',
   qishui: '导入汽水歌单',
 };
@@ -68,9 +71,8 @@ export default function PlaylistImportModal({
     }
   }, [open]);
 
-  const visibleHistory = useMemo(() => {
-    return history.filter((item) => item.platform !== 'qq' || qqImportEnabled);
-  }, [history, qqImportEnabled]);
+  const availablePlatforms = useMemo(() => ['netease', 'qq', 'qishui'].filter((item) => item !== 'qq' || qqImportEnabled) as PlaylistPlatform[], [qqImportEnabled]);
+  const visibleHistory = useMemo(() => history.filter((item) => availablePlatforms.includes(item.platform)), [history, availablePlatforms]);
 
   if (!open) return null;
 
@@ -129,30 +131,18 @@ export default function PlaylistImportModal({
           <p className="text-xs sm:text-sm text-white/60 mb-4">选择歌单来源平台</p>
 
           <div className="flex flex-col gap-2">
-            <button
-              type="button"
-              onClick={() => setPlatform('netease')}
-              className={platformBtnClass}
-            >
-              {PLATFORM_LABELS.netease}
-            </button>
-            <Tooltip content={qqImportEnabled ? undefined : 'QQ 歌单导入暂不可用'}>
-              <button
-                type="button"
-                onClick={() => setPlatform('qq')}
-                disabled={!qqImportEnabled}
-                className={`${platformBtnClass} disabled:opacity-40 disabled:cursor-not-allowed`}
-              >
-                {PLATFORM_LABELS.qq}
-              </button>
-            </Tooltip>
-            <button
-              type="button"
-              onClick={() => setPlatform('qishui')}
-              className={platformBtnClass}
-            >
-              {PLATFORM_LABELS.qishui}
-            </button>
+            {availablePlatforms.map((item) => (
+              <Tooltip key={item} content={item === 'qq' && !qqImportEnabled ? 'QQ 歌单导入暂不可用' : undefined}>
+                <button
+                  type="button"
+                  onClick={() => setPlatform(item)}
+                  disabled={item === 'qq' && !qqImportEnabled}
+                  className={`${platformBtnClass} disabled:cursor-not-allowed disabled:opacity-40`}
+                >
+                  {PLATFORM_LABELS[item]}
+                </button>
+              </Tooltip>
+            ))}
           </div>
 
           <div className="mt-5 border-t border-white/10 pt-4">
@@ -248,7 +238,9 @@ export default function PlaylistImportModal({
           onChange={(e) => setInput(e.target.value)}
           placeholder={platform === 'netease'
             ? '粘贴分享链接、完整分享文案或歌单 ID...'
-            : '粘贴 QQ 分享链接（需含 id=）或歌单 ID...'}
+            : platform === 'qishui'
+                ? '粘贴汽水歌单分享链接或歌单 ID...'
+                : '粘贴 QQ 分享链接（需含 id=）或歌单 ID...'}
           rows={4}
           disabled={loading}
           className={inputClass}

@@ -40,6 +40,7 @@ import BorderGlow from '../components/react-bits/BorderGlow';
 import { getRememberedAdminEntryPath } from '../lib/adminEntryShortcut';
 import { markGuideFeatureUsed } from '../lib/userGuide';
 import { useSiteFeaturesStore } from '../stores/siteFeaturesStore';
+import type { MusicAccountPlatform } from '../lib/musicAccountQr';
 import { fetchDonations, type DonationEntry } from '../lib/donations';
 
 /** 大厅只用接口带回的 CDN 直链，不走 meting type=pic 再查 */
@@ -390,6 +391,13 @@ function DonationModal({ open, onClose, donations }: { open: boolean; onClose: (
 
 export default function Home() {
   const sharedMembershipEnabled = useSiteFeaturesStore((state) => state.sharedMembershipEnabled);
+  const musicSourcesEnabled = useSiteFeaturesStore((state) => state.musicSourcesEnabled);
+  const contributionPlatforms = useMemo<MusicAccountPlatform[]>(
+    () => (['netease', 'tencent', 'kugou', 'qishui'] as MusicAccountPlatform[])
+      .filter((platform) => musicSourcesEnabled[platform]),
+    [musicSourcesEnabled],
+  );
+  const contributionEnabled = sharedMembershipEnabled && contributionPlatforms.length > 0;
   const navigate = useNavigate();
   const nickname = useRoomStore((s) => s.nickname);
   const setNickname = useRoomStore((s) => s.setNickname);
@@ -702,7 +710,7 @@ export default function Home() {
                   <Heart className="h-5 w-5 text-pink-300 fill-current" />
                 </button>
               </Tooltip>
-              {sharedMembershipEnabled && (
+              {contributionEnabled && (
                 <>
                   <Tooltip content="把会员能力分享给大家">
                     <button type="button" onClick={() => setContributionOpen(true)} className={`sm:hidden ${headerIconCls}`} aria-label="共享会员">
@@ -1212,7 +1220,7 @@ export default function Home() {
       )}
 
       <ClientDownloadModal open={downloadModalOpen} onClose={() => setDownloadModalOpen(false)} />
-      <MusicContributionModal open={contributionOpen} onClose={() => setContributionOpen(false)} defaultProvider={nickname} />
+      <MusicContributionModal open={contributionOpen} onClose={() => setContributionOpen(false)} defaultProvider={nickname} enabledPlatforms={contributionPlatforms} />
       <DonationModal open={donationOpen} onClose={() => setDonationOpen(false)} donations={donations} />
 
       <SiteAnnouncementPopup

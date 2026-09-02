@@ -62,7 +62,7 @@ function asNumber(value: unknown): number | undefined {
 }
 
 function asFmSource(value: unknown): RoomState['fmSource'] | undefined {
-  return value === 'netease' || value === 'tencent' || value === 'qishui' ? value : undefined;
+  return value === 'netease' || value === 'tencent' || value === 'kugou' || value === 'qishui' ? value : undefined;
 }
 
 function asDislikeSkipMode(value: unknown): RoomState['dislikeSkipMode'] | undefined {

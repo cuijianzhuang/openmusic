@@ -9,11 +9,12 @@ import {
   type MusicAccountQrSession,
 } from '../lib/musicAccountQr';
 
-type Platform = 'netease' | 'tencent' | 'qishui';
+type Platform = 'netease' | 'tencent' | 'kugou' | 'qishui';
 
 interface Props {
   accounts: RoomMusicAccounts;
   sharedMembershipEnabled?: boolean;
+  enabledPlatforms?: Platform[];
   onCreateQr: (platform: Platform) => Promise<{ success: boolean; error?: string; data?: Record<string, unknown> }>;
   onCheckQr: (payload: Record<string, unknown>) => Promise<{ success: boolean; error?: string; data?: Record<string, unknown> }>;
   onBind: (payload: {
@@ -26,7 +27,7 @@ interface Props {
 }
 
 function getShareBannerText(accounts: RoomMusicAccounts): string {
-  const vipAccounts = [accounts.netease, accounts.tencent, accounts.qishui].filter((a) => a?.hasVip);
+  const vipAccounts = [accounts.netease, accounts.tencent, accounts.kugou, accounts.qishui].filter((a) => a?.hasVip);
   const hasShared = vipAccounts.some((a) => a?.shared);
 
   if (hasShared) {
@@ -57,6 +58,11 @@ const PLATFORM_META: Record<Platform, { label: string; qrInstruction: string; wa
     label: 'QQ 音乐',
     qrInstruction: '使用 QQ 音乐 App 扫码',
     waitingText: '等待 QQ 音乐 App 扫码…',
+  },
+  kugou: {
+    label: '酷狗音乐',
+    qrInstruction: '使用酷狗音乐 App 扫码确认登录',
+    waitingText: '等待酷狗音乐 App 扫码…',
   },
   qishui: {
     label: '汽水音乐',
@@ -296,7 +302,12 @@ export default function RoomMusicAccountPanel({
   onRefresh,
   onSetShared,
   onUnbind,
+  enabledPlatforms,
 }: Props) {
+  const platforms = useMemo(
+    () => (Object.keys(PLATFORM_META) as Platform[]).filter((platform) => !enabledPlatforms || enabledPlatforms.includes(platform)),
+    [enabledPlatforms],
+  );
   const [activePlatform, setActivePlatform] = useState<Platform>('netease');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -309,6 +320,7 @@ export default function RoomMusicAccountPanel({
   const [wantShared, setWantShared] = useState<Record<Platform, boolean>>({
     netease: false,
     tencent: false,
+    kugou: false,
     qishui: false,
   });
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -319,9 +331,10 @@ export default function RoomMusicAccountPanel({
 
   useEffect(() => {
     if (!sharedMembershipEnabled) {
-      setWantShared({ netease: false, tencent: false, qishui: false });
+      setWantShared({ netease: false, tencent: false, kugou: false, qishui: false });
     }
   }, [sharedMembershipEnabled]);
+
 
   const stopPoll = useCallback(() => {
     if (pollRef.current) {
@@ -341,6 +354,13 @@ export default function RoomMusicAccountPanel({
     setHint('');
     setHintPlatform(null);
   }, [stopPoll]);
+
+  useEffect(() => {
+    if (platforms.length > 0 && !platforms.includes(activePlatform)) {
+      cancelQr();
+      setActivePlatform(platforms[0]);
+    }
+  }, [activePlatform, cancelQr, platforms]);
 
   useEffect(() => {
     void onRefresh();
@@ -375,9 +395,9 @@ export default function RoomMusicAccountPanel({
         if (!res.success) {
           setError(res.error || '绑定失败');
           setErrorPlatform(platform);
-    setHint('');
-    setHintPlatform(null);
-    secondVerifySubmittedRef.current = false;
+          setHint('');
+          setHintPlatform(null);
+          secondVerifySubmittedRef.current = false;
           return;
         }
         setSession(null);
@@ -588,6 +608,8 @@ export default function RoomMusicAccountPanel({
   const shareBannerText = useMemo(() => getShareBannerText(accounts), [accounts]);
   const activeMeta = PLATFORM_META[activePlatform];
 
+  if (platforms.length === 0) return null;
+
   const selectPlatform = (platform: Platform) => {
     if (platform === activePlatform) return;
     cancelQr();
@@ -605,9 +627,10 @@ export default function RoomMusicAccountPanel({
       <div
         role="tablist"
         aria-label="选择音乐平台"
-        className="grid grid-cols-3 gap-1 rounded-lg border border-white/10 bg-black/20 p-1"
+        className="grid gap-1 rounded-lg border border-white/10 bg-black/20 p-1"
+        style={{ gridTemplateColumns: `repeat(${Math.max(platforms.length, 1)}, minmax(0, 1fr))` }}
       >
-        {(Object.keys(PLATFORM_META) as Platform[]).map((platform) => {
+        {platforms.map((platform) => {
           const selected = activePlatform === platform;
           const account = accounts[platform];
           return (

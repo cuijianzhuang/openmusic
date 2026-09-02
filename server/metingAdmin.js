@@ -11,6 +11,43 @@ import { fetchMeting, formatMetingFetchError } from './metingFetch.js';
 import { getMetingUpstreamBases } from './metingUpstream.js';
 import { getRuntimeConfig } from './runtimeConfig.js';
 
+export const MUSIC_ACCOUNT_PLATFORMS = ['netease', 'tencent', 'kugou', 'qishui'];
+
+export function isMusicAccountPlatform(platform) {
+  return MUSIC_ACCOUNT_PLATFORMS.includes(platform);
+}
+
+function normalizeMusicAccountPlatform(platform) {
+  return isMusicAccountPlatform(platform) ? platform : 'netease';
+}
+
+/** 兼容 Meting 管理接口的常见响应包装。 */
+export function extractMetingAdminPayload(response) {
+  if (response && typeof response === 'object' && response.data !== undefined) {
+    return response.data;
+  }
+  if (response && typeof response === 'object' && response.account !== undefined) {
+    return response.account;
+  }
+  return response;
+}
+
+/** 兼容 Cookie 管理接口返回数组、{ cookies } 和多层 data 包装。 */
+export function extractMetingCookieList(response) {
+  let payload = response;
+  for (let i = 0; i < 3; i += 1) {
+    if (Array.isArray(payload)) return payload;
+    if (!payload || typeof payload !== 'object') return [];
+    if (Array.isArray(payload.cookies)) return payload.cookies;
+    if (payload.data !== undefined) {
+      payload = payload.data;
+      continue;
+    }
+    return [];
+  }
+  return Array.isArray(payload) ? payload : [];
+}
+
 function getAdminEndpoint() {
   const config = getRuntimeConfig();
   const bases = getMetingUpstreamBases();
@@ -97,14 +134,14 @@ function userInfoHasSvip(userInfo) {
 export function toPublicMusicAccount(cookie, extras = {}) {
   if (!cookie || typeof cookie !== 'object') return null;
   const info = cookie.userInfo || {};
-  const platform = cookie.platform === 'qishui' ? 'qishui' : cookie.platform === 'tencent' ? 'tencent' : 'netease';
+  const platform = normalizeMusicAccountPlatform(cookie.platform);
   const hasVip = Boolean(
     extras.hasVip ?? cookie.hasVip ?? userInfoHasVip(info),
   );
   return {
     cookieId: String(cookie.id || cookie.cookieId || extras.cookieId || ''),
     platform,
-    shared: hasVip ? Boolean(cookie.shared) : false,
+    shared: hasVip ? Boolean(extras.shared ?? cookie.shared) : false,
     hasVip,
     hasSvip: hasVip && Boolean(extras.hasSvip ?? cookie.hasSvip ?? userInfoHasSvip(info)),
     canSearchSongs: info.canSearchSongs !== false,
@@ -121,7 +158,7 @@ export function toPublicMusicAccount(cookie, extras = {}) {
 }
 
 export async function createMusicQrSession(platform) {
-  if (platform !== 'netease' && platform !== 'tencent' && platform !== 'qishui') {
+  if (!isMusicAccountPlatform(platform)) {
     return { ok: false, error: '不支持的音源平台' };
   }
   const result = await metingAdminFetch('/admin/qr/create', {
@@ -134,7 +171,7 @@ export async function createMusicQrSession(platform) {
 
 export async function checkMusicQrSession(payload) {
   const platform = payload?.platform;
-  if (platform !== 'netease' && platform !== 'tencent' && platform !== 'qishui') {
+  if (!isMusicAccountPlatform(platform)) {
     return { ok: false, error: '不支持的音源平台' };
   }
   const key = String(payload?.key || '').trim();
@@ -224,7 +261,7 @@ export async function fetchQishuiVerificationAsset(name) {
 }
 
 export async function validateMusicCookie(platform, cookie) {
-  if (platform !== 'netease' && platform !== 'tencent' && platform !== 'qishui') {
+  if (!isMusicAccountPlatform(platform)) {
     return { ok: false, error: '不支持的音源平台' };
   }
   const credential = typeof cookie === 'string' ? cookie.trim() : '';
@@ -258,7 +295,7 @@ export async function validateMusicCookie(platform, cookie) {
  * - 无 VIP QQ → 拒绝（无漫游用途）
  */
 export async function bindRoomMusicAccount({ roomId, platform, cookie, shared, note, providerName = '' }) {
-  if (platform !== 'netease' && platform !== 'tencent' && platform !== 'qishui') {
+  if (!isMusicAccountPlatform(platform)) {
     return { ok: false, error: '不支持的音源平台' };
   }
   const plat = platform;
@@ -319,22 +356,23 @@ export async function bindRoomMusicAccount({ roomId, platform, cookie, shared, n
     };
   }
 
-  const result = await metingAdminFetch('/admin/qr/bind', {
+  const result = await metingAdminFetch('/admin/cookies', {
     method: 'POST',
     body: {
-      roomId: String(roomId || '').trim().toUpperCase(),
       platform: plat,
       cookie,
-      shared: Boolean(shared),
       note: note || `房间 ${String(roomId || '').trim().toUpperCase()}`,
-      providerName: String(providerName || '').trim().slice(0, 64),
     },
   });
   if (!result.ok) return result;
   return {
     ok: true,
     localOnly: false,
-    data: toPublicMusicAccount(result.data?.data, { hasVip: true, hasSvip: validation.data.hasSvip }),
+    data: toPublicMusicAccount(extractMetingAdminPayload(result.data), {
+      hasVip: true,
+      hasSvip: validation.data.hasSvip,
+      shared: Boolean(shared),
+    }),
     cookie,
     message: result.data?.message || (shared ? '已共享到全站' : '已绑定仅本房间'),
   };
@@ -342,7 +380,7 @@ export async function bindRoomMusicAccount({ roomId, platform, cookie, shared, n
 
 /** 一次性漫游：Cookie 不入库 */
 export async function fetchEphemeralFmSong(cookie, mode = '', platform = 'netease', excludeIds = []) {
-  const plat = platform === 'qishui' ? 'qishui' : platform === 'tencent' ? 'tencent' : 'netease';
+  const plat = normalizeMusicAccountPlatform(platform);
   const result = await metingAdminFetch('/admin/fm', {
     method: 'POST',
     body: { cookie, mode, platform: plat, excludeIds },
@@ -354,50 +392,65 @@ export async function fetchEphemeralFmSong(cookie, mode = '', platform = 'neteas
 export async function fetchRoomMusicAccounts(roomId) {
   const id = String(roomId || '').trim().toUpperCase();
   if (!id) return { ok: false, error: '缺少房间 ID' };
-  const result = await metingAdminFetch(`/admin/room-cookies/${encodeURIComponent(id)}`);
+  const result = await metingAdminFetch('/admin/cookies');
   if (!result.ok) return result;
-  const raw = result.data?.data || {};
+  const roomMarker = '\uFF08' + id + '\uFF09';
+  const legacyRoomMarker = '(' + id + ')';
+  const accounts = extractMetingCookieList(result.data)
+    .filter((cookie) => String(cookie?.note || '').includes(roomMarker)
+      || String(cookie?.note || '').includes(legacyRoomMarker))
+    .reduce((mapped, cookie) => {
+      const platform = normalizeMusicAccountPlatform(cookie?.platform);
+      if (!mapped[platform]) mapped[platform] = toPublicMusicAccount(cookie, { shared: true });
+      return mapped;
+    }, {});
   return {
     ok: true,
     data: {
-      netease: toPublicMusicAccount(raw.netease),
-      tencent: toPublicMusicAccount(raw.tencent),
-      qishui: toPublicMusicAccount(raw.qishui),
+      netease: accounts.netease || null,
+      tencent: accounts.tencent || null,
+      kugou: accounts.kugou || null,
+      qishui: accounts.qishui || null,
     },
   };
 }
 
-export async function setRoomMusicAccountShared(roomId, platform, shared, cookie = '', note = '', providerName = '') {
+async function removeRoomCookieRecords(roomId, platform) {
   const id = String(roomId || '').trim().toUpperCase();
-  const plat = platform === 'tencent' ? 'tencent' : platform === 'qishui' ? 'qishui' : 'netease';
+  const plat = normalizeMusicAccountPlatform(platform);
+  const result = await metingAdminFetch('/admin/cookies');
+  if (!result.ok) return result;
+  const roomMarker = '\uFF08' + id + '\uFF09';
+  const legacyRoomMarker = '(' + id + ')';
+  const records = extractMetingCookieList(result.data).filter((item) => (
+    normalizeMusicAccountPlatform(item?.platform) === plat
+      && (String(item?.note || '').includes(roomMarker) || String(item?.note || '').includes(legacyRoomMarker))
+  ));
+  for (const record of records) {
+    const path = '/admin/cookies/' + encodeURIComponent(String(record.id || ''));
+    const deleted = await metingAdminFetch(path, { method: 'DELETE' });
+    if (!deleted.ok && deleted.status !== 404) return deleted;
+  }
+  return { ok: true };
+}
+
+export async function setRoomMusicAccountShared(roomId, platform, shared, cookie = '', note = '') {
+  const id = String(roomId || '').trim().toUpperCase();
+  const plat = normalizeMusicAccountPlatform(platform);
   if (shared) {
     return bindRoomMusicAccount({
       roomId: id,
       platform: plat,
       cookie,
       shared: true,
-      note: note || `房间：${id} / 提供人：未知`,
-      providerName: String(providerName || '').trim().slice(0, 64),
+      note: note || ('房间：' + id + ' / 提供人：未知'),
     });
   }
-  const result = await metingAdminFetch(
-    `/admin/room-cookies/${encodeURIComponent(id)}/${plat}`,
-    { method: 'DELETE' },
-  );
-  if (!result.ok && result.status !== 404) return result;
-  return { ok: true, data: null };
+  return removeRoomCookieRecords(id, plat);
 }
 
 export async function unbindRoomMusicAccount(roomId, platform) {
-  const id = String(roomId || '').trim().toUpperCase();
-  const plat = platform === 'tencent' ? 'tencent' : platform === 'qishui' ? 'qishui' : 'netease';
-  const result = await metingAdminFetch(
-    `/admin/room-cookies/${encodeURIComponent(id)}/${plat}`,
-    { method: 'DELETE' },
-  );
-  // 404 也视为已解绑（可能是仅本地无 VIP 账号）
-  if (!result.ok && result.status !== 404) return result;
-  return { ok: true };
+  return removeRoomCookieRecords(roomId, platform);
 }
 
 export async function fetchMusicContributions(limit = 20) {
@@ -420,7 +473,7 @@ export async function hasMetingSvipAccount() {
 export async function getMetingQualityCapabilities() {
   const result = await metingAdminFetch('/admin/cookies');
   if (!result.ok) return result;
-  const cookies = Array.isArray(result.data?.data) ? result.data.data : [];
+  const cookies = extractMetingCookieList(result.data);
   const capabilities = {
     neteaseSvip: false,
     tencentSvip: false,
@@ -461,10 +514,10 @@ export async function getMetingQualityCapabilities() {
 
 /** 检查 Meting Cookie 池是否存在指定平台的有效会员账号。 */
 export async function hasMetingVipAccount(platform) {
-  const target = platform === 'qishui' ? 'qishui' : platform === 'tencent' ? 'tencent' : 'netease';
+  const target = normalizeMusicAccountPlatform(platform);
   const result = await metingAdminFetch('/admin/cookies');
   if (!result.ok) return result;
-  const cookies = Array.isArray(result.data?.data) ? result.data.data : [];
+  const cookies = extractMetingCookieList(result.data);
   const hasVip = cookies.some((cookie) => {
     if (cookie?.platform !== target || cookie?.isActive === false || cookie?.isValid === false) return false;
     const info = cookie?.userInfo || {};
@@ -475,7 +528,7 @@ export async function hasMetingVipAccount(platform) {
 
 /** 首页贡献会员 Cookie：Meting 端负责验证、VIP 拦截和账号去重更新。 */
 export async function contributeMusicAccount(platform, cookie, providerName = '', revokeToken = '') {
-  if (platform !== 'netease' && platform !== 'tencent' && platform !== 'qishui') {
+  if (!isMusicAccountPlatform(platform)) {
     return { ok: false, error: '不支持的音源平台' };
   }
   const result = await metingAdminFetch('/admin/contribute', {
@@ -510,7 +563,7 @@ export async function fetchRoomMusicAccountCredentials(roomId) {
   if (!id) return { ok: false, error: '缺少房间 ID' };
   const result = await metingAdminFetch(`/admin/room-cookies/${encodeURIComponent(id)}/credentials`);
   if (!result.ok) return result;
-  const raw = result.data?.data || {};
+  const raw = extractMetingAdminPayload(result.data) || {};
   return {
     ok: true,
     data: Object.fromEntries(

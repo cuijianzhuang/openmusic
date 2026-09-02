@@ -50,6 +50,7 @@ type RuntimeTextField = Exclude<
   | 'metingApiAuth'
   | 'metingSources'
   | 'musicApis'
+  | 'musicSourcesEnabled'
   | 'seoTitle'
   | 'seoDescription'
   | 'seoKeywords'
@@ -322,8 +323,9 @@ export default function RuntimeConfigPanel({
   const applyLoadedConfig = (config: RuntimeConfig) => {
     setDraft({
       ...config,
-      svipQualityEnabled: Boolean(config.svipQualityEnabled),
+      svipQualityEnabled: Object.assign({ netease: false, tencent: false, kugou: false, qishui: false }, typeof config.svipQualityEnabled === 'object' ? config.svipQualityEnabled : { netease: Boolean(config.svipQualityEnabled), tencent: Boolean(config.svipQualityEnabled), kugou: Boolean(config.svipQualityEnabled), qishui: Boolean(config.svipQualityEnabled) }),
       sharedMembershipEnabled: config.sharedMembershipEnabled !== false,
+      musicSourcesEnabled: Object.assign({ netease: true, tencent: true, kugou: true, qishui: true }, config.musicSourcesEnabled || {}),
       aiEnabled: Boolean(config.aiEnabled),
       aiApiBaseUrl: config.aiApiBaseUrl || 'https://api.siliconflow.cn/v1',
       aiApiProtocol: config.aiApiProtocol || 'chat_completions',
@@ -683,16 +685,28 @@ export default function RuntimeConfigPanel({
 
   const qualitySection = (
     <SettingsSection
-      title="音质能力"
+      title="SVIP 音质能力"
       description="需 Meting Cookie 有对应会员"
     >
-      <Space align="center">
-        <Switch
-          checked={Boolean(draft.svipQualityEnabled)}
-          onChange={(checked) => setDraft({ ...draft, svipQualityEnabled: checked })}
-          aria-label="开放 SVIP 音质"
-        />
-        <Typography.Text>开放 SVIP 音质</Typography.Text>
+      <Space wrap>
+        {([
+          ['netease', '网易'],
+          ['tencent', 'QQ'],
+          ['kugou', '酷狗'],
+          ['qishui', '汽水'],
+        ] as const).map(([platform, label]) => (
+          <Space key={platform} align="center">
+            <Switch
+              checked={Boolean(draft.svipQualityEnabled?.[platform])}
+              onChange={(checked) => setDraft({
+                ...draft,
+                svipQualityEnabled: { ...draft.svipQualityEnabled, [platform]: checked },
+              })}
+              aria-label={`切换${label}平台 SVIP 音质能力`}
+            />
+            <Typography.Text>{label}</Typography.Text>
+          </Space>
+        ))}
       </Space>
     </SettingsSection>
   );
@@ -710,6 +724,40 @@ export default function RuntimeConfigPanel({
         />
         <Typography.Text>开放共享会员</Typography.Text>
       </Space>
+    </SettingsSection>
+  );
+
+  const musicSourcesSection = (
+    <SettingsSection
+      title="平台音源开关"
+      description="关闭后，前台会隐藏该平台入口，服务端也会拒绝对应音源请求。"
+    >
+      <Row gutter={[12, 12]}>
+        {MUSIC_API_PLATFORMS.map((platform) => (
+          <Col xs={24} sm={12} key={platform.value}>
+            <Space align="start">
+              <Switch
+                checked={draft.musicSourcesEnabled[platform.value] !== false}
+                checkedChildren="启用"
+                unCheckedChildren="关闭"
+                onChange={(checked) => setDraft({
+                  ...draft,
+                  musicSourcesEnabled: { ...draft.musicSourcesEnabled, [platform.value]: checked },
+                })}
+                aria-label={`启用${platform.label}音源`}
+              />
+              <div>
+                <Typography.Text>{platform.label}</Typography.Text>
+                {platform.value === 'netease' && (
+                  <Typography.Text type="secondary" style={{ display: 'block', fontSize: 11 }}>
+                    网易被热歌榜、电台等功能使用，不建议关闭。
+                  </Typography.Text>
+                )}
+              </div>
+            </Space>
+          </Col>
+        ))}
+      </Row>
     </SettingsSection>
   );
 
@@ -1539,6 +1587,8 @@ export default function RuntimeConfigPanel({
       label: '音源接入',
       children: (
         <>
+          {musicSourcesSection}
+          <Divider style={{ margin: 0 }} />
           {metingSection}
           <Divider style={{ margin: 0 }} />
           {qualitySection}

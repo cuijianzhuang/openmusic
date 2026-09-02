@@ -3,7 +3,7 @@ export const DEFAULT_FM_MODE = 'DEFAULT';
 /** 关闭漫游：队列放空后停止播放，不自动推荐（不作为列表选项展示） */
 export const FM_MODE_OFF = 'OFF';
 
-export type FmSource = 'netease' | 'tencent' | 'qishui';
+export type FmSource = 'netease' | 'tencent' | 'kugou' | 'qishui';
 
 export interface FmModeOption {
   value: string;
@@ -26,6 +26,11 @@ export const TENCENT_FM_MODE_OPTIONS: FmModeOption[] = [
   { value: 'DEFAULT', label: '猜你喜欢', description: 'QQ 音乐个性化推荐' },
 ];
 
+/** 酷狗私人漫游：Provider 仅提供默认个人推荐。 */
+export const KUGOU_FM_MODE_OPTIONS: FmModeOption[] = [
+  { value: 'DEFAULT', label: '推荐模式', description: '酷狗音乐个人推荐' },
+];
+
 /** 汽水 PC 漫游模式：默认推荐不传 preference，由接口走 daily_mix。 */
 export const QISHUI_FM_MODE_OPTIONS: FmModeOption[] = [
   { value: 'DEFAULT', label: '推荐模式', description: '综合你的听歌偏好，智能推荐歌曲' },
@@ -41,17 +46,20 @@ export const QISHUI_FM_MODE_OPTIONS: FmModeOption[] = [
 
 const FM_MODE_VALUES = new Set([...NETEASE_FM_MODE_OPTIONS.map((o) => o.value), FM_MODE_OFF]);
 TENCENT_FM_MODE_OPTIONS.forEach((option) => FM_MODE_VALUES.add(option.value));
+KUGOU_FM_MODE_OPTIONS.forEach((option) => FM_MODE_VALUES.add(option.value));
 QISHUI_FM_MODE_OPTIONS.forEach((option) => FM_MODE_VALUES.add(option.value));
 
 const FM_MODE_LABEL_MAP = new Map([
   ...NETEASE_FM_MODE_OPTIONS.map((o) => [o.value, o.label] as [string, string]),
   ...TENCENT_FM_MODE_OPTIONS.map((o) => [o.value, o.label] as [string, string]),
+  ...KUGOU_FM_MODE_OPTIONS.map((o) => [o.value, o.label] as [string, string]),
   ...QISHUI_FM_MODE_OPTIONS.map((o) => [o.value, o.label] as [string, string]),
   [FM_MODE_OFF, '已关闭'] as [string, string],
 ]);
 
 export function normalizeFmSource(input: string | null | undefined): FmSource {
   const raw = String(input || '').trim();
+  if (raw === 'kugou') return 'kugou';
   if (raw === 'qishui') return 'qishui';
   if (raw === 'tencent') return 'tencent';
   return 'netease';
@@ -60,6 +68,7 @@ export function normalizeFmSource(input: string | null | undefined): FmSource {
 export function getFmModeOptions(source: string | null | undefined): FmModeOption[] {
   const normalized = normalizeFmSource(source);
   if (normalized === 'qishui') return QISHUI_FM_MODE_OPTIONS;
+  if (normalized === 'kugou') return KUGOU_FM_MODE_OPTIONS;
   if (normalized === 'tencent') return TENCENT_FM_MODE_OPTIONS;
   return NETEASE_FM_MODE_OPTIONS;
 }
@@ -67,6 +76,7 @@ export function getFmModeOptions(source: string | null | undefined): FmModeOptio
 export function getFmSourceLabel(source: string | null | undefined): string {
   const normalized = normalizeFmSource(source);
   if (normalized === 'qishui') return '汽水';
+  if (normalized === 'kugou') return '酷狗';
   if (normalized === 'tencent') return 'QQ';
   return '网易';
 }

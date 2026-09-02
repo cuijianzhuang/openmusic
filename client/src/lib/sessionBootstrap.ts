@@ -57,6 +57,7 @@ async function requestSessionBootstrap(): Promise<string | null> {
       tencentSvip?: boolean;
       qishuiVip?: boolean;
       sharedMembershipEnabled?: boolean;
+      musicSourcesEnabled?: Partial<Record<'netease' | 'tencent' | 'kugou' | 'qishui', boolean>>;
     };
   };
   // 非安全 HTTP 上 Web Crypto 可能不可用；此时服务端也不会要求请求签名。

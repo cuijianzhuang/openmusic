@@ -162,6 +162,7 @@ export {
   DEFAULT_ROOM_AUDIO_QUALITY,
   NETEASE_QUALITY_OPTIONS,
   TENCENT_QUALITY_OPTIONS,
+  KUGOU_QUALITY_OPTIONS,
   getDowngradedQuality,
   buildQualityFallbackChain,
   getQualityOptionsForSource,

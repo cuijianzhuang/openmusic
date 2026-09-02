@@ -1091,6 +1091,7 @@ function AdminPage() {
           {room.ownerNickname || room.creatorNickname ? (
             <Typography.Text type="secondary" style={{ display: 'block', fontSize: 11, marginTop: 2 }}>
               房主/建房人：{room.ownerNickname || room.creatorNickname}
+              {room.ownerLastJoinedAt ? ` · 最后进房 ${formatAuditTime(room.ownerLastJoinedAt)}` : ''}
             </Typography.Text>
           ) : room.creatorIp || room.creatorDeviceId ? (
             <Typography.Text type="secondary" style={{ display: 'block', fontSize: 11, marginTop: 2 }}>

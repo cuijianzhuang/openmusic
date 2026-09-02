@@ -11,7 +11,7 @@ interface Props {
   onClick?: () => void;
 }
 
-function shortenQualityLabel(label: string, source: 'netease' | 'tencent' | 'qishui'): string {
+function shortenQualityLabel(label: string, source: 'netease' | 'tencent' | 'kugou' | 'qishui'): string {
   const map: Record<string, string> = {
     标准: '标准',
     标准品质: '标准',
@@ -20,13 +20,15 @@ function shortenQualityLabel(label: string, source: 'netease' | 'tencent' | 'qis
     HQ高品质: 'HQ',
     无损: '无损',
     SQ无损品质: 'SQ',
-    高解析度无损: 'Hi-Res',
     高清臻音: '臻音',
     沉浸环绕声: '环绕',
     超清母带: '母带',
     杜比全景声: 'Dolby',
     臻品全景声: '全景',
     臻品母带: '母带',
+    高解析度无损: 'Hi-Res',
+    全景声: '全景',
+    母带: '母带',
   };
   return map[label] || getQualityLabel(label, source);
 }
@@ -39,9 +41,11 @@ export default function RoomQualityBadge({ audioQuality, className = '', onClick
 
   const neteaseLabel = getQualityLabel(quality.netease, 'netease');
   const tencentLabel = getQualityLabel(quality.tencent, 'tencent');
+  const kugouLabel = getQualityLabel(quality.kugou, 'kugou');
   const qishuiLabel = getQualityLabel(quality.qishui, 'qishui');
   const neteaseShort = shortenQualityLabel(neteaseLabel, 'netease');
   const tencentShort = shortenQualityLabel(tencentLabel, 'tencent');
+  const kugouShort = shortenQualityLabel(kugouLabel, 'kugou');
   const qishuiShort = shortenQualityLabel(qishuiLabel, 'qishui');
 
   const content = (
@@ -58,6 +62,13 @@ export default function RoomQualityBadge({ audioQuality, className = '', onClick
         <span className="inline-flex items-center gap-1">
           <span className="text-[#31c27c]/80">QQ</span>
           <span className="text-white/75">{tencentShort}</span>
+        </span>
+      </Tooltip>
+      <span className="text-white/15" aria-hidden>/</span>
+      <Tooltip content={`酷狗：${kugouLabel}`}>
+        <span className="inline-flex items-center gap-1">
+          <span className="text-[#2688ee]/80">酷狗</span>
+          <span className="text-white/75">{kugouShort}</span>
         </span>
       </Tooltip>
       <span className="text-white/15" aria-hidden>/</span>

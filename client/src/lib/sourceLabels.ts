@@ -19,6 +19,7 @@ export const SOURCE_COLORS: Record<MusicSource, string> = {
 export const PLAYLIST_PLATFORM_LABELS: Record<PlaylistPlatform, string> = {
   netease: '网易',
   qq: 'QQ',
+  kugou: '酷狗',
   qishui: '汽水',
 };
 

@@ -14,7 +14,7 @@ function parseMetingMediaQuery(url: string): { server: MusicSource; id: string; 
     const server = parsed.searchParams.get('server');
     const id = parsed.searchParams.get('id');
     if (!server || !id) return null;
-    if (server !== 'netease' && server !== 'tencent' && server !== 'qishui') return null;
+    if (server !== 'netease' && server !== 'tencent' && server !== 'kugou' && server !== 'qishui') return null;
     return { server, id, type };
   } catch {
     return null;
@@ -143,7 +143,7 @@ function normalizeSong(raw: Record<string, unknown>, source: MusicSource): Searc
 }
 
 function createMetingProvider(
-  source: Extract<MusicSource, 'netease' | 'tencent' | 'qishui'>,
+  source: Extract<MusicSource, 'netease' | 'tencent' | 'kugou' | 'qishui'>,
   meta: Omit<import('../types').MusicProviderMeta, 'id'>,
 ): MusicProvider {
   return {
@@ -247,6 +247,15 @@ export const tencentProvider = createMetingProvider('tencent', {
   supportsIdLookup: false,
 });
 
+export const kugouProvider = createMetingProvider('kugou', {
+  name: '酷狗',
+  shortName: '酷狗',
+  color: '#2688ee',
+  supportsSearch: true,
+  supportsIdLookup: true,
+  description: '酷狗音乐曲库与会员音源',
+});
+
 export const qishuiProvider = createMetingProvider('qishui', {
   name: '汽水',
   shortName: '汽水',
@@ -257,7 +266,7 @@ export const qishuiProvider = createMetingProvider('qishui', {
 });
 
 export async function metingSearchPlaylists(
-  server: Extract<MusicSource, 'netease' | 'tencent' | 'qishui'>,
+  server: Extract<MusicSource, 'netease' | 'tencent' | 'kugou' | 'qishui'>,
   keyword: string,
 ): Promise<Record<string, unknown>[]> {
   if (!keyword.trim()) return [];

@@ -40,6 +40,7 @@ export const useUserQualityStore = create<UserQualityStore>((set, get) => ({
       current
       && current.netease === quality.netease
       && current.tencent === quality.tencent
+      && current.kugou === quality.kugou
       && current.qishui === quality.qishui
     ) {
       return;

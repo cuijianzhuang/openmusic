@@ -17,6 +17,7 @@ interface Props {
   compact?: boolean;
   embedded?: boolean;
   compactLimit?: number;
+  neteaseEnabled?: boolean;
 }
 
 const TOPLIST_LIMIT = 200;
@@ -143,9 +144,11 @@ function CompactToplistCard({
 function SourceSwitch({
   source,
   onChange,
+  neteaseEnabled,
 }: {
   source: HotRankSource;
   onChange: (next: HotRankSource) => void;
+  neteaseEnabled: boolean;
 }) {
   const btn = (id: HotRankSource, label: string) => (
     <button
@@ -168,7 +171,7 @@ function SourceSwitch({
       role="group"
       aria-label="热榜数据源"
     >
-      {btn('netease', '网易热榜')}
+      {neteaseEnabled && btn('netease', '网易热榜')}
       {btn('platform', '平台热榜')}
     </div>
   );
@@ -180,8 +183,9 @@ export default memo(function HotSongPanel({
   compact = false,
   embedded = false,
   compactLimit = COMPACT_LIMIT,
+  neteaseEnabled = true,
 }: Props) {
-  const [source, setSource] = useState<HotRankSource>(readStoredSource);
+  const [source, setSource] = useState<HotRankSource>(() => neteaseEnabled ? readStoredSource() : 'platform');
   const cached = source === 'netease' ? peekNeteaseHotToplist(TOPLIST_LIMIT) : null;
   const [views, setViews] = useState<Record<HotRankSource, HotRankView>>(() => ({
     netease: {
@@ -198,6 +202,10 @@ export default memo(function HotSongPanel({
     },
   }));
   const currentView = views[source];
+
+  useEffect(() => {
+    if (!neteaseEnabled && source === 'netease') setSource('platform');
+  }, [neteaseEnabled, source]);
 
   const handleSourceChange = useCallback((next: HotRankSource) => {
     setSource(next);
@@ -299,7 +307,7 @@ export default memo(function HotSongPanel({
       cancelled = true;
       if (timer) window.clearInterval(timer);
     };
-  }, [source]);
+  }, [source, neteaseEnabled]);
 
   const renderBody = (viewSource: HotRankSource) => {
     const view = views[viewSource];
@@ -362,7 +370,7 @@ export default memo(function HotSongPanel({
     <div className="flex flex-shrink-0 items-center gap-1.5 px-3 py-2">
       <Flame className="h-3.5 w-3.5 flex-shrink-0 text-orange-400/90" />
       <h2 className="min-w-0 flex-1 truncate text-sm font-medium text-white">{currentView.title}</h2>
-      <SourceSwitch source={source} onChange={handleSourceChange} />
+      <SourceSwitch source={source} onChange={handleSourceChange} neteaseEnabled={neteaseEnabled} />
     </div>
   );
 

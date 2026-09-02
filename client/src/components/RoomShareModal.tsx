@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import QRCode from 'qrcode';
 import { createPortal } from 'react-dom';
 import { Check, Copy, Loader2, X } from 'lucide-react';
 import { copyToClipboard } from '../lib/copyToClipboard';
@@ -22,18 +23,8 @@ export default function RoomShareModal({ open, shareUrl, shareText, onClose, onC
     setQrImage('');
     setQrError('');
     setCopied(false);
-    void fetch('/api/room-share-qr', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: shareUrl }),
-    }).then(async (response) => {
-      const data = await response.json() as { image?: string; error?: string };
-      if (cancelled) return;
-      if (!response.ok || !data.image) {
-        setQrError(data.error || '二维码生成失败，请稍后重试');
-        return;
-      }
-      setQrImage(data.image);
+    void QRCode.toDataURL(shareUrl, { width: 640, margin: 1, errorCorrectionLevel: 'M' }).then((image) => {
+      if (!cancelled) setQrImage(image);
     }).catch(() => {
       if (!cancelled) setQrError('二维码生成失败，请稍后重试');
     });

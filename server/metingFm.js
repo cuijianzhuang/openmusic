@@ -1,6 +1,8 @@
 import { formatMetingFetchError } from './metingFetch.js';
 import { fetchMetingApi, runWithMetingRequestContext } from './metingUpstream.js';
 import { fetchEphemeralFmSong } from './metingAdmin.js';
+import { getRuntimeConfig } from './runtimeConfig.js';
+import { isMusicSourceEnabled } from './musicSources.js';
 
 export const DEFAULT_FM_MODE = 'DEFAULT';
 
@@ -36,17 +38,18 @@ export function normalizeFmMode(input) {
 
 export function normalizeFmSource(input) {
   const raw = String(input || '').trim();
+  if (raw === 'kugou') return 'kugou';
   if (raw === 'qishui') return 'qishui';
   if (raw === 'tencent') return 'tencent';
   return 'netease';
 }
 
-function buildFmQuery(mode, source = 'netease') {
+export function buildFmQuery(mode, source = 'netease') {
   const server = normalizeFmSource(source);
   const query = { server, type: 'fm' };
   const normalized = normalizeFmMode(mode);
-  // QQ 官方固定 radio id=99（猜你喜欢），忽略模式；网易 / 汽水通过 id 传模式
-  if (server !== 'tencent' && normalized && normalized !== 'DEFAULT' && normalized !== FM_MODE_OFF) {
+  // QQ、酷狗只有默认私人漫游；网易 / 汽水通过 id 传模式。
+  if (!['tencent', 'kugou'].includes(server) && normalized && normalized !== 'DEFAULT' && normalized !== FM_MODE_OFF) {
     query.id = normalized;
   }
   return query;
@@ -141,7 +144,7 @@ function sleep(ms) {
 }
 
 /**
- * 私人漫游（网易 / QQ / 汽水）。
+ * 私人漫游（网易 / QQ / 酷狗 / 汽水）。
  * - 传入 ephemeralCookie（无 VIP 本地账号）：走 Meting /admin/fm，不入库
  * - 否则走 type=fm；有 roomId 时房间账号优先，否则用 Meting 原有 Cookie 池
  * - QQ 仅支持猜你喜欢，无熟悉/探索等模式
@@ -155,8 +158,10 @@ export async function fetchMetingFmSongs(fmMode = DEFAULT_FM_MODE, options = {})
   const ephemeralCookie = String(options.ephemeralCookie || '').trim();
   const mode = normalizeFmMode(fmMode);
   const source = normalizeFmSource(options.source);
-  // QQ 无模式参数；其余平台 DEFAULT 不传 id
-  const modeId = source === 'tencent' || mode === 'DEFAULT' ? '' : mode;
+  // 已保存的旧房间也必须遵守后台音源开关，避免关闭后仍被空队列预取触发上游请求。
+  if (!isMusicSourceEnabled(source, getRuntimeConfig().musicSourcesEnabled)) return [];
+  // QQ、酷狗无模式参数；其余平台 DEFAULT 不传 id。
+  const modeId = ['tencent', 'kugou'].includes(source) || mode === 'DEFAULT' ? '' : mode;
   const excludedIds = new Set(Array.isArray(options.excludeIds) ? options.excludeIds.map((id) => String(id).trim()).filter(Boolean) : []);
 
   for (let i = 0; i < MAX_FM_RETRIES; i += 1) {

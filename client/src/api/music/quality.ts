@@ -26,6 +26,14 @@ export type NeteaseQuality =
   | '320'
   | 'flac';
 
+export type KugouQuality =
+  | 'standard'
+  | 'exhigh'
+  | 'lossless'
+  | 'hires'
+  | 'atmos'
+  | 'master';
+
 export type TencentQuality =
   | 'standard'
   | 'exhigh'
@@ -39,6 +47,7 @@ export type TencentQuality =
 export const DEFAULT_ROOM_AUDIO_QUALITY: RoomAudioQuality = {
   netease: 'jyeffect',
   tencent: 'lossless',
+  kugou: 'exhigh',
   qishui: 'exhigh',
 };
 
@@ -75,6 +84,15 @@ export const TENCENT_QUALITY_OPTIONS: QualityOption[] = [
   { value: 'master', label: '臻品母带', svip: true },
 ];
 
+export const KUGOU_QUALITY_OPTIONS: QualityOption[] = [
+  { value: 'standard', label: '标准' },
+  { value: 'exhigh', label: '极高' },
+  { value: 'lossless', label: '无损' },
+  { value: 'hires', label: '高解析度无损', svip: true },
+  { value: 'atmos', label: '全景声', svip: true },
+  { value: 'master', label: '母带', svip: true },
+];
+
 export const QISHUI_QUALITY_OPTIONS: QualityOption[] = [
   { value: 'standard', label: '标准' },
   { value: 'exhigh', label: '极高' },
@@ -85,6 +103,7 @@ export const QISHUI_QUALITY_OPTIONS: QualityOption[] = [
 
 const NETEASE_CANONICAL = new Set(NETEASE_QUALITY_OPTIONS.map((o) => o.value));
 const TENCENT_CANONICAL = new Set(TENCENT_QUALITY_OPTIONS.map((o) => o.value));
+const KUGOU_CANONICAL = new Set(KUGOU_QUALITY_OPTIONS.map((o) => o.value));
 const QISHUI_CANONICAL = new Set(QISHUI_QUALITY_OPTIONS.map((o) => o.value));
 const NETEASE_SVIP = new Set(
   NETEASE_QUALITY_OPTIONS.filter((o) => o.svip).map((o) => o.value),
@@ -92,6 +111,7 @@ const NETEASE_SVIP = new Set(
 const TENCENT_SVIP = new Set(
   TENCENT_QUALITY_OPTIONS.filter((o) => o.svip).map((o) => o.value),
 );
+const KUGOU_SVIP = new Set(KUGOU_QUALITY_OPTIONS.filter((o) => o.svip).map((o) => o.value));
 const QISHUI_SVIP = new Set(QISHUI_QUALITY_OPTIONS.filter((o) => o.svip).map((o) => o.value));
 
 /** API 别名 → 房间存储用的 canonical 值 */
@@ -103,6 +123,7 @@ const QUALITY_ALIASES: Record<string, string> = {
 
 const NETEASE_LABEL_MAP = new Map(NETEASE_QUALITY_OPTIONS.map((opt) => [opt.value, opt.label]));
 const TENCENT_LABEL_MAP = new Map(TENCENT_QUALITY_OPTIONS.map((opt) => [opt.value, opt.label]));
+const KUGOU_LABEL_MAP = new Map(KUGOU_QUALITY_OPTIONS.map((opt) => [opt.value, opt.label]));
 const QISHUI_LABEL_MAP = new Map(QISHUI_QUALITY_OPTIONS.map((opt) => [opt.value, opt.label]));
 
 /** @param source 传入时按网易/QQ各自文案；不传则优先网易再QQ */
@@ -115,6 +136,7 @@ export function getQualityLabel(quality: string | undefined, source?: MusicSourc
   if (source === 'netease') {
     return NETEASE_LABEL_MAP.get(normalized) || quality;
   }
+  if (source === 'kugou') return KUGOU_LABEL_MAP.get(normalized) || quality;
   if (source === 'qishui') return QISHUI_LABEL_MAP.get(normalized) || quality;
   return NETEASE_LABEL_MAP.get(normalized)
     || TENCENT_LABEL_MAP.get(normalized)
@@ -125,6 +147,7 @@ export function isSvipQualityValue(source: MusicSource, quality: string): boolea
   const normalized = QUALITY_ALIASES[quality] || quality;
   if (source === 'netease') return NETEASE_SVIP.has(normalized);
   if (source === 'tencent') return TENCENT_SVIP.has(normalized);
+  if (source === 'kugou') return KUGOU_SVIP.has(normalized);
   if (source === 'qishui') return QISHUI_SVIP.has(normalized);
   return false;
 }
@@ -134,13 +157,16 @@ export function normalizeRoomAudioQuality(
 ): RoomAudioQuality {
   const rawNetease = String(input?.netease || DEFAULT_ROOM_AUDIO_QUALITY.netease);
   const rawTencent = String(input?.tencent || DEFAULT_ROOM_AUDIO_QUALITY.tencent);
+  const rawKugou = String(input?.kugou || DEFAULT_ROOM_AUDIO_QUALITY.kugou);
   const rawQishui = String(input?.qishui || DEFAULT_ROOM_AUDIO_QUALITY.qishui);
   const netease = QUALITY_ALIASES[rawNetease] || rawNetease;
   const tencent = QUALITY_ALIASES[rawTencent] || rawTencent;
+  const kugou = QUALITY_ALIASES[rawKugou] || rawKugou;
   const qishui = QUALITY_ALIASES[rawQishui] || rawQishui;
   return {
     netease: NETEASE_CANONICAL.has(netease) ? netease : 'jyeffect',
     tencent: TENCENT_CANONICAL.has(tencent) ? tencent : 'lossless',
+    kugou: KUGOU_CANONICAL.has(kugou) ? kugou : 'exhigh',
     qishui: QISHUI_CANONICAL.has(qishui) ? qishui : 'exhigh',
   };
 }
@@ -158,6 +184,7 @@ export function getRoomPlaybackQuality(source: MusicSource): string | undefined 
   const quality = normalizeRoomAudioQuality(room?.audioQuality);
   if (source === 'netease') return clampQualityToCapabilities('netease', quality.netease);
   if (source === 'tencent') return clampQualityToCapabilities('tencent', quality.tencent);
+  if (source === 'kugou') return clampQualityToCapabilities('kugou', quality.kugou || 'exhigh');
   if (source === 'qishui') return clampQualityToCapabilities('qishui', quality.qishui || 'exhigh');
   return undefined;
 }
@@ -167,14 +194,18 @@ export function getQualityOptionsForSource(source: MusicSource): QualityOption[]
     ? NETEASE_QUALITY_OPTIONS
     : source === 'tencent'
       ? TENCENT_QUALITY_OPTIONS
-      : source === 'qishui'
-        ? QISHUI_QUALITY_OPTIONS
-        : [];
+      : source === 'kugou'
+        ? KUGOU_QUALITY_OPTIONS
+        : source === 'qishui'
+          ? QISHUI_QUALITY_OPTIONS
+          : [];
   const advancedEnabled = source === 'qishui'
-    ? isQishuiSvipAvailable()
+    ? isQishuiSvipAvailable() && isPlatformSvipQualityEnabled('qishui')
     : source === 'netease' || source === 'tencent'
       ? isPlatformSvipQualityEnabled(source)
-      : isSvipQualityEnabled();
+      : source === 'kugou'
+        ? isPlatformSvipQualityEnabled('kugou')
+        : isSvipQualityEnabled();
   if (advancedEnabled) return all;
   return all.filter((opt) => !opt.svip);
 }
@@ -224,6 +255,7 @@ export function applyImmersivePlaybackQualityCap(quality: RoomAudioQuality): Roo
   return {
     netease: capQualityForImmersive('netease', quality.netease),
     tencent: capQualityForImmersive('tencent', quality.tencent),
+    kugou: capQualityForImmersive('kugou', quality.kugou || 'exhigh'),
     qishui: capQualityForImmersive('qishui', quality.qishui || 'exhigh'),
   };
 }
@@ -237,6 +269,7 @@ export function applyWeakDevicePlaybackQualityCap(quality: RoomAudioQuality): Ro
   return {
     netease: capQualityForWeakDevice('netease', quality.netease),
     tencent: capQualityForWeakDevice('tencent', quality.tencent),
+    kugou: capQualityForWeakDevice('kugou', quality.kugou || 'exhigh'),
     qishui: capQualityForWeakDevice('qishui', quality.qishui || 'exhigh'),
   };
 }
@@ -254,6 +287,7 @@ export function getUserPlaybackQuality(source: MusicSource): string | undefined 
   }
   if (source === 'netease') return clampQualityToCapabilities('netease', quality.netease);
   if (source === 'tencent') return clampQualityToCapabilities('tencent', quality.tencent);
+  if (source === 'kugou') return clampQualityToCapabilities('kugou', quality.kugou || 'exhigh');
   if (source === 'qishui') return clampQualityToCapabilities('qishui', quality.qishui || 'exhigh');
   return undefined;
 }

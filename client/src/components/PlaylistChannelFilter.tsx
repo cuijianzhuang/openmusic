@@ -6,6 +6,7 @@ const OPTIONS: { value: PlaylistChannelFilter; label: string }[] = [
   { value: 'all', label: '全部' },
   { value: 'netease', label: '网易' },
   { value: 'qq', label: 'QQ' },
+  { value: 'kugou', label: '酷狗' },
   { value: 'qishui', label: '汽水' },
 ];
 

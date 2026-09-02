@@ -11,7 +11,7 @@ import { Search, Loader2, Check, LogOut, X, Heart, Plus, Download, ListMusic, Up
 import { searchAllSongs, getAvailableSources, listRooms, type SearchFilterMode } from '../api/music';
 import { importPlaylist, searchPlaylists, type PlaylistSearchItem, type PlaylistPlatform, type PlaylistChannelFilter as PlaylistChannelFilterMode } from '../api/music/playlist';
 import { fetchDjPrograms, type DjRadioItem } from '../api/music/djRadio';
-import { normalizeFmMode } from '../api/music/fmMode';
+import { normalizeFmMode, normalizeFmSource, type FmSource } from '../api/music/fmMode';
 import { refreshQualityCapabilities } from '../api/music/quality';
 import { addSongsToQueue, formatBulkAddToast } from '../lib/addSongsToQueue';
 import { rememberPlaylistImportHistory } from '../lib/playlistImportHistory';
@@ -308,6 +308,16 @@ export default function Room() {
 
 
   const [sources, setSources] = useState<MusicProviderMeta[]>([]);
+  const enabledFmSources = useMemo(
+    () => sources
+      .map((source) => source.id)
+      .filter((source): source is FmSource => source === 'netease' || source === 'tencent' || source === 'kugou' || source === 'qishui'),
+    [sources],
+  );
+  const activeFmSource = useMemo(() => {
+    const source = normalizeFmSource(room?.fmSource);
+    return enabledFmSources.includes(source) ? source : (enabledFmSources[0] || source);
+  }, [enabledFmSources, room?.fmSource]);
 
   const [query, setQuery] = useState('');
 
@@ -1478,7 +1488,7 @@ export default function Room() {
     }
   }, [addingPage, addSong, showToast, isOwner, isAdmin]);
 
-  const handleSaveFmMode = useCallback(async (mode: string, source?: 'netease' | 'tencent' | 'qishui') => {
+  const handleSaveFmMode = useCallback(async (mode: string, source?: FmSource) => {
     if (fmSaving) return;
     setFmSaving(true);
     const res = await setRoomFmMode(mode, source);
@@ -2184,6 +2194,7 @@ export default function Room() {
     .filter((s) => s.supportsSearch)
     .map((s) => s.id);
   const qqImportEnabled = sources.some((s) => s.id === 'tencent' && s.supportsSearch);
+  const neteaseEnabled = sources.some((s) => s.id === 'netease');
   const queueCount = (room.current ? 1 : 0) + room.queue.length;
   const canClearQueue = isOwner && room.queue.length > 0;
   const showDesktopSearchOverlay = Boolean(searchedKeyword || searching || playlistSearchLoading);
@@ -2317,7 +2328,7 @@ export default function Room() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-          placeholder={searchMode === 'playlist' ? '搜索网易/QQ/汽水歌单...' : '搜索歌曲、歌手，或粘贴歌单链接...'}
+          placeholder={searchMode === 'playlist' ? '搜索歌单...' : '搜索歌曲、歌手，或粘贴歌单链接...'}
           className="w-full bg-netease-card border border-netease-border rounded-xl sm:rounded-2xl pl-10 sm:pl-12 pr-4 py-3 sm:py-3.5 text-sm sm:text-base text-white placeholder:text-netease-muted/50 focus:outline-none focus:border-netease-red/50 transition-colors"
         />
       </div>
@@ -2363,10 +2374,10 @@ export default function Room() {
                 <div className="min-w-0 flex-1 space-y-0.5">
                   <p className="truncate text-sm font-medium">{playlist.name}</p>
                   <p className="truncate text-xs text-netease-muted">
-                    {playlist.creatorName || (playlist.platform === 'qq' ? 'QQ歌单' : playlist.platform === 'qishui' ? '汽水歌单' : '网易歌单')} · {playlist.trackCount} 首
+                    {playlist.creatorName || (playlist.platform === 'qq' ? 'QQ歌单' : playlist.platform === 'kugou' ? '酷狗歌单' : playlist.platform === 'qishui' ? '汽水歌单' : '网易歌单')} · {playlist.trackCount} 首
                   </p>
                 </div>
-                <SourceBadge source={playlist.platform === 'qq' ? 'tencent' : playlist.platform === 'qishui' ? 'qishui' : 'netease'} variant="muted" />
+                <SourceBadge source={playlist.platform === 'qq' ? 'tencent' : playlist.platform === 'kugou' ? 'kugou' : playlist.platform === 'qishui' ? 'qishui' : 'netease'} variant="muted" />
                 <button
                   type="button"
                   onClick={(e) => {
@@ -2444,7 +2455,7 @@ export default function Room() {
           value={overlayQuery}
           onChange={(e) => setOverlayQuery(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleOverlaySearch()}
-          placeholder={overlaySearchMode === 'playlist' ? '搜索网易/QQ/汽水歌单...' : '搜索歌曲、歌手，或粘贴歌单链接...'}
+          placeholder={overlaySearchMode === 'playlist' ? '搜索歌单...' : '搜索歌曲、歌手，或粘贴歌单链接...'}
           className="w-full bg-netease-card border border-netease-border rounded-xl pl-9 pr-3 py-2 text-sm text-white placeholder:text-netease-muted/50 focus:outline-none focus:border-netease-red/50 transition-colors"
         />
       </div>
@@ -2469,7 +2480,7 @@ export default function Room() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-          placeholder={searchMode === 'playlist' ? '搜索网易/QQ/汽水歌单...' : '搜索歌曲、歌手，或粘贴歌单链接...'}
+          placeholder={searchMode === 'playlist' ? '搜索歌单...' : '搜索歌曲、歌手，或粘贴歌单链接...'}
           className="min-w-0 flex-1 border-none bg-transparent text-[13.5px] tracking-wide text-white outline-none placeholder:text-white/22"
         />
         <button
@@ -2526,6 +2537,7 @@ export default function Room() {
       >
         热榜歌单
       </button>
+{neteaseEnabled && (
       <button
         type="button"
         onClick={() => {
@@ -2536,6 +2548,7 @@ export default function Room() {
       >
         音乐电台
       </button>
+)}
       <button
         type="button"
         onClick={() => {
@@ -2751,7 +2764,9 @@ export default function Room() {
         isOwner={isOwner}
         canModerate={canModerate}
         fmMode={normalizeFmMode(room?.neteaseFmMode)}
-        fmSource={room?.fmSource || 'netease'}
+        fmSource={activeFmSource}
+        enabledFmSources={enabledFmSources}
+        enabledMusicAccountPlatforms={enabledFmSources}
         fmModeBeforeOff={room?.fmModeBeforeOff}
         fmSaving={fmSaving}
         announcementEnabled={Boolean(room?.announcementEnabled)}
@@ -2792,7 +2807,7 @@ export default function Room() {
         identityGithubEnabled={identityProviders.githubEnabled}
         identityLinuxdoBound={identityProviders.linuxdoBound}
         identityGithubBound={identityProviders.githubBound}
-        musicAccounts={room?.musicAccounts ?? { netease: null, tencent: null, qishui: null }}
+        musicAccounts={room?.musicAccounts ?? { netease: null, tencent: null, kugou: null, qishui: null }}
         sharedMembershipEnabled={sharedMembershipEnabled}
         onMusicAccountCreateQr={createMusicAccountQr}
         onMusicAccountCheckQr={checkMusicAccountQr}
@@ -2856,7 +2871,8 @@ export default function Room() {
       <RoomFmModeModal
           open={fmModeOpen}
           value={normalizeFmMode(room?.neteaseFmMode)}
-          source={room?.fmSource || 'netease'}
+          source={activeFmSource}
+          enabledSources={enabledFmSources}
           saving={fmSaving}
           onClose={() => setFmModeOpen(false)}
           onSave={handleSaveFmMode}
@@ -3299,7 +3315,7 @@ export default function Room() {
               data-guide="room-hot"
               className="surface-panel room-main-panel room-main-panel--hot order-0 flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl lg:h-full"
             >
-              <HotSongPanel embedded addingId={addingId} onAdd={handleAdd} />
+              <HotSongPanel embedded addingId={addingId} onAdd={handleAdd} neteaseEnabled={neteaseEnabled} />
             </div>
           )}
 
@@ -3307,7 +3323,7 @@ export default function Room() {
           <div className="room-middle-column order-1 flex min-h-0 min-w-0 flex-col rounded-2xl lg:h-full lg:overflow-hidden">
             {!isLgUp && !pureMode && (
               <div className="mb-3" data-guide="room-hot">
-                <HotSongPanel compact addingId={addingId} onAdd={handleAdd} />
+                <HotSongPanel compact addingId={addingId} onAdd={handleAdd} neteaseEnabled={neteaseEnabled} />
               </div>
             )}
 
@@ -3336,6 +3352,7 @@ export default function Room() {
                   >
                     热榜歌单
                   </button>
+{neteaseEnabled && (
                   <button
                     type="button"
                     onClick={() => {
@@ -3346,6 +3363,7 @@ export default function Room() {
                   >
                     音乐电台
                   </button>
+)}
                 </div>
                 {searchableCount > 0 && (
                   <div className="flex flex-shrink-0 items-center gap-1">
@@ -3824,7 +3842,7 @@ export default function Room() {
           document.body,
         )}
 
-      {djRadioDrawerOpen &&
+      {neteaseEnabled && djRadioDrawerOpen &&
         createPortal(
           <Suspense fallback={null}>
             <DjRadioDrawer

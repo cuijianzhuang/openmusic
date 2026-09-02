@@ -1,4 +1,4 @@
-export type MusicAccountPlatform = 'netease' | 'tencent' | 'qishui';
+export type MusicAccountPlatform = 'netease' | 'tencent' | 'kugou' | 'qishui';
 
 export interface MusicAccountQrSession {
   platform: MusicAccountPlatform;

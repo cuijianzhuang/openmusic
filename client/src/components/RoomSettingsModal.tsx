@@ -85,6 +85,8 @@ interface Props {
   canModerate: boolean;
   fmMode: string;
   fmSource: FmSource;
+  enabledFmSources?: FmSource[];
+  enabledMusicAccountPlatforms?: FmSource[];
   fmModeBeforeOff?: string;
   fmSaving?: boolean;
   announcementEnabled: boolean;
@@ -132,15 +134,15 @@ interface Props {
   identityGithubBound?: GithubBinding | null;
   musicAccounts?: RoomMusicAccounts;
   sharedMembershipEnabled?: boolean;
-  onMusicAccountCreateQr?: (platform: 'netease' | 'tencent' | 'qishui') => Promise<{ success: boolean; error?: string; data?: Record<string, unknown> }>;
+  onMusicAccountCreateQr?: (platform: 'netease' | 'tencent' | 'kugou' | 'qishui') => Promise<{ success: boolean; error?: string; data?: Record<string, unknown> }>;
   onMusicAccountCheckQr?: (payload: Record<string, unknown>) => Promise<{ success: boolean; error?: string; data?: Record<string, unknown> }>;
   onMusicAccountBind?: (payload: {
     sessionId: string;
     shared?: boolean;
   }) => Promise<{ success: boolean; error?: string; message?: string }>;
   onMusicAccountRefresh?: () => Promise<{ success: boolean; error?: string; data?: RoomMusicAccounts }>;
-  onMusicAccountSetShared?: (platform: 'netease' | 'tencent' | 'qishui', shared: boolean) => Promise<{ success: boolean; error?: string }>;
-  onMusicAccountUnbind?: (platform: 'netease' | 'tencent' | 'qishui') => Promise<{ success: boolean; error?: string }>;
+  onMusicAccountSetShared?: (platform: 'netease' | 'tencent' | 'kugou' | 'qishui', shared: boolean) => Promise<{ success: boolean; error?: string }>;
+  onMusicAccountUnbind?: (platform: 'netease' | 'tencent' | 'kugou' | 'qishui') => Promise<{ success: boolean; error?: string }>;
   onClose: () => void;
   onSaveFmMode: (mode: string, source?: FmSource) => void;
   onOpenMemberModal: () => void;
@@ -278,6 +280,8 @@ export default function RoomSettingsModal({
   canModerate,
   fmMode,
   fmSource,
+  enabledFmSources,
+  enabledMusicAccountPlatforms,
   fmModeBeforeOff,
   fmSaving = false,
   announcementEnabled,
@@ -318,7 +322,7 @@ export default function RoomSettingsModal({
   identityGithubEnabled = false,
   identityLinuxdoBound = null,
   identityGithubBound = null,
-  musicAccounts = { netease: null, tencent: null, qishui: null },
+  musicAccounts = { netease: null, tencent: null, kugou: null, qishui: null },
   sharedMembershipEnabled = true,
   onMusicAccountCreateQr,
   onMusicAccountCheckQr,
@@ -399,11 +403,13 @@ export default function RoomSettingsModal({
     [forbiddenWords],
   );
 
+  const hasMusicAccountPlatform = (enabledMusicAccountPlatforms?.length ?? 4) > 0;
+
   const tabs = useMemo(() => {
     const items: { id: SettingsTab; label: string }[] = [];
     if (isOwner) {
       items.push({ id: 'fm', label: '漫游' });
-      if (MUSIC_ACCOUNT_TAB_ENABLED) {
+      if (MUSIC_ACCOUNT_TAB_ENABLED && hasMusicAccountPlatform) {
         items.push({ id: 'account', label: '账号' });
       }
       items.push({ id: 'room', label: '房主' });
@@ -419,7 +425,7 @@ export default function RoomSettingsModal({
       items.push({ id: 'room', label: '身份' });
     }
     return items;
-  }, [isOwner, canModerate, wechatUinEnabled, linuxdoEnabled, githubEnabled]);
+  }, [isOwner, canModerate, wechatUinEnabled, linuxdoEnabled, githubEnabled, hasMusicAccountPlatform]);
 
   // 打开弹窗时 tabs 可能刚因预取变为含「身份」；若仍停留在旧首 tab 则不强制跳转
   useEffect(() => {
@@ -445,7 +451,7 @@ export default function RoomSettingsModal({
     setDraftMaxAdmins(maxAdmins);
     const initialTabs: SettingsTab[] = [];
     if (isOwner) {
-      initialTabs.push('fm', ...(MUSIC_ACCOUNT_TAB_ENABLED ? (['account'] as SettingsTab[]) : []), 'room');
+      initialTabs.push('fm', ...(MUSIC_ACCOUNT_TAB_ENABLED && hasMusicAccountPlatform ? (['account'] as SettingsTab[]) : []), 'room');
     }
     if (canModerate) {
       initialTabs.push('member', 'announcement', 'chat', 'songRequest');
@@ -469,6 +475,7 @@ export default function RoomSettingsModal({
     identityLinuxdoEnabled,
     identityGithubEnabled,
     maxAdmins,
+    hasMusicAccountPlatform,
   ]);
 
   useEffect(() => {
@@ -644,80 +651,94 @@ export default function RoomSettingsModal({
         )}
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-          {activeTab === 'fm' && isOwner && (
-            <section>
-              <div className="mb-4 grid grid-cols-3 gap-1 rounded-lg border border-white/10 bg-black/20 p-1" role="tablist" aria-label="选择漫游来源">
-                {([
-                  { value: 'netease' as const, label: '网易云' },
-                  { value: 'tencent' as const, label: 'QQ 音乐' },
-                  { value: 'qishui' as const, label: '汽水音乐' },
-                ]).map((item) => {
-                  const options = getFmModeOptions(item.value);
-                  const modeForSource = currentFm === FM_MODE_OFF
-                    ? FM_MODE_OFF
-                    : (options.some((opt) => opt.value === currentFm) ? currentFm : DEFAULT_FM_MODE);
-                  return (
-                  <button
-                    key={item.value}
-                    type="button"
-                    role="tab"
-                    aria-selected={fmSource === item.value}
-                    disabled={fmSaving}
-                    onClick={() => onSaveFmMode(modeForSource, item.value)}
-                    className={`min-h-9 rounded-md px-3 py-2 text-xs font-medium transition-colors disabled:opacity-50 ${
-                      fmSource === item.value ? 'bg-white/10 text-white' : 'text-netease-muted hover:bg-white/[0.05] hover:text-white'
-                    }`}
-                  >
-                    {item.label}
-                  </button>
-                  );
-                })}
-              </div>
-              <Toggle
-                checked={currentFm !== FM_MODE_OFF}
-                disabled={fmSaving}
-                onChange={(next) => {
-                  const restored = normalizeFmMode(fmModeBeforeOff);
-                  onSaveFmMode(next ? (restored === FM_MODE_OFF ? DEFAULT_FM_MODE : restored) : FM_MODE_OFF, fmSource);
-                }}
-                label="自动漫游"
-                description="队列为空时通过私人漫游自动推荐下一首"
-              />
-              <div className={`mt-3 space-y-1.5 ${currentFm === FM_MODE_OFF ? 'opacity-40' : ''}`}>
-                {getFmModeOptions(fmSource).map((opt) => (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    disabled={fmSaving || currentFm === FM_MODE_OFF}
-                    onClick={() => onSaveFmMode(opt.value, fmSource)}
-                    className={`w-full rounded-xl border px-3 py-2 text-left transition-colors disabled:opacity-50 ${
-                      currentFm === opt.value
-                        ? 'border-netease-red/25 bg-netease-red/[0.08]'
-                        : 'border-transparent bg-white/[0.03] hover:bg-white/[0.06]'
-                    }`}
-                  >
-                    <p className={`text-sm font-medium ${currentFm === opt.value ? 'text-white' : 'text-white/90'}`}>
-                      {opt.label}
-                      {currentFm === opt.value && (
-                        <span className="ml-2 text-[10px] font-normal text-netease-red">当前</span>
+          {activeTab === 'fm' && isOwner && (() => {
+            const fmTabs = [
+              { value: 'netease' as const, label: '网易云' },
+              { value: 'tencent' as const, label: 'QQ 音乐' },
+              { value: 'kugou' as const, label: '酷狗音乐' },
+              { value: 'qishui' as const, label: '汽水音乐' },
+            ].filter((item) => !enabledFmSources || enabledFmSources.includes(item.value));
+            if (fmTabs.length === 0) return <p className="text-sm text-netease-muted">暂无可用的私人漫游音源</p>;
+            const effectiveFmSource = fmTabs.some((item) => item.value === fmSource)
+              ? fmSource
+              : fmTabs[0].value;
+            return (
+              <section>
+                <div
+                  className="mb-4 grid gap-1 rounded-lg border border-white/10 bg-black/20 p-1"
+                  style={{ gridTemplateColumns: `repeat(${Math.max(fmTabs.length, 1)}, minmax(0, 1fr))` }}
+                  role="tablist"
+                  aria-label="选择漫游来源"
+                >
+                  {fmTabs.map((item) => {
+                    const options = getFmModeOptions(item.value);
+                    const modeForSource = currentFm === FM_MODE_OFF
+                      ? FM_MODE_OFF
+                      : (options.some((opt) => opt.value === currentFm) ? currentFm : DEFAULT_FM_MODE);
+                    return (
+                      <button
+                        key={item.value}
+                        type="button"
+                        role="tab"
+                        aria-selected={effectiveFmSource === item.value}
+                        disabled={fmSaving}
+                        onClick={() => onSaveFmMode(modeForSource, item.value)}
+                        className={`min-h-9 rounded-md px-3 py-2 text-xs font-medium transition-colors disabled:opacity-50 ${
+                          effectiveFmSource === item.value ? 'bg-white/10 text-white' : 'text-netease-muted hover:bg-white/[0.05] hover:text-white'
+                        }`}
+                      >
+                        {item.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <Toggle
+                  checked={currentFm !== FM_MODE_OFF}
+                  disabled={fmSaving}
+                  onChange={(next) => {
+                    const restored = normalizeFmMode(fmModeBeforeOff);
+                    onSaveFmMode(next ? (restored === FM_MODE_OFF ? DEFAULT_FM_MODE : restored) : FM_MODE_OFF, effectiveFmSource);
+                  }}
+                  label="自动漫游"
+                  description="队列为空时通过私人漫游自动推荐下一首"
+                />
+                <div className={`mt-3 space-y-1.5 ${currentFm === FM_MODE_OFF ? 'opacity-40' : ''}`}>
+                  {getFmModeOptions(effectiveFmSource).map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      disabled={fmSaving || currentFm === FM_MODE_OFF}
+                      onClick={() => onSaveFmMode(opt.value, effectiveFmSource)}
+                      className={`w-full rounded-xl border px-3 py-2 text-left transition-colors disabled:opacity-50 ${
+                        currentFm === opt.value
+                          ? 'border-netease-red/25 bg-netease-red/[0.08]'
+                          : 'border-transparent bg-white/[0.03] hover:bg-white/[0.06]'
+                      }`}
+                    >
+                      <p className={`text-sm font-medium ${currentFm === opt.value ? 'text-white' : 'text-white/90'}`}>
+                        {opt.label}
+                        {currentFm === opt.value && (
+                          <span className="ml-2 text-[10px] font-normal text-netease-red">当前</span>
+                        )}
+                      </p>
+                      {opt.description && (
+                        <p className="mt-0.5 text-xs text-netease-muted">{opt.description}</p>
                       )}
-                    </p>
-                    {opt.description && (
-                      <p className="mt-0.5 text-xs text-netease-muted">{opt.description}</p>
-                    )}
-                  </button>
-                ))}
-              </div>
-              <p className="mt-2 text-[10px] text-netease-muted">
-                当前：{getFmModeLabel(currentFm)}
-              </p>
-            </section>
-          )}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-2 text-[10px] text-netease-muted">
+                  当前：{getFmModeLabel(currentFm)}
+                </p>
+              </section>
+            );
+          })()}
 
-          {MUSIC_ACCOUNT_TAB_ENABLED && activeTab === 'account' && isOwner && onMusicAccountCreateQr && onMusicAccountCheckQr && onMusicAccountBind && onMusicAccountRefresh && onMusicAccountSetShared && onMusicAccountUnbind && (
+          {MUSIC_ACCOUNT_TAB_ENABLED && hasMusicAccountPlatform && activeTab === 'account' && isOwner && onMusicAccountCreateQr && onMusicAccountCheckQr && onMusicAccountBind && onMusicAccountRefresh && onMusicAccountSetShared && onMusicAccountUnbind && (
             <RoomMusicAccountPanel
               accounts={musicAccounts}
               sharedMembershipEnabled={sharedMembershipEnabled}
+              enabledPlatforms={enabledMusicAccountPlatforms}
               onCreateQr={onMusicAccountCreateQr}
               onCheckQr={onMusicAccountCheckQr}
               onBind={onMusicAccountBind}

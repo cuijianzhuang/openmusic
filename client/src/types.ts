@@ -3,6 +3,7 @@ export type MusicSource = 'netease' | 'tencent' | 'kugou' | 'qishui';
 export interface RoomAudioQuality {
   netease: string;
   tencent: string;
+  kugou: string;
   qishui?: string;
 }
 
@@ -189,7 +190,7 @@ export interface SkipRequest {
 /** 房主扫码绑定的音源账号公开信息 */
 export interface RoomMusicAccount {
   cookieId: string;
-  platform: 'netease' | 'tencent' | 'qishui';
+  platform: 'netease' | 'tencent' | 'kugou' | 'qishui';
   shared: boolean;
   hasVip: boolean;
   hasSvip?: boolean;
@@ -208,6 +209,7 @@ export interface RoomMusicAccount {
 export interface RoomMusicAccounts {
   netease: RoomMusicAccount | null;
   tencent: RoomMusicAccount | null;
+  kugou: RoomMusicAccount | null;
   qishui: RoomMusicAccount | null;
 }
 
@@ -262,7 +264,7 @@ export interface RoomState {
   /** 队列为空时私人漫游推荐模式 */
   neteaseFmMode?: string;
   /** 私人漫游使用的推荐平台 */
-  fmSource?: 'netease' | 'tencent' | 'qishui';
+  fmSource?: 'netease' | 'tencent' | 'kugou' | 'qishui';
   /** 漫游关闭前的模式，重新开启时恢复 */
   fmModeBeforeOff?: string;
   /** 房主扫码绑定的音源账号（公开信息；Cookie 在 Meting） */

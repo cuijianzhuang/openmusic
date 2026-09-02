@@ -31,7 +31,7 @@ function getRoomScopedAccount(roomId, server) {
   if (!resolveRoomInternal || !roomId) return { account: null, cookie: '' };
   try {
     const room = resolveRoomInternal(String(roomId).trim().toUpperCase());
-    const plat = server === 'tencent' ? 'tencent' : server === 'qishui' ? 'qishui' : 'netease';
+    const plat = server === 'tencent' ? 'tencent' : server === 'kugou' ? 'kugou' : server === 'qishui' ? 'qishui' : 'netease';
     const acc = room?.musicAccounts?.[plat];
     const cookie = String(room?.musicAccountSecrets?.[plat] || '').trim();
     return { account: acc || null, cookie };
@@ -48,7 +48,7 @@ function roomNeedsScopedProxy(roomId, server, type = '') {
   if (account.hasVip === true || normalizedType === 'fm') return true;
 
   // 无会员房间账号只允许当前房间的私人漫游取链，不能接管搜索/点播。
-  if (normalizedType === 'url' && (server === 'qishui' || server === 'tencent') && resolveRoomInternal) {
+  if (normalizedType === 'url' && (server === 'qishui' || server === 'tencent' || server === 'kugou') && resolveRoomInternal) {
     try {
       const room = resolveRoomInternal(String(roomId).trim().toUpperCase());
       const current = room?.current;
@@ -378,24 +378,28 @@ function isNoUrlPayload(text) {
  * 按查询参数请求 Meting API，多上游间轮询负载均衡：
  * 网络错误或 5xx 时将该上游置入 60s 冷却并自动切换下一个。
  */
+async function fetchCustomMusicApiFallback(query, timeoutMs) {
+  try {
+    return await fetchCustomMusicApi(query, { timeoutMs });
+  } catch (err) {
+    console.warn(`自定义音乐接口兜底失败：${err?.message || err}`);
+    return null;
+  }
+}
+
+/** Meting 为默认上游；仅在其不可用、未命中或没有播放链时使用管理员自定义接口兜底。 */
 export async function fetchMetingApi(query, options = {}, timeoutMs = 10000) {
   syncUpstreams();
-  try {
-    const customResponse = await fetchCustomMusicApi(query, { timeoutMs });
-    if (customResponse) return customResponse;
-  } catch (err) {
-    console.warn(`自定义音乐接口失败，继续尝试 Meting：${err?.message || err}`);
-  }
+  let metingUnavailableError = null;
   if (upstreams.length === 0) {
-    throw new Error('未配置 METING_API_URL');
-  }
-  if (upstreams.every((upstream) => !String(upstream.auth || '').trim())) {
-    throw new Error('未配置 Meting API Token：请在管理后台填写与 Meting「API Token」一致的令牌');
+    metingUnavailableError = new Error('未配置 METING_API_URL');
+  } else if (upstreams.every((upstream) => !String(upstream.auth || '').trim())) {
+    metingUnavailableError = new Error('未配置 Meting API Token：请在管理后台填写与 Meting「API Token」一致的令牌');
   }
 
-  const candidates = orderedUpstreams(query);
-  if (candidates.length === 0) {
-    throw new Error('所有 Meting 上游均已禁用');
+  const candidates = metingUnavailableError ? [] : orderedUpstreams(query);
+  if (!metingUnavailableError && candidates.length === 0) {
+    metingUnavailableError = new Error('所有 Meting 上游均已禁用');
   }
 
   const isSearch = String(query?.type || '') === 'search';
@@ -485,10 +489,11 @@ export async function fetchMetingApi(query, options = {}, timeoutMs = 10000) {
       lastError = err;
     }
   }
-  if (emptySearchResponse) return emptySearchResponse;
-  if (emptyUrlResponse) return emptyUrlResponse;
-  if (notFoundResponse) return notFoundResponse;
-  throw lastError || new Error('所有 Meting 上游均不可用');
+  const metingFallbackResponse = emptySearchResponse || emptyUrlResponse || notFoundResponse;
+  const customResponse = await fetchCustomMusicApiFallback(query, timeoutMs);
+  if (customResponse) return customResponse;
+  if (metingFallbackResponse) return metingFallbackResponse;
+  throw lastError || metingUnavailableError || new Error('所有 Meting 上游均不可用');
 }
 
 // ---------- 主动健康探测 ----------

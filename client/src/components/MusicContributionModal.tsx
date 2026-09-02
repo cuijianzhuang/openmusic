@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, Crown, Gem, HeartHandshake, KeyRound, Loader2, QrCode, X } from 'lucide-react';
 import {
   checkContributionQr,
@@ -22,15 +22,21 @@ interface Props {
   open: boolean;
   onClose: () => void;
   defaultProvider?: string;
+  enabledPlatforms?: MusicAccountPlatform[];
 }
 
 const PLATFORM_META: Record<MusicAccountPlatform, { label: string; instruction: string; waiting: string }> = {
   netease: { label: '网易云', instruction: '使用网易云音乐 App 扫码', waiting: '等待网易云音乐 App 扫码…' },
   tencent: { label: 'QQ 音乐', instruction: '使用 QQ 音乐 App 扫码', waiting: '等待 QQ 音乐 App 扫码…' },
+  kugou: { label: '酷狗音乐', instruction: '使用酷狗音乐 App 扫码确认登录', waiting: '等待酷狗音乐 App 扫码…' },
   qishui: { label: '汽水音乐', instruction: '使用已登录的汽水音乐 App 扫码确认登录', waiting: '等待汽水音乐 App 扫码…' },
 };
 
-export default function MusicContributionModal({ open, onClose, defaultProvider = '' }: Props) {
+export default function MusicContributionModal({ open, onClose, defaultProvider = '', enabledPlatforms }: Props) {
+  const platforms = useMemo(
+    () => (Object.keys(PLATFORM_META) as MusicAccountPlatform[]).filter((item) => !enabledPlatforms || enabledPlatforms.includes(item)),
+    [enabledPlatforms],
+  );
   const [platform, setPlatform] = useState<MusicAccountPlatform>('netease');
   const [session, setSession] = useState<MusicAccountQrSession | null>(null);
   const [statusText, setStatusText] = useState('');
@@ -261,11 +267,17 @@ export default function MusicContributionModal({ open, onClose, defaultProvider 
     }
     setProviderName(defaultProvider.trim().slice(0, 40));
     void loadContributions();
-    void startQr('netease');
+    if (platforms.length > 0) void startQr(platforms[0]);
     return cancelRun;
-  }, [cancelRun, defaultProvider, loadContributions, open, startQr]);
+  }, [cancelRun, defaultProvider, loadContributions, open, platforms, startQr]);
 
-  if (!open) return null;
+  useEffect(() => {
+    if (!open || platforms.length === 0 || platforms.includes(platform)) return;
+    cancelRun();
+    setPlatform(platforms[0]);
+  }, [cancelRun, open, platform, platforms]);
+
+  if (!open || platforms.length === 0) return null;
   const qrDisplay = session?.qrimg || '';
 
   return (
@@ -312,7 +324,7 @@ export default function MusicContributionModal({ open, onClose, defaultProvider 
             <div className="mt-2 grid max-h-36 grid-cols-2 gap-1.5 overflow-y-auto pr-1 sm:grid-cols-3 lg:grid-cols-4">
               {contributions.map((item, index) => {
                 const isSvip = item.tier === 'svip';
-                const platformLabel = item.platform === 'tencent' ? 'QQ' : item.platform === 'qishui' ? '汽水' : '网易';
+                const platformLabel = item.platform === 'tencent' ? 'QQ' : item.platform === 'kugou' ? '酷狗' : item.platform === 'qishui' ? '汽水' : '网易';
                 return (
                   <Tooltip
                     key={`${item.platform}-${item.providerName}-${item.updatedAt}-${index}`}
@@ -344,8 +356,8 @@ export default function MusicContributionModal({ open, onClose, defaultProvider 
           )}
         </div>
 
-        <div className="mt-5 grid grid-cols-3 gap-1 rounded-xl border border-white/10 bg-white/[0.03] p-1" role="tablist" aria-label="选择音乐平台">
-          {(Object.keys(PLATFORM_META) as MusicAccountPlatform[]).map((item) => (
+        <div className="mt-5 grid gap-1 rounded-xl border border-white/10 bg-white/[0.03] p-1" style={{ gridTemplateColumns: `repeat(${platforms.length}, minmax(0, 1fr))` }} role="tablist" aria-label="选择音乐平台">
+          {platforms.map((item) => (
             <button
               key={item}
               type="button"

@@ -72,9 +72,20 @@ function extractIdFromApiUrl(url) {
   return match ? decodeURIComponent(match[1]) : '';
 }
 
+export function parseKugouPlaylistId(input) {
+  const text = String(input || '').trim();
+  if (!text) return null;
+  if (/^\d{4,}$/.test(text) || /^collection_\d+_\d+_\d+_\d+$/.test(text)) return text;
+  const url = extractUrlFromText(text);
+  if (!/kugou\.com/i.test(url)) return null;
+  const match = url.match(/[?&](?:global_collection_id|specialid|id)=(\d{4,})/i)
+    || url.match(/\/(?:special|playlist|collection)\/(?:single\/)?(\d{4,})/i);
+  return match ? match[1] : null;
+}
+
 export function parseQishuiPlaylistId(input) {
   const text = String(input || '').trim();
-  if (/^\d{4,}$/.test(text)) return text;
+  if (/^\d{4,}$/.test(text) || /^collection_\d+_\d+_\d+_\d+$/.test(text)) return text;
   const url = extractUrlFromText(text);
   const match = url.match(/[?&](?:playlist_id|id)=(\d{4,})/i) || url.match(/playlist[\/_-](\d{4,})/i);
   return match ? match[1] : null;
@@ -230,7 +241,7 @@ async function importMetingPlaylist(server, playlistId, defaultName) {
     return {
       name: defaultName,
       playlistId,
-      source: server === 'netease' ? 'netease' : server === 'qishui' ? 'qishui' : 'tencent',
+      source: server === 'netease' ? 'netease' : server === 'qishui' ? 'qishui' : server === 'kugou' ? 'kugou' : 'tencent',
       songs: [],
       total: 0,
       failed: 0,
@@ -238,13 +249,13 @@ async function importMetingPlaylist(server, playlistId, defaultName) {
   }
 
   const songs = tracks
-    .map((track) => normalizeMetingPlaylistSong(track, server === 'netease' ? 'netease' : server === 'qishui' ? 'qishui' : 'tencent'))
+    .map((track) => normalizeMetingPlaylistSong(track, server === 'netease' ? 'netease' : server === 'qishui' ? 'qishui' : server === 'kugou' ? 'kugou' : 'tencent'))
     .filter(Boolean);
 
   return {
     name: defaultName,
     playlistId,
-    source: server === 'netease' ? 'netease' : 'tencent',
+    source: server === 'netease' ? 'netease' : server === 'qishui' ? 'qishui' : server === 'kugou' ? 'kugou' : 'tencent',
     songs,
     total: tracks.length,
     failed: tracks.length - songs.length,
@@ -291,4 +302,10 @@ export async function importQishuiPlaylist(input) {
   const playlistId = parseQishuiPlaylistId(input);
   if (!playlistId) throw new Error('无法识别汽水歌单 ID 或分享链接');
   return importMetingPlaylist('qishui', playlistId, '汽水歌单');
+}
+
+export async function importKugouPlaylist(input) {
+  const playlistId = parseKugouPlaylistId(input);
+  if (!playlistId) throw new Error('无法识别酷狗歌单 ID 或分享链接');
+  return importMetingPlaylist('kugou', playlistId, '酷狗歌单');
 }

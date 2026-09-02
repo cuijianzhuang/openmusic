@@ -305,7 +305,7 @@ function qualityParts(source: MusicSource | null | undefined) {
     qualityLockedToLowest: isPlaybackQualityLockedToLowest(),
     immersiveEnabled: immersive.enabled,
     immersiveQualityCapActive: immersive.qualityCapActive,
-    svipQualityEnabled: site.svipQualityEnabled,
+    svipQualityEnabled: JSON.stringify(site.svipQualityEnabled),
     siteFeaturesHydrated: site.hydrated,
   };
 }

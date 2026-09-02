@@ -232,7 +232,7 @@ function normalizeSongFromMeting(raw, server = 'netease') {
 async function searchSongsInternal(keyword, server = 'netease', limit = 5) {
   const q = String(keyword || '').trim().slice(0, 64);
   if (!q) return { success: false, error: '关键词为空' };
-  const src = ['netease', 'tencent', 'qishui'].includes(server) ? server : 'netease';
+  const src = ['netease', 'tencent', 'kugou', 'qishui'].includes(server) ? server : 'netease';
   const safeLimit = Math.max(1, Math.min(8, Number(limit) || 5));
 
   try {

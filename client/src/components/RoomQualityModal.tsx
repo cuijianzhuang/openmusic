@@ -21,6 +21,7 @@ interface Props {
 export default function RoomQualityModal({ open, value, saving = false, onClose, onSave }: Props) {
   const neteaseSvip = useSiteFeaturesStore((s) => s.neteaseSvip);
   const tencentSvip = useSiteFeaturesStore((s) => s.tencentSvip);
+  const kugouSvip = useSiteFeaturesStore((s) => s.svipQualityEnabled.kugou);
   const qishuiVip = useSiteFeaturesStore((s) => s.qishuiVip);
   const qishuiSvip = useSiteFeaturesStore((s) => s.qishuiSvip);
   const [draft, setDraft] = useState(() => normalizeRoomAudioQuality(value));
@@ -32,12 +33,14 @@ export default function RoomQualityModal({ open, value, saving = false, onClose,
     setDraft({
       netease: clampQualityToCapabilities('netease', next.netease),
       tencent: clampQualityToCapabilities('tencent', next.tencent),
+      kugou: clampQualityToCapabilities('kugou', next.kugou || 'exhigh'),
       qishui: clampQualityToCapabilities('qishui', next.qishui || 'exhigh'),
     });
-  }, [open, value, neteaseSvip, tencentSvip, qishuiVip, qishuiSvip]);
+  }, [open, value, neteaseSvip, tencentSvip, kugouSvip, qishuiVip, qishuiSvip]);
 
   const neteaseOptions = useMemo(() => getQualityOptionsForSource('netease'), [neteaseSvip]);
   const tencentOptions = useMemo(() => getQualityOptionsForSource('tencent'), [tencentSvip]);
+  const kugouOptions = useMemo(() => getQualityOptionsForSource('kugou'), [kugouSvip]);
   const qishuiOptions = useMemo(() => getQualityOptionsForSource('qishui'), [qishuiVip, qishuiSvip]);
 
   if (!open) return null;
@@ -46,6 +49,7 @@ export default function RoomQualityModal({ open, value, saving = false, onClose,
   const baseline = normalizeRoomAudioQuality(value);
   const dirty = current.netease !== clampQualityToCapabilities('netease', baseline.netease)
     || current.tencent !== clampQualityToCapabilities('tencent', baseline.tencent)
+    || current.kugou !== clampQualityToCapabilities('kugou', baseline.kugou || 'exhigh')
     || current.qishui !== clampQualityToCapabilities('qishui', baseline.qishui || 'exhigh');
 
   const handleNeteaseChange = (netease: string) => {
@@ -131,6 +135,21 @@ export default function RoomQualityModal({ open, value, saving = false, onClose,
                       : 'border-white/10 bg-netease-card text-netease-muted hover:border-white/20 hover:text-white'
                   }`}
                 >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section>
+            <div className="mb-2 flex items-center gap-2">
+              <span className="text-sm font-medium text-[#2688ee]/90">酷狗</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {kugouOptions.map((opt) => (
+                <button key={opt.value} type="button" disabled={saving}
+                  onClick={() => setDraft((prev) => ({ ...prev, kugou: opt.value }))}
+                  className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50 ${current.kugou === opt.value ? 'border-[#2688ee]/40 bg-[#2688ee]/15 text-white' : 'border-white/10 bg-netease-card text-netease-muted hover:border-white/20 hover:text-white'}`}>
                   {opt.label}
                 </button>
               ))}

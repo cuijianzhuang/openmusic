@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import { isBlockedMediaHostname } from './mediaProxy.js';
 import { normalizeMusicApis } from './customMusicApi.js';
 import { buildPublicSiteSeo } from './seoFiles.js';
+import { normalizeMusicSourcesEnabled } from './musicSources.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = path.join(__dirname, 'runtimeConfig.json');
@@ -87,13 +88,14 @@ function envDefaults() {
     githubRedirectUri: envText('GITHUB_REDIRECT_URI'),
     githubScope: envText('GITHUB_SCOPE', 'read:user'),
     roomCredentialEncryptionKey: envText('ROOM_CREDENTIAL_ENCRYPTION_KEY'),
-    /** 是否开放 SVIP 音质（网易沉浸环绕声/超清母带/杜比；QQ 臻品全景声/臻品母带） */
-    svipQualityEnabled: envText('SVIP_QUALITY_ENABLED') === '1' || envText('SVIP_QUALITY_ENABLED').toLowerCase() === 'true',
+    /** 各平台是否开放 SVIP/高级音质选项；旧 SVIP_QUALITY_ENABLED 会作为全平台兼容默认值。 */
+    svipQualityEnabled: (() => { const enabled = envText('SVIP_QUALITY_ENABLED') === '1' || envText('SVIP_QUALITY_ENABLED').toLowerCase() === 'true'; return { netease: enabled, tencent: enabled, kugou: enabled, qishui: enabled }; })(),
     /** 是否开放全站共享会员入口 */
     sharedMembershipEnabled: true,
     metingApiUrl: envText('METING_API_URL'),
     metingApiAuth: envText('METING_API_AUTH'),
     musicApis: [],
+    musicSourcesEnabled: { netease: true, tencent: true, kugou: true, qishui: true },
     qiniuAccessKey: envText('QINIU_ACCESS_KEY'),
     qiniuSecretKey: envText('QINIU_SECRET_KEY'),
     qiniuBucket: envText('QINIU_BUCKET'),
@@ -276,6 +278,7 @@ function normalize(config) {
     // 旧文件或手工编辑产生的非法配置不进入运行时；保存时会返回明确校验错误。
   }
   const aiModelPools = normalizeAiModelPools(config.aiModelPools);
+  const musicSourcesEnabled = normalizeMusicSourcesEnabled(config.musicSourcesEnabled);
   return {
     roomEmptyTtlMs: Number.isFinite(roomEmptyTtlMs)
       ? Math.max(0, Math.min(Math.round(roomEmptyTtlMs), 24 * 60 * 60 * 1000))
@@ -304,10 +307,21 @@ function normalize(config) {
     githubRedirectUri: String(config.githubRedirectUri || '').trim(),
     githubScope: String(config.githubScope || 'read:user').trim() || 'read:user',
     roomCredentialEncryptionKey: String(config.roomCredentialEncryptionKey || '').trim(),
-    svipQualityEnabled: config.svipQualityEnabled === true
-      || config.svipQualityEnabled === 1
-      || String(config.svipQualityEnabled || '').trim().toLowerCase() === 'true'
-      || String(config.svipQualityEnabled || '').trim() === '1',
+    svipQualityEnabled: (() => {
+      const legacy = config.svipQualityEnabled === true
+        || config.svipQualityEnabled === 1
+        || String(config.svipQualityEnabled || '').trim().toLowerCase() === 'true'
+        || String(config.svipQualityEnabled || '').trim() === '1';
+      const value = config.svipQualityEnabled && typeof config.svipQualityEnabled === 'object'
+        ? config.svipQualityEnabled
+        : {};
+      return {
+        netease: value.netease === undefined ? legacy : Boolean(value.netease),
+        tencent: value.tencent === undefined ? legacy : Boolean(value.tencent),
+        kugou: value.kugou === undefined ? legacy : Boolean(value.kugou),
+        qishui: value.qishui === undefined ? legacy : Boolean(value.qishui),
+      };
+    })(),
     sharedMembershipEnabled: config.sharedMembershipEnabled !== false
       && config.sharedMembershipEnabled !== 0
       && String(config.sharedMembershipEnabled || '').trim().toLowerCase() !== 'false'
@@ -315,6 +329,7 @@ function normalize(config) {
     metingApiUrl: String(config.metingApiUrl || '').trim(),
     metingApiAuth: String(config.metingApiAuth || '').trim(),
     musicApis,
+    musicSourcesEnabled,
     qiniuAccessKey: String(config.qiniuAccessKey || '').trim(),
     qiniuSecretKey: String(config.qiniuSecretKey || '').trim(),
     qiniuBucket: String(config.qiniuBucket || '').trim(),
