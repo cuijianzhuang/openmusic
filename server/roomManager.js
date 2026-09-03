@@ -1,6 +1,7 @@
 import { customAlphabet } from "nanoid";
 import { scrypt, scryptSync, randomBytes, timingSafeEqual } from "crypto";
 import { fetchMetingFmSongs, normalizeFmMode, DEFAULT_FM_MODE, FM_MODE_OFF } from "./metingFm.js";
+import { importNeteasePlaylist, importQqPlaylist, importKugouPlaylist, importQishuiPlaylist } from "./playlistImport.js";
 import { getRedisClient, initRoomStorage, isRedisEnabled, loadAllRoomsFromStorage, queueSaveRoomToStorage, deleteRoomFromStorage, saveRoomToStorage, listFavoriteSongs } from "./roomStorage.js";
 import {
   DEFAULT_MEMBER_SETTINGS,
@@ -463,6 +464,72 @@ function normalizeFmSource(value) {
   return "netease";
 }
 
+const PLAYLIST_ROAMING_MAX_PLAYLISTS = 20;
+const PLAYLIST_ROAMING_MAX_SONGS_PER_PLAYLIST = 500;
+
+function normalizePlaylistUrl(value) {
+  const match = String(value || '').trim().match(/https?:\/\/[^\s]+/i);
+  if (!match) return '';
+  const candidate = match[0].replace(/[.,;，。；)）\]]+$/, '').slice(0, 2000);
+  try {
+    const url = new URL(candidate);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : '';
+  } catch {
+    return '';
+  }
+}
+
+function normalizePlaylistRoamingEntry(playlist) {
+  if (!playlist || typeof playlist !== "object") return null;
+  const source = normalizeFmSource(playlist.source);
+  const id = String(playlist.id || "").trim().slice(0, 160);
+  const name = String(playlist.name || "").trim().slice(0, 160);
+  const url = normalizePlaylistUrl(playlist.url);
+  const songs = (Array.isArray(playlist.songs) ? playlist.songs : [])
+    .map((song) => serializeSongMeta(song))
+    .filter((song) => song?.id && song?.name)
+    .slice(0, PLAYLIST_ROAMING_MAX_SONGS_PER_PLAYLIST);
+  if (!id || songs.length === 0) return null;
+  return { id, source, name, ...(url ? { url } : {}), songs };
+}
+
+function normalizePlaylistRoaming(playlistRoaming) {
+  if (!playlistRoaming || typeof playlistRoaming !== "object") return null;
+  const rawPlaylists = Array.isArray(playlistRoaming.playlists)
+    ? playlistRoaming.playlists
+    : [playlistRoaming];
+  const seen = new Set();
+  const playlists = rawPlaylists
+    .map(normalizePlaylistRoamingEntry)
+    .filter((playlist) => {
+      if (!playlist) return false;
+      const key = playlist.source + ":" + playlist.id;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, PLAYLIST_ROAMING_MAX_PLAYLISTS);
+  return playlists.length
+    ? { playlists, dedupeByName: playlistRoaming.dedupeByName === true, enabled: playlistRoaming.enabled !== false }
+    : null;
+}
+
+function getPlaylistRoamingSongs(playlistRoaming) {
+  const songs = [];
+  for (const playlist of playlistRoaming?.playlists || []) {
+    for (const song of playlist.songs || []) songs.push(song);
+  }
+  return songs;
+}
+
+async function importPlaylistForRoaming(platform, input) {
+  if (platform === "netease") return importNeteasePlaylist(input);
+  if (platform === "qq") return importQqPlaylist(input);
+  if (platform === "kugou") return importKugouPlaylist(input);
+  if (platform === "qishui") return importQishuiPlaylist(input);
+  throw new Error("不支持的平台");
+}
+
 const rooms = new Map();
 const ensurePlaybackInflight = new Map();
 
@@ -687,6 +754,7 @@ function snapshotRoomForStorage(room) {
     neteaseFmMode: normalizeFmMode(room.neteaseFmMode),
     fmSource: normalizeFmSource(room.fmSource),
     fmModeBeforeOff: normalizeFmMode(room.fmModeBeforeOff),
+    playlistRoaming: normalizePlaylistRoaming(room.playlistRoaming),
     musicAccounts: normalizeMusicAccounts(room.musicAccounts),
     musicAccountSecrets: normalizeMusicAccountSecrets(room.musicAccountSecrets),
     playMode: normalizePlayMode(room.playMode),
@@ -773,6 +841,7 @@ function restoreRoomFromStorage(data) {
   room.fmSource = normalizeFmSource(data.fmSource);
   const fmModeBeforeOff = normalizeFmMode(data.fmModeBeforeOff);
   room.fmModeBeforeOff = fmModeBeforeOff === FM_MODE_OFF ? DEFAULT_FM_MODE : fmModeBeforeOff;
+  room.playlistRoaming = normalizePlaylistRoaming(data.playlistRoaming);
   room.musicAccounts = normalizeMusicAccounts(data.musicAccounts);
   room.musicAccountSecrets = normalizeMusicAccountSecrets(data.musicAccountSecrets);
   room.playMode = normalizePlayMode(data.playMode);
@@ -1168,6 +1237,7 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
     neteaseFmMode: DEFAULT_FM_MODE,
     fmSource: "netease",
     fmModeBeforeOff: DEFAULT_FM_MODE,
+    playlistRoaming: null,
     /** 房主扫码绑定的音源账号公开信息 */
     musicAccounts: { netease: null, tencent: null, kugou: null, qishui: null },
     /** 房间私有音源凭证（不广播；仅开启共享时同步到 Meting 池） */
@@ -2857,6 +2927,83 @@ export function setRoomAdmin(roomId, actorId, targetUserId, admin = true, connec
   };
 }
 
+export async function setRoomPlaylistRoaming(roomId, actorId, payload = {}, connectionId = null) {
+  const room = rooms.get(roomId);
+  if (!room) return { error: "房间不存在" };
+  if (!isOwnerConnection(room, actorId, connectionId)) return { error: "仅房主可设置指定歌单" };
+
+  const hasDedupeByName = typeof payload?.dedupeByName === "boolean";
+  const dedupeByName = payload?.dedupeByName === true;
+  if (typeof payload?.playlistEnabled === "boolean") {
+    if (!room.playlistRoaming) return { error: "请先指定至少一个歌单" };
+    room.playlistRoaming = normalizePlaylistRoaming({ ...room.playlistRoaming, enabled: payload.playlistEnabled });
+    room.randomPlayedKeys.clear();
+    clearNextRandom(room);
+    persistRoom(room);
+    if (room.playlistRoaming.enabled && !room.current && room.queue.length === 0) void ensureNextRandom(room);
+    return { room: serializeRoom(room) };
+  }
+  if (hasDedupeByName && !payload?.clear && !payload?.input) {
+    if (!room.playlistRoaming) return { error: "请先指定至少一个歌单" };
+    room.playlistRoaming = normalizePlaylistRoaming({
+      ...room.playlistRoaming,
+      dedupeByName,
+    });
+    room.randomPlayedKeys.clear();
+    clearNextRandom(room);
+    persistRoom(room);
+    if (!room.current && room.queue.length === 0) void ensureNextRandom(room);
+    return { room: serializeRoom(room) };
+  }
+
+  if (payload?.clear === true) {
+    const playlistId = String(payload?.playlistId || "").trim();
+    const playlistSource = normalizeFmSource(payload?.playlistSource);
+    if (playlistId && room.playlistRoaming?.playlists) {
+      room.playlistRoaming = normalizePlaylistRoaming({
+        playlists: room.playlistRoaming.playlists.filter((playlist) => playlist.source !== playlistSource || playlist.id !== playlistId),
+        dedupeByName: room.playlistRoaming.dedupeByName === true,
+      });
+    } else {
+      room.playlistRoaming = null;
+    }
+    room.randomPlayedKeys.clear();
+    clearNextRandom(room);
+    persistRoom(room);
+    if (!room.current && room.queue.length === 0) void ensureNextRandom(room);
+    return { room: serializeRoom(room) };
+  }
+
+  const platform = String(payload?.platform || "").trim();
+  const input = String(payload?.input || "").trim().slice(0, 2000);
+  if (!input) return { error: "请粘贴歌单链接" };
+  try {
+    const imported = await importPlaylistForRoaming(platform, input);
+    const playlist = normalizePlaylistRoamingEntry({
+      id: imported.playlistId || input,
+      source: imported.source,
+      name: typeof payload?.playlistName === "string"
+        ? payload.playlistName.trim().slice(0, 160)
+        : "",
+      url: typeof payload?.playlistName === "string" ? "" : input,
+      songs: imported.songs,
+    });
+    if (!playlist) return { error: "歌单中没有可用歌曲" };
+    const playlists = room.playlistRoaming?.playlists || [];
+    room.playlistRoaming = normalizePlaylistRoaming({
+      playlists: [...playlists.filter((item) => item.source !== playlist.source || item.id !== playlist.id), playlist],
+      dedupeByName: hasDedupeByName ? dedupeByName : room.playlistRoaming?.dedupeByName === true,
+    });
+    room.randomPlayedKeys.clear();
+    clearNextRandom(room);
+    persistRoom(room);
+    if (!room.current && room.queue.length === 0) void ensureNextRandom(room);
+    return { room: serializeRoom(room) };
+  } catch (error) {
+    return { error: String(error?.message || "歌单加载失败").slice(0, 200) };
+  }
+}
+
 export function setRoomFmMode(roomId, actorId, mode, connectionId = null, source = null) {
   const room = rooms.get(roomId);
   if (!room) return { error: "房间不存在" };
@@ -2878,6 +3025,10 @@ export function setRoomFmMode(roomId, actorId, mode, connectionId = null, source
   }
   room.neteaseFmMode = nextMode;
   room.fmSource = nextSource;
+  // 切回私人漫游时只停用指定歌单，保留已加载歌单，便于稍后恢复。
+  if (room.playlistRoaming && nextMode !== FM_MODE_OFF) {
+    room.playlistRoaming = normalizePlaylistRoaming({ ...room.playlistRoaming, enabled: false });
+  }
   clearNextRandom(room);
   persistRoom(room);
 
@@ -4304,8 +4455,63 @@ export function selectRandomFavoriteSong(favorites, currentSong = null, playedKe
   return pool[Math.min(pool.length - 1, Math.max(0, Math.floor(random() * pool.length)))];
 }
 
+const PLAYLIST_SONG_SOURCE_PRIORITY = ["netease", "tencent", "qishui", "kugou"];
+
+function playlistSongNameKey(song) {
+  return String(song?.name || "").trim().toLocaleLowerCase();
+}
+
+function playlistSongPriority(song) {
+  const index = PLAYLIST_SONG_SOURCE_PRIORITY.indexOf(normalizeFmSource(song?.source));
+  return index === -1 ? PLAYLIST_SONG_SOURCE_PRIORITY.length : index;
+}
+
+function dedupePlaylistSongsByName(songs) {
+  const preferredByName = new Map();
+  for (const song of songs) {
+    const nameKey = playlistSongNameKey(song);
+    if (!nameKey) continue;
+    const current = preferredByName.get(nameKey);
+    if (!current || playlistSongPriority(song) < playlistSongPriority(current)) {
+      preferredByName.set(nameKey, song);
+    }
+  }
+  return Array.from(preferredByName.values());
+}
+
+/** 从指定歌单循环选歌；所有歌曲播放过后才重置本轮，绝不回退到私人漫游。 */
+export function selectPlaylistRoamingSong(songs, currentSong = null, playedKeys = new Set(), random = Math.random, options = {}) {
+  const usable = (Array.isArray(songs) ? songs : []).filter((song) => song?.id && song?.source);
+  if (!options?.dedupeByName) return selectRandomFavoriteSong(usable, currentSong, playedKeys, random);
+
+  const deduped = dedupePlaylistSongsByName(usable);
+  const currentNameKey = playlistSongNameKey(currentSong);
+  const playedNameKeys = new Set(
+    usable
+      .filter((song) => playedKeys.has(songIdentity(song.source, song.id)))
+      .map(playlistSongNameKey)
+      .filter(Boolean),
+  );
+  const unplayed = deduped.filter((song) => playlistSongNameKey(song) !== currentNameKey && !playedNameKeys.has(playlistSongNameKey(song)));
+  const fallback = deduped.filter((song) => playlistSongNameKey(song) !== currentNameKey);
+  const pool = unplayed.length > 0 ? unplayed : (fallback.length > 0 ? fallback : deduped);
+  if (pool.length === 0) return null;
+  return pool[Math.min(pool.length - 1, Math.max(0, Math.floor(random() * pool.length)))];
+}
+
 async function fetchRandomForRoom(room) {
-  if (normalizePlayMode(room.playMode) === "favorite-shuffle") {
+  if (room.playlistRoaming && room.playlistRoaming.enabled !== false) {
+    const song = selectPlaylistRoamingSong(
+      getPlaylistRoamingSongs(room.playlistRoaming),
+      room.current,
+      room.randomPlayedKeys,
+      Math.random,
+      { dedupeByName: room.playlistRoaming.dedupeByName === true },
+    );
+    if (!song) return null;
+    return { ...song, requestedBy: "指定歌单", requestedById: "" };
+  }
+  if (!room.playlistRoaming && normalizePlayMode(room.playMode) === "favorite-shuffle") {
     if (!room.favoriteShuffleUserId) return null;
     const favorites = await listFavoriteSongs(room.favoriteShuffleUserId);
     const song = selectRandomFavoriteSong(favorites, room.current, room.randomPlayedKeys);
@@ -4343,7 +4549,7 @@ async function ensureNextRandom(room) {
     return;
   }
   // 漫游已关闭：不预取，队列放空后自然停止
-  if (normalizePlayMode(room.playMode) !== "favorite-shuffle" && (room.neteaseFmMode || DEFAULT_FM_MODE) === FM_MODE_OFF) {
+  if ((!room.playlistRoaming || room.playlistRoaming.enabled === false) && normalizePlayMode(room.playMode) !== "favorite-shuffle" && (room.neteaseFmMode || DEFAULT_FM_MODE) === FM_MODE_OFF) {
     clearNextRandom(room);
     return;
   }
@@ -4358,9 +4564,9 @@ async function ensureNextRandom(room) {
         const key = songIdentity(song.source, song.id);
         const currentKey = room.current ? songIdentity(room.current.source, room.current.id) : '';
         const nextKey = room.nextRandom ? songIdentity(room.nextRandom.source, room.nextRandom.id) : '';
-        if (key === currentKey || key === nextKey || room.randomPlayedKeys.has(key)) continue;
+        if (key === currentKey || key === nextKey || ((!room.playlistRoaming || room.playlistRoaming.enabled === false) && room.randomPlayedKeys.has(key))) continue;
 
-        room.nextRandom = buildPendingRandomItem(song);
+        room.nextRandom = buildPendingRandomItem(song, song.requestedBy || "私人漫游", song.requestedById || "");
         break;
       }
       persistRoom(room);
@@ -4411,7 +4617,7 @@ function setCurrentSong(room, song) {
   const next = serializeQueueItemForRoom(song);
   if (next) next.dislikedByIds = [];
   room.current = next;
-  if ((song?.requestedBy === '私人漫游' || song?.requestedBy === '收藏随机') && song?.id) {
+  if ((song?.requestedBy === '私人漫游' || song?.requestedBy === '收藏随机' || song?.requestedBy === '指定歌单') && song?.id) {
     room.randomPlayedKeys.add(songIdentity(song.source, song.id));
     while (room.randomPlayedKeys.size > MAX_RANDOM_HISTORY) {
       const oldest = room.randomPlayedKeys.values().next().value;
@@ -4544,7 +4750,7 @@ async function playNextUnlocked(room, options = {}) {
   recycleFinishedSongToQueue(room, finishedSong || room.current);
 
   // 收藏随机明确以收藏列表作为下一首来源；已有点歌队列保留，退出该模式后继续消费。
-  if (normalizePlayMode(room.playMode) === "favorite-shuffle") {
+  if (!room.playlistRoaming && normalizePlayMode(room.playMode) === "favorite-shuffle") {
     if (room.nextRandomPromise) await room.nextRandomPromise;
     let favorite = room.nextRandom;
     room.nextRandom = null;
@@ -4581,13 +4787,13 @@ async function playNextUnlocked(room, options = {}) {
     bumpPlaybackState(room);
     random = await fetchRandomForRoom(room);
     if (random && !random.queueId) {
-      random = buildPendingRandomItem(random);
+      random = buildPendingRandomItem(random, random.requestedBy || "私人漫游", random.requestedById || "");
     }
   }
 
   if (room.queue.length > 0) {
     if (random) {
-      const pending = buildPendingRandomItem(random);
+      const pending = buildPendingRandomItem(random, random.requestedBy || "私人漫游", random.requestedById || "");
       if (pending && !room.nextRandom) room.nextRandom = pending;
       notifyRoomPrefetchReady(room);
     }
@@ -4599,10 +4805,11 @@ async function playNextUnlocked(room, options = {}) {
     const item = random.queueId
       ? serializeQueueItemForRoom({
           ...random,
-          requestedBy: "私人漫游",
+          requestedBy: random.requestedBy || "私人漫游",
+          requestedById: random.requestedById || "",
           addedAt: random.addedAt || Date.now(),
         })
-      : buildPendingRandomItem(random);
+      : buildPendingRandomItem(random, random.requestedBy || "私人漫游", random.requestedById || "");
     if (!item) {
       clearNextRandom(room);
       room.current = null;
@@ -4627,7 +4834,7 @@ async function playNextUnlocked(room, options = {}) {
   room.currentTime = 0;
   room.startedAt = null;
   // 漫游关闭时干净停机，不进入"漫游加载中"重试
-  room.randomLoading = (room.neteaseFmMode || DEFAULT_FM_MODE) !== FM_MODE_OFF;
+  room.randomLoading = Boolean(room.playlistRoaming && room.playlistRoaming.enabled !== false) || (room.neteaseFmMode || DEFAULT_FM_MODE) !== FM_MODE_OFF;
   clearSharedPlaybackMedia(room);
   bumpPlaybackState(room);
   invalidateRoomsListCache();
@@ -5965,6 +6172,7 @@ function serializeRoom(room, options = {}) {
     neteaseFmMode: normalizeFmMode(room.neteaseFmMode),
     fmSource: normalizeFmSource(room.fmSource),
     fmModeBeforeOff: normalizeFmMode(room.fmModeBeforeOff),
+    playlistRoaming: normalizePlaylistRoaming(room.playlistRoaming),
     musicAccounts: normalizeMusicAccounts(room.musicAccounts),
     playMode: normalizePlayMode(room.playMode),
     lastPlaybackRequesterId: room.lastPlaybackRequesterId || null,
@@ -6042,6 +6250,7 @@ export function prepareRoomBroadcast(roomId) {
     neteaseFmMode: normalizeFmMode(room.neteaseFmMode),
     fmSource: normalizeFmSource(room.fmSource),
     fmModeBeforeOff: normalizeFmMode(room.fmModeBeforeOff),
+    playlistRoaming: normalizePlaylistRoaming(room.playlistRoaming),
     musicAccounts: normalizeMusicAccounts(room.musicAccounts),
     playMode: normalizePlayMode(room.playMode),
     lastPlaybackRequesterId: room.lastPlaybackRequesterId || null,

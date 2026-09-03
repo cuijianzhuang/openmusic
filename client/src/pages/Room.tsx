@@ -134,7 +134,6 @@ const OnlineUsers = lazyWithRetry(() => import('../components/OnlineUsers'), 'On
 const RoomAmbientBackground = lazyWithRetry(() => import('../components/RoomAmbientBackground'), 'RoomAmbientBackground');
 const MiniPlayer = lazyWithRetry(() => import('../components/MiniPlayer'), 'MiniPlayer');
 const RoomQualityModal = lazyWithRetry(() => import('../components/RoomQualityModal'), 'RoomQualityModal');
-const RoomFmModeModal = lazyWithRetry(() => import('../components/RoomFmModeModal'), 'RoomFmModeModal');
 const RoomAnnouncementPopup = lazyWithRetry(() => import('../components/RoomAnnouncementPopup'), 'RoomAnnouncementPopup');
 
 function ensureGalaxyAudioOutputLazy() {
@@ -301,7 +300,7 @@ export default function Room() {
     noindex: true,
   });
 
-  const { joinRoom, addSong, leaveRoom, listFavorites, setFavorite, importFavorites, createFavoriteShare, previewFavoriteShare, importFavoriteShare, renameRoomName, setRoomLock, setRoomFmMode, setRoomAnnouncement, setRoomCustomCover, setChatHistoryVisibleOnJoin, setChatShowAvatars, setRoomJoinNotice, setRoomAiSettings, setRoomMaxAdmins, setRoomAdminSelfManageMemberTier, setRoomPlaybackRate, setSongRequestEnabled, unbanRoomSong, addRoomForbiddenWord, removeRoomForbiddenWord, setRoomMemberTier, removeRoomMemberTier, setRoomMemberSettings, loadSongHistory, transferOwner, destroyRoom, applyRoomPermanent, cancelRoomPermanent, clearQueue, createMusicAccountQr, checkMusicAccountQr, bindMusicAccount, listMusicAccounts, setMusicAccountShared, unbindMusicAccount, skipSong, togglePlay } = useSocket();
+  const { joinRoom, addSong, leaveRoom, listFavorites, setFavorite, importFavorites, createFavoriteShare, previewFavoriteShare, importFavoriteShare, renameRoomName, setRoomLock, setRoomFmMode, setRoomPlaylistRoaming, setRoomAnnouncement, setRoomCustomCover, setChatHistoryVisibleOnJoin, setChatShowAvatars, setRoomJoinNotice, setRoomAiSettings, setRoomMaxAdmins, setRoomAdminSelfManageMemberTier, setRoomPlaybackRate, setSongRequestEnabled, unbanRoomSong, addRoomForbiddenWord, removeRoomForbiddenWord, setRoomMemberTier, removeRoomMemberTier, setRoomMemberSettings, loadSongHistory, transferOwner, destroyRoom, applyRoomPermanent, cancelRoomPermanent, clearQueue, createMusicAccountQr, checkMusicAccountQr, bindMusicAccount, listMusicAccounts, setMusicAccountShared, unbindMusicAccount, skipSong, togglePlay } = useSocket();
   const { applyFavorites } = useFavorites();
   const { queueKeys, playedKeys } = useRoomSongKeySets();
 
@@ -409,7 +408,6 @@ export default function Room() {
   const [lockSaving, setLockSaving] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [fmSaving, setFmSaving] = useState(false);
-  const [fmModeOpen, setFmModeOpen] = useState(false);
   const [transferSaving, setTransferSaving] = useState(false);
   const [destroySaving, setDestroySaving] = useState(false);
   const [permanentSaving, setPermanentSaving] = useState(false);
@@ -1499,6 +1497,16 @@ export default function Room() {
       showToast(res.error || '漫游模式设置失败', 'error');
     }
   }, [fmSaving, setRoomFmMode, showToast]);
+
+  const handleSavePlaylistRoaming = useCallback(async (payload: { platform?: 'netease' | 'qq' | 'kugou' | 'qishui'; input?: string; clear?: boolean; playlistId?: string; playlistSource?: FmSource; playlistName?: string; dedupeByName?: boolean; playlistEnabled?: boolean }) => {
+    const res = await setRoomPlaylistRoaming(payload);
+    if (res.success) {
+      showToast(payload.clear ? (payload.playlistId ? '已移出歌单' : '已清除全部歌单') : typeof payload.dedupeByName === 'boolean' && !payload.input ? '歌名去重设置已更新' : '指定歌单已更新', 'success');
+    } else {
+      showToast(res.error || '指定歌单设置失败', 'error');
+    }
+    return res;
+  }, [setRoomPlaylistRoaming, showToast]);
 
   const handleTransferOwner = useCallback(async (userId: string) => {
     if (transferSaving) return;
@@ -2768,6 +2776,8 @@ export default function Room() {
         enabledFmSources={enabledFmSources}
         enabledMusicAccountPlatforms={enabledFmSources}
         fmModeBeforeOff={room?.fmModeBeforeOff}
+        initialTab="fm"
+        playlistRoaming={room?.playlistRoaming}
         fmSaving={fmSaving}
         announcementEnabled={Boolean(room?.announcementEnabled)}
         announcementText={room?.announcementText || ''}
@@ -2817,6 +2827,7 @@ export default function Room() {
         onMusicAccountUnbind={unbindMusicAccount}
         onClose={() => setSettingsOpen(false)}
         onSaveFmMode={handleSaveFmMode}
+        onSavePlaylistRoaming={handleSavePlaylistRoaming}
         onOpenMemberModal={handleOpenMemberModalFromSettings}
         onSaveAnnouncement={handleSaveAnnouncement}
         onSaveChatHistory={handleSaveChatHistory}
@@ -2866,18 +2877,6 @@ export default function Room() {
         onClose={() => setQualityOpen(false)}
         onSave={handleSaveUserQuality}
       />
-
-      <Suspense fallback={null}>
-      <RoomFmModeModal
-          open={fmModeOpen}
-          value={normalizeFmMode(room?.neteaseFmMode)}
-          source={activeFmSource}
-          enabledSources={enabledFmSources}
-          saving={fmSaving}
-          onClose={() => setFmModeOpen(false)}
-          onSave={handleSaveFmMode}
-        />
-      </Suspense>
 
       <RoomShareModal
         open={sharePayload !== null}
@@ -3052,9 +3051,10 @@ export default function Room() {
                 <RoomFmModeBadge
                   fmMode={room.neteaseFmMode}
                   fmSource={room.fmSource}
+                  playlistRoamingCount={room.playlistRoaming?.playlists.length || 0}
                   clickable={isOwner}
                   onClick={() => {
-                    setFmModeOpen(true);
+                    setSettingsOpen(true);
                     void refreshQualityCapabilities();
                   }}
                 />

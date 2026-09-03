@@ -78,6 +78,10 @@ export function parseKugouPlaylistId(input) {
   if (/^\d{4,}$/.test(text) || /^collection_\d+_\d+_\d+_\d+$/.test(text)) return text;
   const url = extractUrlFromText(text);
   if (!/kugou\.com/i.test(url)) return null;
+
+  // Meting accepts Kugou gcid share links as the playlist id; do not reduce them to a numeric id.
+  if (/\/songlist\/gcid_[a-z0-9_-]+\/?(?:[?#]|$)/i.test(url)) return url;
+
   const match = url.match(/[?&](?:global_collection_id|specialid|id)=(\d{4,})/i)
     || url.match(/\/(?:special|playlist|collection)\/(?:single\/)?(\d{4,})/i);
   return match ? match[1] : null;
@@ -211,6 +215,29 @@ async function fetchQqPlaylistName(playlistId) {
   return meta?.name || null;
 }
 
+async function fetchPlaylistSearchMeta(server, playlistId) {
+  try {
+    const response = await fetchMetingApi(
+      { server, type: 'search_playlist', id: playlistId },
+      { headers: NETEASE_HEADERS },
+      10000,
+    );
+    if (!response.ok) return null;
+    const data = await response.json();
+    if (!Array.isArray(data)) return null;
+
+    const normalizedId = String(playlistId || '').trim();
+    const exact = data.find((item) => String(item?.id || '').trim() === normalizedId);
+    const item = exact || data[0];
+    if (!item || typeof item !== 'object') return null;
+
+    const name = String(item.name || item.title || item.dissname || item.specialname || '').trim();
+    return name ? { name } : null;
+  } catch {
+    return null;
+  }
+}
+
 async function fetchMetingPlaylist(server, playlistId, { retries = 1 } = {}) {
   try {
     const response = await fetchMetingApi(
@@ -235,11 +262,16 @@ async function fetchMetingPlaylist(server, playlistId, { retries = 1 } = {}) {
 }
 
 async function importMetingPlaylist(server, playlistId, defaultName) {
+  // 酷狗/汽水先走 search_playlist 获取歌单元数据，再查询 playlist 歌曲详情。
+  const meta = ['kugou', 'qishui'].includes(server)
+    ? await fetchPlaylistSearchMeta(server, playlistId)
+    : null;
   const tracks = await fetchMetingPlaylist(server, playlistId);
+  const playlistName = meta?.name || defaultName;
 
   if (tracks.length === 0) {
     return {
-      name: defaultName,
+      name: playlistName,
       playlistId,
       source: server === 'netease' ? 'netease' : server === 'qishui' ? 'qishui' : server === 'kugou' ? 'kugou' : 'tencent',
       songs: [],
@@ -253,7 +285,7 @@ async function importMetingPlaylist(server, playlistId, defaultName) {
     .filter(Boolean);
 
   return {
-    name: defaultName,
+    name: playlistName,
     playlistId,
     source: server === 'netease' ? 'netease' : server === 'qishui' ? 'qishui' : server === 'kugou' ? 'kugou' : 'tencent',
     songs,

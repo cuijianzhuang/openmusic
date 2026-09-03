@@ -10,3 +10,8 @@ test('parseKugouPlaylistId accepts a Kugou global collection id and share URL', 
     '12345678',
   );
 });
+
+test('parseKugouPlaylistId keeps gcid share URLs for Meting playlist imports', () => {
+  const shareUrl = 'https://www.kugou.com/songlist/gcid_3zik61ilzx7z09d/?src_cid=3zik61ilzx7z09d&kgsscty1=wechat&chl=wechat';
+  assert.equal(parseKugouPlaylistId(shareUrl), shareUrl);
+});

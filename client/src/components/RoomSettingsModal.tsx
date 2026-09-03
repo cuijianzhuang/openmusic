@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Crown, Minus, Plus, Sparkles, ShieldCheck, Trash2, X } from 'lucide-react';
+import { Check, ChevronDown, Crown, Minus, Plus, Search, Sparkles, ShieldCheck, Trash2, X } from 'lucide-react';
 import WechatUinBindModal from './WechatUinBindModal';
 import { getFmModeOptions, getFmModeLabel, normalizeFmMode, FM_MODE_OFF, DEFAULT_FM_MODE, type FmSource } from '../api/music/fmMode';
 import type { BannedSong, ForbiddenWord, RoomUser, RoomMusicAccounts } from '../types';
@@ -8,6 +8,7 @@ import type { DislikeSkipMode } from '../lib/dislikeSkip';
 import SourceBadge from './SourceBadge';
 import ConfirmModal from './ConfirmModal';
 import RoomMusicAccountPanel from './RoomMusicAccountPanel';
+import { searchPlaylists, type PlaylistChannelFilter, type PlaylistSearchItem } from '../api/music/playlist';
 import {
   fetchLinuxdoStatus,
   startLinuxdoBind,
@@ -88,6 +89,8 @@ interface Props {
   enabledFmSources?: FmSource[];
   enabledMusicAccountPlatforms?: FmSource[];
   fmModeBeforeOff?: string;
+  initialTab?: SettingsTab;
+  playlistRoaming?: { enabled: boolean; dedupeByName: boolean; playlists: Array<{ id: string; source: FmSource; name: string; url?: string; songs: { id: string; name: string; artist: string; source: string }[] }> } | null;
   fmSaving?: boolean;
   announcementEnabled: boolean;
   announcementText: string;
@@ -145,6 +148,7 @@ interface Props {
   onMusicAccountUnbind?: (platform: 'netease' | 'tencent' | 'kugou' | 'qishui') => Promise<{ success: boolean; error?: string }>;
   onClose: () => void;
   onSaveFmMode: (mode: string, source?: FmSource) => void;
+  onSavePlaylistRoaming?: (payload: { platform?: 'netease' | 'qq' | 'kugou' | 'qishui'; input?: string; clear?: boolean; playlistId?: string; playlistSource?: FmSource; playlistName?: string; dedupeByName?: boolean; playlistEnabled?: boolean }) => Promise<{ success: boolean; error?: string }> | void;
   onOpenMemberModal: () => void;
   onSaveAnnouncement: (options: { enabled: boolean; text: string }) => void;
   onSaveChatHistory: (enabled: boolean) => void;
@@ -283,6 +287,8 @@ export default function RoomSettingsModal({
   enabledFmSources,
   enabledMusicAccountPlatforms,
   fmModeBeforeOff,
+  initialTab,
+  playlistRoaming = null,
   fmSaving = false,
   announcementEnabled,
   announcementText,
@@ -332,6 +338,7 @@ export default function RoomSettingsModal({
   onMusicAccountUnbind,
   onClose,
   onSaveFmMode,
+  onSavePlaylistRoaming,
   onOpenMemberModal,
   onSaveAnnouncement,
   onSaveChatHistory,
@@ -369,6 +376,16 @@ export default function RoomSettingsModal({
   const [permanentNote, setPermanentNote] = useState('');
   const [draftMaxAdmins, setDraftMaxAdmins] = useState(maxAdmins);
   const [draftPlaybackRate, setDraftPlaybackRate] = useState(String(playbackRate));
+  const [playlistRoamingPlatform, setPlaylistRoamingPlatform] = useState<'netease' | 'qq' | 'kugou' | 'qishui'>('netease');
+  const [playlistPlatformOpen, setPlaylistPlatformOpen] = useState(false);
+  const playlistPlatformRef = useRef<HTMLDivElement>(null);
+  const [playlistRoamingInput, setPlaylistRoamingInput] = useState('');
+  const [playlistRoamingSearch, setPlaylistRoamingSearch] = useState('');
+  const [playlistRoamingResults, setPlaylistRoamingResults] = useState<PlaylistSearchItem[]>([]);
+  const [playlistRoamingSearching, setPlaylistRoamingSearching] = useState(false);
+  const [playlistRoamingSaving, setPlaylistRoamingSaving] = useState(false);
+  const [playlistRoamingError, setPlaylistRoamingError] = useState('');
+  const [roamingView, setRoamingView] = useState<'fm' | 'playlist'>(playlistRoaming?.playlists.length ? 'playlist' : 'fm');
   const [wechatUinEnabled, setWechatUinEnabled] = useState(identityWechatUinEnabled);
   const [wechatUinBound, setWechatUinBound] = useState<WechatUinBinding | null>(identityWechatUinBound);
   const [wechatUinUnbinding, setWechatUinUnbinding] = useState(false);
@@ -573,6 +590,25 @@ export default function RoomSettingsModal({
     }
   }, [open, tabs, activeTab]);
 
+  useEffect(() => {
+    if (!open) return;
+    // 仅在打开弹窗时决定初始视图；删除最后一个歌单后仍留在指定歌单页，避免内容闪切。
+    setRoamingView(playlistRoaming?.playlists.length ? 'playlist' : 'fm');
+  }, [open]);
+
+  useEffect(() => {
+    if (!playlistPlatformOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!playlistPlatformRef.current?.contains(event.target as Node)) setPlaylistPlatformOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [playlistPlatformOpen]);
+
+  useEffect(() => {
+    if (open && initialTab) setActiveTab(initialTab);
+  }, [open, initialTab]);
+
   if (!open) return null;
 
   const currentFm = normalizeFmMode(fmMode);
@@ -666,7 +702,7 @@ export default function RoomSettingsModal({
               <section>
                 <div
                   className="mb-4 grid gap-1 rounded-lg border border-white/10 bg-black/20 p-1"
-                  style={{ gridTemplateColumns: `repeat(${Math.max(fmTabs.length, 1)}, minmax(0, 1fr))` }}
+                  style={{ gridTemplateColumns: `repeat(${Math.max(fmTabs.length + 1, 1)}, minmax(0, 1fr))` }}
                   role="tablist"
                   aria-label="选择漫游来源"
                 >
@@ -680,19 +716,207 @@ export default function RoomSettingsModal({
                         key={item.value}
                         type="button"
                         role="tab"
-                        aria-selected={effectiveFmSource === item.value}
-                        disabled={fmSaving}
-                        onClick={() => onSaveFmMode(modeForSource, item.value)}
-                        className={`min-h-9 rounded-md px-3 py-2 text-xs font-medium transition-colors disabled:opacity-50 ${
-                          effectiveFmSource === item.value ? 'bg-white/10 text-white' : 'text-netease-muted hover:bg-white/[0.05] hover:text-white'
+                        aria-selected={roamingView === 'fm' && effectiveFmSource === item.value}
+                        disabled={fmSaving || playlistRoamingSaving}
+                        onClick={async () => {
+                          setRoamingView('fm');
+                          if (playlistRoaming?.playlists.length) {
+                            setPlaylistRoamingSaving(true);
+                            setPlaylistRoamingError('');
+                            const result = await onSavePlaylistRoaming?.({ playlistEnabled: false });
+                            setPlaylistRoamingSaving(false);
+                            if (result && !result.success) {
+                              setPlaylistRoamingError(result.error || '切换失败');
+                              return;
+                            }
+                          }
+                          onSaveFmMode(modeForSource, item.value);
+                        }}
+                        className={`min-h-9 rounded-md px-2 py-2 text-xs font-medium transition-colors disabled:opacity-50 ${
+                          roamingView === 'fm' && effectiveFmSource === item.value ? 'bg-white/10 text-white' : 'text-netease-muted hover:bg-white/[0.05] hover:text-white'
                         }`}
                       >
                         {item.label}
                       </button>
                     );
                   })}
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={roamingView === 'playlist'}
+                    disabled={playlistRoamingSaving}
+                    onClick={async () => {
+                      setRoamingView('playlist');
+                      if (playlistRoaming?.playlists.length && !playlistRoaming.enabled) {
+                        setPlaylistRoamingSaving(true);
+                        setPlaylistRoamingError('');
+                        const result = await onSavePlaylistRoaming?.({ playlistEnabled: true });
+                        if (result && !result.success) setPlaylistRoamingError(result.error || '恢复失败');
+                        setPlaylistRoamingSaving(false);
+                      }
+                    }}
+                    className={`min-h-9 rounded-md px-2 py-2 text-xs font-medium transition-colors disabled:opacity-50 ${
+                      roamingView === 'playlist' ? 'bg-netease-red/15 text-white' : 'text-netease-muted hover:bg-white/[0.05] hover:text-white'
+                    }`}
+                  >
+                    指定歌单
+                  </button>
                 </div>
-                <Toggle
+                {roamingView === 'playlist' && <section className="mb-4 rounded-lg border border-white/10 bg-black/20 p-3">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium text-white">指定歌单</p>
+                      <p className="mt-0.5 text-xs text-netease-muted">队列为空时仅从已指定歌单的合并曲库循环取歌，不再获取 FM 漫游</p>
+                    </div>
+                  </div>
+                <div className="mb-4">
+                  <Toggle
+                    checked={playlistRoaming?.dedupeByName === true}
+                    disabled={playlistRoamingSaving || !playlistRoaming?.playlists.length || !onSavePlaylistRoaming}
+                    onChange={async (dedupeByName) => {
+                      setPlaylistRoamingSaving(true);
+                      setPlaylistRoamingError('');
+                      const result = await onSavePlaylistRoaming?.({ dedupeByName });
+                      if (result && !result.success) setPlaylistRoamingError(result.error || '去重设置失败');
+                      setPlaylistRoamingSaving(false);
+                    }}
+                    label="按歌名去重"
+                    description="开启后同名歌曲优先保留网易云，其次 QQ、汽水、酷狗"
+                  />
+                </div>
+                  <div className="space-y-3">
+                      <div className="flex gap-2">
+                        <div ref={playlistPlatformRef} className="relative flex-shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setPlaylistPlatformOpen((value) => !value)}
+                            aria-expanded={playlistPlatformOpen}
+                            aria-haspopup="listbox"
+                            className="flex min-w-[4.5rem] items-center justify-between gap-1 rounded-lg px-2 py-1 text-xs text-white/80 transition-colors hover:bg-white/10 hover:text-white"
+                            aria-label="歌单平台"
+                          >
+                            <span className="whitespace-nowrap">{{ netease: '网易云', qq: 'QQ', kugou: '酷狗', qishui: '汽水' }[playlistRoamingPlatform]}</span>
+                            <ChevronDown className={`h-3.5 w-3.5 transition-transform ${playlistPlatformOpen ? 'rotate-180' : ''}`} />
+                          </button>
+                          {playlistPlatformOpen && (
+                            <div role="listbox" aria-label="歌单平台" className="absolute left-0 top-full z-50 mt-1 min-w-[6.5rem] rounded-lg border border-white/10 bg-netease-card py-0.5 shadow-lg animate-fade-in">
+                              {([
+                                ['netease', '网易云'],
+                                ['qq', 'QQ'],
+                                ['kugou', '酷狗'],
+                                ['qishui', '汽水'],
+                              ] as const).map(([value, label]) => (
+                                <button
+                                  key={value}
+                                  type="button"
+                                  role="option"
+                                  aria-selected={playlistRoamingPlatform === value}
+                                  onClick={() => {
+                                    setPlaylistRoamingPlatform(value);
+                                    setPlaylistRoamingResults([]);
+                                    setPlaylistPlatformOpen(false);
+                                  }}
+                                  className={`flex w-full items-center gap-1.5 px-2 py-1.5 text-left text-xs transition-colors ${playlistRoamingPlatform === value ? 'bg-netease-red/10 text-netease-red' : 'text-white/80 hover:bg-white/10 hover:text-white'}`}
+                                >
+                                  <Check className={`h-3.5 w-3.5 flex-shrink-0 ${playlistRoamingPlatform === value ? 'opacity-100' : 'opacity-0'}`} />
+                                  <span>{label}</span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <input value={playlistRoamingSearch} onChange={(event) => setPlaylistRoamingSearch(event.target.value)} placeholder="搜索歌单" className="min-w-0 flex-1 rounded-md border border-white/10 bg-netease-dark px-2 py-1.5 text-xs text-white outline-none" />
+                        <button type="button" disabled={playlistRoamingSearching || !playlistRoamingSearch.trim()} onClick={async () => {
+                          setPlaylistRoamingSearching(true);
+                          setPlaylistRoamingError('');
+                          try {
+                            const result = await searchPlaylists(playlistRoamingSearch, 1, 12, playlistRoamingPlatform as PlaylistChannelFilter);
+                            setPlaylistRoamingResults(result.playlists);
+                          } catch (error) {
+                            setPlaylistRoamingError(error instanceof Error ? error.message : '搜索歌单失败');
+                          } finally {
+                            setPlaylistRoamingSearching(false);
+                          }
+                        }} className="rounded-md border border-white/10 px-2 py-1.5 text-netease-muted hover:text-white disabled:opacity-50" aria-label="搜索歌单">
+                          <Search className="h-4 w-4" />
+                        </button>
+                      </div>
+                      {playlistRoamingResults.length > 0 && (
+                        <div className="max-h-40 space-y-1 overflow-y-auto rounded-md border border-white/10 p-1">
+                          {playlistRoamingResults.map((item) => (
+                            <button key={item.platform + ':' + item.id} type="button" disabled={playlistRoamingSaving || !onSavePlaylistRoaming} onClick={async () => {
+                              setPlaylistRoamingSaving(true);
+                              setPlaylistRoamingError('');
+                              const result = await onSavePlaylistRoaming?.({ platform: item.platform, input: item.id, playlistName: item.name });
+                              if (result?.success) {
+                                setPlaylistRoamingResults([]);
+                                setPlaylistRoamingSearch('');
+                              } else if (result) {
+                                setPlaylistRoamingError(result.error || '加载失败');
+                              }
+                              setPlaylistRoamingSaving(false);
+                            }} className="flex w-full items-center justify-between gap-3 rounded px-2 py-1.5 text-left hover:bg-white/5 disabled:opacity-50">
+                              <span className="min-w-0 truncate text-xs text-white">{item.name}</span>
+                              <span className="shrink-0 text-[10px] text-netease-muted">{item.trackCount || '?'} 首</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      <div className="flex gap-2">
+                        <input value={playlistRoamingInput} onChange={(event) => setPlaylistRoamingInput(event.target.value)} placeholder="或粘贴歌单链接或歌单 ID" className="min-w-0 flex-1 rounded-md border border-white/10 bg-netease-dark px-2 py-1.5 text-xs text-white outline-none" />
+                        <button type="button" disabled={playlistRoamingSaving || !playlistRoamingInput.trim() || !onSavePlaylistRoaming} onClick={async () => {
+                          setPlaylistRoamingSaving(true);
+                          setPlaylistRoamingError('');
+                          const result = await onSavePlaylistRoaming?.({ platform: playlistRoamingPlatform, input: playlistRoamingInput });
+                          if (result?.success) setPlaylistRoamingInput('');
+                          else if (result) setPlaylistRoamingError(result.error || '加载失败');
+                          setPlaylistRoamingSaving(false);
+                        }} className="w-16 shrink-0 rounded-md bg-netease-red px-3 py-1.5 text-center text-xs text-white disabled:opacity-50">{playlistRoamingSaving ? '加载中' : '指定'}</button>
+                      </div>
+                      {playlistRoamingError && <p className="text-xs text-netease-red">{playlistRoamingError}</p>}
+                  </div>
+                  <div className="mt-4">
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      <p className="text-xs font-medium text-white">已加入歌单</p>
+                      {playlistRoaming?.playlists.length ? (
+                        <button type="button" disabled={playlistRoamingSaving || !onSavePlaylistRoaming} onClick={async () => {
+                          setPlaylistRoamingSaving(true);
+                          setPlaylistRoamingError('');
+                          const result = await onSavePlaylistRoaming?.({ clear: true });
+                          if (result && !result.success) setPlaylistRoamingError(result.error || '清除失败');
+                          setPlaylistRoamingSaving(false);
+                        }} className="min-w-14 rounded px-1.5 py-1 text-center text-xs text-netease-muted hover:bg-white/5 hover:text-white disabled:opacity-50">清除全部</button>
+                      ) : null}
+                    </div>
+                    <div className="h-48 overflow-y-auto rounded-lg border border-white/10 bg-black/10 p-1.5">
+                      {playlistRoaming?.playlists.length ? (
+                        <div className="space-y-1.5">
+                          {playlistRoaming.playlists.map((playlist) => (
+                            <div key={playlist.source + ':' + playlist.id} className="flex items-center gap-2 rounded-md border border-white/[0.06] bg-white/[0.03] px-2.5 py-2">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex min-w-0 items-center gap-1.5">
+                                  <SourceBadge source={playlist.source} className="shrink-0 rounded-full px-1.5 py-0 text-[9px]" />
+                                  {playlist.name ? <p className="min-w-0 truncate text-xs font-medium text-white" title={playlist.name}>{playlist.name}</p> : playlist.url ? <a href={playlist.url} target="_blank" rel="noreferrer" className="min-w-0 truncate text-xs font-medium text-netease-red underline-offset-2 hover:underline" title="打开导入链接">导入链接</a> : null}
+                                </div>
+                                <p className="mt-0.5 truncate text-[10px] text-netease-muted">{playlist.songs.length} 首歌曲</p>
+                              </div>
+                              <button type="button" disabled={playlistRoamingSaving || !onSavePlaylistRoaming} onClick={async () => {
+                                setPlaylistRoamingSaving(true);
+                                setPlaylistRoamingError('');
+                                const result = await onSavePlaylistRoaming?.({ clear: true, playlistId: playlist.id, playlistSource: playlist.source });
+                                if (result && !result.success) setPlaylistRoamingError(result.error || '移除失败');
+                                setPlaylistRoamingSaving(false);
+                              }} className="min-w-9 shrink-0 rounded px-1.5 py-1 text-center text-[10px] text-netease-muted transition-colors hover:bg-white/10 hover:text-white disabled:opacity-50">移除</button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="m-1 rounded-lg border border-dashed border-white/10 px-3 py-4 text-center text-xs text-netease-muted">暂未加入歌单</p>
+                      )}
+                    </div>
+                  </div>
+                </section>}
+                {roamingView === 'fm' && <Toggle
                   checked={currentFm !== FM_MODE_OFF}
                   disabled={fmSaving}
                   onChange={(next) => {
@@ -701,8 +925,8 @@ export default function RoomSettingsModal({
                   }}
                   label="自动漫游"
                   description="队列为空时通过私人漫游自动推荐下一首"
-                />
-                <div className={`mt-3 space-y-1.5 ${currentFm === FM_MODE_OFF ? 'opacity-40' : ''}`}>
+                />}
+                {roamingView === 'fm' && <div className={`mt-3 space-y-1.5 ${currentFm === FM_MODE_OFF ? 'opacity-40' : ''}`}>
                   {getFmModeOptions(effectiveFmSource).map((opt) => (
                     <button
                       key={opt.value}
@@ -726,10 +950,10 @@ export default function RoomSettingsModal({
                       )}
                     </button>
                   ))}
-                </div>
-                <p className="mt-2 text-[10px] text-netease-muted">
+                </div>}
+                {roamingView === 'fm' && <p className="mt-2 text-[10px] text-netease-muted">
                   当前：{getFmModeLabel(currentFm)}
-                </p>
+                </p>}
               </section>
             );
           })()}

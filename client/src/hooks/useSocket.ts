@@ -1387,6 +1387,21 @@ export function useSocket() {
     });
   }, []);
 
+  const setRoomPlaylistRoaming = useCallback((payload: { platform?: 'netease' | 'qq' | 'kugou' | 'qishui'; input?: string; clear?: boolean; playlistId?: string; playlistSource?: 'netease' | 'tencent' | 'kugou' | 'qishui'; playlistName?: string; dedupeByName?: boolean; playlistEnabled?: boolean }): Promise<{ success: boolean; error?: string; room?: RoomState }> => {
+    return emitWithAck<{ success: boolean; error?: string; room?: RoomState }>(
+      'set_room_playlist_roaming',
+      payload,
+      { success: false, error: '连接超时，请重试' },
+      SOCKET_MUSIC_ACCOUNT_ACK_TIMEOUT_MS,
+    ).then((res) => {
+      if (res.success && res.room) {
+        applyRoomSnapshot(res.room);
+        cacheCurrentOwnerRoomConfig(res.room);
+      }
+      return res;
+    });
+  }, []);
+
   const createMusicAccountQr = useCallback((platform: 'netease' | 'tencent' | 'kugou' | 'qishui') => {
     return emitWithAck<{ success: boolean; error?: string; data?: Record<string, unknown> }>(
       'music_account_qr_create',
@@ -1876,6 +1891,7 @@ export function useSocket() {
     cancelRoomPermanent,
 
     setRoomFmMode,
+    setRoomPlaylistRoaming,
 
     createMusicAccountQr,
     checkMusicAccountQr,

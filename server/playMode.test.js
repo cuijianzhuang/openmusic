@@ -15,6 +15,9 @@ import {
   reuseIdleOwnedRoom,
   setRoomAdmin,
   setRoomPlayMode,
+  setRoomFmMode,
+  setRoomPlaylistRoaming,
+  selectPlaylistRoamingSong,
   selectRandomFavoriteSong,
   skipSong,
 } from './roomManager.js';
@@ -112,6 +115,85 @@ test('收藏随机模式只有一首收藏时下一首仍可继续播放该歌�
   const only = makeSong('only');
   const selected = selectRandomFavoriteSong([only], only, new Set(['netease:only']), () => 0);
   assert.equal(selected?.id, 'only');
+});
+
+test('指定歌单漫游只从歌单歌曲中选择，优先避开当前曲和已播放歌曲', () => {
+  const songs = [makeSong('a'), makeSong('b'), makeSong('c')];
+  const selected = selectPlaylistRoamingSong(songs, songs[0], new Set(['netease:b']), () => 0);
+  assert.equal(selected?.id, 'c');
+});
+
+test('指定歌单全部播放过后仍只在该歌单内循环', () => {
+  const songs = [makeSong('a'), makeSong('b')];
+  const selected = selectPlaylistRoamingSong(songs, songs[0], new Set(['netease:a', 'netease:b']), () => 0);
+  assert.equal(selected?.id, 'b');
+});
+
+test('指定歌单默认保留不同平台的同名歌曲', () => {
+  const neteaseSong = makeSong('same');
+  neteaseSong.name = '同名歌曲';
+  const qqSong = { ...makeSong('same'), source: 'tencent', name: '同名歌曲' };
+
+  const selected = selectPlaylistRoamingSong([neteaseSong, qqSong], null, new Set(['netease:same']), () => 0);
+  assert.equal(selected?.source, 'tencent');
+  assert.equal(selected?.id, 'same');
+});
+
+test('指定歌单按歌名去重时按网易、QQ、汽水、酷狗优先保留', () => {
+  const kugouSong = { ...makeSong('kg'), source: 'kugou', name: '同名歌曲' };
+  const qishuiSong = { ...makeSong('qs'), source: 'qishui', name: '同名歌曲' };
+  const qqSong = { ...makeSong('qq'), source: 'tencent', name: '同名歌曲' };
+  const neteaseSong = { ...makeSong('wy'), source: 'netease', name: '同名歌曲' };
+
+  const selected = selectPlaylistRoamingSong(
+    [kugouSong, qishuiSong, qqSong, neteaseSong],
+    null,
+    new Set(),
+    () => 0,
+    { dedupeByName: true },
+  );
+  assert.equal(selected?.source, 'netease');
+  assert.equal(selected?.id, 'wy');
+});
+
+test('切回私人漫游只停用指定歌单，切回指定歌单可恢复原歌单', async (t) => {
+  const { roomId, room } = createTestRoom(t);
+  room.playlistRoaming = {
+    enabled: true,
+    dedupeByName: false,
+    playlists: [{ id: 'playlist-1', source: 'netease', name: '测试歌单', songs: [makeSong('a')] }],
+  };
+
+  const switchedToFm = setRoomFmMode(roomId, OWNER_ID, 'default', OWNER_CONNECTION, 'netease');
+  assert.equal(switchedToFm.error, undefined);
+  assert.equal(room.playlistRoaming?.playlists.length, 1);
+  assert.equal(room.playlistRoaming?.enabled, false);
+
+  const restored = await setRoomPlaylistRoaming(roomId, OWNER_ID, { playlistEnabled: true }, OWNER_CONNECTION);
+  assert.equal(restored.error, undefined);
+  assert.equal(room.playlistRoaming?.playlists.length, 1);
+  assert.equal(room.playlistRoaming?.enabled, true);
+});
+
+test('FM 关闭时指定歌单仍会自动续播且保留来源标记', async (t) => {
+  const { roomId, room } = createTestRoom(t);
+  room.playlistRoaming = {
+    playlists: [{
+      id: 'playlist-1',
+      source: 'netease',
+      name: '测试歌单',
+      songs: [makeSong('a'), makeSong('b')],
+    }],
+  };
+  seedPlayback(room, 'a', []);
+  room.current.requestedBy = '指定歌单';
+  room.randomPlayedKeys = new Set(['netease:a']);
+
+  const advanced = await finishCurrentSong(roomId, OWNER_ID, OWNER_CONNECTION, room.current.queueId);
+  assert.equal(advanced.error, undefined);
+  assert.equal(advanced.room?.current?.id, 'b');
+  assert.equal(advanced.room?.current?.requestedBy, '指定歌单');
+  assert.equal(room.randomPlayedKeys.has('netease:b'), true);
 });
 
 test('仅房主、正式管理员和临时控播管理员可以切换模式', (t) => {

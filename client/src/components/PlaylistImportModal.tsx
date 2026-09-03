@@ -18,7 +18,7 @@ export { rememberPlaylistImportHistory } from '../lib/playlistImportHistory';
 
 const HINTS: Record<PlaylistPlatform, string> = {
   netease: '粘贴歌单分享文案或链接到下方。',
-  kugou: '',
+  kugou: '粘贴酷狗歌单分享链接到下方。',
   qq: '请在 QQ 音乐打开歌单 → 分享到「QQ」或「我的电脑」，再把链接粘贴到下方。链接必须带 id= 参数才可解析。',
   qishui: '粘贴汽水歌单 ID 或分享链接到下方。',
 };
@@ -71,7 +71,7 @@ export default function PlaylistImportModal({
     }
   }, [open]);
 
-  const availablePlatforms = useMemo(() => ['netease', 'qq', 'qishui'].filter((item) => item !== 'qq' || qqImportEnabled) as PlaylistPlatform[], [qqImportEnabled]);
+  const availablePlatforms = useMemo(() => ['netease', 'qq', 'kugou', 'qishui'].filter((item) => item !== 'qq' || qqImportEnabled) as PlaylistPlatform[], [qqImportEnabled]);
   const visibleHistory = useMemo(() => history.filter((item) => availablePlatforms.includes(item.platform)), [history, availablePlatforms]);
 
   if (!open) return null;
@@ -240,7 +240,9 @@ export default function PlaylistImportModal({
             ? '粘贴分享链接、完整分享文案或歌单 ID...'
             : platform === 'qishui'
                 ? '粘贴汽水歌单分享链接或歌单 ID...'
-                : '粘贴 QQ 分享链接（需含 id=）或歌单 ID...'}
+                : platform === 'kugou'
+                  ? '粘贴酷狗歌单分享链接或歌单 ID...'
+                  : '粘贴 QQ 分享链接（需含 id=）或歌单 ID...'}
           rows={4}
           disabled={loading}
           className={inputClass}

@@ -170,6 +170,7 @@ import {
   reportTrackDuration,
   setOnRoomPrefetchReady,
   setOnRoomStructureChanged,
+  setRoomPlaylistRoaming,
   serializeRoomForViewer,
   prepareRoomBroadcast,
   roomUpdateForViewer,
@@ -3591,6 +3592,38 @@ io.on('connection', (socket) => {
       return;
     }
     callback?.({ success: true });
+  });
+
+  socket.on('set_room_playlist_roaming', async (payload = {}, callback) => {
+    if (rejectReadOnly(socket, callback)) return;
+    if (rejectRateLimited(socket, limitSocketAction, 'set_room_playlist_roaming', callback)) return;
+    const roomId = socketToRoom.get(socket.id);
+    if (!roomId) return callback?.({ success: false, error: '未加入房间' });
+    const platform = String(payload?.platform || '').trim();
+    if (payload?.playlistName != null && (typeof payload.playlistName !== 'string' || payload.playlistName.trim().length > 160)) {
+      return callback?.({ success: false, error: '歌单名称无效' });
+    }
+    if (payload?.dedupeByName != null && typeof payload.dedupeByName !== 'boolean') {
+      return callback?.({ success: false, error: '去重设置无效' });
+    }
+    if (!payload?.clear && typeof payload?.playlistEnabled !== 'boolean' && !['netease', 'qq', 'kugou', 'qishui'].includes(platform) && typeof payload?.dedupeByName !== 'boolean') {
+      return callback?.({ success: false, error: '不支持的平台' });
+    }
+    const source = platform === 'qq' ? 'tencent' : platform;
+    if (payload?.clear && payload?.playlistId != null) {
+      const playlistId = String(payload.playlistId).trim();
+      const playlistSource = String(payload?.playlistSource || '').trim();
+      if (!playlistId || playlistId.length > 160 || !['netease', 'tencent', 'kugou', 'qishui'].includes(playlistSource)) {
+        return callback?.({ success: false, error: '歌单标识无效' });
+      }
+    }
+    if (!payload?.clear && platform && !isMusicSourceEnabled(source, getRuntimeConfig().musicSourcesEnabled)) {
+      return callback?.({ success: false, error: '该音源已关闭' });
+    }
+    const result = await setRoomPlaylistRoaming(roomId, getSocketUserId(socket), payload, socket.id);
+    if (result.error) return callback?.({ success: false, error: result.error });
+    broadcastRoomUpdate(roomId);
+    callback?.({ success: true, room: getViewerRoomPayload(socket, roomId) });
   });
 
   socket.on('set_room_fm_mode', async ({ mode, source } = {}, callback) => {

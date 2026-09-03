@@ -32,7 +32,13 @@ export type KugouQuality =
   | 'lossless'
   | 'hires'
   | 'atmos'
-  | 'master';
+  | 'master'
+  | 'viper_atmos'
+  | 'viper_tape'
+  | 'viper_clear'
+  | 'viper_hifi'
+  | 'acappella'
+  | 'multitrack';
 
 export type TencentQuality =
   | 'standard'
@@ -88,9 +94,15 @@ export const KUGOU_QUALITY_OPTIONS: QualityOption[] = [
   { value: 'standard', label: '标准' },
   { value: 'exhigh', label: '极高' },
   { value: 'lossless', label: '无损' },
-  { value: 'hires', label: '高解析度无损', svip: true },
-  { value: 'atmos', label: '全景声', svip: true },
+  { value: 'hires', label: 'Hi-Res 音质' },
+  { value: 'atmos', label: '蝰蛇全景声 2.0', svip: true },
   { value: 'master', label: '母带', svip: true },
+  { value: 'viper_atmos', label: '蝰蛇全景声 2.0', svip: true },
+  { value: 'viper_tape', label: '蝰蛇母带音质', svip: true },
+  { value: 'viper_clear', label: '蝰蛇超清音质', svip: true },
+  { value: 'viper_hifi', label: '蝰蛇 HiFi 音质', svip: true },
+  { value: 'acappella', label: '人声伴奏', svip: true },
+  { value: 'multitrack', label: '多轨音质', svip: true },
 ];
 
 export const QISHUI_QUALITY_OPTIONS: QualityOption[] = [

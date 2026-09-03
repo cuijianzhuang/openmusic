@@ -267,6 +267,20 @@ export interface RoomState {
   fmSource?: 'netease' | 'tencent' | 'kugou' | 'qishui';
   /** 漫游关闭前的模式，重新开启时恢复 */
   fmModeBeforeOff?: string;
+  /** 队列为空时仅从这些歌单的合并曲库循环取歌；不存在时使用私人漫游 */
+  playlistRoaming?: {
+    /** 开启后同名歌曲按网易云、QQ、汽水、酷狗顺序保留一个候选 */
+    dedupeByName: boolean;
+    enabled: boolean;
+    playlists: Array<{
+      id: string;
+      source: 'netease' | 'tencent' | 'kugou' | 'qishui';
+      name: string;
+      /** 直接导入的 HTTP(S) 链接；搜索结果加入的歌单为空 */
+      url?: string;
+      songs: Song[];
+    }>;
+  } | null;
   /** 房主扫码绑定的音源账号（公开信息；Cookie 在 Meting） */
   musicAccounts?: RoomMusicAccounts;
   /** 公告是否开启 */
