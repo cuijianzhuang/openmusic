@@ -24,9 +24,6 @@ export interface PlaylistSearchItem {
   playCount: number;
 }
 
-/** @deprecated 使用 PlaylistSearchItem */
-export type NeteasePlaylistSearchItem = PlaylistSearchItem;
-
 export interface PlaylistSearchResult {
   playlists: PlaylistSearchItem[];
   total: number;

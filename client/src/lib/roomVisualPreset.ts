@@ -53,14 +53,6 @@ export const ROOM_VISUAL_MODE_META: Record<
   off: { name: '关闭背景', hasSettings: false },
 };
 
-/** @deprecated 使用 ROOM_VISUAL_MODES */
-export const ROOM_VISUAL_PRESET_CYCLE = ROOM_VISUAL_MODES;
-
-/** @deprecated 使用 ROOM_VISUAL_MODE_META */
-export const ROOM_VISUAL_PRESET_META = Object.fromEntries(
-  ROOM_VISUAL_MODES.map((mode) => [mode, ROOM_VISUAL_MODE_META[mode]]),
-) as Record<RoomVisualMode, { name: string; hasSettings: boolean }>;
-
 const LEGACY_MODE_ALIASES: Record<string, RoomVisualMode> = {
   cover: 'emily',
   skull: 'topography',

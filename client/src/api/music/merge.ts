@@ -260,11 +260,6 @@ export function interleaveSearchResults(
 
   return keyword ? rankSearchResultsByKeyword(merged, keyword) : merged;
 }
-
-/** @deprecated 使用 interleaveSearchResults */
-export function mergeSearchResults(songs: SearchResult[]): SearchResult[] {
-  return dedupExact(songs);
-}
 export function songKey(song: Pick<SearchResult, 'source' | 'id'>): string {
   return `${song.source}-${song.id}`;
 }

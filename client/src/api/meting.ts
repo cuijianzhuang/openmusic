@@ -14,7 +14,6 @@ export {
   getAvailableSources,
   formatDuration,
   getAllSources,
-  mergeSearchResults,
   songKey,
   artistGroupKey,
 } from './music';

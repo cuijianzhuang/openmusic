@@ -143,13 +143,6 @@ export function toProxiedMediaUrl(url: string): string {
   return `${MEDIA_PROXY_PATH}?url=${encodeURIComponent(url)}`;
 }
 
-/**
- * @deprecated 请使用 toProxiedMediaUrl；保留别名兼容旧调用。
- */
-export function toSecureMediaUrl(url: string): string {
-  return toProxiedMediaUrl(url);
-}
-
 /** Canvas / WebGL / fetch 分析用，与 toProxiedMediaUrl 相同 */
 export function toVisualMediaUrl(url: string): string {
   return toProxiedMediaUrl(url);

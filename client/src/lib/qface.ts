@@ -2,9 +2,7 @@ import {
   configureQFaceImageLoader,
   getQFaceObjectUrl,
   hydrateQFaceImagesFromCache,
-  isQFaceImageDecoded,
   QFaceLoadPriority,
-  requestQFaceImage,
   requestQFaceImages,
   type QFaceImageState,
 } from './qfaceImageLoader';
@@ -186,27 +184,6 @@ export function getQQFaceItem(id: string): QFaceItem {
     text: POPULAR_LABELS[id] || `/表情${id}`,
     url: faceUrl(id),
   };
-}
-
-/** @deprecated 使用 isQFaceImageDecoded */
-export function isQQFaceImageLoaded(id: string): boolean {
-  return isQFaceImageDecoded(id);
-}
-
-/** @deprecated 使用 requestQFaceImage + QFaceLoadPriority */
-export function ensureQQFaceImageLoaded(id: string, priority?: boolean): Promise<void> {
-  return requestQFaceImage(
-    id,
-    priority ? QFaceLoadPriority.MESSAGE : QFaceLoadPriority.PANEL,
-  );
-}
-
-/** @deprecated 使用 requestQFaceImages + QFaceLoadPriority */
-export function preloadQQFaceByIds(ids: string[], priority = false): void {
-  requestQFaceImages(
-    ids,
-    priority ? QFaceLoadPriority.MESSAGE : QFaceLoadPriority.PANEL,
-  );
 }
 
 export function extractQQFaceIds(text: string): string[] {

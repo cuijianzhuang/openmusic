@@ -20,9 +20,6 @@ type PendingSnapshot = {
 
 let pendingSnapshot: PendingSnapshot | null = null;
 
-/** @deprecated 绑定改在 assign src 时写入 audio.dataset，此处保留空实现兼容旧调用 */
-export function markAudioReadyTrackQueueId(_queueId: string | null): void {}
-
 function syncRoomPlaybackFromState(state: PlaybackState) {
   const { room } = useRoomStore.getState();
   if (!room || room.id !== state.roomId) return;

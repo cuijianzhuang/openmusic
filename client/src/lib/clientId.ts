@@ -58,16 +58,6 @@ export function rememberClientId(clientId: string): void {
   persistClientId(clientId);
 }
 
-/** @deprecated 身份令牌已改为 HttpOnly Cookie，客户端不再持有 */
-export function getClientToken(): undefined {
-  return undefined;
-}
-
-/** @deprecated 身份令牌已改为 HttpOnly Cookie */
-export function rememberClientToken(_clientToken: string): void {
-  // no-op
-}
-
 export function rememberClientIdentity(clientId?: string): void {
   if (clientId) rememberClientId(clientId);
 }

@@ -95,7 +95,6 @@ export async function searchAllSongs(
 
 export {
   interleaveSearchResults,
-  mergeSearchResults,
   songKey,
   artistGroupKey,
   trackTitleKey,

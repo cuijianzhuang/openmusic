@@ -14,9 +14,6 @@ const FORCE_CORRECTION_COOLDOWN_MS = 800;
 const COOLDOWN_OVERRIDE_ENTER_SEC = 2.5;
 const COOLDOWN_OVERRIDE_EXIT_SEC = 2.0;
 
-/** @deprecated 使用滞回 enter 阈值 */
-export const COOLDOWN_OVERRIDE_DRIFT_SEC = COOLDOWN_OVERRIDE_ENTER_SEC;
-
 let bufferingActive = false;
 let postBufferUntil = 0;
 let visibilityRecoverUntil = 0;
