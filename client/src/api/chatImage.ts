@@ -4,6 +4,15 @@ import { fetchWithTimeout } from './http';
 
 const MAX_CHAT_IMAGE_BYTES = 5 * 1024 * 1024;
 
+/** 聊天列表只加载七牛处理后的缩略图，点击预览仍使用原图。 */
+export function getChatImageDisplayUrl(url: string, key?: string | null): string {
+  const normalizedUrl = String(url || '').trim();
+  const normalizedKey = String(key || '').trim();
+  if (!normalizedUrl || !normalizedKey || !normalizedKey.startsWith('openmusic/chat/')) return normalizedUrl;
+  return `${normalizedUrl}${normalizedUrl.includes('?') ? '&' : '?'}imageView2/2/w/440/interlace/1`;
+}
+
+
 export interface ChatImageUploadToken {
   token: string;
   key: string;

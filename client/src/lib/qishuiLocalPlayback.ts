@@ -14,6 +14,10 @@ const LOCAL_DECRYPT_TIMEOUT_MS = 20_000;
 const LOCAL_SOURCE_FETCH_TIMEOUT_MS = 5_000;
 /** 只保留当前/下一首 blob；多缓存会让整曲明文长期驻留主线程堆。 */
 const MAX_LOCAL_AUDIO_CACHE = 1;
+
+export function isQishuiLocalPlaybackUrl(url: string | null | undefined): url is string {
+  return Boolean(url && /\/api\/qishui-source(?:\?|$)/i.test(url));
+}
 const blobCache = new Map<string, string>();
 const pending = new Map<string, Promise<QishuiLocalPlaybackResult>>();
 /** 串行解密：并行 Worker 会同时持有多首「密文+明文」峰值。 */
@@ -167,7 +171,7 @@ export async function resolveQishuiLocalPlaybackUrl(
   url: string,
   signal?: AbortSignal,
 ): Promise<QishuiLocalPlaybackResult> {
-  if (!url || !/\/api\/qishui-source(?:\?|$)/i.test(url)) {
+  if (!isQishuiLocalPlaybackUrl(url)) {
     return { status: 'failed' };
   }
   // 正式播放优先：取消仅预取任务，避免和当前曲抢 Worker/内存
@@ -185,7 +189,7 @@ export async function resolveQishuiLocalPlaybackUrl(
  * 不要对当前曲+多首队列并行整曲解密，否则内存会线性叠加。
  */
 export function prefetchQishuiLocalPlayback(url: string | null | undefined): void {
-  if (!url || !/\/api\/qishui-source(?:\?|$)/i.test(url)) return;
+  if (!isQishuiLocalPlaybackUrl(url)) return;
   const token = sourceToken(url);
   if (!token) return;
   if (blobCache.has(token) || pending.has(token)) return;

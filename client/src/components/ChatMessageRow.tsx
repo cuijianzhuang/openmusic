@@ -20,6 +20,7 @@ import { parseQQFaceTokens, QFaceLoadPriority } from '../lib/qface';
 import { importUserStickerFromChatImage } from '../lib/userStickerStore';
 import { getDisplayInitial } from '../lib/displayInitial';
 import { useRoomStore } from '../stores/roomStore';
+import { getChatImageDisplayUrl } from '../api/chatImage';
 
 type StickerSaveState = 'idle' | 'saving' | 'done' | 'exists' | 'error';
 
@@ -204,7 +205,7 @@ function renderReplyRefContent(
       {hasText && renderMessageText(reply.text, 'reply', chatScrollRoot, nicknames)}
       {isSticker && reply.imageUrl && (
         <img
-          src={reply.imageUrl}
+          src={getChatImageDisplayUrl(reply.imageUrl, reply.imageKey)}
           alt="表情包"
           loading="lazy"
           className="max-h-8 max-w-[3.5rem] shrink-0 rounded object-contain"
@@ -359,10 +360,12 @@ function ChatMessageRow({
     }
     return (
       <img
-        src={msg.imageUrl}
+        src={getChatImageDisplayUrl(msg.imageUrl, msg.imageKey)}
         alt="表情包"
-        loading={onContentResize ? 'eager' : 'lazy'}
+        loading="lazy"
         className={CHAT_STICKER_CLASS}
+        decoding="async"
+        fetchPriority="low"
         onLoad={onContentResize}
       />
     );
@@ -386,10 +389,12 @@ function ChatMessageRow({
       return (
         <div className="overflow-hidden rounded-lg">
           <img
-            src={msg.imageUrl}
+            src={getChatImageDisplayUrl(msg.imageUrl, msg.imageKey)}
             alt="聊天图片"
-            loading={onContentResize ? 'eager' : 'lazy'}
+            loading="lazy"
             className={CHAT_PHOTO_CLASS}
+            decoding="async"
+            fetchPriority="low"
             onLoad={onContentResize}
           />
         </div>
@@ -404,10 +409,12 @@ function ChatMessageRow({
           aria-label="查看聊天图片"
         >
           <img
-            src={msg.imageUrl}
+            src={getChatImageDisplayUrl(msg.imageUrl, msg.imageKey)}
             alt="聊天图片"
-            loading={onContentResize ? 'eager' : 'lazy'}
+            loading="lazy"
             className={CHAT_PHOTO_CLASS}
+            decoding="async"
+            fetchPriority="low"
             onLoad={onContentResize}
           />
         </button>

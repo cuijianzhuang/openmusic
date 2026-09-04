@@ -1,5 +1,6 @@
 import type { SearchResult } from '../types';
-import { getSongUrl, songKey } from '../api/music';
+import { getSongUrlInfo, songKey } from '../api/music';
+import { resolveQishuiLocalPlaybackUrl, isQishuiLocalPlaybackUrl } from './qishuiLocalPlayback';
 import { getSharedAudio } from './audioElement';
 import { getAudioController } from './audioController';
 import { configureInlineAudio } from './audioUnlock';
@@ -20,6 +21,7 @@ let status: SongPreviewStatus = 'idle';
 let lastError: string | null = null;
 let loadToken = 0;
 let pausedRoomForPreview = false;
+let previewAbortController: AbortController | null = null;
 
 const listeners = new Set<() => void>();
 
@@ -91,6 +93,8 @@ function resumeRoomAudioIfNeeded() {
 
 function finishPreview(options: { resumeRoom: boolean }) {
   loadToken += 1;
+  previewAbortController?.abort();
+  previewAbortController = null;
   const audio = previewAudio;
   if (audio) {
     audio.pause();
@@ -153,6 +157,9 @@ export async function toggleSongPreview(song: SearchResult): Promise<void> {
   }
 
   const token = ++loadToken;
+  previewAbortController?.abort();
+  const previewAbort = new AbortController();
+  previewAbortController = previewAbort;
   activeKey = key;
   status = 'loading';
   lastError = null;
@@ -161,9 +168,16 @@ export async function toggleSongPreview(song: SearchResult): Promise<void> {
   pauseRoomAudioLocally();
 
   try {
-    const url = await getSongUrl(song);
+    const resolved = await getSongUrlInfo(song);
     if (token !== loadToken || activeKey !== key) return;
+    let url = resolved.url;
     if (!url) throw new Error('empty url');
+    if (song.source === 'qishui' && isQishuiLocalPlaybackUrl(url)) {
+      const local = await resolveQishuiLocalPlaybackUrl(url, previewAbort.signal);
+      if (local.status === 'aborted' || token !== loadToken || activeKey !== key) return;
+      if (local.status !== 'ok') throw new Error('汽水试听解密失败');
+      url = local.url;
+    }
 
     audio.src = url;
     syncPreviewVolume();
