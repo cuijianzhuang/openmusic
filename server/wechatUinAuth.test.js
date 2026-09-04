@@ -12,6 +12,13 @@ function createFakeRedis() {
     async get(key) { return data.get(key) || null; },
     async set(key, value) { data.set(key, String(value)); },
     async del(...keys) { keys.forEach((key) => data.delete(key)); },
+    async *scanIterator({ MATCH }) {
+      const pattern = String(MATCH || '').replaceAll('*', '.*');
+      const regex = new RegExp(`^${pattern}$`);
+      for (const key of [...data.keys()]) {
+        if (regex.test(key)) yield key;
+      }
+    },
   };
 }
 
@@ -52,4 +59,21 @@ test('同一用户重复绑定同一微信 UIN 幂等成功', async () => {
   assert.equal(second.userId, first.userId);
   assert.equal(second.wechatUin, first.wechatUin);
   assert.equal(await store.getUserIdForUin('123', 'ROOMAAA'), 'user-a');
+});
+
+
+test('清理房间微信绑定时删除该房间全部绑定且保留其他房间', async () => {
+  const redis = createFakeRedis();
+  const store = createWechatUinStore({ redis, enabled: true });
+  await store.bindToUser('123', 'user-a', 'ROOMAAA');
+  await store.bindToUser('456', 'user-b', 'ROOMAAA');
+  await store.bindToUser('789', 'user-c', 'ROOMBBB');
+
+  await store.clearBindingsForRoom('ROOMAAA');
+
+  assert.equal(await store.getUserIdForUin('123', 'ROOMAAA'), null);
+  assert.equal(await store.getUserIdForUin('456', 'ROOMAAA'), null);
+  assert.equal(await store.getProfileForUser('user-a', 'ROOMAAA'), null);
+  assert.equal(await store.getProfileForUser('user-b', 'ROOMAAA'), null);
+  assert.equal(await store.getUserIdForUin('789', 'ROOMBBB'), 'user-c');
 });

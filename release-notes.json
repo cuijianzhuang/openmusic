@@ -3,5 +3,5 @@
     "修复汽水音乐试听失败问题",
     "修复图片上传大图导致的卡顿"
   ],
-  "forcePrompt": true
+  "forcePrompt": false
 }

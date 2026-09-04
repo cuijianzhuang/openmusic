@@ -239,6 +239,7 @@ import {
   getUserIdForLinuxdo,
   getLinuxdoProfileForUser,
   unbindLinuxdoForUser,
+  clearLinuxdoBindingsForRoom,
 } from './linuxdoAuth.js';
 import {
   isGithubConfigured,
@@ -252,6 +253,7 @@ import {
   getUserIdForGithub,
   getGithubProfileForUser,
   unbindGithubForUser,
+  clearGithubBindingsForRoom,
 } from './githubAuth.js';
 
 // 由 mountAdminApi() 返回赋值：房主 OAuth 回调路由与后台 OAuth 回调共用同一个
@@ -261,6 +263,14 @@ let handleLinuxdoAdminCallback = null;
 let handleGithubAdminCallback = null;
 
 const wechatUinStore = createWechatUinStore();
+
+async function clearRoomOwnerBindings(roomId) {
+  await Promise.all([
+    clearLinuxdoBindingsForRoom(roomId),
+    clearGithubBindingsForRoom(roomId),
+    wechatUinStore.clearBindingsForRoom(roomId),
+  ]);
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const clientDist = path.join(__dirname, '../client/dist');
@@ -2799,6 +2809,7 @@ const socketToUserId = new Map();
   getClientIp: (req) => getClientIpFromHeaders(req.headers, req.socket?.remoteAddress || ''),
   allowedOrigins: ALLOWED_ORIGINS,
   broadcastRoomUpdate,
+  clearRoomOwnerBindings,
 }));
 
 function isPrivateHostname(hostname) {
@@ -4392,7 +4403,7 @@ io.on('connection', (socket) => {
     });
   });
 
-  socket.on('transfer_owner', ({ userId: targetUserId }, callback) => {
+  socket.on('transfer_owner', async ({ userId: targetUserId }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
     if (rejectRateLimited(socket, limitSocketAction, 'transfer_owner', callback)) return;
 
@@ -4409,6 +4420,11 @@ io.on('connection', (socket) => {
       return;
     }
 
+    try {
+      await clearRoomOwnerBindings(roomId);
+    } catch (err) {
+      console.error('房主转让后清理 Linux.do 绑定失败:', err?.message || err);
+    }
     broadcastRoomUpdate(roomId);
     emitSystemChat(roomId, result.systemMessage);
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId), message: result.message });
