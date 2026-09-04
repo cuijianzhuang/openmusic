@@ -94,7 +94,7 @@ export const KUGOU_QUALITY_OPTIONS: QualityOption[] = [
   { value: 'standard', label: '标准' },
   { value: 'exhigh', label: '极高' },
   { value: 'lossless', label: '无损' },
-  { value: 'hires', label: 'Hi-Res 音质' },
+  { value: 'hires', label: 'Hi-Res' },
   { value: 'atmos', label: '蝰蛇全景声 2.0', svip: true },
   { value: 'master', label: '母带', svip: true },
   { value: 'viper_atmos', label: '蝰蛇全景声 2.0', svip: true },

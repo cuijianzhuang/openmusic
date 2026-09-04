@@ -20,5 +20,6 @@ test('酷狗音质别名可归一化并显示平台名称', async () => {
   const quality = normalizeRoomAudioQuality({ kugou: 'viper_tape' });
   assert.equal(quality.kugou, 'viper_tape');
   assert.equal(getQualityLabel('viper_hifi', 'kugou'), '蝰蛇 HiFi 音质');
+  assert.equal(getQualityLabel('hires', 'kugou'), 'Hi-Res');
   assert.equal(getQualityLabel('acappella', 'kugou'), '人声伴奏');
 });
