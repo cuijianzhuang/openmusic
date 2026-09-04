@@ -156,6 +156,21 @@ test('指定歌单按歌名去重时按网易、QQ、汽水、酷狗优先保留
   assert.equal(selected?.id, 'wy');
 });
 
+test('指定歌单保留超过 500 首歌曲，避免与外部整单导入行为不一致', (t) => {
+  const { roomId, room } = createTestRoom(t);
+  room.playlistRoaming = {
+    playlists: [{
+      id: 'large-playlist',
+      source: 'netease',
+      name: '大歌单',
+      songs: Array.from({ length: 600 }, (_, index) => makeSong(`song-${index}`)),
+    }],
+  };
+
+  const broadcast = prepareRoomBroadcast(roomId);
+  assert.equal(broadcast?.shared.playlistRoaming?.playlists[0]?.songs.length, 600);
+});
+
 test('切回私人漫游只停用指定歌单，切回指定歌单可恢复原歌单', async (t) => {
   const { roomId, room } = createTestRoom(t);
   room.playlistRoaming = {

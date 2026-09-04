@@ -465,7 +465,8 @@ function normalizeFmSource(value) {
 }
 
 const PLAYLIST_ROAMING_MAX_PLAYLISTS = 20;
-const PLAYLIST_ROAMING_MAX_SONGS_PER_PLAYLIST = 500;
+// 与收藏整单导入的上限保持一致；指定歌单也应保留完整的大型歌单。
+const PLAYLIST_ROAMING_MAX_SONGS_PER_PLAYLIST = 5000;
 
 function normalizePlaylistUrl(value) {
   const match = String(value || '').trim().match(/https?:\/\/[^\s]+/i);
