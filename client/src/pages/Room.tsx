@@ -51,6 +51,7 @@ import PlaylistChannelFilter from '../components/PlaylistChannelFilter';
 import PageNumberPagination from '../components/PageNumberPagination';
 import SearchSkeleton, { RESULT_BODY_HEIGHT } from '../components/SearchSkeleton';
 import SongResultList from '../components/SongResultList';
+import SearchInputWithSuggestions, { type SelectedMusicSuggestion } from '../components/SearchInputWithSuggestions';
 import {
   getStoredSongResultPageSize,
   setStoredSongResultPageSize,
@@ -1022,7 +1023,11 @@ export default function Room() {
     prevOverlayOpenRef.current = overlayOpen;
   }, [activeSearchMode, searchedKeyword, searching, playlistSearchLoading, playlistSearchBackup, query]);
 
-  const doSearch = useCallback(async (keyword: string, filterMode = searchFilterMode) => {
+  const doSearch = useCallback(async (
+    keyword: string,
+    filterMode = searchFilterMode,
+    suggestion?: SelectedMusicSuggestion,
+  ) => {
     const requestId = ++songSearchRequestRef.current;
 
     if (!keyword.trim()) {
@@ -1041,7 +1046,7 @@ export default function Room() {
     try {
 
       // 音源配置还在加载时不能传空数组，否则 searchAllSongs 会直接返回空结果。
-      const songs = await searchAllSongs(keyword, sources.length > 0 ? sources : undefined, { filterMode });
+      const songs = await searchAllSongs(keyword, sources.length > 0 ? sources : undefined, { filterMode, suggestion });
 
       if (requestId === songSearchRequestRef.current) setResults(songs);
 
@@ -1241,8 +1246,25 @@ export default function Room() {
     isLgUp,
   ]);
 
-  const handleSearch = useCallback(() => {
-    const keyword = query.trim();
+  const handleArtistClick = useCallback((artist: string) => {
+    const keyword = artist.trim();
+    if (!keyword) return;
+    setActiveSearchMode('song');
+    setSearchMode('song');
+    setOverlaySearchMode('song');
+    setIsPlaylistResults(false);
+    setIsRadioResults(false);
+    setSearchDetailOrigin(null);
+    setPlaylistSearchResults([]);
+    setPlaylistSearchTotal(0);
+    setQuery(keyword);
+    setOverlayQuery(keyword);
+    setSearchedKeyword(keyword);
+    void doSearch(keyword);
+  }, [doSearch]);
+
+  const handleSearch = useCallback((selectedKeyword?: string, suggestion?: SelectedMusicSuggestion) => {
+    const keyword = (selectedKeyword ?? query).trim();
     const detectedPlatform = detectPlaylistLink(keyword);
     if (detectedPlatform) {
       void handlePlaylistImport(detectedPlatform, keyword);
@@ -1259,8 +1281,8 @@ export default function Room() {
     setPlaylistSearchResults([]);
     setPlaylistSearchTotal(0);
     setSearchedKeyword(keyword);
-    doSearch(keyword);
-  }, [query, searchMode, doPlaylistSearch, doSearch, handlePlaylistImport]);
+    void doSearch(keyword, searchFilterMode, suggestion);
+  }, [query, searchMode, searchFilterMode, doPlaylistSearch, doSearch, handlePlaylistImport]);
 
   const handleSearchModeChange = useCallback((mode: SearchMode) => {
     if (mode === searchMode) return;
@@ -1297,8 +1319,8 @@ export default function Room() {
     void doSearch(keyword);
   }, [searchMode, query, searchedKeyword, playlistSearchBackup, doPlaylistSearch, doSearch]);
 
-  const handleOverlaySearch = useCallback(() => {
-    const keyword = overlayQuery.trim();
+  const handleOverlaySearch = useCallback((selectedKeyword?: string, suggestion?: SelectedMusicSuggestion) => {
+    const keyword = (selectedKeyword ?? overlayQuery).trim();
     const detectedPlatform = detectPlaylistLink(keyword);
     if (detectedPlatform) {
       void handlePlaylistImport(detectedPlatform, keyword);
@@ -1315,8 +1337,8 @@ export default function Room() {
     setPlaylistSearchResults([]);
     setPlaylistSearchTotal(0);
     setSearchedKeyword(keyword);
-    void doSearch(keyword);
-  }, [overlayQuery, overlaySearchMode, doPlaylistSearch, doSearch, handlePlaylistImport]);
+    void doSearch(keyword, searchFilterMode, suggestion);
+  }, [overlayQuery, overlaySearchMode, searchFilterMode, doPlaylistSearch, doSearch, handlePlaylistImport]);
 
   const handleOverlaySearchModeChange = useCallback((mode: SearchMode) => {
     if (mode === overlaySearchMode) return;
@@ -1362,6 +1384,7 @@ export default function Room() {
     setPlaylistSearchResults([]);
     setPlaylistSearchTotal(0);
     setPlaylistSearchLoading(false);
+    setSearching(false); // 立即停止搜索状态
     setSearchedKeyword('');
     setIsPlaylistResults(false);
     setIsRadioResults(false);
@@ -2301,7 +2324,7 @@ export default function Room() {
         <QueueSystemToast />
       </div>
       <div className={`p-2 ${fillHeight ? 'flex-1 min-h-0 overflow-hidden flex flex-col' : ''}`}>
-        <QueuePanel fillHeight={fillHeight} />
+        <QueuePanel fillHeight={fillHeight} onArtistClick={handleArtistClick} />
       </div>
     </div>
   );
@@ -2330,13 +2353,14 @@ export default function Room() {
         </Tooltip>
       )}
       <div className="relative flex-1 min-w-0">
-        <Search className="absolute left-3 sm:left-4 top-1/2 -translate-y-1/2 w-4 sm:w-5 h-4 sm:h-5 text-netease-muted pointer-events-none" />
-        <input
-          type="text"
+        <Search className="absolute left-3 sm:left-4 top-1/2 -translate-y-1/2 w-4 sm:w-5 h-4 sm:h-5 text-netease-muted pointer-events-none z-10" />
+        <SearchInputWithSuggestions
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+          onChange={setQuery}
+          onSearch={handleSearch}
           placeholder={searchMode === 'playlist' ? '搜索歌单...' : '搜索歌曲、歌手，或粘贴歌单链接...'}
+          searching={searching}
+          suggestionsEnabled={searchMode === 'song' && !showDesktopSearchOverlay}
           className="w-full bg-netease-card border border-netease-border rounded-xl sm:rounded-2xl pl-10 sm:pl-12 pr-4 py-3 sm:py-3.5 text-sm sm:text-base text-white placeholder:text-netease-muted/50 focus:outline-none focus:border-netease-red/50 transition-colors"
         />
       </div>
@@ -2457,19 +2481,20 @@ export default function Room() {
         </div>
       )}
       <div className="relative flex-1 min-w-0">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-netease-muted pointer-events-none" />
-        <input
-          type="text"
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-netease-muted pointer-events-none z-10" />
+        <SearchInputWithSuggestions
           value={overlayQuery}
-          onChange={(e) => setOverlayQuery(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && handleOverlaySearch()}
+          onChange={setOverlayQuery}
+          onSearch={handleOverlaySearch}
           placeholder={overlaySearchMode === 'playlist' ? '搜索歌单...' : '搜索歌曲、歌手，或粘贴歌单链接...'}
+          searching={overlaySearchMode === 'song' && searching}
+          suggestionsEnabled={overlaySearchMode === 'song'}
           className="w-full bg-netease-card border border-netease-border rounded-xl pl-9 pr-3 py-2 text-sm text-white placeholder:text-netease-muted/50 focus:outline-none focus:border-netease-red/50 transition-colors"
         />
       </div>
       <button
         type="button"
-        onClick={handleOverlaySearch}
+        onClick={() => handleOverlaySearch()}
         disabled={!overlayQuery.trim() || (overlaySearchMode === 'song' && searching)}
         className="flex-shrink-0 px-3 py-2 rounded-xl bg-netease-red text-white text-sm font-medium hover:bg-netease-red/85 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
       >
@@ -2483,12 +2508,13 @@ export default function Room() {
     <div className="w-full">
       <div id="search-box" className="mineradio-glass-search-box">
         <Search className="mr-2.5 h-4 w-4 flex-shrink-0 text-white/30" />
-        <input
-          type="text"
+        <SearchInputWithSuggestions
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+          onChange={setQuery}
+          onSearch={handleSearch}
           placeholder={searchMode === 'playlist' ? '搜索歌单...' : '搜索歌曲、歌手，或粘贴歌单链接...'}
+          searching={searchMode === 'song' && searching}
+          suggestionsEnabled={searchMode === 'song' && !showDesktopSearchOverlay}
           className="min-w-0 flex-1 border-none bg-transparent text-[13.5px] tracking-wide text-white outline-none placeholder:text-white/22"
         />
         <button
@@ -2633,6 +2659,7 @@ export default function Room() {
             results={results}
             addingId={addingId}
             onAdd={handleAdd}
+            onArtistClick={handleArtistClick}
             keyword={searchedKeyword}
             alwaysShowActions
             fillHeight
@@ -2710,7 +2737,7 @@ export default function Room() {
                 </div>
               ) : null
             }
-            queueContent={<QueuePanel fillHeight />}
+            queueContent={<QueuePanel fillHeight onArtistClick={handleArtistClick} />}
             chatContent={<ChatPanel />}
             settingsPanel={
               <ImmersiveFxSettingsPanel
@@ -3503,6 +3530,7 @@ export default function Room() {
                   results={results}
                   addingId={addingId}
                   onAdd={handleAdd}
+                  onArtistClick={handleArtistClick}
                   keyword={searchedKeyword}
                   alwaysShowActions
                   fillHeight

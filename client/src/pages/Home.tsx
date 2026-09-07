@@ -177,13 +177,14 @@ const RoomCard = memo(function RoomCard({
       )}
 
       {(room.isOwner || room.isAdmin) && (
-        <div
-          className="absolute right-4 top-4 z-20 inline-flex items-center justify-center rounded-full border border-white/10 bg-black/45 p-2 text-amber-300 shadow-lg backdrop-blur-md"
-          title={room.isOwner ? '房主' : '管理员'}
-          aria-label={room.isOwner ? '房主' : '管理员'}
-        >
-          {room.isOwner ? <Crown className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4 text-sky-300" />}
-        </div>
+        <Tooltip content={room.isOwner ? '房主' : '管理员'}>
+          <div
+            className="absolute right-4 top-4 z-20 inline-flex items-center justify-center rounded-full border border-white/10 bg-black/45 p-2 text-amber-300 shadow-lg backdrop-blur-md"
+            aria-label={room.isOwner ? '房主' : '管理员'}
+          >
+            {room.isOwner ? <Crown className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4 text-sky-300" />}
+          </div>
+        </Tooltip>
       )}
 
       <div className="relative p-5 sm:p-6" style={{ transformStyle: 'preserve-3d' }}>

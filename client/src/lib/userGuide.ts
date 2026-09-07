@@ -164,7 +164,7 @@ export const GUIDE_STEPS: GuideStep[] = [
     id: 'room-desktop-lyrics',
     scope: 'room',
     title: '桌面歌词',
-    body: '桌面歌词：把同步歌词显示在独立的小窗口\n开关：再次点击底栏的歌词按钮即可关闭\n浏览器要求：使用支持文档画中画的最新版 Chrome 或 Edge',
+    body: '桌面歌词：把同步歌词显示在独立的小窗口\n开关：再次点击底栏的歌词按钮即可关闭\n浏览器端使用支持文档画中画的最新版 Chrome 或 Edge；客户端会使用原生桌面歌词窗口',
     side: 'top',
     desktopOnly: true,
   },

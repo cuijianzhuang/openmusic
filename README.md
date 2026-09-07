@@ -63,39 +63,40 @@
 
 > Docker 全量版已内置 Redis 与 Meting，打开站点后填域名即可。
 
-### Docker（推荐）
+### Docker 一键部署（推荐）
 
 ```bash
-curl -O https://raw.githubusercontent.com/qq01-hub/openmusic/main/docker-compose.full.yml
-curl -O https://raw.githubusercontent.com/qq01-hub/openmusic/main/.env.full.example
-cp .env.full.example .env
-# 编辑 .env，填写所有空值；可用 openssl rand -hex 32 生成随机密钥
-mkdir -p data/downloads data/meting
-touch data/.env data/setup.lock
-echo '{}' > data/runtimeConfig.json
-echo '{}' > data/adminConfig.json
-docker compose --env-file .env -f docker-compose.full.yml up -d
+curl -fsSL https://raw.githubusercontent.com/qq01-hub/openmusic/main/install.sh | bash
 ```
 
-| 服务 | 地址 | 说明 |
-|------|------|------|
-| OpenMusic | `http://<IP>:4000` | 首次进入部署向导，完成后自动重启 |
-| Meting 后台 | `http://127.0.0.1:3000/<METING_ADMIN_PATH>` | 仅服务器本机访问，凭据来自 `.env` |
+**访问地址：**
+- OpenMusic：`http://<服务器IP>:4000`（首次进入部署向导）
+- Meting 管理后台：`http://127.0.0.1:3000/<管理路径>`（仅本机，凭据保存在部署目录的 `.env`）
 
+**常用命令：**
 ```bash
-# 更新
-docker compose --env-file .env -f docker-compose.full.yml pull
-docker compose --env-file .env -f docker-compose.full.yml up -d
+# 查看日志
+docker compose --env-file .env -f docker-compose.full.yml logs -f
 
-# 自定义端口
-OPENMUSIC_PORT=8080 docker compose --env-file .env -f docker-compose.full.yml up -d
+# 停止服务
+docker compose --env-file .env -f docker-compose.full.yml down
+
+# 重启服务
+docker compose --env-file .env -f docker-compose.full.yml restart
+
+# 更新到最新版
+docker compose --env-file .env -f docker-compose.full.yml pull && docker compose --env-file .env -f docker-compose.full.yml up -d
 ```
 
-远程管理 Meting 时先建立 SSH 隧道：`ssh -L 3000:127.0.0.1:3000 user@server`，再在本机打开管理地址。不要把 Meting 管理端口直接暴露到公网。
+**远程管理 Meting：**
+```bash
+ssh -L 3000:127.0.0.1:3000 user@server
+# 然后在本机浏览器访问 http://127.0.0.1:3000/<管理路径>
+```
 
-旧版全量部署升级前也要先创建根目录 `.env`。已有 `ROOM_CREDENTIAL_ENCRYPTION_KEY` 时必须沿用原值；Meting 已初始化时填写现有管理路径和账号信息即可，容器不会重置已有数据。
+> 💡 **提示：** 不要把 Meting 管理端口直接暴露到公网。已有部署升级时，脚本会保留原有的 `ROOM_CREDENTIAL_ENCRYPTION_KEY` 和 Meting 数据。
 
-不需要内置 Meting 时改用 `docker-compose.yml`。宝塔面板见 [宝塔部署](deploy/DEPLOY-BAOTA.md)。
+**手动部署或自定义配置：** 见 [详细部署文档](docs/DEPLOY.md) 或 [宝塔部署指南](deploy/DEPLOY-BAOTA.md)。
 
 ### 源码部署
 
@@ -288,6 +289,8 @@ npm run install:all   # 安装根 / server / client 依赖
 npm run build         # 构建前端 → client/dist
 npm start             # 启动后端（生产）
 npm run dev           # 前后端同时开发
+npm run dev:electron  # 启动 Electron 客户端（需先启动前端）
+npm run electron:dist # 构建 Windows Electron 安装包 / 便携版
 npm run package:build # 组装发版包
 ```
 

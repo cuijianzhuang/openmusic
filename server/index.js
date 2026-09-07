@@ -191,6 +191,7 @@ import { importNeteasePlaylist, importQqPlaylist, importKugouPlaylist, importQis
 import { fetchNeteaseHotToplist } from './neteaseToplist.js';
 import { createNeteasePlaylistSearchHandler } from './neteasePlaylistSearch.js';
 import { getHotSongs } from './songHotRank.js';
+import { fetchMusicSuggestions } from './musicSuggestions.js';
 import { hasRedisEnvConfig, createFavoriteShare, importFavoriteShare, importFavoriteSongs, listFavoriteSongs, previewFavoriteShare, setFavoriteSong, getRedisClient } from './roomStorage.js';
 import {
   createChatImageUploadToken,
@@ -674,6 +675,8 @@ function createRateLimiter({ windowMs, max, maxBuckets = 10_000 }) {
 const limitJoinAttempt = createRateLimiter({ windowMs: 60_000, max: 30 });
 const limitJoinPasswordFail = createRateLimiter({ windowMs: 60_000, max: 8 });
 const limitProxyRequest = createRateLimiter({ windowMs: 60_000, max: 120 });
+// 联想一次会扇出多个音源请求；单独限额以保护上游，避免挤占常规搜索配额。
+const limitMusicSuggestions = createRateLimiter({ windowMs: 60_000, max: 30 });
 const limitSocketAction = createRateLimiter({ windowMs: 60_000, max: 90 });
 const limitContributionQr = createRateLimiter({ windowMs: 60_000, max: 45 });
 const limitContributionBind = createRateLimiter({ windowMs: 10 * 60_000, max: 8 });
@@ -1415,6 +1418,26 @@ app.get('/api/music/hot', async (req, res) => {
   } catch (err) {
     console.error('Hot songs error:', err.message);
     res.status(500).json({ error: '获取热榜失败' });
+  }
+});
+
+app.get('/api/music/suggestions', async (req, res) => {
+  if (!requireSessionIdentity(req, res)) return;
+  if (!limitMusicSuggestions(proxyLimitKey('music-suggestions', req))) {
+    return res.status(429).json({ error: '请求过于频繁，请稍后再试', suggestions: [] });
+  }
+  const keyword = String(req.query.q || '').trim();
+
+  if (!keyword || keyword.length < 1) {
+    return res.json({ suggestions: [] });
+  }
+
+  try {
+    const suggestions = await fetchMusicSuggestions(keyword, getRuntimeConfig().musicSourcesEnabled);
+    res.json({ suggestions });
+  } catch (err) {
+    console.error('Music suggestions error:', err.message);
+    res.status(500).json({ error: '获取搜索建议失败', suggestions: [] });
   }
 });
 

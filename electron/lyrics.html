@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>OpenMusic 桌面歌词</title><link rel="stylesheet" href="./lyrics.css"></head>
+<body>
+  <main class="lyrics-shell" aria-live="polite">
+    <div class="cover" aria-hidden="true"><img id="cover" alt=""></div>
+    <div class="song-info"><div id="song-meta">OpenMusic</div><div id="artist-meta"></div></div>
+    <div class="lyrics-stage"><div id="active" class="active">暂无歌词</div><div id="translation" class="translation"></div><div id="next" class="next"></div></div>
+    <button id="close" class="close" aria-label="关闭桌面歌词">×</button>
+  </main>
+  <script src="./lyrics-renderer.js"></script>
+</body>
+</html>
