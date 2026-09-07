@@ -6,7 +6,8 @@
     "dev": "node --watch index.js",
     "start": "node index.js",
     "lint": "eslint .",
-    "check": "npm run lint"
+    "check": "npm run lint",
+    "test": "npm run check"
   },
   "dependencies": {
     "cors": "^2.8.5",
