@@ -22,7 +22,7 @@
   "devDependencies": {
     "concurrently": "^9.2.4",
     "cross-env": "^7.0.3",
-    "electron": "^37.2.6",
+    "electron": "^44.2.0",
     "electron-builder": "^26.0.12",
     "wait-on": "^8.0.3"
   },
