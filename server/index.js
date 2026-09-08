@@ -2658,6 +2658,16 @@ function resolveIosIpaPath() {
   return null;
 }
 
+function resolveWindowsDesktopClientPath() {
+  const candidates = [
+    path.join(__dirname, 'downloads/openmusic-desktop-setup.exe'),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
 function sendAndroidApk(req, res) {
   const apkPath = resolveAndroidApkPath();
   if (!apkPath) {
@@ -2680,8 +2690,20 @@ function sendIosIpa(req, res) {
   res.download(ipaPath, 'openmusic.ipa');
 }
 
+function sendWindowsDesktopClient(req, res) {
+  const clientPath = resolveWindowsDesktopClientPath();
+  if (!clientPath) {
+    return res.status(404).type('text/plain; charset=utf-8').send(
+      'Windows 客户端尚未构建。请在项目根目录执行 npm run build。',
+    );
+  }
+  res.setHeader('Content-Type', 'application/vnd.microsoft.portable-executable');
+  res.download(clientPath, 'openmusic-desktop-setup.exe');
+}
+
 app.get('/downloads/openmusic.apk', sendAndroidApk);
 app.get('/downloads/openmusic.ipa', sendIosIpa);
+app.get('/downloads/openmusic-desktop-setup.exe', sendWindowsDesktopClient);
 
 mountWechatFileHelperProxy(app, fetchWithTimeout, {
   requireAuth: (req, res) => Boolean(requireSessionIdentity(req, res)),

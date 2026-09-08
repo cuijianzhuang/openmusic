@@ -290,7 +290,10 @@ npm run build         # 构建前端 → client/dist
 npm start             # 启动后端（生产）
 npm run dev           # 前后端同时开发
 npm run dev:electron  # 启动 Electron 客户端（需先启动前端）
-npm run electron:dist # 构建 Windows Electron 安装包 / 便携版
+npm run desktop:build # 首次输入站点地址后，单独构建 Windows 安装包 → server/downloads/
+# 本机地址保存在 desktop-build.local.json（已忽略，不会上传 GitHub）
+# 如需无交互构建：$env:OPENMUSIC_DESKTOP_URL='https://music.example.com'; npm run desktop:build
+npm run electron:dist # desktop:build 的兼容别名
 npm run package:build # 组装发版包
 ```
 

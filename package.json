@@ -6,7 +6,7 @@
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "dev:server": "npm run dev --prefix server",
     "dev:client": "npm run dev --prefix client",
-    "build": "npm run build --prefix client",
+    "build": "npm run build:client",
     "lint": "npm run lint --prefix server",
     "check": "npm run lint && npm run build:check",
     "typecheck": "npm run typecheck --prefix client",
@@ -17,7 +17,10 @@
     "build:apk": "npm run build:apk --prefix client",
     "dev:electron": "wait-on http://localhost:5173 && cross-env OPENMUSIC_URL=http://localhost:5173 electron electron/main.cjs",
     "electron": "electron electron/main.cjs",
-    "electron:dist": "npm run build && electron-builder"
+    "electron:dist": "npm run desktop:build",
+    "build:client": "npm run build --prefix client",
+    "electron:package": "node scripts/build-electron-client.mjs",
+    "desktop:build": "npm run build:client && npm run electron:package"
   },
   "devDependencies": {
     "concurrently": "^9.2.4",
@@ -40,13 +43,15 @@
     ],
     "win": {
       "target": [
-        "nsis",
-        "portable"
+        "nsis"
       ],
       "icon": "electron/openmusic.ico"
     },
     "directories": {
-      "output": "release/electron"
+      "output": "dow"
+    },
+    "nsis": {
+      "artifactName": "openmusic-desktop-setup.${ext}"
     }
   },
   "main": "electron/main.cjs"

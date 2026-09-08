@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Users, ArrowRight, Lock, ListMusic,
   Loader2, RefreshCw, Plus, X, Disc3, Sparkles, Github, History, HeartHandshake, Heart,
-  Play, Activity, Search, ShieldCheck, Crown, Smartphone, Shuffle
+  Play, Activity, Search, ShieldCheck, Crown, Download, Shuffle
 } from 'lucide-react';
 import { createRoom, checkRoom, listRooms, randomMatchRoom } from '../api/meting';
 import { useRoomStore } from '../stores/roomStore';
@@ -13,7 +13,6 @@ import { usePageSeo, useSiteSeoConfig } from '../lib/seo';
 import { partitionRoomsByRecent, sortRecentRooms } from '../lib/recentRooms';
 import { getStoredRoomPassword } from '../lib/roomPassword';
 import { areRoomListsEqual, isLobbyHardLocked, sortLobbyRooms } from '../lib/roomListCompare';
-import { ANDROID_APK_URL } from '../lib/androidDownload';
 import { resizeCoverUrl } from '../lib/coverUrl';
 import { markRoomConfigApplyPending, rememberLatestCreatedRoom } from '../lib/roomConfigCache';
 import {
@@ -726,14 +725,9 @@ export default function Home() {
                   </Tooltip>
                 </>
               )}
-              <Tooltip content="下载 Android 客户端">
-                <a href={ANDROID_APK_URL} download="openmusic.apk" className={`hidden sm:inline-flex ${headerIconCls}`} aria-label="下载 Android 客户端">
-                  <Smartphone className="home-header-icon__download h-5 w-5" />
-                </a>
-              </Tooltip>
-              <Tooltip content="下载 Android 客户端">
-                <button type="button" onClick={() => setDownloadModalOpen(true)} className={`inline-flex sm:hidden ${headerIconCls}`} aria-label="下载 Android 客户端">
-                  <Smartphone className="home-header-icon__download h-5 w-5" />
+              <Tooltip content="下载客户端">
+                <button type="button" onClick={() => setDownloadModalOpen(true)} className={`inline-flex ${headerIconCls}`} aria-label="下载客户端">
+                  <Download className="home-header-icon__download h-5 w-5" />
                 </button>
               </Tooltip>
               {adminEntryPath && (
