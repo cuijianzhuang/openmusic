@@ -175,6 +175,7 @@ function publicAccount(account) {
     email: normalized.email,
     emailVerifiedAt: normalized.emailVerifiedAt || null,
     hasPassword: Boolean(normalized.password),
+    ...(normalized.roomUserId ? { roomUserId: normalized.roomUserId } : {}),
     identities: normalized.identities.map((identity) => ({
       provider: identity.provider,
       username: identity.username || '',

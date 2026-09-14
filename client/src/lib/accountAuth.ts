@@ -14,6 +14,7 @@ export interface AccountProfile {
   email: string | null;
   emailVerifiedAt: number | null;
   hasPassword: boolean;
+  roomUserId?: string | null;
   identities: AccountIdentity[];
   createdAt: number;
 }

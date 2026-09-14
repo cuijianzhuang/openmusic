@@ -42,6 +42,7 @@ import { useSiteFeaturesStore } from '../stores/siteFeaturesStore';
 import type { MusicAccountPlatform } from '../lib/musicAccountQr';
 import { fetchDonations, type DonationEntry } from '../lib/donations';
 import AccountAccess from '../components/AccountAccess';
+import MyRoomsAccess from '../components/MyRoomsAccess';
 
 /** 大厅只用接口带回的 CDN 直链，不走 meting type=pic 再查 */
 function lobbyDirectCoverUrl(pic?: string): string | null {
@@ -705,6 +706,7 @@ export default function Home() {
                 allowAutoPrompt={!siteAnnouncementOpen}
                 onOpenChange={setAccountPanelOpen}
               />
+              <MyRoomsAccess />
               <Tooltip content="支持 OpenMusic">
                 <button type="button" onClick={() => setDonationOpen(true)} className={`hidden sm:inline-flex ${headerPillCls}`} aria-label="支持 OpenMusic">
                   <Heart className="h-4 w-4 text-pink-300 fill-current" />

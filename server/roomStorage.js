@@ -4,6 +4,7 @@ import { createLogger, incrementMetric } from './logger.js';
 
 const ROOM_IDS_KEY = 'openmusic:room_ids';
 const roomKey = (id) => `openmusic:room:${id}`;
+const accountRoomsKey = (accountId) => `openmusic:account:rooms:${accountId}`;
 const log = createLogger('room-storage');
 
 let redisClient = null;
@@ -144,6 +145,9 @@ export async function saveRoomToStorage(roomSnapshot) {
     const payload = JSON.stringify(persisted);
     await redisClient.set(roomKey(roomSnapshot.id), payload);
     await redisClient.sAdd(ROOM_IDS_KEY, roomSnapshot.id);
+    if (roomSnapshot.ownerAccountId) {
+      await redisClient.sAdd(accountRoomsKey(roomSnapshot.ownerAccountId), String(roomSnapshot.id).trim().toUpperCase());
+    }
   } catch (err) {
     incrementMetric('redis_error_total', { phase: 'save_room' });
     log.error('redis_save_room_failed', { roomId: roomSnapshot.id, error: err });
@@ -173,15 +177,56 @@ function scheduleRoomWriteFlush() {
   });
 }
 
-export async function deleteRoomFromStorage(roomId) {
+export async function deleteRoomFromStorage(roomId, accountId = '') {
   if (!enabled || !redisClient) return;
 
   try {
     await redisClient.del(roomKey(roomId));
     await redisClient.sRem(ROOM_IDS_KEY, roomId);
+    if (accountId) await redisClient.sRem(accountRoomsKey(accountId), String(roomId || '').trim().toUpperCase());
   } catch (err) {
     incrementMetric('redis_error_total', { phase: 'delete_room' });
     log.error('redis_delete_room_failed', { roomId, error: err });
+  }
+}
+
+export async function addRoomToAccountIndex(accountId, roomId) {
+  const aid = String(accountId || '').trim();
+  const rid = String(roomId || '').trim().toUpperCase();
+  if (!enabled || !redisClient || !aid || !rid) return false;
+  try {
+    await redisClient.sAdd(accountRoomsKey(aid), rid);
+    return true;
+  } catch (err) {
+    incrementMetric('redis_error_total', { phase: 'account_room_index_add' });
+    log.error('redis_account_room_index_add_failed', { accountId: aid, roomId: rid, error: err });
+    return false;
+  }
+}
+
+export async function removeRoomFromAccountIndex(accountId, roomId) {
+  const aid = String(accountId || '').trim();
+  const rid = String(roomId || '').trim().toUpperCase();
+  if (!enabled || !redisClient || !aid || !rid) return false;
+  try {
+    await redisClient.sRem(accountRoomsKey(aid), rid);
+    return true;
+  } catch (err) {
+    incrementMetric('redis_error_total', { phase: 'account_room_index_remove' });
+    log.error('redis_account_room_index_remove_failed', { accountId: aid, roomId: rid, error: err });
+    return false;
+  }
+}
+
+export async function listRoomIdsForAccount(accountId) {
+  const aid = String(accountId || '').trim();
+  if (!enabled || !redisClient || !aid) return [];
+  try {
+    return await redisClient.sMembers(accountRoomsKey(aid));
+  } catch (err) {
+    incrementMetric('redis_error_total', { phase: 'account_room_index_list' });
+    log.error('redis_account_room_index_list_failed', { accountId: aid, error: err });
+    return [];
   }
 }
 

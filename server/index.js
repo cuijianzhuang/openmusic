@@ -179,6 +179,7 @@ import {
   serializeRoomForViewer,
   prepareRoomBroadcast,
   roomUpdateForViewer,
+  setRoomOwnerAccountId,
   prepareRoomPresence,
   roomPresenceForViewer,
   findUserRoomPresence,
@@ -197,7 +198,7 @@ import { fetchNeteaseHotToplist } from './neteaseToplist.js';
 import { createNeteasePlaylistSearchHandler } from './neteasePlaylistSearch.js';
 import { getHotSongs } from './songHotRank.js';
 import { fetchMusicSuggestions } from './musicSuggestions.js';
-import { hasRedisEnvConfig, createFavoriteShare, importFavoriteShare, importFavoriteSongs, listFavoriteSongs, previewFavoriteShare, setFavoriteSong, getRedisClient } from './roomStorage.js';
+import { hasRedisEnvConfig, createFavoriteShare, importFavoriteShare, importFavoriteSongs, listFavoriteSongs, previewFavoriteShare, setFavoriteSong, getRedisClient, addRoomToAccountIndex, listRoomIdsForAccount } from './roomStorage.js';
 import {
   createChatImageUploadToken,
   isQiniuConfigured,
@@ -1895,6 +1896,8 @@ app.get('/api/music/kugou/song', handleKugouSong);
 const IDENTITY_UID_COOKIE = 'openmusic_uid';
 const IDENTITY_TOKEN_COOKIE = 'openmusic_token';
 const DEVICE_ID_COOKIE = 'openmusic_did';
+const GUEST_HANDOFF_COOKIE = 'openmusic_guest_handoff';
+const GUEST_HANDOFF_TTL_SEC = 10 * 60;
 const IDENTITY_COOKIE_MAX_AGE_SEC = SESSION_TTL_SEC;
 
 function parseCookieHeader(header) {
@@ -2031,13 +2034,53 @@ async function resolveAccountFromRequest(req) {
 async function syncAccountRoomIdentity(req, res, account) {
   if (!account?.id) return null;
   const currentIdentity = resolveIdentityFromRequest(req);
+  const hadStableRoomIdentity = Boolean(account.roomUserId);
   const roomUserId = await ensureRoomUserId(account.id, currentIdentity?.userId || '');
+  if (currentIdentity?.userId && (!hadStableRoomIdentity || currentIdentity.userId !== roomUserId)) {
+    setGuestHandoffCookie(res, currentIdentity.userId, roomUserId);
+  }
   const cookieDeviceId = resolveDeviceIdFromCookieHeader(req.headers?.cookie || '');
   const deviceId = cookieDeviceId || createServerClientId();
   const now = Math.floor(Date.now() / 1000);
   await linkDeviceToUser(deviceId, roomUserId);
   setIdentityCookieHeaders(res, roomUserId, signClientId(roomUserId, now), deviceId);
+  account.roomUserId = roomUserId;
   return roomUserId;
+}
+
+function signGuestHandoff(sourceUserId, targetUserId, issuedAt = Math.floor(Date.now() / 1000)) {
+  const source = sanitizeClientId(sourceUserId);
+  const target = sanitizeClientId(targetUserId);
+  if (!source || !target) return '';
+  const payload = `${source}.${target}.${issuedAt}`;
+  const signature = createHmac('sha256', CLIENT_ID_SECRET).update(`guest-handoff:${payload}`).digest('base64url');
+  return `${payload}.${signature}`;
+}
+
+function verifyGuestHandoff(rawValue, targetUserId) {
+  const raw = String(rawValue || '').trim();
+  const parts = raw.split('.');
+  if (parts.length !== 4) return null;
+  const [source, target, issuedAtRaw, signature] = parts;
+  const issuedAt = Number(issuedAtRaw);
+  if (!sanitizeClientId(source) || !sanitizeClientId(target) || target !== sanitizeClientId(targetUserId)) return null;
+  if (!Number.isFinite(issuedAt) || Math.abs(Math.floor(Date.now() / 1000) - issuedAt) > GUEST_HANDOFF_TTL_SEC) return null;
+  const expected = createHmac('sha256', CLIENT_ID_SECRET).update(`guest-handoff:${source}.${target}.${issuedAt}`).digest('base64url');
+  try {
+    const a = Buffer.from(expected);
+    const b = Buffer.from(signature);
+    if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+  } catch {
+    return null;
+  }
+  return { sourceUserId: source, targetUserId: target, issuedAt };
+}
+
+function setGuestHandoffCookie(res, sourceUserId, targetUserId) {
+  const value = signGuestHandoff(sourceUserId, targetUserId);
+  if (!value) return;
+  const secure = ((IS_PRODUCTION && !ALLOW_INSECURE_COOKIES) || res.req?.secure) ? '; Secure' : '';
+  appendSetCookieHeaders(res, [`${GUEST_HANDOFF_COOKIE}=${encodeURIComponent(value)}; Path=/; Max-Age=${GUEST_HANDOFF_TTL_SEC}; HttpOnly; SameSite=Lax${secure}`]);
 }
 
 async function requireAccountSession(req, res) {
@@ -2304,6 +2347,7 @@ app.post('/api/auth/logout', async (req, res) => {
     }
   }
   clearAccountSessionCookie(res);
+  appendSetCookieHeaders(res, [`${GUEST_HANDOFF_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${((IS_PRODUCTION && !ALLOW_INSECURE_COOKIES) || res.req?.secure) ? '; Secure' : ''}`]);
   if (hadAccountSession) {
     // 注销后切换到新的游客身份，避免同一设备在未登录状态继续读取账户数据。
     const cookieDeviceId = resolveDeviceIdFromCookieHeader(req.headers?.cookie || '');
@@ -2909,6 +2953,7 @@ app.post('/api/rooms', async (req, res) => {
   const name = req.body?.name;
   const password = req.body?.password;
   const identity = resolveIdentityFromRequest(req);
+  const account = await resolveAccountFromRequest(req);
   if (!identity?.userId) {
     return res.status(401).json({ error: '会话未就绪，请刷新页面后重试' });
   }
@@ -2924,6 +2969,10 @@ app.post('/api/rooms', async (req, res) => {
       return res.status(400).json({ error: reused.error });
     }
     const room = reused || idleOwned;
+    if (account?.id) {
+      const bound = setRoomOwnerAccountId(room.id, identity.userId, account.id);
+      if (!bound.error) await addRoomToAccountIndex(account.id, room.id);
+    }
     recordRoomCreate({
       ip: createIp,
       deviceId: createDeviceId,
@@ -2983,6 +3032,7 @@ app.post('/api/rooms', async (req, res) => {
     creatorId: identity.userId,
     creatorDeviceId: createDeviceId,
     creatorIp: createIp,
+    ownerAccountId: account?.id || null,
   });
   if (room?.error) {
     return res.status(400).json({ error: room.error });
@@ -2994,7 +3044,78 @@ app.post('/api/rooms', async (req, res) => {
     userId: identity.userId,
   });
 
+  if (account?.id && room?.id) await addRoomToAccountIndex(account.id, room.id);
+
   res.json(room);
+});
+
+app.get('/api/account/rooms', async (req, res) => {
+  const account = await requireAccountSession(req, res);
+  if (!account) return;
+  const ids = await listRoomIdsForAccount(account.id);
+  const rooms = [];
+  for (const id of ids) {
+    const room = getRoomInternal(id);
+    if (!room || room.ownerAccountId !== account.id) continue;
+    rooms.push({
+      id: room.id,
+      name: room.name,
+      isLocked: Boolean(room.isLocked || room.passwordHash),
+      userCount: room.users?.size || 0,
+      createdAt: Number(room.createdAt) || 0,
+      ownerAccountId: room.ownerAccountId || null,
+    });
+  }
+  rooms.sort((a, b) => b.createdAt - a.createdAt || a.id.localeCompare(b.id));
+  return res.json({ rooms });
+});
+
+app.post('/api/account/rooms/:id/claim', async (req, res) => {
+  const account = await requireAccountSession(req, res);
+  if (!account) return;
+  const room = getRoomInternal(req.params.id);
+  const identity = resolveIdentityFromRequest(req);
+  const deviceId = resolveDeviceIdFromCookieHeader(req.headers?.cookie || '');
+  if (!room) return res.status(404).json({ error: '房间不存在', code: 'ROOM_NOT_FOUND' });
+  const hasCreatorProof = Boolean(
+    identity?.userId && identity.userId === room.creatorId,
+  ) || Boolean(deviceId && deviceId === room.creatorDeviceId);
+  if (!hasCreatorProof) {
+    return res.status(403).json({ error: '当前身份不具备房主认领凭证', code: 'ROOM_CLAIM_FORBIDDEN' });
+  }
+  const result = setRoomOwnerAccountId(room.id, room.creatorId, account.id);
+  if (result.error) {
+    const status = result.error === '房间已绑定其他账户' ? 409 : 403;
+    return res.status(status).json({ error: result.error, code: status === 409 ? 'ROOM_ACCOUNT_CONFLICT' : 'ROOM_CLAIM_FORBIDDEN' });
+  }
+  await addRoomToAccountIndex(account.id, room.id);
+  return res.json({ success: true, changed: Boolean(result.changed) });
+});
+
+app.post('/api/account/favorites/sync', async (req, res) => {
+  const account = await requireAccountSession(req, res);
+  if (!account) return;
+  const identity = resolveIdentityFromRequest(req);
+  if (!identity?.userId) return res.status(401).json({ error: '会话未就绪', code: 'SESSION_REQUIRED' });
+  const cookies = parseCookieHeader(req.headers?.cookie || '');
+  const handoff = verifyGuestHandoff(cookies[GUEST_HANDOFF_COOKIE], identity.userId);
+  const localSongs = Array.isArray(req.body?.songs) ? req.body.songs.slice(0, 1000) : [];
+  if (localSongs.length > 0 && !handoff) {
+    return res.status(403).json({ error: '缺少有效的登录前游客同步凭证', code: 'FAVORITES_HANDOFF_REQUIRED' });
+  }
+  // 游客收藏当前由客户端本地缓存承载；handoff 只用于证明该同步请求来自本次登录前会话，
+  // 不把任意 sourceUserId 当作 Redis 收藏读取目标，避免跨账户窃取收藏。
+  const result = await importFavoriteSongs(identity.userId, localSongs);
+  if (result.error) return res.status(400).json({ error: result.error, code: 'FAVORITES_SYNC_FAILED' });
+  return res.json({
+    success: true,
+    status: handoff?.sourceUserId === identity.userId ? 'identity_same' : 'merged',
+    identitySame: Boolean(handoff?.sourceUserId === identity.userId),
+    favorites: result.favorites,
+    imported: result.imported,
+    dropped: result.dropped,
+    maxFavorites: result.maxFavorites,
+  });
 });
 
 app.get('/api/rooms/:id', (req, res) => {
@@ -5689,7 +5810,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('import_favorites', async (payload, callback) => {
-    const { songs } = socketPayload(payload);
+    const { songs, sourceUserId } = socketPayload(payload);
     if (rejectRateLimited(socket, limitSocketAction, 'import_favorites', callback)) return;
 
     const identity = resolveIdentityFromCookies(socket.handshake?.headers?.cookie || '');
@@ -5714,7 +5835,15 @@ io.on('connection', (socket) => {
       callback?.({ success: false, error: result.error });
       return;
     }
-    callback?.({ success: true, favorites: result.favorites, imported: result.imported, dropped: result.dropped, maxFavorites: result.maxFavorites });
+    callback?.({
+      success: true,
+      favorites: result.favorites,
+      imported: result.imported,
+      dropped: result.dropped,
+      maxFavorites: result.maxFavorites,
+      // 仅作为客户端展示状态；目标身份仍由当前已验证 Cookie 决定，绝不按该字段读取数据。
+      identitySame: Boolean(sourceUserId && String(sourceUserId).trim() === identity.userId),
+    });
   });
   socket.on('toggle_play', (payload, callback) => {
     const { isPlaying } = socketPayload(payload);

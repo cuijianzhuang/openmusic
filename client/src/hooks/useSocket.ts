@@ -1243,8 +1243,8 @@ export function useSocket() {
     return emitWithAck('set_favorite', { song, favorite }, { success: false, error: '连接超时，请重试' });
   }, []);
 
-  const importFavorites = useCallback((songs: Song[]): Promise<{ success: boolean; favorites?: FavoriteSong[]; imported?: number; dropped?: number; maxFavorites?: number; error?: string }> => {
-    return emitWithAck('import_favorites', { songs }, { success: false, error: '导入超时，请稍后重试' });
+  const importFavorites = useCallback((songs: Song[], sourceUserId?: string): Promise<{ success: boolean; favorites?: FavoriteSong[]; imported?: number; dropped?: number; maxFavorites?: number; identitySame?: boolean; error?: string }> => {
+    return emitWithAck('import_favorites', { songs, sourceUserId }, { success: false, error: '导入超时，请稍后重试' });
   }, []);
 
   const createFavoriteShare = useCallback(() => emitWithAck<{ success: boolean; code?: string; count?: number; error?: string }>('create_favorite_share', {}, { success: false, error: '分享码创建失败，请重试' }), []);

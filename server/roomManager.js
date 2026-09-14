@@ -2,7 +2,7 @@ import { customAlphabet } from "nanoid";
 import { scrypt, scryptSync, randomBytes, timingSafeEqual } from "crypto";
 import { fetchMetingFmSongs, normalizeFmMode, DEFAULT_FM_MODE, FM_MODE_OFF } from "./metingFm.js";
 import { importNeteasePlaylist, importQqPlaylist, importKugouPlaylist, importQishuiPlaylist } from "./playlistImport.js";
-import { getRedisClient, initRoomStorage, isRedisEnabled, loadAllRoomsFromStorage, queueSaveRoomToStorage, deleteRoomFromStorage, saveRoomToStorage, listFavoriteSongs } from "./roomStorage.js";
+import { getRedisClient, initRoomStorage, isRedisEnabled, loadAllRoomsFromStorage, queueSaveRoomToStorage, deleteRoomFromStorage, saveRoomToStorage, listFavoriteSongs, removeRoomFromAccountIndex } from "./roomStorage.js";
 import {
   DEFAULT_MEMBER_SETTINGS,
   buildWelcomeText,
@@ -650,7 +650,7 @@ function destroyRoomNow(roomId) {
   void deleteRoomChatImages(id).catch((err) => {
     console.error(`删除房间 ${id} 聊天图片失败:`, err?.message || err);
   });
-  void deleteRoomFromStorage(id);
+  void deleteRoomFromStorage(id, room.ownerAccountId || '');
   return true;
 }
 
@@ -726,6 +726,8 @@ function snapshotRoomForStorage(room) {
     muteAll: Boolean(room.muteAll),
     mutedUserIds: Array.from(room.mutedUserIds || []),
     creatorId: room.creatorId ?? null,
+    // 持久账户归属；必须与 creatorId 对齐，ownerId 仅表示运行时播放主控。
+    ownerAccountId: room.ownerAccountId ?? null,
     creatorDeviceId: room.creatorDeviceId ?? null,
     creatorIp: room.creatorIp || null,
     ownerLastJoinedAtByUserId: Object.fromEntries(room.ownerLastJoinedAtByUserId || []),
@@ -820,6 +822,9 @@ function restoreRoomFromStorage(data) {
   room.randomPlayedKeys = new Set(data.randomPlayedKeys || []);
   room.nextRandom = serializeSongMeta(data.nextRandom);
   room.creatorId = data.creatorId ?? null;
+  room.ownerAccountId = typeof data.ownerAccountId === 'string' && data.ownerAccountId.trim()
+    ? data.ownerAccountId.trim().slice(0, 128)
+    : null;
   room.creatorDeviceId = sanitizeCreatorId(data.creatorDeviceId) || null;
   room.creatorIp = String(data.creatorIp || "").trim().slice(0, 64) || null;
   room.ownerLastJoinedAtByUserId = new Map(
@@ -1185,6 +1190,7 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
     muteAll: false,
     mutedUserIds: new Set(),
     creatorId: null,
+    ownerAccountId: null,
     creatorDeviceId: null,
     creatorIp: null,
     ownerLastJoinedAtByUserId: new Map(),
@@ -2039,7 +2045,7 @@ function normalizeSongDurationMs(value) {
   return Math.round(duration < 10_000 ? duration * 1000 : duration);
 }
 
-export function createRoom({ name, password, creatorId, creatorDeviceId, creatorIp } = {}) {
+export function createRoom({ name, password, creatorId, creatorDeviceId, creatorIp, ownerAccountId } = {}) {
   const pwd = validateRoomPassword(password);
   if (!pwd.ok) return { error: pwd.error };
 
@@ -2055,6 +2061,9 @@ export function createRoom({ name, password, creatorId, creatorDeviceId, creator
   const reservedCreator = sanitizeCreatorId(creatorId);
   if (reservedCreator) {
     room.creatorId = reservedCreator;
+    room.ownerAccountId = typeof ownerAccountId === 'string' && ownerAccountId.trim()
+      ? ownerAccountId.trim().slice(0, 128)
+      : null;
     room.creatorDeviceId = sanitizeCreatorId(creatorDeviceId) || null;
   }
   const ip = String(creatorIp || "").trim().slice(0, 64);
@@ -2344,6 +2353,7 @@ export function listRoomsForAdmin() {
         protectedFromDestroy: protectedRoomIds.has(room.id),
         permanentApplication: null,
         creatorId: room.creatorId || null,
+        ownerAccountId: room.ownerAccountId || null,
         creatorDeviceId: room.creatorDeviceId || null,
         creatorIp: room.creatorIp || null,
         ownerLastJoinedAt: resolveAdminOwnerLastJoinedAt(room),
@@ -2532,7 +2542,7 @@ export function adminDestroyRoom(roomId) {
   rooms.delete(id);
   invalidateRoomsListCache();
   void deleteRoomChatImages(id).catch((err) => console.error(`删除房间 ${id} 聊天图片失败:`, err));
-  void deleteRoomFromStorage(id).catch((err) => console.error(`删除房间 ${id} 存储失败:`, err));
+  void deleteRoomFromStorage(id, room.ownerAccountId || '').catch((err) => console.error(`删除房间 ${id} 存储失败:`, err));
   clearRoomAiContext(id);
   clearRoomAiUserState(id);
   return { success: true, name };
@@ -3935,7 +3945,11 @@ export function transferOwner(roomId, actorId, targetUserId, connectionId = null
   admins.delete(targetId);
   auto.delete(targetId);
 
+  const previousOwnerAccountId = room.ownerAccountId;
   room.creatorId = targetId;
+  // 目标用户的账户归属需由账户鉴权层重新确认；不能把原账户归属泄露给新房主。
+  room.ownerAccountId = null;
+  if (previousOwnerAccountId) void removeRoomFromAccountIndex(previousOwnerAccountId, room.id);
   // 同步设备绑定：否则原房主刷新进房时会因 creatorDeviceId 匹配被「恢复」为房主
   room.creatorDeviceId = sanitizeCreatorId(target.deviceId) || null;
 
@@ -3985,7 +3999,10 @@ export function adminTransferOwner(roomId, targetUserId) {
 
   admins.delete(targetId);
   auto.delete(targetId);
+  const previousOwnerAccountId = room.ownerAccountId;
   room.creatorId = targetId;
+  room.ownerAccountId = null;
+  if (previousOwnerAccountId) void removeRoomFromAccountIndex(previousOwnerAccountId, room.id);
   room.creatorDeviceId = sanitizeCreatorId(target.deviceId) || null;
 
   if (previousOwnerId && previousOwnerId !== targetId) {
@@ -6374,4 +6391,23 @@ export function getRoomInternal(roomId) {
 export function persistRoomById(roomId) {
   const room = rooms.get(roomId);
   if (room) persistRoom(room);
+}
+
+/**
+ * 由已完成账户鉴权的路由绑定持久房主账户。仅允许绑定当前 creatorId，
+ * 避免把 ownerAccountId 误当成运行时 ownerId。
+ */
+export function setRoomOwnerAccountId(roomId, creatorId, accountId) {
+  const room = rooms.get(String(roomId || '').toUpperCase());
+  const uid = sanitizeCreatorId(creatorId);
+  const aid = String(accountId || '').trim().slice(0, 128);
+  if (!room) return { error: '房间不存在' };
+  if (!uid || room.creatorId !== uid) return { error: '当前身份不是持久房主' };
+  if (!aid) return { error: '账户身份无效' };
+  if (room.ownerAccountId && room.ownerAccountId !== aid) return { error: '房间已绑定其他账户' };
+  if (room.ownerAccountId === aid) return { ok: true, changed: false, room: serializeRoom(room) };
+  room.ownerAccountId = aid;
+  persistRoom(room);
+  invalidateRoomsListCache();
+  return { ok: true, changed: true, room: serializeRoom(room) };
 }
