@@ -580,6 +580,23 @@ async function attemptRoomRejoin(trigger: string) {
   }
 }
 
+/** 账户会话切换后刷新 Socket 握手身份；已在房间时复用原会话重新进房。 */
+export async function refreshSocketSession(): Promise<void> {
+  resetSessionBootstrap();
+  const s = getSocket();
+  if (shouldMaintainRoomSession()) {
+    await attemptRoomRejoin('account_session_changed');
+    return;
+  }
+  if (s.connected || s.active) {
+    try {
+      await reconnectSocketSession(true);
+    } catch {
+      // 账户登录本身已完成，Socket 可在下一次进入房间时重试。
+    }
+  }
+}
+
 function handleSocketDisconnect(reason: string) {
   debugLog('socket_disconnect', debugLine({ reason }));
   const { mySocketId } = useRoomStore.getState();
@@ -1226,8 +1243,8 @@ export function useSocket() {
     return emitWithAck('set_favorite', { song, favorite }, { success: false, error: '连接超时，请重试' });
   }, []);
 
-  const importFavorites = useCallback((songs: Song[]): Promise<{ success: boolean; favorites?: FavoriteSong[]; imported?: number; dropped?: number; maxFavorites?: number; error?: string }> => {
-    return emitWithAck('import_favorites', { songs }, { success: false, error: '导入超时，请稍后重试' });
+  const importFavorites = useCallback((songs: Song[], sourceUserId?: string): Promise<{ success: boolean; favorites?: FavoriteSong[]; imported?: number; dropped?: number; maxFavorites?: number; identitySame?: boolean; error?: string }> => {
+    return emitWithAck('import_favorites', { songs, sourceUserId }, { success: false, error: '导入超时，请稍后重试' });
   }, []);
 
   const createFavoriteShare = useCallback(() => emitWithAck<{ success: boolean; code?: string; count?: number; error?: string }>('create_favorite_share', {}, { success: false, error: '分享码创建失败，请重试' }), []);

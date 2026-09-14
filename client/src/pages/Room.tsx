@@ -301,8 +301,8 @@ export default function Room() {
     noindex: true,
   });
 
-  const { joinRoom, addSong, leaveRoom, listFavorites, setFavorite, importFavorites, createFavoriteShare, previewFavoriteShare, importFavoriteShare, renameRoomName, setRoomLock, setRoomFmMode, setRoomPlaylistRoaming, setRoomAnnouncement, setRoomCustomCover, setChatHistoryVisibleOnJoin, setChatShowAvatars, setRoomJoinNotice, setRoomAiSettings, setRoomMaxAdmins, setRoomAdminSelfManageMemberTier, setRoomPlaybackRate, setSongRequestEnabled, unbanRoomSong, addRoomForbiddenWord, removeRoomForbiddenWord, setRoomMemberTier, removeRoomMemberTier, setRoomMemberSettings, loadSongHistory, transferOwner, destroyRoom, applyRoomPermanent, cancelRoomPermanent, clearQueue, createMusicAccountQr, checkMusicAccountQr, bindMusicAccount, listMusicAccounts, setMusicAccountShared, unbindMusicAccount, skipSong, togglePlay } = useSocket();
-  const { applyFavorites } = useFavorites();
+  const { joinRoom, addSong, leaveRoom, createFavoriteShare, previewFavoriteShare, importFavoriteShare, renameRoomName, setRoomLock, setRoomFmMode, setRoomPlaylistRoaming, setRoomAnnouncement, setRoomCustomCover, setChatHistoryVisibleOnJoin, setChatShowAvatars, setRoomJoinNotice, setRoomAiSettings, setRoomMaxAdmins, setRoomAdminSelfManageMemberTier, setRoomPlaybackRate, setSongRequestEnabled, unbanRoomSong, addRoomForbiddenWord, removeRoomForbiddenWord, setRoomMemberTier, removeRoomMemberTier, setRoomMemberSettings, loadSongHistory, transferOwner, destroyRoom, applyRoomPermanent, cancelRoomPermanent, clearQueue, createMusicAccountQr, checkMusicAccountQr, bindMusicAccount, listMusicAccounts, setMusicAccountShared, unbindMusicAccount, skipSong, togglePlay } = useSocket();
+  const { listFavorites, setFavorite, importFavorites, applyFavorites, favorites: cachedFavorites } = useFavorites();
   const { queueKeys, playedKeys } = useRoomSongKeySets();
 
 
@@ -388,7 +388,7 @@ export default function Room() {
   const [favoriteShareSongs, setFavoriteShareSongs] = useState<FavoriteSong[]>([]);
   const [favoriteShareSelected, setFavoriteShareSelected] = useState<Set<string>>(new Set());
   const [favoriteShareLoading, setFavoriteShareLoading] = useState(false);
-  const [favorites, setFavorites] = useState<FavoriteSong[]>([]);
+  const [favorites, setFavorites] = useState<FavoriteSong[]>(() => cachedFavorites);
   const [favoriteQuery, setFavoriteQuery] = useState('');
   const [favoritePage, setFavoritePage] = useState(1);
   const [favoritePageSize, setFavoritePageSize] = useState<FavoritesPageSize>(DEFAULT_FAVORITES_PAGE_SIZE);
@@ -396,6 +396,10 @@ export default function Room() {
   const [addingAllFavorites, setAddingAllFavorites] = useState(false);
   const [importingFavorites, setImportingFavorites] = useState(false);
   const [favoritesImportProgress, setFavoritesImportProgress] = useState('');
+
+  useEffect(() => {
+    if (!favoritesOpen && cachedFavorites.length > 0) setFavorites(cachedFavorites);
+  }, [cachedFavorites, favoritesOpen]);
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameDraft, setRenameDraft] = useState('');
   const [renameSaving, setRenameSaving] = useState(false);

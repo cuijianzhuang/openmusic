@@ -354,6 +354,15 @@ export interface RoomState {
   roomAi?: RoomAiConfig;
 }
 
+/** “我的房间”接口返回的轻量摘要，不包含队列或播放状态详情。 */
+export interface AccountRoomSummary {
+  id: string;
+  name: string;
+  isLocked: boolean;
+  userCount: number;
+  createdAt: number;
+}
+
 /** CRDT 播放状态（服务端唯一时间源） */
 export interface PlaybackState {
   roomId: string;
