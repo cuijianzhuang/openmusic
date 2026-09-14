@@ -1445,17 +1445,13 @@ const MAX_AVATAR_DATA_URL_LENGTH = 200 * 1024;
 /** 房间封面轻度压缩（约 512px / q≈0.96），与客户端 roomCoverImage.ts 保持一致 */
 const MAX_CUSTOM_COVER_DATA_URL_LENGTH = 800 * 1024;
 
-/** 头像取值：jpg/png 的 base64 data URL（限长），或兼容旧的 http(s) 链接；非法值归空 */
+/** 头像只允许客户端压缩后的 jpg/png base64 data URL，禁止外链绕过大小限制。 */
 function normalizeAvatarUrl(avatarUrl) {
   const raw = String(avatarUrl || "").trim();
   if (!raw) return "";
-  if (raw.startsWith("data:")) {
-    if (!/^data:image\/(jpeg|png);base64,/.test(raw)) return "";
-    if (raw.length > MAX_AVATAR_DATA_URL_LENGTH) return "";
-    return raw;
-  }
-  if (!/^https?:\/\//i.test(raw)) return "";
-  return raw.slice(0, 500);
+  if (!/^data:image\/(jpeg|png);base64,/.test(raw)) return "";
+  if (raw.length > MAX_AVATAR_DATA_URL_LENGTH) return "";
+  return raw;
 }
 
 /** 房间自定义封面：空字符串表示取消自定义、跟随当前歌曲封面 */

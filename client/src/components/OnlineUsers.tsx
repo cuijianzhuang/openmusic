@@ -3,7 +3,7 @@ import { Check, Clock, Crown, Image, MapPin, Pencil, Shield, Upload, UserMinus, 
 import { useRoomStore } from "../stores/roomStore";
 import Modal from "./Modal";
 import { useSocket } from "../hooks/useSocket";
-import { fileToAvatarDataUrl, isSupportedAvatarFile } from "../lib/avatarImage";
+import { fileToAvatarDataUrl, getSafeAvatarUrl, isSupportedAvatarFile } from "../lib/avatarImage";
 import { getDisplayInitial } from "../lib/displayInitial";
 import ChatImageLightbox from "./ChatImageLightbox";
 import { formatStayDuration } from "../lib/formatStayDuration";
@@ -59,8 +59,8 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
   const panelRef = useRef<HTMLDivElement>(null);
 
   const getUserAvatar = (userId: string) => {
-    if (userId === mySocketId) return avatar_url;
-    return userAvatarUrls[userId] || "";
+    if (userId === mySocketId) return getSafeAvatarUrl(avatar_url);
+    return getSafeAvatarUrl(userAvatarUrls[userId]);
   };
 
   useEffect(() => {
@@ -203,7 +203,7 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
   };
 
   const openAvatarSettings = (pickFile = false) => {
-    setAvatarDraft(avatar_url);
+    setAvatarDraft(getSafeAvatarUrl(avatar_url));
     setAvatarError("");
     setAvatarPickOnOpen(pickFile);
     setShowAvatarModal(true);
@@ -258,16 +258,20 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
 
   const saveAvatar = async () => {
     if (avatarSaving) return;
-    const url = avatarDraft.trim();
+    const url = getSafeAvatarUrl(avatarDraft);
+    if (avatarDraft.trim() && !url) {
+      setAvatarError("头像格式不支持或图片过大");
+      return;
+    }
     setAvatarSaving(true);
-    localStorage.setItem("avatar_url", url);
-    useRoomStore.setState({ avatar_url: url });
     const res = await setUserAvatar(url);
     setAvatarSaving(false);
     if (!res.success) {
       setAvatarError(res.error || "头像保存失败");
       return;
     }
+    localStorage.setItem("avatar_url", url);
+    useRoomStore.setState({ avatar_url: url });
     setShowAvatarModal(false);
   };
 

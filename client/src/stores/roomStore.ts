@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { RoomState } from '../types';
+import { getSafeAvatarUrl } from '../lib/avatarImage';
 
 interface RoomStore {
   room: RoomState | null;
@@ -58,7 +59,7 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
   showPlayer: false,
   exitReason: null,
   isReconnecting: false,
-  avatar_url: localStorage.getItem('avatar_url') || '',
+  avatar_url: getSafeAvatarUrl(localStorage.getItem('avatar_url')),
   setRoom: (room) => set({ room }),
   setNickname: (nickname) => {
     localStorage.setItem('sjb_nickname', nickname);
