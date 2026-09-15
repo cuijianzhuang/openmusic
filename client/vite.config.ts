@@ -213,6 +213,12 @@ export default defineConfig({
     drop: ['debugger'],
     legalComments: 'none',
   },
+  optimizeDeps: {
+    // 仅以应用入口 index.html 作为扫描起点：默认的 **/*.html 会连带扫描
+    // public/vendor 下由 Wallpaper Engine 预打包的成品 JS（内部含可选
+    // require('@emotion/is-prop-valid')），冷启动预构建时会直接报依赖缺失。
+    entries: ['index.html'],
+  },
   server: {
     port: 5173,
     proxy: {
