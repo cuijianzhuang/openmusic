@@ -11,11 +11,13 @@ import {
 import { ChevronDown } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore';
 import type { ChatMessage, RoomUser } from '../types';
+import type { ChatCardActions } from './chatCardActions';
 import Tooltip from './Tooltip';
 import ChatMessageRow, { type ChatRoomMeta } from './ChatMessageRow';
 import { fireWelcomeConfetti } from '../lib/confettiBurst';
 import {
   compactReplyText,
+  compactSongCardsText,
   hasMentionAllInText,
   hasMentionInText,
 } from '../lib/chatPanelUtils';
@@ -54,6 +56,8 @@ interface Props {
   onMentionUser: (user: RoomUser) => void;
   onToggleReaction: (messageId: string, emoji: string) => void;
   onPreviewImage: (url: string) => void;
+  /** 卡片收藏 / 点歌 / 再分享（ChatPanel 统一维护，避免每张卡片各自订阅） */
+  cardActions?: ChatCardActions;
   loadChatHistory: (before: number, beforeId: string) => Promise<{
     success: boolean;
     messages?: ChatMessage[];
@@ -87,6 +91,7 @@ type VirtualRowData = {
   onReactionPickerChange: (messageId: string | null) => void;
   onRevealPureImage: (messageId: string) => void;
   onPreviewImage: (url: string) => void;
+  cardActions?: ChatCardActions;
   setRowHeight: (index: number, messageId: string, height: number) => void;
 };
 
@@ -98,6 +103,9 @@ function estimateMessageHeight(msg: ChatMessage): number {
   // 头像行 + 昵称行余量（宁可偏高出现空隙，也不要偏低导致重叠）
   let height = 56;
   if (msg.replyTo) height += 44;
+  // 音乐卡片高度：未播放约 76px，播放中含歌词行与进度条约 120px
+  const cardCount = msg.songs?.length || 0;
+  if (cardCount > 0) height += 118 + (cardCount - 1) * 118;
   if (msg.imageUrl) {
     // 贴纸 max-h-28≈112；普通图 max-h-40≈160
     height += msg.imageKey ? 120 : 168;
@@ -155,6 +163,7 @@ function VirtualChatRow({ index, style, data }: ListChildComponentProps<VirtualR
           onOpenReactionPicker={data.onReactionPickerChange}
           onRevealPureImage={data.onRevealPureImage}
           onPreviewImage={data.onPreviewImage}
+          cardActions={data.cardActions}
           onContentResize={reportSize}
         />
       </div>
@@ -178,6 +187,7 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
   onMentionUser,
   onToggleReaction,
   onPreviewImage,
+  cardActions,
   loadChatHistory,
   onScrollRootChange,
 }, ref) {
@@ -575,7 +585,8 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
       const notify = () => {
         if (Notification.permission !== 'granted') return;
         const notification = new Notification(`${msg.nickname} 提到了你`, {
-          body: compactReplyText(msg.text, msg.imageUrl, msg.imageKey, msg.asSticker),
+          body: compactReplyText(msg.text, msg.imageUrl, msg.imageKey, msg.asSticker)
+            || compactSongCardsText(msg.songs),
           tag: `openmusic-mention-${roomMeta.id}-${msg.id}`,
           silent: false,
         });
@@ -635,6 +646,7 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
     onReactionPickerChange,
     onRevealPureImage: handleRevealPureImage,
     onPreviewImage,
+    cardActions,
     setRowHeight,
   }), [
     messages,
@@ -655,7 +667,7 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
     onReactionPickerChange,
     handleRevealPureImage,
     onPreviewImage,
-    setRowHeight,
+      setRowHeight,
   ]);
 
   const renderPlainList = () => (
@@ -684,6 +696,7 @@ const ChatMessageList = forwardRef<ChatMessageListHandle, Props>(function ChatMe
           onOpenReactionPicker={onReactionPickerChange}
           onRevealPureImage={handleRevealPureImage}
           onPreviewImage={onPreviewImage}
+          cardActions={cardActions}
           onContentResize={handleStickyContentResize}
         />
       ))}

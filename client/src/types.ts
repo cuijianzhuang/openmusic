@@ -157,6 +157,17 @@ export interface RoomAiConfig {
   defaultBotName?: string;
 }
 
+export interface ChatSongCard {
+  id: string;
+  source: MusicSource;
+  name: string;
+  artist: string;
+  album?: string;
+  duration?: number;
+  /** 音乐 CDN 封面直链（服务端已校验 https + 平台域名） */
+  pic?: string;
+}
+
 export interface ChatMessage {
   id: string;
   userId: string;
@@ -177,6 +188,8 @@ export interface ChatMessage {
   targetNickname?: string;
   /** 本条迎宾是否触发礼花（与欢迎语文案独立） */
   confettiEnabled?: boolean;
+  /** 聊天音乐卡片（一条消息可带多张，如 AI 候选） */
+  songs?: ChatSongCard[];
 }
 
 export interface SkipRequest {

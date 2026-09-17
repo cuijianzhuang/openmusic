@@ -7,6 +7,7 @@ import Tooltip from './Tooltip';
 import MemberTierBadge from './MemberTierBadge';
 import UserRoleMarks from './UserRoleMarks';
 import { ChatMessageReactions } from './ChatMessageReactions';
+import ChatMusicCard from './ChatMusicCard';
 import ChatMessageContextMenu, { type ChatMessageMenuPos } from './ChatMessageContextMenu';
 import {
   CHAT_PHOTO_CLASS,
@@ -22,6 +23,7 @@ import { getDisplayInitial } from '../lib/displayInitial';
 import { getSafeAvatarUrl } from '../lib/avatarImage';
 import { useRoomStore } from '../stores/roomStore';
 import { getChatImageDisplayUrl } from '../api/chatImage';
+import type { ChatCardActions } from './chatCardActions';
 
 type StickerSaveState = 'idle' | 'saving' | 'done' | 'exists' | 'error';
 
@@ -237,6 +239,8 @@ export interface ChatMessageRowProps {
   onOpenReactionPicker: (messageId: string | null) => void;
   onRevealPureImage: (messageId: string) => void;
   onPreviewImage: (url: string) => void;
+  /** 卡片收藏 / 点歌 / 再分享 */
+  cardActions?: ChatCardActions;
   onContentResize?: () => void;
 }
 
@@ -259,6 +263,7 @@ function ChatMessageRow({
   onOpenReactionPicker,
   onRevealPureImage,
   onPreviewImage,
+  cardActions,
   onContentResize,
 }: ChatMessageRowProps) {
   const [menuPos, setMenuPos] = useState<ChatMessageMenuPos | null>(null);
@@ -505,6 +510,18 @@ function ChatMessageRow({
                   </div>
                 )}
                 {renderPhotoContent()}
+                {msg.songs?.length ? (
+                  <div className={`flex flex-col gap-1.5 ${msg.text ? 'mt-1.5' : ''}`}>
+                    {msg.songs.map((card) => (
+                      <ChatMusicCard
+                        key={`${card.source}:${card.id}`}
+                        song={card}
+                        messageId={msg.id}
+                        actions={cardActions}
+                      />
+                    ))}
+                  </div>
+                ) : null}
                 {msg.text
                   ? isAiBot
                     ? renderAiMessageText(msg.text, chatScrollRoot, nicknames)
@@ -636,6 +653,7 @@ export default memo(ChatMessageRow, (prev, next) => (
   && prev.msg.imageUrl === next.msg.imageUrl
   && prev.msg.imageKey === next.msg.imageKey
   && prev.msg.asSticker === next.msg.asSticker
+  && prev.msg.songs === next.msg.songs
   && reactionsKey(prev.msg.reactions) === reactionsKey(next.msg.reactions)
   && prev.pureMode === next.pureMode
   && prev.pureImageRevealed === next.pureImageRevealed
@@ -650,6 +668,8 @@ export default memo(ChatMessageRow, (prev, next) => (
   && prev.room.chatShowAvatars === next.room.chatShowAvatars
   && prev.room.userAvatarUrls === next.room.userAvatarUrls
   && prev.chatScrollRoot === next.chatScrollRoot
+  // 卡片收藏 / 点歌状态（Set 由 ChatPanel 在变化时重建引用）
+  && prev.cardActions === next.cardActions
 ));
 
 export { renderReplyRefContent };

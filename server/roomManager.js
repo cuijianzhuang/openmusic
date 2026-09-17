@@ -46,6 +46,7 @@ import {
   toPublicPermanentApplication,
 } from "./permanentApplication.js";
 import { buildUserRoundRobinOrder } from "./playbackOrder.js";
+import { sanitizeChatSongCards } from "./chatSongCard.js";
 import { resolveAdminOwnerLastJoinedAt } from "./adminRoomUtils.js";
 
 const generateRoomId = customAlphabet("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", 6);
@@ -1879,6 +1880,13 @@ function findForbiddenWordInText(room, text) {
     if (lowered.includes(word.toLowerCase())) return word;
   }
   return null;
+}
+
+/** 正文与卡片显示字段是否命中房间违禁词；逐字段匹配，避免跨字段拼出违禁词 */
+function hasForbiddenTextInChat(room, content, songs) {
+  if (findForbiddenWordInText(room, content)) return true;
+  return (Array.isArray(songs) ? songs : []).some((song) =>
+    [song?.name, song?.artist, song?.album].some((value) => findForbiddenWordInText(room, value)));
 }
 
 function normalizeBannedSongName(name) {
@@ -5551,6 +5559,8 @@ function serializeChatMessage(message, options = {}) {
 
   const imageUrl = String(source.imageUrl || "").trim() || null;
   const replyTo = sanitizeReplyImageForWire(source.replyTo, allowLargeDataUrl);
+  // 一条消息可带多张音乐卡片（AI 候选），统一用 songs
+  const songs = sanitizeChatSongCards(source.songs);
 
   let safeImageUrl = imageUrl;
   if (!allowLargeDataUrl && isOversizedDataUrl(imageUrl)) {
@@ -5588,6 +5598,7 @@ function serializeChatMessage(message, options = {}) {
     confettiEnabled: source.kind === 'welcome'
       ? source.confettiEnabled !== false
       : Boolean(source.confettiEnabled),
+    songs,
   };
   if (aiBotSig) out.aiBotSig = aiBotSig;
   return out;
@@ -5696,19 +5707,19 @@ export function addChatMessage(roomId, userId, text, options = {}) {
   const room = rooms.get(roomId);
   if (!room) return { error: "房间不存在" };
 
-  const content = String(text || "").trim();
   const imageUrl = String(options.imageUrl || "").trim();
   const imageKey = String(options.imageKey || "").trim();
   const asSticker = Boolean(options.asSticker) || isLocalStickerImageKey(imageKey);
+  const songs = sanitizeChatSongCards(options.songs);
+  // 卡片消息不再写默认文案，气泡里只展示卡片
+  const content = String(text || "").trim();
 
-  if (!content && !imageUrl) return { error: "消息不能为空" };
+  if (!content && !imageUrl && songs.length === 0) return { error: "消息不能为空" };
   if (content.length > 500) return { error: "消息过长" };
 
-  if (content) {
-    const hit = findForbiddenWordInText(room, content);
-    if (hit) {
-      return { error: "消息包含违禁词，请修改后发送" };
-    }
+  // 卡片歌名/歌手/专辑会直接显示在聊天里，与正文一样受房间违禁词约束
+  if (hasForbiddenTextInChat(room, content, songs)) {
+    return { error: "消息包含违禁词，请修改后发送" };
   }
 
   const user = room.users.get(userId);
@@ -5750,6 +5761,7 @@ export function addChatMessage(roomId, userId, text, options = {}) {
     mentions,
     replyTo: sanitizeChatReplyRef(options.replyTo, roomId),
     timestamp: Date.now(),
+    songs: songs.length ? songs : undefined,
   };
 
   room.messages.push(message);
@@ -5771,6 +5783,23 @@ export function addChatMessage(roomId, userId, text, options = {}) {
   return { message: serializeChatMessage(message, { roomId, allowLargeDataUrl: true }) };
 }
 
+/**
+ * 分享音乐卡片到聊天室（文字可选，同一条消息携带）。
+ * 复用 addChatMessage 的禁言、只读、违禁词与长度校验；封面与播放地址由客户端自行取链。
+ */
+export function shareSongToChat(roomId, userId, songs, options = {}) {
+  const cards = sanitizeChatSongCards(songs);
+  if (cards.length === 0) return { error: "歌曲信息无效" };
+  // 与 send_chat 一致：只有房间成员可以发消息，不从聊天室外部写入卡片
+  if (!canUserMutate(roomId, userId)) {
+    const room = rooms.get(String(roomId || "").toUpperCase());
+    if (!room) return { error: "房间不存在" };
+    if (!room.users.has(userId)) return { error: "未加入房间" };
+    return { error: "只读端无法执行此操作" };
+  }
+  return addChatMessage(roomId, userId, String(options.text || ""), { songs: cards });
+}
+
 /** AI 助手发言（不占用真实用户席位；带服务端签名） */
 export function postBotChatMessage(roomId, options = {}) {
   const room = rooms.get(roomId);
@@ -5779,13 +5808,19 @@ export function postBotChatMessage(roomId, options = {}) {
   const botName = String(options.nickname || resolveRoomAiBotName(room) || "小音")
     .trim()
     .slice(0, 20) || "小音";
-  const content = String(options.text || "").trim();
   const imageUrl = String(options.imageUrl || "").trim();
   const imageKey = String(options.imageKey || "").trim();
   const asSticker = Boolean(options.asSticker);
+  const songs = sanitizeChatSongCards(options.songs);
+  const content = String(options.text || "").trim();
 
-  if (!content && !imageUrl) return { error: "消息不能为空" };
+  if (!content && !imageUrl && songs.length === 0) return { error: "消息不能为空" };
   if (content.length > 500) return { error: "消息过长" };
+
+  // AI 卡片与正文同样受房间违禁词约束（搜索结果不保证符合本房间自定义词）
+  if (hasForbiddenTextInChat(room, content, songs)) {
+    return { error: "消息包含违禁词，请修改后发送" };
+  }
 
   if (imageUrl) {
     const imageCheck = imageKey
@@ -5807,6 +5842,7 @@ export function postBotChatMessage(roomId, options = {}) {
     mentions: [],
     replyTo: sanitizeChatReplyRef(options.replyTo, roomId),
     timestamp: Date.now(),
+    songs: songs.length ? songs : undefined,
   };
 
   room.messages.push(message);

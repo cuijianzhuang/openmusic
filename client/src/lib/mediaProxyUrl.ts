@@ -1,3 +1,23 @@
+/** 音乐平台 CDN 域名（与服务端 mediaProxy 的允许列表保持一致） */
+const MUSIC_CDN_DOMAINS = [
+  '163.com', '126.net', 'netease.com',
+  'qq.com', 'gtimg.com', 'gtimg.cn', 'tencentmusic.com',
+  'kugou.com', 'kugou.net', 'kgimg.com', 'kgcdn.com', 'kgimg.net',
+  // 汽水封面实际域名；必须带点匹配，不能用 includes('douyin')
+  'douyinpic.com',
+];
+
+function hostMatchesDomain(host: string, domain: string): boolean {
+  return host === domain || host.endsWith(`.${domain}`);
+}
+
+/** 是否为已知音乐平台 CDN 主机（用于卡片封面白名单；与服务端 mediaProxy 一致） */
+export function isAllowedCoverHostname(hostname: string): boolean {
+  const host = String(hostname || '').toLowerCase();
+  if (!host) return false;
+  return MUSIC_CDN_DOMAINS.some((domain) => hostMatchesDomain(host, domain));
+}
+
 /**
  * 将第三方媒体 URL 转为同源 `/api/media-proxy`。
  * 仅用于：① 着色器背景下的歌曲播放（Web Audio 频谱）；② 封面背景 Canvas 采样（AmbientCoverLayers）。

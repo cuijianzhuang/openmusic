@@ -159,6 +159,7 @@ import {
   approveSkip,
   rejectSkip,
   addChatMessage,
+  shareSongToChat,
   postBotChatMessage,
   recallChatMessage,
   toggleChatReaction,
@@ -5721,6 +5722,36 @@ io.on('connection', (socket) => {
 
     broadcastRoomUpdate(roomId);
     callback?.({ success: true });
+  });
+
+  socket.on('share_song_to_chat', async (payload, callback) => {
+    const { songs, text } = socketPayload(payload);
+    if (rejectReadOnly(socket, callback)) return;
+    if (rejectRateLimited(socket, limitSocketChat, 'send_chat', callback)) return;
+    const shareRate = await consumeDistributedSocketRate(socket, 'chat-song-card', {
+      windowMs: 60_000,
+      max: 20,
+    });
+    if (!shareRate.allowed) {
+      incrementMetric('socket_rate_limit_rejected_total', { event: 'chat_song_card' });
+      callback?.({ success: false, error: '分享太快啦，稍等一下再试' });
+      return;
+    }
+
+    const roomId = socketToRoom.get(socket.id);
+    if (!roomId) {
+      callback?.({ success: false, error: '未加入房间' });
+      return;
+    }
+
+    const result = shareSongToChat(roomId, getSocketUserId(socket), songs, { text });
+    if (result.error) {
+      callback?.({ success: false, error: result.error });
+      return;
+    }
+
+    callback?.({ success: true, message: result.message });
+    io.to(roomId).emit('chat_message', result.message);
   });
 
   socket.on('send_chat', async (payload, callback) => {

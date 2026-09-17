@@ -33,6 +33,7 @@ import {
   aiChatCompletions,
 } from './aiModelService.js';
 import { appendRoomAiTurn, getRoomAiContextMessages } from './roomAiContext.js';
+import { MAX_CHAT_SONG_CARDS } from './chatSongCard.js';
 import {
   extractUserChatSignals,
   getAiUserRapport,
@@ -48,6 +49,11 @@ import {
 
 const MAX_TOOL_ROUNDS = 4;
 const AI_MAX_ATTEMPTS = 3;
+/**
+ * 真正产生外部副作用的工具：重试时命中台账，避免重复执行。
+ * send_song_card 不在此列——它只是把卡片放进本轮缓冲，真正发送发生在 flush，
+ * 如果在这里记账，重试会命中缓存而永不发送。
+ */
 const MUTATING_TOOL_NAMES = new Set([
   'request_song',
   'skip_song',
@@ -341,7 +347,7 @@ function stripEmbeddedQqFaces(text) {
 export function sanitizeAiUserFacingText(value) {
   return String(value || '')
     .replace(/(?:用\s*)?`?request_song`?\s*点上/gi, '让我帮你点上')
-    .replace(/`?(?:request_song|search_songs|recommend_songs|skip_song|request_skip_song|reply_message|send_emoji|send_sticker|get_room_status|get_my_permissions)`?/gi, (name) => ({
+    .replace(/`?(?:request_song|search_songs|recommend_songs|skip_song|request_skip_song|reply_message|send_emoji|send_sticker|send_song_card|get_room_status|get_my_permissions)`?/gi, (name) => ({
       request_song: '点歌',
       search_songs: '搜歌',
       recommend_songs: '歌曲推荐',
@@ -350,6 +356,7 @@ export function sanitizeAiUserFacingText(value) {
       reply_message: '回复功能',
       send_emoji: '表情功能',
       send_sticker: '表情包功能',
+      send_song_card: '音乐卡片',
       get_room_status: '房间状态',
       get_my_permissions: '权限信息',
     })[String(name).replace(/`/g, '').toLowerCase()] || '')
@@ -484,6 +491,30 @@ function findRememberedSong(ctx, id, server) {
   if (!(ctx.songCandidates instanceof Map) || !id) return null;
   if (server) return ctx.songCandidates.get(`${server}:${id}`) || null;
   return Array.from(ctx.songCandidates.values()).find((song) => String(song.id) === String(id)) || null;
+}
+
+/**
+ * 把本轮缓冲的音乐卡片合并成一条聊天消息发出去。
+ * 目的是让「一次回复里的多张候选卡片」只占一条消息，而不是刷屏多条。
+ * finalText 是本轮模型的最终文字：有它就用它，避免只留下工具参数里的半句话而显得被截断。
+ */
+function flushPendingSongCards(ctx, finalText = '') {
+  const buffer = ctx?.cardBuffer;
+  if (!buffer || buffer.cards.length === 0) return;
+  const cards = buffer.cards.splice(0, buffer.cards.length);
+  buffer.seen.clear();
+  const caption = String(buffer.text || '').trim().slice(0, 200);
+  const text = (String(finalText || '').trim() || caption).slice(0, 500);
+  buffer.text = '';
+
+  const posted = postBotChatMessage(ctx.roomId, {
+    text,
+    songs: cards,
+    replyTo: ctx.triggerMessage || null,
+  });
+  if (posted.error) return;
+  ctx.replied = true;
+  if (posted.message && ctx.emitChat) ctx.emitChat(posted.message);
 }
 
 export function summarizePlaybackAfterSkip(room) {
@@ -780,6 +811,92 @@ async function executeTool(name, args, ctx) {
       return { success: true, message: '已回复' };
     }
 
+    case 'send_song_card': {
+      // 只缓冲不发送：本轮结束时统一 flush，多次调用才会合并成同一条消息。
+      // 只允许本轮搜索/推荐候选或明确的歌名+歌手，避免把任意歌曲 ID 拼成卡片。
+      const requestedIds = Array.isArray(args.ids)
+        ? args.ids.map((item) => String(item || '').trim()).filter(Boolean).slice(0, MAX_CHAT_SONG_CARDS)
+        : [];
+      const singleId = String(args.id || '').trim();
+      const idList = requestedIds.length ? requestedIds : (singleId ? [singleId] : []);
+      const requestedServer = String(args.server || '').trim();
+
+      const cards = [];
+      let lastSearchResult = null;
+      for (const id of idList) {
+        const matched = findRememberedSong(ctx, id, requestedServer);
+        if (!matched) return { success: false, error: '该歌曲不在本次搜索候选中，请先搜索后再发卡片。' };
+        cards.push({
+          id: matched.id,
+          source: matched.server || requestedServer || 'netease',
+          name: matched.name,
+          artist: matched.artist,
+          pic: matched.pic,
+          duration: matched.duration,
+        });
+      }
+
+      if (cards.length === 0) {
+        const requestedName = String(args.name || '').trim();
+        const keyword = requestedName
+          ? [requestedName, String(args.artist || '').trim()].filter(Boolean).join(' ')
+          : '';
+        if (!keyword) return { success: false, error: '请提供候选中的歌曲 ID，或歌名与歌手。' };
+        const found = await searchSongsInternal(keyword, requestedServer || 'netease', MAX_CHAT_SONG_CARDS);
+        if (!found.success || !found.songs?.length) return { success: false, error: found.error || '没搜到歌' };
+        rememberSongCandidates(ctx, found.songs);
+        lastSearchResult = found;
+        const matched = pickRequestedSong(found.songs, {
+          name: requestedName,
+          artist: String(args.artist || '').trim(),
+        });
+        if (matched?.id) {
+          cards.push({
+            id: matched.id,
+            source: matched.server || requestedServer || 'netease',
+            name: matched.name,
+            artist: matched.artist,
+            pic: matched.pic,
+            duration: matched.duration,
+          });
+        } else if (String(args.artist || '').trim()) {
+          return { success: false, error: '搜索结果有歧义，不能确定是哪一首，请让用户再确认。', songs: found.songs };
+        } else {
+          // 只给歌名、用户需要自己挑：直接把候选做成多张卡片，一条消息发出去
+          for (const item of found.songs) {
+            cards.push({
+              id: item.id,
+              source: item.server || requestedServer || 'netease',
+              name: item.name,
+              artist: item.artist,
+              pic: item.pic,
+            });
+          }
+        }
+      }
+
+      // 本轮缓冲：同一次回复里的多张卡片合并成一条聊天消息
+      const text = String(args.text || '').trim().slice(0, 200);
+      if (text && !ctx.cardBuffer.text) ctx.cardBuffer.text = text;      const before = ctx.cardBuffer.cards.length;
+      for (const card of cards) {
+        const key = `${card.source}:${card.id}`;
+        if (ctx.cardBuffer.seen.has(key)) continue;
+        ctx.cardBuffer.seen.add(key);
+        if (ctx.cardBuffer.cards.length >= MAX_CHAT_SONG_CARDS) break;
+        ctx.cardBuffer.cards.push(card);
+      }
+      if (ctx.cardBuffer.cards.length === 0) {
+        return { success: false, error: '这些歌曲已经发过卡片了，不要重复发送。' };
+      }
+
+      return {
+        success: true,
+        message: `已准备 ${ctx.cardBuffer.cards.length - before} 张音乐卡片（同一条消息展示，用户点卡片可在自己客户端试听确认）`,
+        cards: ctx.cardBuffer.cards.map((card) => ({ name: card.name, artist: card.artist })),
+        ...(lastSearchResult ? { songs: lastSearchResult.songs } : {}),
+      };
+    }
+
     default:
       return { success: false, error: `未知工具: ${name}` };
   }
@@ -929,6 +1046,8 @@ export async function handleRoomAiChat(params = {}) {
     intent: null,
     songCandidates: new Map(persistedSongCandidates.map((song) => [songCandidateKey(song), song])),
     executionLedger: params.executionLedger instanceof Map ? params.executionLedger : new Map(),
+    /** 本轮音乐卡片缓冲：多次 send_song_card 会合并成一条聊天消息 */
+    cardBuffer: { cards: [], seen: new Set(), text: '' },
   };
 
   const userTurnLabel = `用户「${params.userNickname || '匿名'}」（角色 ${permissions.role}）说：${userPrompt}`;
@@ -996,6 +1115,10 @@ export async function handleRoomAiChat(params = {}) {
           ? stripEmbeddedQqFaces(sanitizeAiUserFacingText(extractAssistantText(completion)))
           : sanitizeAiUserFacingText(extractAssistantText(completion));
         if (reply) finalAssistantText = reply;
+        // 模型不再调工具时，把本轮攒下的卡片作为一条消息发出；
+        // 模型本轮没另发过文字（reply_message）时，把最终回复一并带上，
+        // 否则卡片消息只剩工具参数里的半句话，看起来是被截断了
+        flushPendingSongCards(ctx, ctx.replied ? '' : reply);
         if (reply && !ctx.replied) {
           const posted = postBotChatMessage(roomId, {
             text: reply.slice(0, 500),
@@ -1026,6 +1149,9 @@ export async function handleRoomAiChat(params = {}) {
         });
       }
     }
+
+    // 轮数耗尽（模型一直调工具没给出最终回复）时，别丢掉已经缓冲的卡片
+    flushPendingSongCards(ctx, ctx.replied ? '' : finalAssistantText);
 
     if (!ctx.replied) {
       const fallback = '这次没办成，你再说具体一点试试～';

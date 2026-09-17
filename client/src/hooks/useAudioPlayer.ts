@@ -79,7 +79,13 @@ import { resetDriftController } from '../lib/driftController';
 import { getClientPlaybackState, getPlaybackTime, optimisticSeekPosition, optimisticSetPlaying, resolveInitialTrackSyncTime } from '../lib/playbackState';
 import { attachAudioBufferingListeners, isAudioBuffering, setAudioBufferEndHandler } from '../lib/audioBuffering';
 import { flushPendingPlaybackSnapshot } from '../lib/playbackSchedule';
-import { isSongPreviewSuppressingRoom, stopSongPreview } from '../lib/songPreviewPlayer';
+import { stopSongPreview } from '../lib/songPreviewPlayer';
+import {
+  getRoomAudioOwner,
+  isRoomAudioTakenOver,
+  resetRoomAudioPriority,
+} from '../lib/roomAudioPriority';
+import { stopChatCardPlayback } from '../lib/chatCardPlayer';
 import {
   bindAudioQueueId,
   clearAudioQueueBinding,
@@ -377,7 +383,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
   }, [finishSong]);
 
   const playAudio = useCallback(async (audio: HTMLAudioElement) => {
-    if (isSongPreviewSuppressingRoom()) {
+    if (isRoomAudioTakenOver()) {
       if (!audio.paused) audio.pause();
       return 'played' as PlayResult;
     }
@@ -390,7 +396,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     audio: HTMLAudioElement,
     liveRoom: NonNullable<typeof room>,
   ) => {
-    if (isSongPreviewSuppressingRoom()) {
+    if (isRoomAudioTakenOver()) {
       if (!audio.paused) audio.pause();
       return;
     }
@@ -411,7 +417,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
 
       if (isAudioSessionUnlocked()) {
         controller.enqueue(async () => {
-          if (isSongPreviewSuppressingRoom()) {
+          if (isRoomAudioTakenOver()) {
             if (!audio.paused) audio.pause();
             return;
           }
@@ -468,8 +474,8 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     options: { forceZero?: boolean; forceTime?: number; forceCorrection?: boolean } = {},
   ) => {
     controller.enqueue(async () => {
-      // 试听占用本机时禁止跟播，否则会 play 主轨把试听挤掉
-      if (isSongPreviewSuppressingRoom()) return;
+      // 本机被更高优先级占用（试听 / 聊天音乐卡片）时禁止跟播，避免抢回音频输出
+      if (isRoomAudioTakenOver()) return;
       const liveRoom = useRoomStore.getState().room;
       if (!liveRoom?.current || skippingRef.current) return;
       const song = liveRoom.current;
@@ -492,7 +498,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
   }, [controller, tvMode, shouldSkipForEndedTrackKey, handleSyncResult]);
 
   const recoverReadyAudio = useCallback((audio: HTMLAudioElement) => {
-    if (isSongPreviewSuppressingRoom() || skippingRef.current) return;
+    if (isRoomAudioTakenOver() || skippingRef.current) return;
     const liveRoom = useRoomStore.getState().room;
     if (!liveRoom?.current || !liveRoom.isPlaying) return;
     if (!isAudioBoundToQueue(audio, liveRoom.current.queueId)) return;
@@ -508,7 +514,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
 
   const applyVisibilitySync = useCallback(() => {
     controller.enqueue(async () => {
-      if (isSongPreviewSuppressingRoom()) return;
+      if (isRoomAudioTakenOver()) return;
       const liveRoom = useRoomStore.getState().room;
       if (!liveRoom?.current || !liveRoom.isPlaying || skippingRef.current) return;
       const song = liveRoom.current;
@@ -727,8 +733,8 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
       });
 
       audio.addEventListener('pause', () => {
-        // 试听占用本机音频时不自动恢复房间播放
-        if (isSongPreviewSuppressingRoom()) return;
+        // 本机被更高优先级占用（试听 / 聊天音乐卡片）时不自动恢复房间播放
+        if (isRoomAudioTakenOver()) return;
         // 仅对抗息屏瞬间的系统挂起；锁屏控件主动暂停不在此窗口内
         if (intentionalLocalPauseRef.current) return;
         // 播完触发的 pause：此时元素处于 ended，play() 会从 0 重放同一首。
@@ -1002,10 +1008,11 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
       return;
     }
 
-    // 用户主动恢复房间播放时结束试听；静默跟播则继续让路给试听
-    if (isSongPreviewSuppressingRoom()) {
+    // 用户主动恢复房间播放时结束本机占用（试听 / 卡片播放）；静默跟播则继续让路
+    if (isRoomAudioTakenOver()) {
       if (!fromUserGesture) return;
-      stopSongPreview({ resumeRoom: false });
+      if (getRoomAudioOwner() === 'chat_card') stopChatCardPlayback({ resumeRoom: false });
+      else stopSongPreview({ resumeRoom: false });
     }
 
     if (fromUserGesture) {
@@ -1574,7 +1581,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
   // 服务端 PlaybackState（150ms 防抖后）→ 统一同步
   useEffect(() => {
     if (trackLoading) return;
-    if (isSongPreviewSuppressingRoom()) return;
+    if (isRoomAudioTakenOver()) return;
     const liveRoom = useRoomStore.getState().room;
     if (!liveRoom?.current) return;
     if (!canSyncAudioForQueue(controller.audio, liveRoom.current.queueId)) return;
@@ -1596,7 +1603,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
 
     const id = window.setInterval(() => {
       if (document.hidden) return;
-      if (isSongPreviewSuppressingRoom()) return;
+      if (isRoomAudioTakenOver()) return;
       const liveRoom = useRoomStore.getState().room;
       if (!liveRoom?.current || !liveRoom.isPlaying) return;
       if (skippingRef.current || controller.isRunning) return;
@@ -1614,7 +1621,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
 
   useEffect(() => {
     setAudioBufferEndHandler((audio) => {
-      if (isSongPreviewSuppressingRoom()) return;
+      if (isRoomAudioTakenOver()) return;
       const liveRoom = useRoomStore.getState().room;
       if (!liveRoom?.current || skippingRef.current) return;
       if (!canSyncAudioForQueue(controller.audio, liveRoom.current.queueId)) return;
@@ -1623,7 +1630,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
 
       const song = liveRoom.current;
       controller.enqueue(async () => {
-        if (isSongPreviewSuppressingRoom()) return;
+        if (isRoomAudioTakenOver()) return;
         await applyPostBufferSync(audio, {
           song,
           capTime: (time, mediaDur) => capSeekTime(time, song, mediaDur),
@@ -1654,7 +1661,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
 
     const resumeFromForeground = () => {
       if (document.hidden) return;
-      if (isSongPreviewSuppressingRoom()) return;
+      if (isRoomAudioTakenOver()) return;
 
       const live = useRoomStore.getState();
       const liveRoom = live.room;
@@ -1756,7 +1763,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
   }, [controller]);
 
   const handleSoftResumeLocalAudio = useCallback(() => {
-    if (isSongPreviewSuppressingRoom()) return;
+    if (isRoomAudioTakenOver()) return;
     if (suppressAutoResumeRef.current) return;
     const live = useRoomStore.getState().room;
     const audio = controller.audio;
@@ -1816,10 +1823,14 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     return () => setRetryPlayback(null);
   }, [retryPlayback, setRetryPlayback]);
 
+  // 离开房间时清掉本机音频占用，避免带入下一个房间
+  useEffect(() => () => {
+    resetRoomAudioPriority();
+  }, []);
   useEffect(() => {
     onWeChatBridgeReady(() => {
       const liveRoom = useRoomStore.getState().room;
-      if (isSongPreviewSuppressingRoom()) return;
+      if (isRoomAudioTakenOver()) return;
       if (!controller.audio.src || !liveRoom?.current || !liveRoom.isPlaying) return;
       if (!playbackStateMatchesCurrentTrack(liveRoom.current)) return;
       if (useAudioStore.getState().trackLoading || skippingRef.current) return;
@@ -1844,7 +1855,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
   useEffect(() => {
     const check = () => {
       if (document.hidden) return;
-      if (isSongPreviewSuppressingRoom()) return;
+      if (isRoomAudioTakenOver()) return;
       const liveRoom = useRoomStore.getState().room;
       if (!liveRoom?.current || !liveRoom.isPlaying) return;
       const loading = useAudioStore.getState().trackLoading;

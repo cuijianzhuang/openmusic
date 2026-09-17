@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { Trash2, Zap, ThumbsUp, ThumbsDown, AlertTriangle, Ban, GripVertical, Shuffle } from 'lucide-react';
+import { Trash2, Zap, ThumbsUp, ThumbsDown, AlertTriangle, Ban, GripVertical, Shuffle, Share2 } from 'lucide-react';
 import { getClientId } from '../../lib/clientId';
 import { formatCrossSourceTip } from '../../lib/sourceLabels';
 import type { RoomMemberTier, QueueItem, MusicSource } from '../../types';
@@ -34,6 +34,7 @@ interface Props {
   rowRef?: React.MutableRefObject<HTMLDivElement | null>;
   onLike: (queueId: string) => void;
   onDislike?: () => void;
+  onShare?: (song: QueueRowSong) => void;
   onJump: (queueId: string) => void;
   onRemove: (queueId: string) => void;
   onBan: (song: QueueRowSong) => void;
@@ -63,6 +64,7 @@ function QueueRow({
   rowRef,
   onLike,
   onDislike,
+  onShare,
   onJump,
   onRemove,
   onBan,
@@ -193,6 +195,18 @@ function QueueRow({
             className="w-7 h-7 text-netease-muted hover:text-rose-300"
             iconClassName="w-3.5 h-3.5"
           />
+          {onShare && (
+            <QueueTip content="分享到聊天">
+              <button
+                type="button"
+                onClick={() => onShare(song)}
+                className="rounded-lg p-1 text-netease-muted transition-colors hover:bg-sky-400/10 hover:text-sky-300"
+                aria-label="分享到聊天"
+              >
+                <Share2 className="h-3.5 w-3.5" />
+              </button>
+            </QueueTip>
+          )}
           {song.isCurrent && onDislike && (
             <QueueTip content={dislikedByMe
               ? `取消踩（${dislikeCount}/${dislikeSkipThreshold}）`
