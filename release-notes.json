@@ -6,5 +6,5 @@
     "优化其他已知问题",
     "最近服务器老是被攻击，没招了"
   ],
-  "forcePrompt": true
+  "forcePrompt": false
 }

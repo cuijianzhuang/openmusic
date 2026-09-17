@@ -82,6 +82,7 @@ import {
   sanitizeDeviceId,
 } from './deviceIdentity.js';
 import { resolveBoundClientNetwork } from './clientIpBinding.js';
+import { shouldRefreshRoomIdentity } from './sessionIdentity.js';
 import {
   createRoom,
   getRoomPublic,
@@ -2107,7 +2108,9 @@ async function syncAccountRoomIdentity(req, res, account) {
   const deviceId = cookieDeviceId || createServerClientId();
   const now = Math.floor(Date.now() / 1000);
   await linkDeviceToUser(deviceId, roomUserId);
-  setIdentityCookieHeaders(res, roomUserId, signClientId(roomUserId, now), deviceId);
+  if (shouldRefreshRoomIdentity(currentIdentity, roomUserId)) {
+    setIdentityCookieHeaders(res, roomUserId, signClientId(roomUserId, now), deviceId);
+  }
   account.roomUserId = roomUserId;
   return roomUserId;
 }

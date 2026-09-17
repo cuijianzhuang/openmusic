@@ -32,6 +32,7 @@ import {
   type AccountProviderStatus,
 } from '../lib/accountAuth';
 import { getInitialAccountPanelOpen } from '../lib/accountAutoPrompt';
+import { headerPillCls } from '../lib/homeHeaderActions';
 import { getAccountAccessBackView } from '../lib/accountAccessNavigation';
 import {
   bootstrapWechatFileHelperSession,
@@ -370,10 +371,10 @@ export default function AccountAccess({
           setView(account ? 'manage' : 'welcome');
           setPanelOpen(true);
         }}
-        className="group inline-flex h-10 items-center gap-2 rounded-full border border-white/20 bg-white/[0.03] px-2.5 text-sm text-white/65 outline-none transition duration-300 hover:-translate-y-0.5 hover:border-white/30 hover:bg-white/[0.1] hover:text-white focus-visible:ring-2 focus-visible:ring-netease-red/40 sm:px-3.5"
+        className={headerPillCls}
         aria-label={account ? '账户与安全' : '登录账户'}
       >
-        <span className={`flex h-6 w-6 items-center justify-center rounded-full ${account ? 'bg-white text-black' : 'bg-white/10 text-white/70'}`}>
+        <span className={`flex h-4 w-4 items-center justify-center rounded-full ${account ? 'bg-white text-black' : 'bg-white/10 text-white/70'}`}>
           {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : account ? <Check className="h-3.5 w-3.5" /> : <UserRound className="h-3.5 w-3.5" />}
         </span>
         <span className="hidden max-w-28 truncate sm:inline">{account ? (account.email || identityMap.values().next().value?.username || '我的账户') : '登录'}</span>

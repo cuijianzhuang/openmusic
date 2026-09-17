@@ -13,12 +13,13 @@ import {
 
 let bootstrapPromise: Promise<string | null> | null = null;
 let lastBootstrapError = '';
+let bootstrapGeneration = 0;
 
 export function getLastBootstrapError(): string {
   return lastBootstrapError;
 }
 
-async function requestSessionBootstrap(): Promise<string | null> {
+async function requestSessionBootstrap(generation: number): Promise<string | null> {
   if (isSiteAccessBlocked()) return null;
   const res = await fetchWithTimeout(
     '/api/session/bootstrap',
@@ -29,6 +30,7 @@ async function requestSessionBootstrap(): Promise<string | null> {
     },
     8000,
   );
+  if (generation !== bootstrapGeneration) return null;
   if (detectSiteAccessBlockResponse(res)) {
     markSiteAccessBlocked(readSoftBlockCodeFromResponse(res) || SOFT_BLOCK_CODES.SITE_BAN);
     lastBootstrapError = softBlockMessage(SOFT_BLOCK_CODES.SITE_BAN);
@@ -60,6 +62,7 @@ async function requestSessionBootstrap(): Promise<string | null> {
       musicSourcesEnabled?: Partial<Record<'netease' | 'tencent' | 'kugou' | 'qishui', boolean>>;
     };
   };
+  if (generation !== bootstrapGeneration) return null;
   // 非安全 HTTP 上 Web Crypto 可能不可用；此时服务端也不会要求请求签名。
   setApiSignKey(globalThis.crypto?.subtle ? data.apiSignKey : null);
   applySiteFeatures(data.features);
@@ -73,11 +76,13 @@ export function ensureSessionBootstrap(force = false): Promise<string | null> {
   if (isSiteAccessBlocked()) return Promise.resolve(null);
   if (force) bootstrapPromise = null;
   if (!bootstrapPromise) {
+    const generation = bootstrapGeneration;
     bootstrapPromise = (async () => {
       for (let attempt = 0; attempt < 3; attempt += 1) {
+        if (generation !== bootstrapGeneration) return null;
         if (isSiteAccessBlocked()) return null;
         try {
-          const clientId = await requestSessionBootstrap();
+          const clientId = await requestSessionBootstrap(generation);
           if (clientId) return clientId;
           if (isSiteAccessBlocked()) return null;
         } catch {
@@ -119,6 +124,7 @@ export async function requireSessionBootstrap(force = false): Promise<string> {
 
 export function resetSessionBootstrap(): void {
   if (isSiteAccessBlocked()) return;
+  bootstrapGeneration += 1;
   bootstrapPromise = null;
   setApiSignKey(null);
 }

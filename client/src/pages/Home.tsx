@@ -41,6 +41,7 @@ import { markGuideFeatureUsed } from '../lib/userGuide';
 import { useSiteFeaturesStore } from '../stores/siteFeaturesStore';
 import type { MusicAccountPlatform } from '../lib/musicAccountQr';
 import { fetchDonations, type DonationEntry } from '../lib/donations';
+import { headerIconCls, headerPillCls } from '../lib/homeHeaderActions';
 import AccountAccess from '../components/AccountAccess';
 import MyRoomsAccess from '../components/MyRoomsAccess';
 
@@ -64,13 +65,6 @@ function GiteeIcon({ className }: { className?: string }) {
     </svg>
   );
 }
-
-const headerIconCls =
-  'home-header-icon group/hicon relative inline-flex items-center justify-center h-10 w-10 rounded-full text-white/55 border border-white/8 bg-white/[0.03] outline-none transition-[color,background,border-color,transform,box-shadow] duration-300 hover:text-white hover:bg-white/[0.1] hover:border-white/18 hover:-translate-y-0.5 hover:shadow-[0_8px_22px_rgba(0,0,0,0.35)] focus-visible:text-white focus-visible:ring-2 focus-visible:ring-netease-red/40';
-
-const headerPillCls =
-  'home-header-pill group/pill inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-sm font-medium text-white/65 border border-white/8 bg-white/[0.03] outline-none transition-[color,background,border-color,transform,box-shadow] duration-300 hover:text-white hover:bg-white/[0.1] hover:border-white/18 hover:-translate-y-0.5 hover:shadow-[0_8px_22px_rgba(0,0,0,0.3)] focus-visible:ring-2 focus-visible:ring-netease-red/40';
-
 
 /** 逐字母渐变色：品牌红 → 玫红 → 紫，跨整个词插值（hover 时逐字点亮） */
 function buildGradientLetters(text: string) {
@@ -698,15 +692,17 @@ export default function Home() {
                 </span>
               ))}
             </span>
-          </div>
-
-          <div className="flex items-center gap-2 sm:gap-2.5">
-            <div className="flex items-center gap-1.5 sm:gap-2">
+            <div data-home-primary-actions className="flex items-center gap-1.5 sm:gap-2">
               <AccountAccess
                 allowAutoPrompt={!siteAnnouncementOpen}
                 onOpenChange={setAccountPanelOpen}
               />
               <MyRoomsAccess />
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 sm:gap-2.5">
+            <div className="flex items-center gap-1.5 sm:gap-2">
               <Tooltip content="支持 OpenMusic">
                 <button type="button" onClick={() => setDonationOpen(true)} className={`hidden sm:inline-flex ${headerPillCls}`} aria-label="支持 OpenMusic">
                   <Heart className="h-4 w-4 text-pink-300 fill-current" />
