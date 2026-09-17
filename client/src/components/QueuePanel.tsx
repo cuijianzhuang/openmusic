@@ -37,6 +37,7 @@ type RowData = {
   onRemove: (queueId: string) => void;
   onBan: (song: QueueRowSong) => void;
   onArtistClick?: (artist: string) => void;
+  onShareSong?: (song: QueueRowSong) => void;
   onDragStart: (queueId: string) => void;
   onDragOver: (queueId: string) => void;
   onDrop: (queueId: string) => void;
@@ -70,6 +71,7 @@ const VirtualQueueRow = memo(function VirtualQueueRow({ index, style, data }: Li
           rowRef={song.isCurrent ? data.currentRef : undefined}
           onLike={data.onLike}
           onDislike={song.isCurrent ? data.onDislike : undefined}
+          onShare={data.onShareSong}
           onJump={data.onJump}
           onRemove={data.onRemove}
           onBan={data.onBan}
@@ -110,9 +112,10 @@ const VirtualQueueRow = memo(function VirtualQueueRow({ index, style, data }: Li
 interface Props {
   fillHeight?: boolean;
   onArtistClick?: (artist: string) => void;
+  onShareSong?: (song: QueueItem) => void;
 }
 
-export default function QueuePanel({ fillHeight = false, onArtistClick }: Props) {
+export default function QueuePanel({ fillHeight = false, onArtistClick, onShareSong }: Props) {
   const queue = useRoomStore((s) => s.room?.queue);
   const currentSong = useRoomStore((s) => s.room?.current);
   const memberTiers = useRoomStore((s) => s.room?.memberTiers);
@@ -314,6 +317,7 @@ export default function QueuePanel({ fillHeight = false, onArtistClick }: Props)
     onRemove: removeSong,
     onBan: handleBanSong,
     onArtistClick,
+    onShareSong,
     onDragStart: handleDragStart,
     onDragOver: handleDragOver,
     onDrop: handleDrop,
@@ -335,6 +339,7 @@ export default function QueuePanel({ fillHeight = false, onArtistClick }: Props)
     removeSong,
     handleBanSong,
     onArtistClick,
+    onShareSong,
     handleDragStart,
     handleDragOver,
     handleDrop,
@@ -380,6 +385,7 @@ export default function QueuePanel({ fillHeight = false, onArtistClick }: Props)
         onRemove={removeSong}
         onBan={handleBanSong}
         onArtistClick={onArtistClick}
+        onShare={onShareSong}
         onDragStart={handleDragStart}
         onDragOver={handleDragOver}
         onDrop={handleDrop}

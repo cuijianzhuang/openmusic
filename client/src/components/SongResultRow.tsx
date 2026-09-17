@@ -1,5 +1,5 @@
 import { memo, useCallback } from 'react';
-import { Plus, Loader2, Play, Pause, UserRound } from 'lucide-react';
+import { Plus, Loader2, Play, Pause, Share2, UserRound } from 'lucide-react';
 import type { SearchResult } from '../types';
 import { songKey } from '../api/music';
 import SongCover from './SongCover';
@@ -20,6 +20,8 @@ interface Props {
   favorited: boolean;
   glassRow?: boolean;
   onAdd: (song: SearchResult) => void;
+  /** 分享到当前房间聊天（音乐卡片） */
+  onShare?: (song: SearchResult) => void;
   onArtistClick?: (artist: string) => void;
 }
 
@@ -32,6 +34,7 @@ function SongResultRow({
   favorited,
   glassRow = false,
   onAdd,
+  onShare,
   onArtistClick,
 }: Props) {
   const key = songKey(song);
@@ -51,6 +54,11 @@ function SongResultRow({
     if (preview.key === key) stopSongPreview({ resumeRoom: true });
     onAdd(song);
   }, [key, onAdd, preview.key, song]);
+
+  const handleShare = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    onShare?.(song);
+  }, [onShare, song]);
 
   return (
     <div
@@ -93,6 +101,16 @@ function SongResultRow({
           </button>
         </Tooltip>
       )}
+      <Tooltip content="分享到聊天">
+        <button
+          type="button"
+          onClick={handleShare}
+          className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-white/5 text-netease-muted transition-all hover:bg-sky-400/10 hover:text-sky-300 ${alwaysShowActions ? 'opacity-100' : 'opacity-100 sm:opacity-0 sm:group-hover:opacity-100'}`}
+          aria-label="分享到聊天"
+        >
+          <Share2 className="h-3.5 w-3.5" />
+        </button>
+      </Tooltip>
       <Tooltip content={previewPlaying ? '暂停试听' : '试听'}>
         <button
           type="button"
@@ -136,6 +154,7 @@ export default memo(SongResultRow, (prev, next) => (
   && prev.favorited === next.favorited
   && prev.glassRow === next.glassRow
   && prev.onAdd === next.onAdd
+  && prev.onShare === next.onShare
   && prev.onArtistClick === next.onArtistClick
   && songKey(prev.song) === songKey(next.song)
   && prev.song.name === next.song.name

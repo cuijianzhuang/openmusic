@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { MessageCircle, MicOff } from 'lucide-react';
 import { useRoomStore } from '../stores/roomStore';
 import { useSocket } from '../hooks/useSocket';
 import { useMediaQuery } from '../hooks/useMediaQuery';
-import type { ChatMessage, ChatReplyRef, RoomUser } from '../types';
+import type { ChatMessage, ChatReplyRef, ChatSongCard, RoomUser, Song } from '../types';
 import { isChatMutedForUser } from '../lib/chatMute';
 import { getClientId } from '../lib/clientId';
 import Tooltip from './Tooltip';
@@ -14,10 +14,14 @@ import ChatImageLightbox from './ChatImageLightbox';
 import ChatMessageList, { type ChatMessageListHandle } from './ChatMessageList';
 import ChatInputBar, { type ChatInputBarHandle, type PendingChatImage } from './ChatInputBar';
 import ChatMutePicker from './ChatMutePicker';
-import { compactReplyText } from '../lib/chatPanelUtils';
+import { compactReplyText, compactSongCardsText } from '../lib/chatPanelUtils';
 import { useChatRoomMeta, useChatRoomSlice } from '../lib/chatRoomSlice';
 import { fetchChatUploadEnabled } from '../api/chatImage';
 import { fetchStickerSearchEnabled } from '../api/stickerSearch';
+import type { ChatCardActions } from './chatCardActions';
+import { useFavorites } from '../hooks/useFavorites';
+import { useRoomSongKeySets } from '../hooks/useRoomSongKeySets';
+import { songKey } from '../api/music';
 
 export default function ChatPanel({ className = '' }: { className?: string }) {
   const chatRoomSlice = useChatRoomSlice();
@@ -29,7 +33,9 @@ export default function ChatPanel({ className = '' }: { className?: string }) {
   const isAdmin = useRoomStore((s) => s.isAdmin);
   const canControlPlayback = useRoomStore((s) => s.canControlPlayback);
   const canModerate = isOwner || isAdmin;
-  const { sendChat, recallChat, setChatMute, loadChatHistory, toggleChatReaction } = useSocket();
+  const { sendChat, recallChat, setChatMute, loadChatHistory, toggleChatReaction, addSong } = useSocket();
+  const { favoriteIds, toggleFavorite } = useFavorites();
+  const { queueKeys } = useRoomSongKeySets();
 
   const [replyTo, setReplyTo] = useState<ChatReplyRef | null>(null);
   const [reactionPickerMessageId, setReactionPickerMessageId] = useState<string | null>(null);
@@ -41,6 +47,7 @@ export default function ChatPanel({ className = '' }: { className?: string }) {
   const [pendingImage, setPendingImage] = useState<PendingChatImage | null>(null);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [chatScrollRoot, setChatScrollRoot] = useState<HTMLDivElement | null>(null);
+  const [cardPendingKeys, setCardPendingKeys] = useState<Set<string>>(() => new Set());
 
   const chatPanelRef = useRef<HTMLDivElement>(null);
   const chatOverlayHostRef = useRef<HTMLDivElement>(null);
@@ -59,6 +66,8 @@ export default function ChatPanel({ className = '' }: { className?: string }) {
 
   useEffect(() => {
     if (!chatRoomSlice?.id) return;
+    setMuteError('');
+    setCardPendingKeys(new Set());
     setReplyTo(null);
     setPendingImage((current) => {
       if (current?.previewUrl) URL.revokeObjectURL(current.previewUrl);
@@ -113,7 +122,8 @@ export default function ChatPanel({ className = '' }: { className?: string }) {
       id: msg.id,
       userId: msg.userId,
       nickname: msg.nickname,
-      text: compactReplyText(msg.text, msg.imageUrl, msg.imageKey, msg.asSticker),
+      text: compactReplyText(msg.text, msg.imageUrl, msg.imageKey, msg.asSticker)
+        || compactSongCardsText(msg.songs),
       imageUrl: msg.imageUrl?.startsWith('data:') ? null : (msg.imageUrl || null),
       imageKey: msg.imageKey || null,
       asSticker: Boolean(msg.asSticker || (msg.imageKey && msg.imageKey.startsWith('local-sticker:'))),
@@ -139,6 +149,50 @@ export default function ChatPanel({ className = '' }: { className?: string }) {
       setMuteError(res.error);
     }
   }, [toggleChatReaction]);
+
+  /** 卡片键 → 收藏 / 点歌接口使用的 Song（封面沿用服务端校验过的直链） */
+  const cardSong = useCallback((card: ChatSongCard): Song => ({
+    id: card.id,
+    source: card.source,
+    name: card.name,
+    artist: card.artist,
+    album: card.album,
+    duration: card.duration,
+    pic: card.pic,
+  }), []);
+
+  const markCardPending = useCallback((key: string, pending: boolean) => {
+    setCardPendingKeys((prev) => {
+      const next = new Set(prev);
+      if (pending) next.add(key); else next.delete(key);
+      return next;
+    });
+  }, []);
+
+  const handleCardFavorite = useCallback(async (card: ChatSongCard) => {
+    const key = songKey(card);
+    markCardPending(`fav:${key}`, true);
+    const res = await toggleFavorite(cardSong(card));
+    markCardPending(`fav:${key}`, false);
+    if (!res.success && res.error) setMuteError(res.error);
+  }, [cardSong, markCardPending, toggleFavorite]);
+
+  const handleCardAddToQueue = useCallback(async (card: ChatSongCard) => {
+    const key = songKey(card);
+    markCardPending(`add:${key}`, true);
+    // 服务端仍会按房规 / 冷却 / 上限再校验一次
+    const res = await addSong(cardSong(card));
+    markCardPending(`add:${key}`, false);
+    if (!res.success && res.error) setMuteError(res.error);
+  }, [addSong, cardSong, markCardPending]);
+
+  const cardActions = useMemo<ChatCardActions>(() => ({
+    favoriteKeys: favoriteIds,
+    queueKeys,
+    pendingKeys: cardPendingKeys,
+    onToggleFavorite: (card) => { void handleCardFavorite(card); },
+    onAddToQueue: (card) => { void handleCardAddToQueue(card); },
+  }), [cardPendingKeys, favoriteIds, handleCardAddToQueue, handleCardFavorite, queueKeys]);
 
   const handleRecall = useCallback(async (msg: ChatMessage) => {
     const res = await recallChat(msg.id);
@@ -279,6 +333,7 @@ export default function ChatPanel({ className = '' }: { className?: string }) {
           onMentionUser={handleMentionUser}
           onToggleReaction={handleToggleReaction}
           onPreviewImage={setPreviewImageUrl}
+          cardActions={cardActions}
           loadChatHistory={loadChatHistory}
           onScrollRootChange={setChatScrollRoot}
         />

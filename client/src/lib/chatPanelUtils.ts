@@ -93,6 +93,22 @@ export function compactReplyText(
   return '';
 }
 
+/** 聊天音乐卡片的可读文案（回复引用、通知、撤回提示都用它） */
+function compactSongCardText(song?: { name?: string; artist?: string } | null): string {
+  if (!song?.name) return '[音乐卡片]';
+  const artist = String(song.artist || '').trim();
+  return `[音乐] ${song.name}${artist ? ` - ${artist}` : ''}`.slice(0, 48);
+}
+
+/** 一条消息可能带多张卡片，取首张作为引用/通知文案 */
+export function compactSongCardsText(
+  songs?: Array<{ name?: string; artist?: string }> | null,
+): string {
+  if (!songs?.length) return '';
+  const first = compactSongCardText(songs[0]);
+  return songs.length > 1 ? `${first} 等 ${songs.length} 首`.slice(0, 48) : first;
+}
+
 export function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
