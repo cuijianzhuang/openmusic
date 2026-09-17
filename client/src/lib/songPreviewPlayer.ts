@@ -4,6 +4,15 @@ import { resolveQishuiLocalPlaybackUrl, isQishuiLocalPlaybackUrl } from './qishu
 import { getSharedAudio } from './audioElement';
 import { getAudioController } from './audioController';
 import { configureInlineAudio } from './audioUnlock';
+import {
+  acquireRoomAudio,
+  consumeRoomResumeRequest,
+  isRoomAudioTakenOver,
+  markRoomPausedForLocalPlayback,
+  releaseRoomAudio,
+  resetRoomAudioPriority,
+  unregisterRoomAudio,
+} from './roomAudioPriority';
 import { useAudioStore } from '../stores/audioStore';
 import { useRoomStore } from '../stores/roomStore';
 
@@ -20,18 +29,12 @@ let activeKey: string | null = null;
 let status: SongPreviewStatus = 'idle';
 let lastError: string | null = null;
 let loadToken = 0;
-let pausedRoomForPreview = false;
 let previewAbortController: AbortController | null = null;
 
 const listeners = new Set<() => void>();
 
 function notify() {
   listeners.forEach((cb) => cb());
-}
-
-/** 试听占用本机音频：房间主播放应暂停且勿自动跟播 */
-export function isSongPreviewSuppressingRoom(): boolean {
-  return status === 'loading' || status === 'playing' || status === 'paused';
 }
 
 export function applyPreviewVolume(volume: number): void {
@@ -57,6 +60,8 @@ function getOrCreatePreviewAudio(): HTMLAudioElement {
         lastError = '试听加载失败';
         status = 'error';
         notify();
+        // 播放中出错时 play() 已经 resolve，不会再走下面的 catch，必须在这里归还音频
+        releaseAudio();
         resumeRoomAudioIfNeeded();
       }
     });
@@ -66,25 +71,45 @@ function getOrCreatePreviewAudio(): HTMLAudioElement {
 
 function pauseRoomAudioLocally() {
   const room = useRoomStore.getState().room;
-  if (room?.isPlaying) {
-    pausedRoomForPreview = true;
-  }
+  if (room?.isPlaying) markRoomPausedForLocalPlayback();
   const audio = getSharedAudio();
   if (!audio.paused) {
     audio.pause();
   }
   // 再入队 pause，排在可能已排队的 play/sync 之后，避免被跟播立刻挤掉
   getAudioController().enqueue(() => {
-    if (!isSongPreviewSuppressingRoom()) return;
+    if (!isRoomAudioTakenOver()) return;
     if (!getSharedAudio().paused) {
       getSharedAudio().pause();
     }
   });
 }
 
+function takeOverPreviewAudio() {
+  pauseRoomAudioLocally();
+  acquireRoomAudio('preview', () => {
+    // 被其它本机播放接管：立即停止试听，避免两路音频同时出声
+    if (previewAudio && !previewAudio.paused) previewAudio.pause();
+    if (status === 'playing' || status === 'loading') {
+      loadToken += 1;
+      previewAbortController?.abort();
+      previewAbortController = null;
+      activeKey = null;
+      status = 'idle';
+      lastError = null;
+      notify();
+    }
+  });
+}
+
+function releaseAudio(): boolean {
+  return releaseRoomAudio('preview');
+}
+
 function resumeRoomAudioIfNeeded() {
-  if (!pausedRoomForPreview) return;
-  pausedRoomForPreview = false;
+  // 其它本机播放（如聊天音乐卡片）仍占用音频时不要抢回播放
+  if (isRoomAudioTakenOver()) return;
+  if (!consumeRoomResumeRequest()) return;
   const room = useRoomStore.getState().room;
   if (room?.isPlaying) {
     useAudioStore.getState().retryPlayback?.(true);
@@ -104,9 +129,10 @@ function finishPreview(options: { resumeRoom: boolean }) {
   activeKey = null;
   status = 'idle';
   lastError = null;
+  const released = releaseAudio();
+  unregisterRoomAudio('preview');
   notify();
-  if (options.resumeRoom) resumeRoomAudioIfNeeded();
-  else pausedRoomForPreview = false;
+  if (options.resumeRoom !== false && released) resumeRoomAudioIfNeeded();
 }
 
 export function getSongPreviewState(): SongPreviewState {
@@ -125,6 +151,12 @@ export function stopSongPreview(options: { resumeRoom?: boolean } = {}) {
   finishPreview({ resumeRoom: options.resumeRoom !== false });
 }
 
+/** 离开房间/重置会话时清理，避免把音频占用带到下一个房间 */
+export function resetSongPreview(): void {
+  stopSongPreview({ resumeRoom: false });
+  resetRoomAudioPriority();
+}
+
 export async function toggleSongPreview(song: SearchResult): Promise<void> {
   const key = songKey(song);
   const audio = getOrCreatePreviewAudio();
@@ -138,7 +170,7 @@ export async function toggleSongPreview(song: SearchResult): Promise<void> {
       return;
     }
     if (status === 'paused') {
-      pauseRoomAudioLocally();
+      takeOverPreviewAudio();
       syncPreviewVolume();
       try {
         await audio.play();
@@ -149,6 +181,7 @@ export async function toggleSongPreview(song: SearchResult): Promise<void> {
         lastError = '无法播放试听';
         status = 'error';
         notify();
+        releaseAudio();
         resumeRoomAudioIfNeeded();
       }
       return;
@@ -165,7 +198,7 @@ export async function toggleSongPreview(song: SearchResult): Promise<void> {
   lastError = null;
   notify();
 
-  pauseRoomAudioLocally();
+  takeOverPreviewAudio();
 
   try {
     const resolved = await getSongUrlInfo(song);
@@ -191,6 +224,7 @@ export async function toggleSongPreview(song: SearchResult): Promise<void> {
     lastError = err instanceof Error && err.message ? '试听失败，换一首试试' : '试听失败';
     status = 'error';
     notify();
+    releaseAudio();
     resumeRoomAudioIfNeeded();
   }
 }

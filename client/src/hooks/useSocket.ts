@@ -13,6 +13,8 @@ import type { ChatMention, ChatReplyRef, ChatMessage, FavoriteSong, PlaybackMedi
 import { sanitizeIncomingChatMessage } from '../lib/chatAi';
 
 import { stopSharedAudio } from '../lib/audioElement';
+import { resetChatCardPlayback } from '../lib/chatCardPlayer';
+import { resetSongPreview } from '../lib/songPreviewPlayer';
 import { resetDriftController } from '../lib/driftController';
 import { resetPhaseSync } from '../lib/playbackSync';
 import { resetSyncStateMachine } from '../lib/syncStateMachine';
@@ -799,6 +801,8 @@ export function useSocket() {
       useChatStore.getState().clear();
       useChatSystemToastStore.getState().clear();
       useSongHistoryStore.getState().clear();
+      resetChatCardPlayback();
+      resetSongPreview();
       stopSharedAudio();
       resetSyncStateMachine();
       resetPhaseSync();
@@ -1023,6 +1027,8 @@ export function useSocket() {
     useChatStore.getState().clear();
     useChatSystemToastStore.getState().clear();
     useSongHistoryStore.getState().clear();
+    resetChatCardPlayback();
+    resetSongPreview();
     stopSharedAudio();
     resetSyncStateMachine();
     resetPhaseSync();
@@ -1235,6 +1241,30 @@ export function useSocket() {
       timeoutMs,
     );
 
+  }, []);
+
+  /** 分享音乐卡片到当前房间聊天（仅聊天，不影响房间播放） */
+  const shareSongToChat = useCallback((
+    song: Song,
+    text = '',
+  ): Promise<{ success: boolean; error?: string }> => {
+    return emitWithAck(
+      'share_song_to_chat',
+      {
+        text,
+        songs: [{
+          id: song.id,
+          source: song.source,
+          name: song.name,
+          artist: song.artist,
+          album: song.album,
+          duration: song.duration,
+          // 封面直链：服务端按平台白名单校验后才写入卡片，客户端无需再取一次图
+          pic: song.pic,
+        }],
+      },
+      { success: false, error: '连接超时，请重试' },
+    );
   }, []);
 
   const toggleChatReaction = useCallback((
@@ -1914,6 +1944,8 @@ export function useSocket() {
     rejectSkip,
 
     sendChat,
+
+    shareSongToChat,
 
     toggleChatReaction,
 

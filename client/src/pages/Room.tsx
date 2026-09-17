@@ -77,6 +77,7 @@ import { getSongRequestBlockReason } from '../lib/roomPermissions';
 import { markAnnouncementSeen, shouldAutoShowAnnouncement } from '../lib/announcementSeen';
 import JumpRequestBanner from '../components/JumpRequestBanner';
 import Toast from '../components/Toast';
+import ShareSongCardModal from '../components/ShareSongCardModal';
 import QueueSystemToast from '../components/QueueSystemToast';
 import Tooltip from '../components/Tooltip';
 import RoomThemeColorPicker from '../components/RoomThemeColorPicker';
@@ -305,7 +306,7 @@ export default function Room() {
     noindex: true,
   });
 
-  const { joinRoom, addSong, leaveRoom, createFavoriteShare, revokeFavoriteShare, previewFavoriteShare, importFavoriteShare, renameRoomName, setRoomLock, setRoomFmMode, setRoomPlaylistRoaming, setRoomAnnouncement, setRoomCustomCover, setChatHistoryVisibleOnJoin, setChatShowAvatars, setRoomJoinNotice, setRoomAiSettings, setRoomMaxAdmins, setRoomAdminSelfManageMemberTier, setRoomPlaybackRate, setSongRequestEnabled, unbanRoomSong, addRoomForbiddenWord, removeRoomForbiddenWord, setRoomMemberTier, removeRoomMemberTier, setRoomMemberSettings, loadSongHistory, transferOwner, destroyRoom, applyRoomPermanent, cancelRoomPermanent, clearQueue, createMusicAccountQr, checkMusicAccountQr, bindMusicAccount, listMusicAccounts, setMusicAccountShared, unbindMusicAccount, skipSong, togglePlay } = useSocket();
+  const { joinRoom, addSong, leaveRoom, shareSongToChat, createFavoriteShare, revokeFavoriteShare, previewFavoriteShare, importFavoriteShare, renameRoomName, setRoomLock, setRoomFmMode, setRoomPlaylistRoaming, setRoomAnnouncement, setRoomCustomCover, setChatHistoryVisibleOnJoin, setChatShowAvatars, setRoomJoinNotice, setRoomAiSettings, setRoomMaxAdmins, setRoomAdminSelfManageMemberTier, setRoomPlaybackRate, setSongRequestEnabled, unbanRoomSong, addRoomForbiddenWord, removeRoomForbiddenWord, setRoomMemberTier, removeRoomMemberTier, setRoomMemberSettings, loadSongHistory, transferOwner, destroyRoom, applyRoomPermanent, cancelRoomPermanent, clearQueue, createMusicAccountQr, checkMusicAccountQr, bindMusicAccount, listMusicAccounts, setMusicAccountShared, unbindMusicAccount, skipSong, togglePlay } = useSocket();
   const {
     listFavorites,
     setFavorite,
@@ -1554,6 +1555,52 @@ export default function Room() {
     setListPageSongs(songs);
   }, []);
 
+  /** 分享音乐卡片到当前房间聊天：先弹窗确认文案，再发送；不限房间播放 */
+  const [shareCardSong, setShareCardSong] = useState<Song | null>(null);
+  const [shareCardSending, setShareCardSending] = useState(false);
+
+  const handleShareSongToChat = useCallback((song: Song) => {
+    if (!song?.id || !song.name) {
+      showToast('歌曲信息不完整，无法分享', 'error');
+      return;
+    }
+    setShareCardSong({
+      id: song.id,
+      source: song.source || 'netease',
+      name: song.name,
+      artist: song.artist || '未知歌手',
+      album: song.album,
+      duration: song.duration,
+      pic: song.pic,
+    });
+  }, [showToast]);
+
+  const closeShareCardModal = useCallback(() => {
+    if (shareCardSending) return;
+    setShareCardSong(null);
+  }, [shareCardSending]);
+
+  const confirmShareSongToChat = useCallback(async (text: string) => {
+    if (!shareCardSong || shareCardSending) return;
+    setShareCardSending(true);
+    const res = await shareSongToChat({
+      id: shareCardSong.id,
+      source: shareCardSong.source,
+      name: shareCardSong.name,
+      artist: shareCardSong.artist,
+      album: shareCardSong.album,
+      duration: shareCardSong.duration,
+      pic: shareCardSong.pic,
+    }, text);
+    setShareCardSending(false);
+    if (res.success) {
+      setShareCardSong(null);
+      showToast('已分享到聊天', 'success');
+      return;
+    }
+    showToast(res.error || '分享失败', 'error');
+  }, [shareCardSending, shareCardSong, shareSongToChat, showToast]);
+
   const handleAddMany = useCallback(async (songs: SearchResult[]) => {
     if (addingPage || songs.length === 0) return;
     const blockReason = getSongRequestBlockReason(
@@ -2397,7 +2444,7 @@ export default function Room() {
         <QueueSystemToast />
       </div>
       <div className={`p-2 ${fillHeight ? 'flex-1 min-h-0 overflow-hidden flex flex-col' : ''}`}>
-        <QueuePanel fillHeight={fillHeight} onArtistClick={handleArtistClick} />
+        <QueuePanel fillHeight={fillHeight} onArtistClick={handleArtistClick} onShareSong={handleShareSongToChat} />
       </div>
     </div>
   );
@@ -2732,6 +2779,7 @@ export default function Room() {
             results={results}
             addingId={addingId}
             onAdd={handleAdd}
+            onShare={handleShareSongToChat}
             onArtistClick={handleArtistClick}
             keyword={searchedKeyword}
             alwaysShowActions
@@ -2810,7 +2858,7 @@ export default function Room() {
                 </div>
               ) : null
             }
-            queueContent={<QueuePanel fillHeight onArtistClick={handleArtistClick} />}
+            queueContent={<QueuePanel fillHeight onArtistClick={handleArtistClick} onShareSong={handleShareSongToChat} />}
             chatContent={<ChatPanel />}
             settingsPanel={
               <ImmersiveFxSettingsPanel
@@ -2857,6 +2905,16 @@ export default function Room() {
       </Suspense>
 
       <AudioEngine />
+
+      {shareCardSong && (
+        <ShareSongCardModal
+          open
+          song={shareCardSong}
+          loading={shareCardSending}
+          onCancel={closeShareCardModal}
+          onConfirm={(text) => void confirmShareSongToChat(text)}
+        />
+      )}
 
       {toast && (
         <Toast
@@ -3603,6 +3661,7 @@ export default function Room() {
                   results={results}
                   addingId={addingId}
                   onAdd={handleAdd}
+                  onShare={handleShareSongToChat}
                   onArtistClick={handleArtistClick}
                   keyword={searchedKeyword}
                   alwaysShowActions
