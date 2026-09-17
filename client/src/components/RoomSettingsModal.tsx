@@ -56,6 +56,7 @@ export interface SongRequestSettings {
   dislikeSkipPercent: number;
   clearSongsOnLeaveEnabled: boolean;
   clearSongsOnLeaveDelayMinutes: number;
+  deferOfflineRequesterSongs: boolean;
   minStayMinutes: number;
   maxPerUser: number;
   cooldownSec: number;
@@ -74,6 +75,7 @@ function songRequestEqual(a: SongRequestSettings, b: SongRequestSettings) {
     && a.dislikeSkipPercent === b.dislikeSkipPercent
     && a.clearSongsOnLeaveEnabled === b.clearSongsOnLeaveEnabled
     && a.clearSongsOnLeaveDelayMinutes === b.clearSongsOnLeaveDelayMinutes
+    && a.deferOfflineRequesterSongs === b.deferOfflineRequesterSongs
     && a.minStayMinutes === b.minStayMinutes
     && a.maxPerUser === b.maxPerUser
     && a.cooldownSec === b.cooldownSec
@@ -1763,6 +1765,14 @@ export default function RoomSettingsModal({
                     />
                   </div>
                 )}
+
+                <Toggle
+                  checked={draftSongRequest.deferOfflineRequesterSongs}
+                  disabled={songRequestSaving}
+                  onChange={(deferOfflineRequesterSongs) => setDraftSongRequest((prev) => ({ ...prev, deferOfflineRequesterSongs }))}
+                  label="离房成员歌曲置后"
+                  description="仅用户轮播生效；关闭后离房成员仍按原始点歌人轮次播放"
+                />
 
                 <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5">
                   <label htmlFor="settings-min-stay" className="text-sm font-medium text-white">

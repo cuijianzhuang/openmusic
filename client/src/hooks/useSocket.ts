@@ -326,6 +326,7 @@ async function applyCachedOwnerRoomConfigAfterJoin(room: RoomState, socketId?: s
     dislikeSkipPercent: config.dislikeSkipPercent,
     clearSongsOnLeaveEnabled: config.clearSongsOnLeaveEnabled,
     clearSongsOnLeaveDelaySec: config.clearSongsOnLeaveDelaySec,
+    deferOfflineRequesterSongs: config.deferOfflineRequesterSongs,
   });
 
   cacheCurrentOwnerRoomConfig(latestRoom || useRoomStore.getState().room || room, { force: true });
@@ -1673,6 +1674,7 @@ export function useSocket() {
     dislikeSkipPercent?: number;
     clearSongsOnLeaveEnabled?: boolean;
     clearSongsOnLeaveDelaySec?: number;
+    deferOfflineRequesterSongs?: boolean;
     minStaySec?: number;
     maxPerUser?: number;
     cooldownSec?: number;

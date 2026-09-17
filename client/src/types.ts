@@ -332,6 +332,8 @@ export interface RoomState {
   clearSongsOnLeaveEnabled?: boolean;
   /** 退出后等待多久再清除，秒，默认 60 */
   clearSongsOnLeaveDelaySec?: number;
+  /** 用户轮播时，离房成员的待播歌曲是否在在线成员之后播放，默认开启 */
+  deferOfflineRequesterSongs?: boolean;
   /** 进房后需等待的秒数才能点歌，0 表示不限制 */
   songRequestMinStaySec?: number;
   /** 每人队列中最多保留几首，0 表示不限制 */
@@ -446,4 +448,3 @@ export interface FavoriteSong extends Song {
   /** 用户为此收藏选择的分类；缺失时归入“未分类”。 */
   category?: string;
 }
-

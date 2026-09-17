@@ -21,6 +21,7 @@ export interface CachedOwnerRoomConfigSettings {
   dislikeSkipPercent?: number;
   clearSongsOnLeaveEnabled?: boolean;
   clearSongsOnLeaveDelaySec?: number;
+  deferOfflineRequesterSongs?: boolean;
   songRequestMinStaySec?: number;
   songRequestMaxPerUser?: number;
   songRequestCooldownSec?: number;
@@ -88,6 +89,7 @@ function sanitizeSettings(raw: unknown): CachedOwnerRoomConfigSettings {
     dislikeSkipPercent: asNumber(obj.dislikeSkipPercent),
     clearSongsOnLeaveEnabled: asBoolean(obj.clearSongsOnLeaveEnabled),
     clearSongsOnLeaveDelaySec: asNumber(obj.clearSongsOnLeaveDelaySec),
+    deferOfflineRequesterSongs: asBoolean(obj.deferOfflineRequesterSongs),
     songRequestMinStaySec: asNumber(obj.songRequestMinStaySec),
     songRequestMaxPerUser: asNumber(obj.songRequestMaxPerUser),
     songRequestCooldownSec: asNumber(obj.songRequestCooldownSec),
@@ -166,6 +168,7 @@ export function extractOwnerRoomConfig(room: RoomState): CachedOwnerRoomConfigSe
     dislikeSkipPercent: room.dislikeSkipPercent,
     clearSongsOnLeaveEnabled: Boolean(room.clearSongsOnLeaveEnabled),
     clearSongsOnLeaveDelaySec: room.clearSongsOnLeaveDelaySec,
+    deferOfflineRequesterSongs: room.deferOfflineRequesterSongs !== false,
     songRequestMinStaySec: room.songRequestMinStaySec,
     songRequestMaxPerUser: room.songRequestMaxPerUser,
     songRequestCooldownSec: room.songRequestCooldownSec,

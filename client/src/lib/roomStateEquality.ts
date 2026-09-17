@@ -215,6 +215,7 @@ export function isRoomStateEquivalent(a: RoomState, b: RoomState): boolean {
     && a.dislikeSkipPercent === b.dislikeSkipPercent
     && a.clearSongsOnLeaveEnabled === b.clearSongsOnLeaveEnabled
     && a.clearSongsOnLeaveDelaySec === b.clearSongsOnLeaveDelaySec
+    && a.deferOfflineRequesterSongs === b.deferOfflineRequesterSongs
     && a.songRequestMinStaySec === b.songRequestMinStaySec
     && a.songRequestMaxPerUser === b.songRequestMaxPerUser
     && a.songRequestCooldownSec === b.songRequestCooldownSec

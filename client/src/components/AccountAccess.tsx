@@ -31,6 +31,8 @@ import {
   type AccountProfile,
   type AccountProviderStatus,
 } from '../lib/accountAuth';
+import { getInitialAccountPanelOpen } from '../lib/accountAutoPrompt';
+import { getAccountAccessBackView } from '../lib/accountAccessNavigation';
 import {
   bootstrapWechatFileHelperSession,
   buildWechatLoginQrImageUrl,
@@ -236,11 +238,13 @@ export default function AccountAccess({
 
   useEffect(() => {
     if (loading || account || !allowAutoPrompt || open) return;
+    let hasChosenGuest = false;
     try {
-      if (localStorage.getItem(GUEST_CHOICE_KEY) === 'guest') return;
+      hasChosenGuest = localStorage.getItem(GUEST_CHOICE_KEY) === 'guest';
     } catch {
-      // 无本地存储时仍展示一次选择。
+      // 本地存储不可用时仍按首次访问处理。
     }
+    if (!getInitialAccountPanelOpen(hasChosenGuest)) return;
     setView('welcome');
     setPanelOpen(true);
   }, [account, allowAutoPrompt, loading, open, setPanelOpen]);
@@ -366,7 +370,7 @@ export default function AccountAccess({
           setView(account ? 'manage' : 'welcome');
           setPanelOpen(true);
         }}
-        className="group inline-flex h-10 items-center gap-2 rounded-full border border-white/10 bg-white/[0.045] px-2.5 text-sm text-white/70 outline-none transition duration-300 hover:-translate-y-0.5 hover:border-white/20 hover:bg-white/[0.1] hover:text-white focus-visible:ring-2 focus-visible:ring-netease-red/40 sm:px-3.5"
+        className="group inline-flex h-10 items-center gap-2 rounded-full border border-white/20 bg-white/[0.03] px-2.5 text-sm text-white/65 outline-none transition duration-300 hover:-translate-y-0.5 hover:border-white/30 hover:bg-white/[0.1] hover:text-white focus-visible:ring-2 focus-visible:ring-netease-red/40 sm:px-3.5"
         aria-label={account ? '账户与安全' : '登录账户'}
       >
         <span className={`flex h-6 w-6 items-center justify-center rounded-full ${account ? 'bg-white text-black' : 'bg-white/10 text-white/70'}`}>
@@ -385,7 +389,7 @@ export default function AccountAccess({
         <div className="mb-5 flex items-center justify-between border-b border-white/8 pb-4">
           <div className="flex items-center gap-3">
             {!['welcome', 'manage'].includes(view) && (
-              <button type="button" onClick={() => { setError(''); setView(account ? 'manage' : 'methods'); }} className="rounded-lg bg-white/[0.06] p-2 text-white/55 transition hover:bg-white/10 hover:text-white" aria-label="返回">
+              <button type="button" onClick={() => { setError(''); setView(getAccountAccessBackView(view, Boolean(account))); }} className="rounded-lg bg-white/[0.06] p-2 text-white/55 transition hover:bg-white/10 hover:text-white" aria-label="返回">
                 <ArrowLeft className="h-4 w-4" />
               </button>
             )}

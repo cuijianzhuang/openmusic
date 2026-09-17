@@ -45,7 +45,7 @@ import {
   reviewPermanentApplication,
   toPublicPermanentApplication,
 } from "./permanentApplication.js";
-import { buildUserRoundRobinOrder } from "./playbackOrder.js";
+import { selectNextUserRoundRobinSong } from "./playbackOrder.js";
 import { resolveAdminOwnerLastJoinedAt } from "./adminRoomUtils.js";
 
 const generateRoomId = customAlphabet("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", 6);
@@ -813,6 +813,7 @@ export function snapshotRoomForStorage(room) {
     dislikeSkipPercent: normalizeDislikeSkipPercent(room.dislikeSkipPercent),
     clearSongsOnLeaveEnabled: Boolean(room.clearSongsOnLeaveEnabled),
     clearSongsOnLeaveDelaySec: normalizeClearSongsOnLeaveDelaySec(room.clearSongsOnLeaveDelaySec),
+    deferOfflineRequesterSongs: room.deferOfflineRequesterSongs !== false,
     bannedSongs: serializeBannedSongs(room.bannedSongs),
     forbiddenWords: serializeForbiddenWords(ensureForbiddenWords(room)),
     memberTiers: serializeMemberTiersMap(room.memberTiers),
@@ -909,6 +910,7 @@ function restoreRoomFromStorage(data) {
   room.dislikeSkipPercent = normalizeDislikeSkipPercent(data.dislikeSkipPercent);
   room.clearSongsOnLeaveEnabled = Boolean(data.clearSongsOnLeaveEnabled);
   room.clearSongsOnLeaveDelaySec = normalizeClearSongsOnLeaveDelaySec(data.clearSongsOnLeaveDelaySec ?? DEFAULT_CLEAR_SONGS_ON_LEAVE_DELAY_SEC);
+  room.deferOfflineRequesterSongs = data.deferOfflineRequesterSongs !== false;
   room.bannedSongs = restoreBannedSongs(data.bannedSongs);
   room.forbiddenWords = restoreForbiddenWords(data.forbiddenWords);
   room.memberTiers = restoreMemberTiersFromStorage(data.memberTiers);
@@ -1343,6 +1345,8 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
     dislikeSkipPercent: DEFAULT_DISLIKE_SKIP_PERCENT,
     clearSongsOnLeaveEnabled: false,
     clearSongsOnLeaveDelaySec: DEFAULT_CLEAR_SONGS_ON_LEAVE_DELAY_SEC,
+    /** 用户轮播时，离房成员的歌曲默认在仍有在线点歌人时置后 */
+    deferOfflineRequesterSongs: true,
     pendingLeaveClears: new Map(),
     bannedSongs: [],
     forbiddenWords: createDefaultForbiddenWords(),
@@ -3689,6 +3693,9 @@ export function setSongRequestEnabled(roomId, actorId, options = {}, connectionI
   if (options.clearSongsOnLeaveDelaySec !== undefined) {
     room.clearSongsOnLeaveDelaySec = normalizeClearSongsOnLeaveDelaySec(options.clearSongsOnLeaveDelaySec);
   }
+  if (options.deferOfflineRequesterSongs !== undefined) {
+    room.deferOfflineRequesterSongs = Boolean(options.deferOfflineRequesterSongs);
+  }
 
   persistRoom(room);
   return { room: serializeRoom(room) };
@@ -4746,17 +4753,12 @@ function takeNextFromQueue(room) {
       ...room.playbackRequesterOrder,
       ...queuedUserIds.filter((userId) => !room.playbackRequesterOrder.includes(userId)),
     ];
-    const onlineUserIds = queuedUserIds.filter((userId) => room.users.has(userId));
-    // 仍有人在线时只消费在线用户的歌曲；所有点歌用户都离开后才回退消费离房用户的歌曲。
-    const eligibleUserIds = onlineUserIds.length ? onlineUserIds : queuedUserIds;
-    const orderedUsers = room.playbackRequesterOrder.filter((userId) => eligibleUserIds.includes(userId));
-    const allOrder = room.playbackRequesterOrder;
-    const previousIndex = allOrder.indexOf(room.lastPlaybackRequesterId);
-    const rotatedAll = previousIndex >= 0 && allOrder.length > 1
-      ? [...allOrder.slice(previousIndex + 1), ...allOrder.slice(0, previousIndex + 1)]
-      : allOrder;
-    const rotated = rotatedAll.filter((userId) => eligibleUserIds.includes(userId));
-    const next = buildUserRoundRobinOrder(room.queue.filter((item) => eligibleUserIds.includes(item.requestedById)), { userOrder: rotated.length ? rotated : orderedUsers })[0];
+    const next = selectNextUserRoundRobinSong(room.queue, {
+      requesterOrder: room.playbackRequesterOrder,
+      lastRequesterId: room.lastPlaybackRequesterId,
+      onlineUserIds: new Set(room.users.keys()),
+      deferOfflineRequesters: room.deferOfflineRequesterSongs !== false,
+    });
     if (!next) return null;
     const index = room.queue.findIndex((item) => item.queueId === next.queueId);
     if (index >= 0) room.queue.splice(index, 1);
@@ -6274,6 +6276,7 @@ function serializeRoom(room, options = {}) {
     dislikeSkipPercent: normalizeDislikeSkipPercent(room.dislikeSkipPercent),
     clearSongsOnLeaveEnabled: Boolean(room.clearSongsOnLeaveEnabled),
     clearSongsOnLeaveDelaySec: normalizeClearSongsOnLeaveDelaySec(room.clearSongsOnLeaveDelaySec),
+    deferOfflineRequesterSongs: room.deferOfflineRequesterSongs !== false,
     bannedSongs: viewerCanModerate ? serializeBannedSongs(room.bannedSongs) : undefined,
     forbiddenWords: viewerCanModerate ? serializeForbiddenWords(ensureForbiddenWords(room)) : undefined,
     memberTiers: serializeMemberTiersMap(room.memberTiers),
@@ -6352,6 +6355,7 @@ export function prepareRoomBroadcast(roomId) {
     dislikeSkipPercent: normalizeDislikeSkipPercent(room.dislikeSkipPercent),
     clearSongsOnLeaveEnabled: Boolean(room.clearSongsOnLeaveEnabled),
     clearSongsOnLeaveDelaySec: normalizeClearSongsOnLeaveDelaySec(room.clearSongsOnLeaveDelaySec),
+    deferOfflineRequesterSongs: room.deferOfflineRequesterSongs !== false,
     memberTiers: serializeMemberTiersMap(room.memberTiers),
     memberSettings: serializeMemberSettings(room.memberSettings),
     adminSelfManageMemberTierEnabled: Boolean(room.adminSelfManageMemberTierEnabled),

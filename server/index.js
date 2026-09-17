@@ -4950,7 +4950,7 @@ io.on('connection', (socket) => {
     callback?.({ success: true, room: getViewerRoomPayload(socket, roomId), maxAdmins: result.maxAdmins });
   });
 
-  socket.on('set_room_song_request', ({ enabled, minStaySec, maxPerUser, cooldownSec, queueMaxLength, memberJumpEnabled, memberSeekEnabled, memberPauseEnabled, systemMediaPlayBound, systemMediaSkipBound, dislikeSkipMode, dislikeSkipThreshold, dislikeSkipPercent, clearSongsOnLeaveEnabled, clearSongsOnLeaveDelaySec }, callback) => {
+  socket.on('set_room_song_request', ({ enabled, minStaySec, maxPerUser, cooldownSec, queueMaxLength, memberJumpEnabled, memberSeekEnabled, memberPauseEnabled, systemMediaPlayBound, systemMediaSkipBound, dislikeSkipMode, dislikeSkipThreshold, dislikeSkipPercent, clearSongsOnLeaveEnabled, clearSongsOnLeaveDelaySec, deferOfflineRequesterSongs }, callback) => {
     if (rejectReadOnly(socket, callback)) return;
     if (rejectRateLimited(socket, limitSocketAction, 'set_room_song_request', callback)) return;
 
@@ -4976,6 +4976,7 @@ io.on('connection', (socket) => {
       dislikeSkipPercent,
       clearSongsOnLeaveEnabled,
       clearSongsOnLeaveDelaySec,
+      deferOfflineRequesterSongs,
     }, socket.id);
     if (result.error) {
       callback?.({ success: false, error: result.error });
