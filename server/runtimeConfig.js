@@ -17,11 +17,15 @@ const SECRET_FIELDS = new Set([
   'apihzKey',
   'linuxdoClientSecret',
   'githubClientSecret',
+  'smtpPass',
   'roomCredentialEncryptionKey',
   'aiApiKey',
 ]);
 const QINIU_ZONES = new Set(['z0', 'z1', 'z2', 'na0', 'as0']);
 const ENC_PREFIX = 'enc:v1:';
+const FAVORITE_SHARE_TTL_DEFAULT_MS = 30 * 24 * 60 * 60 * 1000;
+const FAVORITE_SHARE_TTL_MIN_MS = 60 * 60 * 1000;
+const FAVORITE_SHARE_TTL_MAX_MS = 90 * 24 * 60 * 60 * 1000;
 /** 管理后台回显：保留首尾，中间用 ...... 隐藏 */
 const MASK_GAP = '......';
 
@@ -60,6 +64,13 @@ function envRoomRestartGraceMs() {
   return Math.max(0, Math.min(Math.round(value), 7 * 24 * 60 * 60 * 1000));
 }
 
+/** 收藏分享有效期仅由管理后台运行配置维护。 */
+export function normalizeFavoriteShareTtlMs(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return FAVORITE_SHARE_TTL_DEFAULT_MS;
+  return Math.max(FAVORITE_SHARE_TTL_MIN_MS, Math.min(Math.round(numeric), FAVORITE_SHARE_TTL_MAX_MS));
+}
+
 function envDefaults() {
   return {
     roomEmptyTtlMs: envRoomEmptyTtlMs(),
@@ -70,6 +81,15 @@ function envDefaults() {
     roomCreateMaxOwned: 2,
     /** 无设备/用户标识时按 IP 的宽松冷却（毫秒）；0 = 关闭 */
     roomCreateIpLooseCooldownMs: 60 * 1000,
+    /** 收藏分享固定快照的有效期；在管理后台运行配置中维护。 */
+    favoriteShareTtlMs: FAVORITE_SHARE_TTL_DEFAULT_MS,
+    // 注册邮箱验证码 SMTP：仅由管理后台维护；密码作为密钥字段加密落盘。
+    smtpHost: '',
+    smtpPort: 587,
+    smtpSecure: false,
+    smtpUser: '',
+    smtpPass: '',
+    smtpFrom: '',
     // Linux.do OAuth2（房主身份绑定 / 后台登录）：全部留空表示未配置、功能自动关闭。
     // 需要先在 https://connect.linux.do 注册应用拿到 client_id / secret / 回调地址，
     // 并向 Linux.do 核实真实的授权 / 令牌 / 用户信息接口地址后再填写，不要照抄示例值。
@@ -271,6 +291,7 @@ function normalize(config) {
   const roomCreateCooldownMs = Number(config.roomCreateCooldownMs);
   const roomCreateMaxOwned = Number(config.roomCreateMaxOwned);
   const roomCreateIpLooseCooldownMs = Number(config.roomCreateIpLooseCooldownMs);
+  const favoriteShareTtlMs = normalizeFavoriteShareTtlMs(config.favoriteShareTtlMs);
   let musicApis = [];
   try {
     musicApis = normalizeMusicApis(config.musicApis);
@@ -295,6 +316,19 @@ function normalize(config) {
     roomCreateIpLooseCooldownMs: Number.isFinite(roomCreateIpLooseCooldownMs)
       ? Math.max(0, Math.min(Math.round(roomCreateIpLooseCooldownMs), 60 * 60 * 1000))
       : 60 * 1000,
+    favoriteShareTtlMs,
+    smtpHost: String(config.smtpHost || '').trim().replace(/[\r\n]/g, '').slice(0, 253),
+    smtpPort: (() => {
+      const port = Number(config.smtpPort);
+      return Number.isInteger(port) && port >= 1 && port <= 65_535 ? port : 587;
+    })(),
+    smtpSecure: config.smtpSecure === true
+      || config.smtpSecure === 1
+      || String(config.smtpSecure || '').trim().toLowerCase() === 'true'
+      || String(config.smtpSecure || '').trim() === '1',
+    smtpUser: String(config.smtpUser || '').trim().replace(/[\r\n]/g, '').slice(0, 254),
+    smtpPass: String(config.smtpPass || ''),
+    smtpFrom: String(config.smtpFrom || '').trim().replace(/[\r\n]/g, '').slice(0, 320),
     linuxdoClientId: String(config.linuxdoClientId || '').trim(),
     linuxdoClientSecret: String(config.linuxdoClientSecret || '').trim(),
     linuxdoRedirectUri: String(config.linuxdoRedirectUri || '').trim(),

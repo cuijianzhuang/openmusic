@@ -874,6 +874,28 @@ export function useSocket() {
 
     s.on('kicked', onKicked);
 
+    const onAccountSessionInvalidated = () => {
+      // HTTP 响应会更新或清除 Cookie；稍后重连以新的会话握手，不能复用旧连接身份。
+      resetSession();
+      resetSessionBootstrap();
+      window.setTimeout(() => {
+        connected.current = false;
+        socketConnectRequested = false;
+        s.connect();
+        connected.current = true;
+        socketConnectRequested = true;
+      }, 250);
+    };
+    s.on('account_session_invalidated', onAccountSessionInvalidated);
+
+    const onSocketOperationError = ({ error }: { error?: unknown } = {}) => {
+      const message = typeof error === 'string' && error.trim() ? error : '操作失败，请重试';
+      window.dispatchEvent(new CustomEvent('openmusic:visual-toast', {
+        detail: { message, type: 'error' },
+      }));
+    };
+    s.on('socket_operation_error', onSocketOperationError);
+
     s.on('connect', () => {
       debugLog('socket_connect', debugLine({
         id: s.id,
@@ -1239,16 +1261,29 @@ export function useSocket() {
     return emitWithAck('list_favorites', {}, { success: false, error: '连接超时，请重试' });
   }, []);
 
+  const listFavoriteCategories = useCallback((): Promise<{ success: boolean; categories?: string[]; error?: string }> => {
+    return emitWithAck('list_favorite_categories', {}, { success: false, error: '连接超时，请重试' });
+  }, []);
+
+  const createFavoriteCategory = useCallback((name: string): Promise<{ success: boolean; category?: string; categories?: string[]; error?: string }> => {
+    return emitWithAck('create_favorite_category', { name }, { success: false, error: '分类创建超时，请重试' });
+  }, []);
+
   const setFavorite = useCallback((song: Song, favorite: boolean): Promise<{ success: boolean; favorites?: FavoriteSong[]; favorite?: boolean; error?: string }> => {
     return emitWithAck('set_favorite', { song, favorite }, { success: false, error: '连接超时，请重试' });
+  }, []);
+
+  const setFavoriteCategory = useCallback((song: FavoriteSong, category: string): Promise<{ success: boolean; favorites?: FavoriteSong[]; category?: string | null; error?: string }> => {
+    return emitWithAck('set_favorite_category', { song, category }, { success: false, error: '收藏分类保存超时，请重试' });
   }, []);
 
   const importFavorites = useCallback((songs: Song[], sourceUserId?: string): Promise<{ success: boolean; favorites?: FavoriteSong[]; imported?: number; dropped?: number; maxFavorites?: number; identitySame?: boolean; error?: string }> => {
     return emitWithAck('import_favorites', { songs, sourceUserId }, { success: false, error: '导入超时，请稍后重试' });
   }, []);
 
-  const createFavoriteShare = useCallback(() => emitWithAck<{ success: boolean; code?: string; count?: number; error?: string }>('create_favorite_share', {}, { success: false, error: '分享码创建失败，请重试' }), []);
-  const previewFavoriteShare = useCallback((code: string) => emitWithAck<{ success: boolean; code?: string; songs?: FavoriteSong[]; error?: string }>('preview_favorite_share', { code }, { success: false, error: '分享码无效' }), []);
+  const createFavoriteShare = useCallback(() => emitWithAck<{ success: boolean; code?: string; count?: number; expiresAt?: number; error?: string }>('create_favorite_share', {}, { success: false, error: '分享码创建失败，请重试' }), []);
+  const revokeFavoriteShare = useCallback(() => emitWithAck<{ success: boolean; revoked?: boolean; error?: string }>('revoke_favorite_share', {}, { success: false, error: '分享码撤销失败，请重试' }), []);
+  const previewFavoriteShare = useCallback((code: string) => emitWithAck<{ success: boolean; code?: string; songs?: FavoriteSong[]; expiresAt?: number; error?: string }>('preview_favorite_share', { code }, { success: false, error: '分享码无效' }), []);
   const importFavoriteShare = useCallback((code: string, selectedIds: string[]) => emitWithAck<{ success: boolean; favorites?: FavoriteSong[]; imported?: number; dropped?: number; maxFavorites?: number; error?: string }>('import_favorite_share', { code, selectedIds }, { success: false, error: '分享收藏导入失败，请重试' }), []);
 
 
@@ -1883,10 +1918,14 @@ export function useSocket() {
     recallChat,
 
     listFavorites,
+    listFavoriteCategories,
+    createFavoriteCategory,
 
     setFavorite,
+    setFavoriteCategory,
     importFavorites,
     createFavoriteShare,
+    revokeFavoriteShare,
     previewFavoriteShare,
     importFavoriteShare,
     renameUser,

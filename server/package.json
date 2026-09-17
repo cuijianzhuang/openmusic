@@ -7,7 +7,7 @@
     "start": "node index.js",
     "lint": "eslint .",
     "check": "npm run lint",
-    "test": "npm run check"
+    "test": "npm run check && node --test ./*.test.js"
   },
   "dependencies": {
     "cors": "^2.8.5",

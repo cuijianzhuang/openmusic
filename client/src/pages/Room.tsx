@@ -127,6 +127,10 @@ const RoomImmersiveShell = lazyWithRetry(() => import('../components/immersive/R
 const ImmersiveFxSettingsPanel = lazyWithRetry(() => import('../components/immersive/ImmersiveFxSettingsPanel'), 'ImmersiveFxSettingsPanel');
 const ImmersiveExitModal = lazyWithRetry(() => import('../components/immersive/ImmersiveExitModal'), 'ImmersiveExitModal');
 const ImmersiveTransitionOverlay = lazyWithRetry(() => import('../components/immersive/ImmersiveTransitionOverlay'), 'ImmersiveTransitionOverlay');
+
+function isFavoriteShareCode(value: string) {
+  return /^[A-Za-z0-9_-]{8}$/.test(value);
+}
 const ChatPanel = lazyWithRetry(() => import('../components/ChatPanel'), 'ChatPanel');
 const PureModeChatDock = lazyWithRetry(() => import('../components/PureModeChatDock'), 'PureModeChatDock');
 const QueuePanel = lazyWithRetry(() => import('../components/QueuePanel'), 'QueuePanel');
@@ -301,8 +305,18 @@ export default function Room() {
     noindex: true,
   });
 
-  const { joinRoom, addSong, leaveRoom, createFavoriteShare, previewFavoriteShare, importFavoriteShare, renameRoomName, setRoomLock, setRoomFmMode, setRoomPlaylistRoaming, setRoomAnnouncement, setRoomCustomCover, setChatHistoryVisibleOnJoin, setChatShowAvatars, setRoomJoinNotice, setRoomAiSettings, setRoomMaxAdmins, setRoomAdminSelfManageMemberTier, setRoomPlaybackRate, setSongRequestEnabled, unbanRoomSong, addRoomForbiddenWord, removeRoomForbiddenWord, setRoomMemberTier, removeRoomMemberTier, setRoomMemberSettings, loadSongHistory, transferOwner, destroyRoom, applyRoomPermanent, cancelRoomPermanent, clearQueue, createMusicAccountQr, checkMusicAccountQr, bindMusicAccount, listMusicAccounts, setMusicAccountShared, unbindMusicAccount, skipSong, togglePlay } = useSocket();
-  const { listFavorites, setFavorite, importFavorites, applyFavorites, favorites: cachedFavorites } = useFavorites();
+  const { joinRoom, addSong, leaveRoom, createFavoriteShare, revokeFavoriteShare, previewFavoriteShare, importFavoriteShare, renameRoomName, setRoomLock, setRoomFmMode, setRoomPlaylistRoaming, setRoomAnnouncement, setRoomCustomCover, setChatHistoryVisibleOnJoin, setChatShowAvatars, setRoomJoinNotice, setRoomAiSettings, setRoomMaxAdmins, setRoomAdminSelfManageMemberTier, setRoomPlaybackRate, setSongRequestEnabled, unbanRoomSong, addRoomForbiddenWord, removeRoomForbiddenWord, setRoomMemberTier, removeRoomMemberTier, setRoomMemberSettings, loadSongHistory, transferOwner, destroyRoom, applyRoomPermanent, cancelRoomPermanent, clearQueue, createMusicAccountQr, checkMusicAccountQr, bindMusicAccount, listMusicAccounts, setMusicAccountShared, unbindMusicAccount, skipSong, togglePlay } = useSocket();
+  const {
+    listFavorites,
+    setFavorite,
+    setFavoriteCategory,
+    importFavorites,
+    applyFavorites,
+    favorites: cachedFavorites,
+    categories: favoriteCategories,
+    listCategories,
+    addCategory,
+  } = useFavorites();
   const { queueKeys, playedKeys } = useRoomSongKeySets();
 
 
@@ -390,6 +404,11 @@ export default function Room() {
   const [favoriteShareLoading, setFavoriteShareLoading] = useState(false);
   const [favorites, setFavorites] = useState<FavoriteSong[]>(() => cachedFavorites);
   const [favoriteQuery, setFavoriteQuery] = useState('');
+  const [activeFavoriteCategory, setActiveFavoriteCategory] = useState('全部收藏');
+  const [newFavoriteCategoryOpen, setNewFavoriteCategoryOpen] = useState(false);
+  const [newFavoriteCategoryName, setNewFavoriteCategoryName] = useState('');
+  const [creatingFavoriteCategory, setCreatingFavoriteCategory] = useState(false);
+  const [updatingFavoriteCategoryId, setUpdatingFavoriteCategoryId] = useState<string | null>(null);
   const [favoritePage, setFavoritePage] = useState(1);
   const [favoritePageSize, setFavoritePageSize] = useState<FavoritesPageSize>(DEFAULT_FAVORITES_PAGE_SIZE);
   const [removingFavoriteId, setRemovingFavoriteId] = useState<string | null>(null);
@@ -741,6 +760,11 @@ export default function Room() {
   }, [lockPassword, lockSaving, room?.id, setRoomLock, showToast]);
 
   const filteredFavorites = favorites.filter((song) => {
+    if (activeFavoriteCategory === '未分类') {
+      if (String(song.category || '').trim()) return false;
+    } else if (activeFavoriteCategory !== '全部收藏') {
+      if (String(song.category || '').trim() !== activeFavoriteCategory) return false;
+    }
     const keyword = favoriteQuery.trim().toLowerCase();
     if (!keyword) return true;
     return [song.name, song.artist, song.album, song.lrc].some((value) => String(value || '').toLowerCase().includes(keyword));
@@ -754,7 +778,7 @@ export default function Room() {
 
   useEffect(() => {
     setFavoritePage(1);
-  }, [favoriteQuery, favoritePageSize]);
+  }, [activeFavoriteCategory, favoriteQuery, favoritePageSize]);
 
   useEffect(() => {
     if (favoritePage > favoriteTotalPages) {
@@ -766,6 +790,7 @@ export default function Room() {
     setFavoritesOpen(true);
     setFavoritePage(1);
     setFavoritesLoading(true);
+    void listCategories();
     const res = await listFavorites();
     setFavoritesLoading(false);
     if (res.success) {
@@ -775,7 +800,41 @@ export default function Room() {
     } else {
       showToast(res.error || '收藏列表加载失败', 'error');
     }
-  }, [listFavorites, showToast, applyFavorites]);
+  }, [listFavorites, listCategories, showToast, applyFavorites]);
+
+  const handleCreateFavoriteCategory = useCallback(async () => {
+    const name = newFavoriteCategoryName.trim();
+    if (!name || creatingFavoriteCategory) return;
+    setCreatingFavoriteCategory(true);
+    const result = await addCategory(name);
+    setCreatingFavoriteCategory(false);
+    if (!result.success) {
+      showToast(result.error || '分类创建失败', 'error');
+      return;
+    }
+    setActiveFavoriteCategory(result.category || name);
+    setNewFavoriteCategoryName('');
+    setNewFavoriteCategoryOpen(false);
+    showToast('分类已创建', 'success');
+  }, [addCategory, creatingFavoriteCategory, newFavoriteCategoryName, showToast]);
+
+  const handleChangeFavoriteCategory = useCallback(async (song: FavoriteSong, category: string) => {
+    const key = songKey(song);
+    if (updatingFavoriteCategoryId === key) return;
+    const current = String(song.category || '').trim();
+    if (current === category.trim()) return;
+    setUpdatingFavoriteCategoryId(key);
+    const result = await setFavoriteCategory(song, category);
+    setUpdatingFavoriteCategoryId(null);
+    if (!result.success) {
+      showToast(result.error || '分类更新失败', 'error');
+      return;
+    }
+    if (result.favorites) {
+      setFavorites(result.favorites);
+      applyFavorites(result.favorites);
+    }
+  }, [applyFavorites, setFavoriteCategory, showToast, updatingFavoriteCategoryId]);
 
   const createShareCode = useCallback(async () => {
     const res = await createFavoriteShare();
@@ -786,9 +845,16 @@ export default function Room() {
       } catch {
         // 剪贴板权限不可用时仍保留分享码，用户可手动复制。
       }
-      showToast(`永久分享码 ${res.code} 已就绪`, 'success');
+      showToast(`分享码 ${res.code} 已就绪`, 'success');
     } else showToast(res.error || '分享码创建失败', 'error');
   }, [createFavoriteShare, showToast]);
+
+  const revokeShareCode = useCallback(async () => {
+    const res = await revokeFavoriteShare();
+    if (!res.success) return showToast(res.error || '分享码撤销失败', 'error');
+    setFavoriteShareCode('');
+    showToast(res.revoked ? '分享码已撤销' : '当前没有可撤销的分享码', 'success');
+  }, [revokeFavoriteShare, showToast]);
 
   const previewShareCode = useCallback(async () => {
     setFavoriteShareLoading(true);
@@ -3652,9 +3718,9 @@ export default function Room() {
             <div className="flex items-center justify-between border-b border-netease-border/50 px-4 py-3"><div><h2 className="text-sm font-medium">收藏分享</h2><p className="mt-0.5 text-xs text-netease-muted">分享出去或导入他人的收藏</p></div><button type="button" onClick={() => setFavoriteShareOpen(false)}><X className="h-5 w-5 text-netease-muted" /></button></div>
             <div className="flex border-b border-netease-border/50"><button type="button" onClick={() => { setFavoriteShareMode('create'); setFavoriteShareSongs([]); }} className={`flex-1 px-4 py-2.5 text-sm ${favoriteShareMode === 'create' ? 'border-b-2 border-netease-red text-white' : 'text-netease-muted'}`}>我的分享码</button><button type="button" onClick={() => { setFavoriteShareMode('import'); setFavoriteShareSongs([]); }} className={`flex-1 px-4 py-2.5 text-sm ${favoriteShareMode === 'import' ? 'border-b-2 border-netease-red text-white' : 'text-netease-muted'}`}>输入分享码</button></div>
             {favoriteShareMode === 'create' ? (
-              <div className="p-5"><p className="text-sm text-netease-muted">当前收藏 {favorites.length} 首。分享码长期有效，其他人预览时会看到你的最新收藏。</p><button type="button" onClick={() => void createShareCode()} className="mt-5 flex w-full items-center justify-center gap-2 rounded-lg bg-netease-red py-2.5 text-sm disabled:opacity-50"><Share2 className="h-4 w-4" />获取我的永久分享码</button>{favoriteShareCode && <div className="mt-4 rounded-lg border border-netease-border bg-netease-dark p-3 text-center"><p className="text-xs text-netease-muted">永久分享码（已自动复制，可手动复制）</p><p className="mt-1 select-all text-xl font-semibold tracking-[0.2em]">{favoriteShareCode}</p></div>}</div>
+              <div className="p-5"><p className="text-sm text-netease-muted">当前收藏 {favorites.length} 首。分享码会固定本次收藏快照并自动失效；撤销后将立即无法访问。</p><button type="button" onClick={() => void createShareCode()} className="mt-5 flex w-full items-center justify-center gap-2 rounded-lg bg-netease-red py-2.5 text-sm disabled:opacity-50"><Share2 className="h-4 w-4" />创建收藏分享码</button>{favoriteShareCode && <div className="mt-4 rounded-lg border border-netease-border bg-netease-dark p-3 text-center"><p className="text-xs text-netease-muted">分享码（已自动复制，可手动复制）</p><p className="mt-1 select-all break-all text-sm font-semibold">{favoriteShareCode}</p><button type="button" onClick={() => void revokeShareCode()} className="mt-3 text-xs text-red-300 hover:text-red-200">撤销此分享码</button></div>}</div>
             ) : (
-              <div className="flex min-h-0 flex-1 flex-col p-5"><div className="flex gap-2"><input value={favoriteShareCode} onChange={e => setFavoriteShareCode(e.target.value.toUpperCase())} placeholder="输入 8 位永久分享码" maxLength={8} className="min-w-0 flex-1 rounded-lg border border-netease-border bg-netease-dark px-3 py-2 text-sm" /><button type="button" onClick={() => void previewShareCode()} disabled={favoriteShareLoading || favoriteShareCode.length !== 8} className="rounded-lg bg-netease-red px-3 text-sm disabled:opacity-50">预览</button></div>{favoriteShareSongs.length > 0 && (() => { const totalPages = Math.max(1, Math.ceil(favoriteShareSongs.length / favoriteSharePageSize)); const pageSongs = favoriteShareSongs.slice((favoriteSharePage - 1) * favoriteSharePageSize, favoriteSharePage * favoriteSharePageSize); const pageKeys = pageSongs.map(songKey); const pageAll = pageKeys.every(key => favoriteShareSelected.has(key)); return <><div className="mt-4 flex items-center justify-between text-xs text-netease-muted"><span>已选 {favoriteShareSelected.size} / {favoriteShareSongs.length} 首</span><button type="button" onClick={() => setFavoriteShareSelected(prev => { const next = new Set(prev); pageKeys.forEach(key => pageAll ? next.delete(key) : next.add(key)); return next; })} className="text-netease-red">{pageAll ? '取消本页全选' : '全选本页'}</button></div><div className="mt-2 min-h-0 flex-1 space-y-1 overflow-y-auto">{pageSongs.map(song => { const key = songKey(song); return <label key={key} className="flex items-center gap-2 rounded-lg p-2 hover:bg-white/5"><input type="checkbox" checked={favoriteShareSelected.has(key)} onChange={() => setFavoriteShareSelected(prev => { const next = new Set(prev); next.has(key) ? next.delete(key) : next.add(key); return next; })} /><span className="truncate text-sm">{song.name}<span className="text-xs text-netease-muted"> · {song.artist}</span></span></label>; })}</div><div className="mt-3 flex items-center justify-between"><button type="button" disabled={favoriteSharePage <= 1} onClick={() => setFavoriteSharePage(page => page - 1)} className="rounded px-2 py-1 text-xs text-netease-muted disabled:opacity-40">上一页</button><span className="text-xs text-netease-muted">第 {favoriteSharePage} / {totalPages} 页</span><button type="button" disabled={favoriteSharePage >= totalPages} onClick={() => setFavoriteSharePage(page => page + 1)} className="rounded px-2 py-1 text-xs text-netease-muted disabled:opacity-40">下一页</button></div><button type="button" onClick={() => void importShareFavorites()} disabled={!favoriteShareSelected.size} className="mt-3 w-full rounded-lg bg-netease-red py-2 text-sm disabled:opacity-50">导入选中收藏</button></> })()}</div>
+              <div className="flex min-h-0 flex-1 flex-col p-5"><div className="flex gap-2"><input value={favoriteShareCode} onChange={e => setFavoriteShareCode(e.target.value.trim())} placeholder="输入 8 位收藏分享码" maxLength={43} className="min-w-0 flex-1 rounded-lg border border-netease-border bg-netease-dark px-3 py-2 text-sm" /><button type="button" onClick={() => void previewShareCode()} disabled={favoriteShareLoading || !isFavoriteShareCode(favoriteShareCode)} className="rounded-lg bg-netease-red px-3 text-sm disabled:opacity-50">预览</button></div>{favoriteShareSongs.length > 0 && (() => { const totalPages = Math.max(1, Math.ceil(favoriteShareSongs.length / favoriteSharePageSize)); const pageSongs = favoriteShareSongs.slice((favoriteSharePage - 1) * favoriteSharePageSize, favoriteSharePage * favoriteSharePageSize); const pageKeys = pageSongs.map(songKey); const pageAll = pageKeys.every(key => favoriteShareSelected.has(key)); return <><div className="mt-4 flex items-center justify-between text-xs text-netease-muted"><span>已选 {favoriteShareSelected.size} / {favoriteShareSongs.length} 首</span><button type="button" onClick={() => setFavoriteShareSelected(prev => { const next = new Set(prev); pageKeys.forEach(key => pageAll ? next.delete(key) : next.add(key)); return next; })} className="text-netease-red">{pageAll ? '取消本页全选' : '全选本页'}</button></div><div className="mt-2 min-h-0 flex-1 space-y-1 overflow-y-auto">{pageSongs.map(song => { const key = songKey(song); return <label key={key} className="flex items-center gap-2 rounded-lg p-2 hover:bg-white/5"><input type="checkbox" checked={favoriteShareSelected.has(key)} onChange={() => setFavoriteShareSelected(prev => { const next = new Set(prev); next.has(key) ? next.delete(key) : next.add(key); return next; })} /><span className="truncate text-sm">{song.name}<span className="text-xs text-netease-muted"> · {song.artist}</span></span></label>; })}</div><div className="mt-3 flex items-center justify-between"><button type="button" disabled={favoriteSharePage <= 1} onClick={() => setFavoriteSharePage(page => page - 1)} className="rounded px-2 py-1 text-xs text-netease-muted disabled:opacity-40">上一页</button><span className="text-xs text-netease-muted">第 {favoriteSharePage} / {totalPages} 页</span><button type="button" disabled={favoriteSharePage >= totalPages} onClick={() => setFavoriteSharePage(page => page + 1)} className="rounded px-2 py-1 text-xs text-netease-muted disabled:opacity-40">下一页</button></div><button type="button" onClick={() => void importShareFavorites()} disabled={!favoriteShareSelected.size} className="mt-3 w-full rounded-lg bg-netease-red py-2 text-sm disabled:opacity-50">导入选中收藏</button></> })()}</div>
             )}
           </div>
         </div>, document.body,
@@ -3730,6 +3796,21 @@ export default function Room() {
               </div>
             </div>
             <div className="flex-shrink-0 border-b border-netease-border/50 px-4 py-2.5">
+              <div className="mb-2 flex items-center gap-2 overflow-x-auto pb-0.5">
+                {['全部收藏', '未分类', ...favoriteCategories].map((category) => (
+                  <button
+                    key={category}
+                    type="button"
+                    onClick={() => { setActiveFavoriteCategory(category); setFavoritePage(1); }}
+                    className={`flex-shrink-0 rounded-lg px-2.5 py-1 text-xs transition-colors ${activeFavoriteCategory === category ? 'bg-netease-red text-white' : 'text-netease-muted hover:bg-white/10 hover:text-white'}`}
+                  >
+                    {category}
+                  </button>
+                ))}
+                <button type="button" onClick={() => setNewFavoriteCategoryOpen(true)} className="flex flex-shrink-0 items-center gap-1 rounded-lg px-2.5 py-1 text-xs text-netease-muted hover:bg-white/10 hover:text-white">
+                  <Plus className="h-3.5 w-3.5" /> 新建分类
+                </button>
+              </div>
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-netease-muted" />
                 <input
@@ -3779,6 +3860,24 @@ export default function Room() {
                         <div className="min-w-0 flex-1 space-y-0.5">
                           <p className="truncate text-sm font-medium">{song.name}</p>
                           <p className="truncate text-xs text-netease-muted">{song.artist}{song.album ? ` · ${song.album}` : ''}</p>
+                          <label className="mt-1 flex max-w-[11rem] items-center gap-1">
+                            <span className="sr-only">收藏分类</span>
+                            <select
+                              value={String(song.category || '')}
+                              onChange={(event) => void handleChangeFavoriteCategory(song, event.target.value)}
+                              disabled={updatingFavoriteCategoryId === key}
+                              className="w-full rounded-md border border-netease-border bg-netease-dark px-1.5 py-1 text-[11px] text-netease-muted focus:border-netease-red/50 focus:outline-none disabled:opacity-50"
+                              aria-label={`为 ${song.name} 选择收藏分类`}
+                            >
+                              <option value="">未分类</option>
+                              {song.category && !favoriteCategories.includes(song.category) && (
+                                <option value={song.category}>{song.category}</option>
+                              )}
+                              {favoriteCategories.map((category) => (
+                                <option key={category} value={category}>{category}</option>
+                              ))}
+                            </select>
+                          </label>
                         </div>
                         <SongRowBadges
                           song={song}
@@ -3927,6 +4026,18 @@ export default function Room() {
               {renameSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : null}
               保存
             </button>
+          </div>
+        </div>,
+        document.body,
+      )}
+
+      {newFavoriteCategoryOpen && createPortal(
+        <div className="fixed inset-0 z-[110] flex items-center justify-center px-4">
+          <button type="button" className="absolute inset-0 bg-black/65 backdrop-blur-sm" onClick={() => setNewFavoriteCategoryOpen(false)} aria-label="关闭新建分类" />
+          <div className="relative z-10 w-full max-w-sm rounded-2xl border border-white/10 bg-netease-bg p-5 shadow-2xl">
+            <div className="mb-4 flex items-center justify-between"><h2 className="text-sm font-medium text-white">新建收藏分类</h2><button type="button" onClick={() => setNewFavoriteCategoryOpen(false)} aria-label="关闭"><X className="h-5 w-5 text-netease-muted" /></button></div>
+            <input autoFocus value={newFavoriteCategoryName} onChange={(event) => setNewFavoriteCategoryName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void handleCreateFavoriteCategory(); }} maxLength={30} placeholder="输入分类名称" className="w-full rounded-xl border border-netease-border bg-netease-dark px-3 py-2.5 text-sm text-white placeholder:text-netease-muted/50 focus:border-netease-red/50 focus:outline-none" />
+            <div className="mt-4 flex justify-end gap-2"><button type="button" onClick={() => setNewFavoriteCategoryOpen(false)} className="rounded-lg px-3 py-2 text-sm text-netease-muted hover:bg-white/10">取消</button><button type="button" onClick={() => void handleCreateFavoriteCategory()} disabled={!newFavoriteCategoryName.trim() || creatingFavoriteCategory} className="rounded-lg bg-netease-red px-3 py-2 text-sm text-white disabled:opacity-50">{creatingFavoriteCategory ? '创建中...' : '创建'}</button></div>
           </div>
         </div>,
         document.body,

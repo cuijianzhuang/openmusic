@@ -84,6 +84,15 @@ export interface RuntimeConfig {
   roomCreateMaxOwned: number;
   /** 无身份时 IP 宽松冷却（毫秒）；0 = 关闭 */
   roomCreateIpLooseCooldownMs: number;
+  /** 收藏分享固定快照的有效期（毫秒） */
+  favoriteShareTtlMs: number;
+  /** 注册邮箱验证码 SMTP，密码字段只以掩码回显。 */
+  smtpHost: string;
+  smtpPort: number;
+  smtpSecure: boolean;
+  smtpUser: string;
+  smtpPass: string;
+  smtpFrom: string;
   linuxdoClientId: string;
   linuxdoClientSecret: string;
   linuxdoRedirectUri: string;

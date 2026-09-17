@@ -1787,7 +1787,7 @@ export default function RoomSettingsModal({
                     每人最多点歌
                   </label>
                   <p className="mt-0.5 text-xs text-netease-muted">
-                    队列中每人最多保留几首（含正在播放），0 表示不限制
+                    待播队列中每人最多保留几首，0 表示不限制
                   </p>
                   <NumberStepper
                     id="settings-max-per-user"

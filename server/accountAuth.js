@@ -2,6 +2,7 @@ import { createHash, createHmac, randomBytes, scrypt as scryptCallback, timingSa
 import { promisify } from 'node:util';
 import nodemailer from 'nodemailer';
 import { getRedisClient, isRedisEnabled } from './roomStorage.js';
+import { getRuntimeConfig } from './runtimeConfig.js';
 
 const scrypt = promisify(scryptCallback);
 
@@ -186,34 +187,33 @@ function publicAccount(account) {
   };
 }
 
-function getSmtpTransporter() {
-  const host = String(process.env.SMTP_HOST || '').trim();
+function createSmtpTransporter(config = getRuntimeConfig()) {
+  const host = String(config?.smtpHost || '').trim();
   if (!host) return null;
 
-  const port = Number.parseInt(process.env.SMTP_PORT || '587', 10) || 587;
-  const secure = process.env.SMTP_SECURE === '1'
-    || process.env.SMTP_SECURE === 'true'
-    || port === 465;
-  const user = String(process.env.SMTP_USER || '').trim();
-  const pass = String(process.env.SMTP_PASS || '');
+  const port = Number(config?.smtpPort);
+  const normalizedPort = Number.isInteger(port) && port >= 1 && port <= 65_535 ? port : 587;
+  const user = String(config?.smtpUser || '').trim();
+  const pass = String(config?.smtpPass || '');
 
   return nodemailer.createTransport({
     host,
-    port,
-    secure,
+    port: normalizedPort,
+    secure: config?.smtpSecure === true || normalizedPort === 465,
     ...(user ? { auth: { user, pass } } : {}),
   });
 }
 
 async function sendRegistrationCodeBySmtp({ email, code }) {
-  const transporter = getSmtpTransporter();
+  const config = getRuntimeConfig();
+  const transporter = createSmtpTransporter(config);
   if (!transporter) {
-    throw new AccountAuthError('EMAIL_NOT_CONFIGURED', '邮箱服务未配置', 503);
+    throw new AccountAuthError('EMAIL_NOT_CONFIGURED', '邮箱服务未配置，请联系管理员在后台完成 SMTP 设置', 503);
   }
 
-  const from = String(process.env.SMTP_FROM || process.env.SMTP_USER || '').trim();
+  const from = String(config.smtpFrom || config.smtpUser || '').trim();
   if (!from) {
-    throw new AccountAuthError('EMAIL_NOT_CONFIGURED', '邮箱发件人未配置', 503);
+    throw new AccountAuthError('EMAIL_NOT_CONFIGURED', '邮箱发件人未配置，请联系管理员在后台完成 SMTP 设置', 503);
   }
 
   try {

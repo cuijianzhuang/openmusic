@@ -24,6 +24,8 @@ const syncListeners = new Set<() => void>();
 const GUEST_CACHE_KEY = 'openmusic:favorites-cache:v1:guest';
 const ACCOUNT_CACHE_PREFIX = 'openmusic:favorites-cache:v1:account:';
 const GUEST_ID_KEY = 'openmusic:favorites-cache:v1:guest-identity';
+const GUEST_CATEGORIES_KEY = 'openmusic:favorite-categories:v1:guest';
+const ACCOUNT_CATEGORIES_PREFIX = 'openmusic:favorite-categories:v1:account:';
 
 function rememberGuestIdentity(): string {
   const id = getClientId();
@@ -55,6 +57,23 @@ function accountCacheKey(accountId: string): string {
   return `${ACCOUNT_CACHE_PREFIX}${accountId}`;
 }
 
+function categoriesCacheKey(accountId?: string): string {
+  return accountId ? `${ACCOUNT_CATEGORIES_PREFIX}${accountId}` : GUEST_CATEGORIES_KEY;
+}
+
+function readCategories(key: string): string[] {
+  try {
+    const value = JSON.parse(localStorage.getItem(key) || '[]');
+    return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeCategories(key: string, categories: string[]): void {
+  try { localStorage.setItem(key, JSON.stringify(categories)); } catch { /* storage unavailable */ }
+}
+
 function notifyListeners() {
   listeners.forEach((listener) => listener());
 }
@@ -72,9 +91,10 @@ function updateSharedSyncState(state: FavoritesSyncState) {
 }
 
 export function useFavorites() {
-  const { listFavorites, setFavorite, importFavorites } = useSocket();
+  const { listFavorites, listFavoriteCategories, createFavoriteCategory, setFavorite, setFavoriteCategory, importFavorites } = useSocket();
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(() => new Set(sharedFavoriteIds));
   const [syncState, setSyncState] = useState<FavoritesSyncState>(() => sharedSyncState);
+  const [categories, setCategories] = useState<string[]>(() => readCategories(GUEST_CATEGORIES_KEY));
   const retryTimer = useRef<number | null>(null);
 
   useEffect(() => {
@@ -225,6 +245,68 @@ export function useFavorites() {
     return { success: true, favorites: sharedFavoriteSongs, error: undefined as string | undefined };
   }, [ensureLoaded]);
 
+  const listCachedCategories = useCallback(async () => {
+    const account = await fetchAccountSession().catch(() => null);
+    if (!account) {
+      const cachedCategories = readCategories(GUEST_CATEGORIES_KEY);
+      setCategories(cachedCategories);
+      return { success: true, categories: cachedCategories };
+    }
+    const result = await listFavoriteCategories();
+    if (result.success) {
+      const nextCategories = result.categories || [];
+      writeCategories(categoriesCacheKey(account.id), nextCategories);
+      setCategories(nextCategories);
+    }
+    return result;
+  }, [listFavoriteCategories]);
+
+  const addFavoriteCategory = useCallback(async (name: string) => {
+    const account = await fetchAccountSession().catch(() => null);
+    if (!account) {
+      const trimmedName = name.trim();
+      const currentCategories = readCategories(GUEST_CATEGORIES_KEY);
+      if (!trimmedName || trimmedName.length > 30) return { success: false as const, error: '分类名称需为 1-30 个字符' };
+      if (trimmedName === '未分类') return { success: false as const, error: '“未分类”是系统分类，不能重复创建' };
+      if (currentCategories.some((category) => category.toLowerCase() === trimmedName.toLowerCase())) return { success: false as const, error: '该分类已存在' };
+      if (currentCategories.length >= 50) return { success: false as const, error: '自定义分类已达到上限' };
+      const nextCategories = [...currentCategories, trimmedName];
+      writeCategories(GUEST_CATEGORIES_KEY, nextCategories);
+      setCategories(nextCategories);
+      return { success: true as const, category: trimmedName, categories: nextCategories };
+    }
+    const result = await createFavoriteCategory(name);
+    if (result.success && result.categories) {
+      writeCategories(categoriesCacheKey(account.id), result.categories);
+      setCategories(result.categories);
+    }
+    return result;
+  }, [createFavoriteCategory]);
+
+  const setCachedFavoriteCategory = useCallback(async (song: FavoriteSong, category: string) => {
+    const account = await fetchAccountSession().catch(() => null);
+    if (!account) {
+      const nextCategory = category.trim();
+      let resolvedCategory = '';
+      if (nextCategory) {
+        const currentCategories = readCategories(GUEST_CATEGORIES_KEY);
+        resolvedCategory = currentCategories.find((item) => item.toLowerCase() === nextCategory.toLowerCase()) || '';
+        if (!resolvedCategory) return { success: false as const, error: '请选择已创建的收藏分类' };
+      }
+      const next = sharedFavoriteSongs.map((item) => {
+        if (songKey(item) !== songKey(song)) return item;
+        if (resolvedCategory) return { ...item, category: resolvedCategory };
+        const { category: _category, ...withoutCategory } = item;
+        return withoutCategory;
+      });
+      updateSharedFavorites(next, GUEST_CACHE_KEY);
+      return { success: true as const, favorites: next, category: resolvedCategory || null };
+    }
+    const result = await setFavoriteCategory(song, category);
+    if (result.success && result.favorites) updateSharedFavorites(result.favorites, accountCacheKey(account.id));
+    return result;
+  }, [setFavoriteCategory]);
+
   const setCachedFavorite = useCallback(async (song: Song, favorite: boolean) => {
     if (favoriteIds.has(songKey(song)) !== favorite) return toggleFavorite(song);
     return { success: true as const, favorites: sharedFavoriteSongs, favorite };
@@ -263,10 +345,14 @@ export function useFavorites() {
     toggleFavorite,
     listFavorites: listCachedFavorites,
     setFavorite: setCachedFavorite,
+    setFavoriteCategory: setCachedFavoriteCategory,
     importFavorites: importCachedFavorites,
     applyFavorites,
     reloadFavorites,
     syncState,
     retryFavoritesSync,
+    categories,
+    listCategories: listCachedCategories,
+    addCategory: addFavoriteCategory,
   };
 }

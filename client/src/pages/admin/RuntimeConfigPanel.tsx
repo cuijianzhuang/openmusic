@@ -38,6 +38,9 @@ type RuntimeTextField = Exclude<
   | 'roomCreateCooldownMs'
   | 'roomCreateMaxOwned'
   | 'roomCreateIpLooseCooldownMs'
+  | 'favoriteShareTtlMs'
+  | 'smtpPort'
+  | 'smtpSecure'
   | 'svipQualityEnabled'
   | 'sharedMembershipEnabled'
   | 'aiEnabled'
@@ -78,11 +81,24 @@ interface RuntimeFieldGroup {
   purpose: ReactNode;
   fields: RuntimeFieldDef[];
   includeQiniuZone?: boolean;
+  includeSmtpOptions?: boolean;
   includeAiProtocol?: boolean;
   includeAiLimits?: boolean;
 }
 
 const RUNTIME_FIELD_GROUPS: RuntimeFieldGroup[] = [
+  {
+    id: 'smtp',
+    title: '注册邮箱（SMTP）',
+    purpose: '用于发送注册验证码。密码会加密保存且不会回显；端口 465 自动使用 TLS。',
+    includeSmtpOptions: true,
+    fields: [
+      { key: 'smtpHost', label: 'SMTP 服务器', placeholder: 'smtp.example.com' },
+      { key: 'smtpUser', label: '用户名', placeholder: 'your-mail@example.com' },
+      { key: 'smtpPass', label: '密码或应用专用密码', secret: true },
+      { key: 'smtpFrom', label: '发件人', placeholder: 'OpenMusic <your-mail@example.com>', tip: '留空时使用 SMTP 用户名' },
+    ],
+  },
   {
     id: 'linuxdo',
     title: 'Linux.do 登录',
@@ -325,6 +341,7 @@ export default function RuntimeConfigPanel({
       ...config,
       svipQualityEnabled: Object.assign({ netease: false, tencent: false, kugou: false, qishui: false }, typeof config.svipQualityEnabled === 'object' ? config.svipQualityEnabled : { netease: Boolean(config.svipQualityEnabled), tencent: Boolean(config.svipQualityEnabled), kugou: Boolean(config.svipQualityEnabled), qishui: Boolean(config.svipQualityEnabled) }),
       sharedMembershipEnabled: config.sharedMembershipEnabled !== false,
+      favoriteShareTtlMs: Number(config.favoriteShareTtlMs) || 30 * 24 * 60 * 60 * 1000,
       musicSourcesEnabled: Object.assign({ netease: true, tencent: true, kugou: true, qishui: true }, config.musicSourcesEnabled || {}),
       aiEnabled: Boolean(config.aiEnabled),
       aiApiBaseUrl: config.aiApiBaseUrl || 'https://api.siliconflow.cn/v1',
@@ -497,6 +514,7 @@ export default function RuntimeConfigPanel({
   const renderField = (field: RuntimeFieldDef) => {
     const configured = Boolean(draft.configuredSecrets[field.key]);
     const dirty = dirtySecrets.has(field.key);
+    const FieldInput = field.secret ? Input.Password : Input;
     return (
       <Col xs={24} sm={12} key={field.key}>
         <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
@@ -509,7 +527,7 @@ export default function RuntimeConfigPanel({
           )}
         </Typography.Text>
         <Space.Compact style={{ width: '100%' }}>
-        <Input
+        <FieldInput
           value={field.secret && configured && !dirty ? '' : draft[field.key]}
           onChange={(e) => {
             const nextValue = e.target.value;
@@ -678,6 +696,22 @@ export default function RuntimeConfigPanel({
               style={{ width: 100 }}
             />
             <Typography.Text type="secondary">秒无身份时按 IP 冷却</Typography.Text>
+          </Space>
+
+          <Space wrap>
+            <InputNumber
+              min={1}
+              max={90}
+              step={1}
+              value={Math.round((draft.favoriteShareTtlMs ?? 30 * 24 * 60 * 60 * 1000) / (24 * 60 * 60 * 1000))}
+              onChange={(val) => setDraft({
+                ...draft,
+                favoriteShareTtlMs: Math.max(1, Math.min(90, Number(val) || 1)) * 24 * 60 * 60 * 1000,
+              })}
+              aria-label="收藏分享有效期（天）"
+              style={{ width: 100 }}
+            />
+            <Typography.Text type="secondary">天收藏分享有效期（创建时固定，1 至 90 天）</Typography.Text>
           </Space>
         </Space>
       </SettingsSection>
@@ -1206,6 +1240,36 @@ export default function RuntimeConfigPanel({
     <SettingsSection key={group.id} title={group.title} description={group.purpose}>
       <Row gutter={[16, 16]}>
         {group.fields.map(renderField)}
+        {group.includeSmtpOptions && (
+          <>
+            <Col xs={24} sm={12}>
+              <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
+                SMTP 端口
+              </Typography.Text>
+              <InputNumber
+                value={draft.smtpPort}
+                min={1}
+                max={65_535}
+                precision={0}
+                aria-label="SMTP 端口"
+                style={{ width: '100%' }}
+                onChange={(smtpPort) => setDraft({ ...draft, smtpPort: Number(smtpPort) || 587 })}
+              />
+            </Col>
+            <Col xs={24} sm={12}>
+              <Space size="small" style={{ marginTop: 24 }}>
+                <Switch
+                  checked={Boolean(draft.smtpSecure)}
+                  checkedChildren="TLS"
+                  unCheckedChildren="普通连接"
+                  aria-label="SMTP TLS"
+                  onChange={(smtpSecure) => setDraft({ ...draft, smtpSecure })}
+                />
+                <Typography.Text>使用 TLS（465 端口会自动启用）</Typography.Text>
+              </Space>
+            </Col>
+          </>
+        )}
         {group.includeQiniuZone && (
           <Col xs={24} sm={12}>
             <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
@@ -1604,6 +1668,8 @@ export default function RuntimeConfigPanel({
       label: '身份登录',
       children: (
         <>
+          {fieldGroup('smtp')}
+          <Divider style={{ margin: 0 }} />
           {fieldGroup('linuxdo')}
           <Divider style={{ margin: 0 }} />
           {fieldGroup('github')}

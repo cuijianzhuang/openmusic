@@ -14,7 +14,11 @@ export function hardenSocketHandlers(target) {
         : null;
       const reportFailure = (err) => {
         console.error(`socket 事件 "${event}" 处理失败:`, err?.message || err);
-        callback?.({ success: false, error: '服务器内部错误，请重试' });
+        const payload = { success: false, error: '服务器内部错误，请重试' };
+        if (callback) callback(payload);
+        else if (typeof target.emit === 'function') {
+          target.emit('socket_operation_error', { event: String(event), error: payload.error });
+        }
       };
       try {
         const result = handler(...normalizedArgs);

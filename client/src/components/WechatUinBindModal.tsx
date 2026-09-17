@@ -10,7 +10,6 @@ import {
   buildWechatLoginQrImageUrl,
   clearWechatFileHelperSession,
   fetchWechatLoginUuid,
-  getWechatFileHelperUin,
   pollWechatLogin,
 } from '../lib/wechatFileHelperBridge';
 
@@ -86,11 +85,9 @@ export default function WechatUinBindModal({ open, mode, roomId, onClose, onComp
             setQrUrl(null);
             setStatus('登录中，正在读取微信身份…');
             await bootstrapWechatFileHelperSession(null, result.redirectUri);
-            const uin = getWechatFileHelperUin();
-            if (!uin) throw new Error('未读取到微信 UIN');
             const bindResult = mode === 'bind'
-              ? await bindWechatUin(roomId || '', uin)
-              : await recoverWechatUin(roomId || '', uin);
+              ? await bindWechatUin(roomId || '')
+              : await recoverWechatUin(roomId || '');
             if (!bindResult.success) throw new Error(bindResult.error || '微信绑定失败');
             if (cancelled) return;
             completedRef.current = true;

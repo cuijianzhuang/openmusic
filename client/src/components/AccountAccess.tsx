@@ -379,39 +379,39 @@ export default function AccountAccess({
         open={open}
         onClose={close}
         zIndex={115}
-        panelClassName="relative max-h-[min(760px,calc(100vh-2rem))] w-full max-w-[520px] overflow-y-auto rounded-[34px] border border-white/12 bg-[#111113]/95 p-5 shadow-[0_32px_100px_rgba(0,0,0,.62)] backdrop-blur-3xl sm:p-7"
+        containerClassName="fixed inset-0 flex items-center justify-center p-4 sm:p-6"
+        panelClassName="relative max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto rounded-2xl border border-white/10 bg-netease-dark p-4 shadow-2xl backdrop-blur-xl sm:max-h-[calc(100dvh-3rem)] sm:p-5"
       >
-        <div className="pointer-events-none absolute inset-x-12 top-0 h-px bg-gradient-to-r from-transparent via-white/45 to-transparent" />
-        <div className="mb-6 flex items-center justify-between">
+        <div className="mb-5 flex items-center justify-between border-b border-white/8 pb-4">
           <div className="flex items-center gap-3">
             {!['welcome', 'manage'].includes(view) && (
-              <button type="button" onClick={() => { setError(''); setView(account ? 'manage' : 'methods'); }} className="rounded-full bg-white/[0.06] p-2 text-white/55 transition hover:bg-white/10 hover:text-white" aria-label="返回">
+              <button type="button" onClick={() => { setError(''); setView(account ? 'manage' : 'methods'); }} className="rounded-lg bg-white/[0.06] p-2 text-white/55 transition hover:bg-white/10 hover:text-white" aria-label="返回">
                 <ArrowLeft className="h-4 w-4" />
               </button>
             )}
             <div>
-              <h2 className="text-xl font-semibold tracking-[-0.025em] text-white">{title}</h2>
-              <p className="mt-0.5 text-xs text-white/38">账户是可选的，游客功能始终可用</p>
+              <h2 className="text-base font-semibold text-white">{title}</h2>
+              <p className="mt-1 text-xs text-netease-muted">账户是可选的，游客功能始终可用</p>
             </div>
           </div>
-          <button type="button" onClick={close} className="rounded-full p-2 text-white/35 transition hover:bg-white/[0.07] hover:text-white" aria-label="关闭">
+          <button type="button" onClick={close} className="rounded-lg p-1.5 text-white/50 transition hover:bg-white/10 hover:text-white" aria-label="关闭">
             <X className="h-5 w-5" />
           </button>
         </div>
 
         {view === 'welcome' && (
           <div className="space-y-3">
-            <div className="mb-7 rounded-[28px] border border-white/8 bg-gradient-to-b from-white/[0.075] to-white/[0.025] px-6 py-7">
+            <div className="mb-5 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-5">
               <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-2xl bg-white text-black shadow-[0_10px_30px_rgba(255,255,255,.12)]">
                 <KeyRound className="h-5 w-5" />
               </div>
-              <h3 className="text-2xl font-semibold tracking-[-0.04em] text-white">一份账户，多种登录方式。</h3>
-              <p className="mt-3 text-sm leading-6 text-white/48">绑定 Linux Do 或 GitHub，换设备时也能安全回到自己的账户。</p>
+              <h3 className="text-xl font-semibold text-white">一份账户，多种登录方式。</h3>
+              <p className="mt-2 text-sm leading-6 text-netease-muted">绑定 Linux Do 或 GitHub，换设备时也能安全回到自己的账户。</p>
             </div>
-            <button type="button" onClick={() => setView('methods')} className="flex w-full items-center justify-between rounded-2xl bg-white px-5 py-4 text-left text-[15px] font-semibold text-black transition hover:bg-white/90">
+            <button type="button" onClick={() => setView('methods')} className="flex w-full items-center justify-between rounded-xl bg-white px-4 py-3 text-left text-sm font-semibold text-black transition hover:bg-white/90">
               登录或创建账户 <ChevronRight className="h-4 w-4" />
             </button>
-            <button type="button" onClick={chooseGuest} className="flex w-full items-center justify-between rounded-2xl border border-white/10 bg-white/[0.04] px-5 py-4 text-left text-[15px] text-white/75 transition hover:bg-white/[0.08] hover:text-white">
+            <button type="button" onClick={chooseGuest} className="flex w-full items-center justify-between rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-left text-sm text-white/75 transition hover:bg-white/[0.08] hover:text-white">
               以游客身份继续 <ChevronRight className="h-4 w-4 text-white/35" />
             </button>
           </div>
@@ -436,7 +436,7 @@ export default function AccountAccess({
                 <ChevronRight className="h-4 w-4 text-white/25" />
               </button>
             ))}
-            <button type="button" onClick={chooseGuest} className="w-full py-3 text-sm text-white/42 transition hover:text-white/70">暂不登录，继续使用游客身份</button>
+            <button type="button" onClick={chooseGuest} className="w-full py-2.5 text-sm text-white/42 transition hover:text-white/70">暂不登录，继续使用游客身份</button>
           </div>
         )}
 

@@ -2,7 +2,7 @@ import { customAlphabet } from "nanoid";
 import { scrypt, scryptSync, randomBytes, timingSafeEqual } from "crypto";
 import { fetchMetingFmSongs, normalizeFmMode, DEFAULT_FM_MODE, FM_MODE_OFF } from "./metingFm.js";
 import { importNeteasePlaylist, importQqPlaylist, importKugouPlaylist, importQishuiPlaylist } from "./playlistImport.js";
-import { getRedisClient, initRoomStorage, isRedisEnabled, loadAllRoomsFromStorage, queueSaveRoomToStorage, deleteRoomFromStorage, saveRoomToStorage, listFavoriteSongs, removeRoomFromAccountIndex } from "./roomStorage.js";
+import { getRedisClient, initRoomStorage, isRedisEnabled, loadAllRoomsFromStorage, queueSaveRoomToStorage, cancelQueuedRoomSave, deleteRoomFromStorage, saveRoomToStorage, listFavoriteSongs, addRoomToAccountIndex, removeRoomFromAccountIndex } from "./roomStorage.js";
 import {
   DEFAULT_MEMBER_SETTINGS,
   buildWelcomeText,
@@ -18,6 +18,7 @@ import { deleteRoomChatImages, validateChatImageForRoom, validateExternalChatIma
 import { isLocalStickerImageKey, validateLocalStickerImage } from "./localSticker.js";
 import { collectDeviceIdsForUser, isAccessBanned } from "./deviceIdentity.js";
 import { getRuntimeConfig, ensureRoomCredentialEncryptionKey } from "./runtimeConfig.js";
+import { decryptSensitiveValue, encryptSensitiveValue, hasRoomCredentialEncryptionKey } from "./roomCredentialCrypto.js";
 import { resizeCoverForThumb } from "./coverUrl.js";
 import { isDirectCoverUrl, resolveSongCoverUrl } from "./resolveSongCover.js";
 import { isSongPlayableOnServer } from "./songPlayableProbe.js";
@@ -645,6 +646,7 @@ function destroyRoomNow(roomId) {
   cancelRoomDestroy(room);
   clearAllPendingLeaveClears(room);
   clearSkipRequestExpiryTimersForRoom(id);
+  cancelQueuedRoomSave(id);
   rooms.delete(id);
   invalidateRoomsListCache();
   void deleteRoomChatImages(id).catch((err) => {
@@ -716,12 +718,35 @@ function roomHasPersistableContent(room) {
   return false;
 }
 
-function snapshotRoomForStorage(room) {
+function roomPasswordEncryptionScope(roomId) {
+  return `room-password:${String(roomId || '').trim().toUpperCase()}`;
+}
+
+function encryptRoomPassword(roomId, password) {
+  const plain = String(password || '');
+  if (!plain) return null;
+  return encryptSensitiveValue(plain, roomPasswordEncryptionScope(roomId));
+}
+
+function decryptRoomPassword(room) {
+  const ciphertext = String(room?.passwordEncrypted || '');
+  // 绝不把旧版或异常的非密文值当作明文返回给管理后台。
+  if (!ciphertext.startsWith('enc:v1:')) return null;
+  return decryptSensitiveValue(ciphertext, roomPasswordEncryptionScope(room.id));
+}
+
+function applyRoomPassword(room, password) {
+  const plain = String(password || '');
+  room.passwordHash = plain ? hashPassword(plain) : null;
+  room.passwordEncrypted = plain ? encryptRoomPassword(room.id, plain) : null;
+}
+
+export function snapshotRoomForStorage(room) {
   return {
     id: room.id,
     name: room.name,
     passwordHash: room.passwordHash,
-    passwordPlain: room.passwordPlain || null,
+    passwordEncrypted: room.passwordEncrypted || null,
     isLocked: Boolean(room.isLocked),
     muteAll: Boolean(room.muteAll),
     mutedUserIds: Array.from(room.mutedUserIds || []),
@@ -803,7 +828,13 @@ function snapshotRoomForStorage(room) {
 
 function restoreRoomFromStorage(data) {
   const room = createEmptyRoom(data.id, data.name, data.passwordHash ?? null);
-  room.passwordPlain = data.passwordPlain || null;
+  const legacyPassword = typeof data.passwordPlain === 'string' ? data.passwordPlain : '';
+  const storedCiphertext = String(data.passwordEncrypted || '');
+  room.passwordEncrypted = storedCiphertext.startsWith('enc:v1:')
+    ? storedCiphertext
+    : encryptRoomPassword(room.id, legacyPassword);
+  // 旧 Redis 快照中的明文只用于本次迁移加密，绝不驻留在运行内存。
+  room.needsPasswordStorageMigration = Boolean(Object.hasOwn(data, 'passwordPlain'));
   room.queue = (data.queue || []).map(serializeQueueItemForRoom).filter(Boolean);
   room.current = serializeQueueItemForRoom(data.current) ?? null;
   room.isPlaying = Boolean(data.isPlaying);
@@ -976,11 +1007,16 @@ export async function initRooms() {
   // 进房/贵宾通知静默窗：重启后已知成员回流（客户端也会带 rejoin）
   const RESTART_NOTICE_MUTE_MS = 5 * 60 * 1000;
   const noticeMuteUntil = Date.now() + RESTART_NOTICE_MUTE_MS;
+  const passwordMigrationSnapshots = [];
   let preservedCount = 0;
   for (const data of stored) {
     const room = restoreRoomFromStorage(data);
     room.restartNoticeMuteUntil = noticeMuteUntil;
     rooms.set(room.id, room);
+    if (room.needsPasswordStorageMigration) {
+      passwordMigrationSnapshots.push(snapshotRoomForStorage(room));
+      room.needsPasswordStorageMigration = false;
+    }
     if (room.users.size === 0) {
       // 重启时 socket 全断，房间会短暂无人。有队列/当前曲的房间给重连宽限期；
       // 宽限期未配置或为 0 时，回退到正常空房 TTL，避免空房永远不销毁。
@@ -993,6 +1029,18 @@ export async function initRooms() {
       }
     }
   }
+
+  if (passwordMigrationSnapshots.length > 0) {
+    await Promise.all(passwordMigrationSnapshots.map((snapshot) => saveRoomToStorage(snapshot)));
+    console.log(`已清理 ${passwordMigrationSnapshots.length} 个房间快照中的旧明文密码字段`);
+  }
+
+  // 房间快照是账户归属的权威数据；启动时补齐丢失的账户索引。
+  await Promise.all(
+    [...rooms.values()]
+      .filter((room) => room.ownerAccountId)
+      .map((room) => addRoomToAccountIndex(room.ownerAccountId, room.id)),
+  );
 
   if (stored.length > 0) {
     console.log(`已从 Redis 恢复 ${stored.length} 个房间（保留 ${preservedCount} 个空闲房间不因重启解散）`);
@@ -1184,8 +1232,8 @@ function createEmptyRoom(roomId, name, passwordHash = null) {
     id: roomId,
     name: normalizeRoomName(name, roomId),
     passwordHash,
-    /** 明文密码（仅内存 + Redis，管理后台可查） */
-    passwordPlain: null,
+    /** 仅用于管理员按需恢复的 AES-256-GCM 密文；永不保存明文。 */
+    passwordEncrypted: null,
     isLocked: false,
     muteAll: false,
     mutedUserIds: new Set(),
@@ -1882,7 +1930,6 @@ function trimQueueToMaxLength(room) {
 function countUserRequestedSongs(room, userId) {
   const user = room.users.get(userId);
   let count = 0;
-  if (room.current && isQueueRequester(room.current, userId, user)) count += 1;
   for (const item of room.queue) {
     if (isQueueRequester(item, userId, user)) count += 1;
   }
@@ -2052,8 +2099,11 @@ export function createRoom({ name, password, creatorId, creatorDeviceId, creator
 
   const trimmed = pwd.password;
   const passwordHash = trimmed ? hashPassword(trimmed) : null;
+  if (trimmed && !hasRoomCredentialEncryptionKey()) {
+    return { error: '房间密码加密服务未就绪，请稍后重试' };
+  }
   const room = createEmptyRoom(roomId, name, passwordHash);
-  room.passwordPlain = trimmed || null;
+  room.passwordEncrypted = trimmed ? encryptRoomPassword(roomId, trimmed) : null;
   const reservedCreator = sanitizeCreatorId(creatorId);
   if (reservedCreator) {
     room.creatorId = reservedCreator;
@@ -2133,8 +2183,10 @@ export function reuseIdleOwnedRoom(roomId, { name, password } = {}) {
     const pwd = validateRoomPassword(password);
     if (!pwd.ok) return { error: pwd.error };
     const trimmed = pwd.password;
-    room.passwordHash = trimmed ? hashPassword(trimmed) : null;
-    room.passwordPlain = trimmed || null;
+    if (trimmed && !hasRoomCredentialEncryptionKey()) {
+      return { error: '房间密码加密服务未就绪，请稍后重试' };
+    }
+    applyRoomPassword(room, trimmed);
   }
 
   // 当作新建：清掉上次残留的曲目/播放状态，避免「空房却无法复用」
@@ -2393,8 +2445,8 @@ export function getRoomPasswordForAdmin(roomId) {
   return {
     roomId: id,
     hasPassword: true,
-    // 旧房间可能只有哈希、无明文（升级前设置的密码）
-    password: room.passwordPlain || null,
+    // 无法解密的密文会明确表现为“不可恢复”，不会退回任何明文或哈希值。
+    password: decryptRoomPassword(room),
   };
 }
 
@@ -2872,15 +2924,16 @@ export function setRoomLock(roomId, actorId, options = {}, connectionId = null) 
   const locked = Boolean(options.locked);
   if (!locked) {
     room.isLocked = false;
-    room.passwordHash = null;
-    room.passwordPlain = null;
+    applyRoomPassword(room, '');
   } else {
     const pwd = validateRoomPassword(options.password);
     if (!pwd.ok) return { error: pwd.error };
     room.isLocked = true;
     const trimmed = pwd.password;
-    room.passwordHash = trimmed ? hashPassword(trimmed) : null;
-    room.passwordPlain = trimmed || null;
+    if (trimmed && !hasRoomCredentialEncryptionKey()) {
+      return { error: '房间密码加密服务未就绪，请稍后重试' };
+    }
+    applyRoomPassword(room, trimmed);
   }
 
   persistRoom(room);

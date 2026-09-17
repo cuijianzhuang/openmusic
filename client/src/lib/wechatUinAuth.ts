@@ -21,12 +21,12 @@ export async function fetchWechatUinStatus(roomId?: string): Promise<WechatUinSt
   }
 }
 
-export async function bindWechatUin(roomId: string, uin: string): Promise<{ success: boolean; error?: string }> {
+export async function bindWechatUin(roomId: string): Promise<{ success: boolean; error?: string }> {
   try {
     const res = await fetchWithTimeout('/api/auth/wechat-uin/bind', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ roomId, uin }),
+      body: JSON.stringify({ roomId }),
     }, 10000);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return { success: false, error: data.error || '微信绑定失败' };
@@ -36,12 +36,12 @@ export async function bindWechatUin(roomId: string, uin: string): Promise<{ succ
   }
 }
 
-export async function recoverWechatUin(roomId: string, uin: string): Promise<{ success: boolean; error?: string }> {
+export async function recoverWechatUin(roomId: string): Promise<{ success: boolean; error?: string }> {
   try {
     const res = await fetchWithTimeout('/api/auth/wechat-uin/recover', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ roomId, uin }),
+      body: JSON.stringify({ roomId }),
     }, 10000);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return { success: false, error: data.error || '微信身份找回失败' };

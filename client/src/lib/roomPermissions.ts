@@ -25,12 +25,7 @@ export function canRequestSong(
 }
 
 export function countUserQueueSongs(room: RoomState, userId: string): number {
-  let count = 0;
-  if (room.current?.requestedById === userId) count += 1;
-  for (const item of room.queue) {
-    if (item.requestedById === userId) count += 1;
-  }
-  return count;
+  return room.queue.filter((item) => item.requestedById === userId).length;
 }
 
 export function getSongRequestCooldownRemainSec(

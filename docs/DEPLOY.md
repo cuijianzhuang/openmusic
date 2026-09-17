@@ -62,7 +62,7 @@ npm start   # http://0.0.0.0:4000
 
 ## 环境变量
 
-向导会自动写入 `server/.env`。**业务配置优先用管理后台「运行时配置」**（Meting、OAuth、七牛、歌词、空房 TTL 等），不必改文件。
+向导会自动写入 `server/.env`。**业务配置优先用管理后台「运行时配置」**（Meting、注册邮箱 SMTP、OAuth、七牛、歌词、空房 TTL 等），不必改文件。SMTP 密码会以加密形式保存在 `runtimeConfig.json`，生产环境须保留稳定的 `CLIENT_ID_SECRET`，否则保存的密码无法解密。
 
 进程级变量（详见 `server/.env.example`）：
 
@@ -72,7 +72,8 @@ npm start   # http://0.0.0.0:4000
 | `NODE_ENV` | 推荐 | 生产设为 `production` |
 | `CLIENT_URL` | 生产必填 | 前端 Origin（https） |
 | `CLIENT_ID_SECRET` | 生产必填 | 会话签名密钥（向导自动生成） |
-| `TRUST_PROXY` | 推荐 | 反代后设为 `1` |
+| `TRUST_PROXY` | 推荐 | 反代后设为 `1`；仅当 TCP 对端在 `TRUSTED_PROXY_IPS` 中时才采信转发 IP 头 |
+| `TRUSTED_PROXY_IPS` | 反代必填 | 逗号分隔的反向代理 TCP 地址；本机 Nginx 默认可用 `127.0.0.1,::1`，容器部署须填网关/代理地址 |
 | `CLIENT_IP_HEADER` | 有 CDN | Cloudflare：`CF-Connecting-IP`；EdgeOne：`iqp` |
 | `REDIS_URL` | 必需 | Redis 连接串（或分项 `REDIS_HOST` 等） |
 
@@ -84,10 +85,12 @@ NODE_ENV=production
 CLIENT_URL=https://music.example.com
 CLIENT_ID_SECRET=换成一段长随机字符串
 TRUST_PROXY=1
+TRUSTED_PROXY_IPS=127.0.0.1,::1
 REDIS_URL=redis://127.0.0.1:6379/0
 ```
 
 Meting / 房间凭证密钥等由向导或管理后台配置。使用汽水音乐时，Meting 须包含 `qishui` provider；网易、QQ、汽水均优先房间绑定账号，否则走全站共享池。
+
 ---
 
 ## Docker 部署细节

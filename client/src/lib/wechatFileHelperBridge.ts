@@ -622,7 +622,7 @@ export function hasWechatFileHelperSession(): boolean {
   return activeSession !== null;
 }
 
-/** 返回当前文件传输助手会话的 wxuin；仅用于完成一次绑定请求。 */
+/** 返回当前文件传输助手会话的 wxuin；用于完成微信账户登录。 */
 export function getWechatFileHelperUin(): string | null {
   return activeSession?.uin || null;
 }

@@ -1,4 +1,5 @@
 import { decryptRoomSecrets, encryptRoomSecrets } from './roomCredentialCrypto.js';
+import { getRuntimeConfig } from './runtimeConfig.js';
 import { randomBytes } from 'node:crypto';
 import { createLogger, incrementMetric } from './logger.js';
 
@@ -11,6 +12,7 @@ let redisClient = null;
 let enabled = false;
 const pendingRoomWrites = new Map();
 let roomWriteFlushScheduled = false;
+const roomStorageOperations = new Map();
 
 function parseRedisDb(value) {
   const raw = String(value ?? '').trim();
@@ -134,7 +136,7 @@ export async function loadAllRoomsFromStorage() {
   return rooms;
 }
 
-export async function saveRoomToStorage(roomSnapshot) {
+async function saveRoomToStorageNow(roomSnapshot) {
   if (!enabled || !redisClient) return;
 
   try {
@@ -154,6 +156,24 @@ export async function saveRoomToStorage(roomSnapshot) {
   }
 }
 
+function enqueueRoomStorageOperation(roomId, operation) {
+  const id = String(roomId || '').trim().toUpperCase();
+  const previous = roomStorageOperations.get(id) || Promise.resolve();
+  const next = previous
+    .catch(() => undefined)
+    .then(operation)
+    .finally(() => {
+      if (roomStorageOperations.get(id) === next) roomStorageOperations.delete(id);
+    });
+  roomStorageOperations.set(id, next);
+  return next;
+}
+
+export function saveRoomToStorage(roomSnapshot) {
+  if (!enabled || !redisClient) return Promise.resolve();
+  return enqueueRoomStorageOperation(roomSnapshot?.id, () => saveRoomToStorageNow(roomSnapshot));
+}
+
 /** 异步持久化，避免 JSON 序列化阻塞 HTTP / Socket 热路径 */
 export function queueSaveRoomToStorage(roomSnapshot) {
   if (!enabled || !redisClient) return;
@@ -164,6 +184,12 @@ export function queueSaveRoomToStorage(roomSnapshot) {
   pendingRoomWrites.set(id, { ...roomSnapshot, id });
   if (roomWriteFlushScheduled) return;
   scheduleRoomWriteFlush();
+}
+
+export function cancelQueuedRoomSave(roomId) {
+  const id = String(roomId || '').trim().toUpperCase();
+  if (!id) return;
+  pendingRoomWrites.delete(id);
 }
 
 function scheduleRoomWriteFlush() {
@@ -180,42 +206,48 @@ function scheduleRoomWriteFlush() {
 export async function deleteRoomFromStorage(roomId, accountId = '') {
   if (!enabled || !redisClient) return;
 
-  try {
-    await redisClient.del(roomKey(roomId));
-    await redisClient.sRem(ROOM_IDS_KEY, roomId);
-    if (accountId) await redisClient.sRem(accountRoomsKey(accountId), String(roomId || '').trim().toUpperCase());
-  } catch (err) {
-    incrementMetric('redis_error_total', { phase: 'delete_room' });
-    log.error('redis_delete_room_failed', { roomId, error: err });
-  }
+  return enqueueRoomStorageOperation(roomId, async () => {
+    try {
+      await redisClient.del(roomKey(roomId));
+      await redisClient.sRem(ROOM_IDS_KEY, roomId);
+      if (accountId) await redisClient.sRem(accountRoomsKey(accountId), String(roomId || '').trim().toUpperCase());
+    } catch (err) {
+      incrementMetric('redis_error_total', { phase: 'delete_room' });
+      log.error('redis_delete_room_failed', { roomId, error: err });
+    }
+  });
 }
 
 export async function addRoomToAccountIndex(accountId, roomId) {
   const aid = String(accountId || '').trim();
   const rid = String(roomId || '').trim().toUpperCase();
   if (!enabled || !redisClient || !aid || !rid) return false;
-  try {
-    await redisClient.sAdd(accountRoomsKey(aid), rid);
-    return true;
-  } catch (err) {
-    incrementMetric('redis_error_total', { phase: 'account_room_index_add' });
-    log.error('redis_account_room_index_add_failed', { accountId: aid, roomId: rid, error: err });
-    return false;
-  }
+  return enqueueRoomStorageOperation(rid, async () => {
+    try {
+      await redisClient.sAdd(accountRoomsKey(aid), rid);
+      return true;
+    } catch (err) {
+      incrementMetric('redis_error_total', { phase: 'account_room_index_add' });
+      log.error('redis_account_room_index_add_failed', { accountId: aid, roomId: rid, error: err });
+      return false;
+    }
+  });
 }
 
 export async function removeRoomFromAccountIndex(accountId, roomId) {
   const aid = String(accountId || '').trim();
   const rid = String(roomId || '').trim().toUpperCase();
   if (!enabled || !redisClient || !aid || !rid) return false;
-  try {
-    await redisClient.sRem(accountRoomsKey(aid), rid);
-    return true;
-  } catch (err) {
-    incrementMetric('redis_error_total', { phase: 'account_room_index_remove' });
-    log.error('redis_account_room_index_remove_failed', { accountId: aid, roomId: rid, error: err });
-    return false;
-  }
+  return enqueueRoomStorageOperation(rid, async () => {
+    try {
+      await redisClient.sRem(accountRoomsKey(aid), rid);
+      return true;
+    } catch (err) {
+      incrementMetric('redis_error_total', { phase: 'account_room_index_remove' });
+      log.error('redis_account_room_index_remove_failed', { accountId: aid, roomId: rid, error: err });
+      return false;
+    }
+  });
 }
 
 export async function listRoomIdsForAccount(accountId) {
@@ -226,17 +258,21 @@ export async function listRoomIdsForAccount(accountId) {
   } catch (err) {
     incrementMetric('redis_error_total', { phase: 'account_room_index_list' });
     log.error('redis_account_room_index_list_failed', { accountId: aid, error: err });
-    return [];
+    return null;
   }
 }
 
 const FAVORITES_PREFIX = 'openmusic:favorites:';
+const FAVORITE_CATEGORIES_PREFIX = 'openmusic:favorite-categories:';
 const MAX_FAVORITES = 5000;
+const MAX_FAVORITE_CATEGORIES = 50;
+const MAX_FAVORITE_CATEGORY_NAME_LENGTH = 30;
 const FAVORITES_CAS_RETRIES = 8;
 const FAVORITE_SHARE_PREFIX = 'openmusic:favorite-share:';
 const FAVORITE_SHARE_OWNER_PREFIX = 'openmusic:favorite-share-owner:';
-const FAVORITE_SHARE_CODE_LENGTH = 8;
-const FAVORITE_SHARE_VERSION = 2;
+const FAVORITE_SHARE_TOKEN_BYTES = 6;
+const FAVORITE_SHARE_TOKEN_LENGTH = 8;
+const FAVORITE_SHARE_VERSION = 3;
 const FAVORITES_CAS_SCRIPT = `
 local current = redis.call('GET', KEYS[1])
 if ARGV[1] == '0' then
@@ -252,8 +288,27 @@ function favoriteKey(userId) {
   return `${FAVORITES_PREFIX}${userId}`;
 }
 
+function favoriteCategoriesKey(userId) {
+  return `${FAVORITE_CATEGORIES_PREFIX}${userId}`;
+}
+
 function songFavoriteId(song) {
   return `${song?.source || 'netease'}:${song?.id || ''}`;
+}
+
+function normalizeFavoriteCategoryName(value) {
+  return String(value || '').trim().slice(0, MAX_FAVORITE_CATEGORY_NAME_LENGTH);
+}
+
+export function applyFavoriteCategory(items, favorite, category) {
+  const targetId = songFavoriteId(favorite);
+  const nextCategory = normalizeFavoriteCategoryName(category);
+  return items.map((item) => {
+    if (songFavoriteId(item) !== targetId) return item;
+    if (nextCategory) return { ...item, category: nextCategory };
+    const { category: _category, ...withoutCategory } = item;
+    return withoutCategory;
+  });
 }
 
 function normalizeFavoriteSong(song) {
@@ -336,6 +391,76 @@ export async function listFavoriteSongs(userId) {
   return readFavorites(id);
 }
 
+export async function listFavoriteCategories(userId) {
+  const id = String(userId || '').trim();
+  if (!id || !enabled || !redisClient) return [];
+  try {
+    const raw = await redisClient.get(favoriteCategoriesKey(id));
+    const categories = JSON.parse(raw || '[]');
+    return Array.isArray(categories)
+      ? categories.filter((category) => typeof category === 'string').slice(0, MAX_FAVORITE_CATEGORIES)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function createFavoriteCategory(userId, name) {
+  const id = String(userId || '').trim();
+  const rawCategoryName = String(name || '').trim();
+  const categoryName = normalizeFavoriteCategoryName(rawCategoryName);
+  if (!id) return { error: '用户身份无效' };
+  if (!categoryName || categoryName.length !== rawCategoryName.length) {
+    return { error: `分类名称需为 1-${MAX_FAVORITE_CATEGORY_NAME_LENGTH} 个字符` };
+  }
+  if (categoryName === '未分类') return { error: '“未分类”是系统分类，不能重复创建' };
+  if (!enabled || !redisClient) return { error: 'Redis 不可用，分类无法保存' };
+
+  try {
+    const categories = await listFavoriteCategories(id);
+    if (categories.some((category) => category.toLowerCase() === categoryName.toLowerCase())) {
+      return { error: '该分类已存在' };
+    }
+    if (categories.length >= MAX_FAVORITE_CATEGORIES) return { error: '自定义分类已达到上限' };
+    const nextCategories = [...categories, categoryName];
+    await redisClient.set(favoriteCategoriesKey(id), JSON.stringify(nextCategories));
+    return { categories: nextCategories, category: categoryName };
+  } catch (error) {
+    return { error: error.message || '分类保存失败' };
+  }
+}
+
+export async function setFavoriteCategory(userId, favorite, category) {
+  const id = String(userId || '').trim();
+  const favoriteId = songFavoriteId(favorite);
+  const rawCategory = String(category || '').trim();
+  const categoryName = normalizeFavoriteCategoryName(rawCategory);
+  if (!id || !favoriteId || favoriteId.endsWith(':')) return { error: '收藏歌曲无效' };
+  if (rawCategory && (!categoryName || categoryName.length !== rawCategory.length)) {
+    return { error: `分类名称需为 1-${MAX_FAVORITE_CATEGORY_NAME_LENGTH} 个字符` };
+  }
+
+  try {
+    let resolvedCategory = '';
+    if (categoryName) {
+      const categories = await listFavoriteCategories(id);
+      resolvedCategory = categories.find((item) => item.toLowerCase() === categoryName.toLowerCase()) || '';
+      if (!resolvedCategory) return { error: '请选择已创建的收藏分类' };
+    }
+    const mutation = await mutateFavoritesAtomically(id, (items) => {
+      const exists = items.some((item) => songFavoriteId(item) === favoriteId);
+      return {
+        items: exists ? applyFavoriteCategory(items, favorite, resolvedCategory) : items,
+        updated: exists,
+      };
+    });
+    if (!mutation.updated) return { error: '收藏歌曲不存在' };
+    return { favorites: mutation.items, category: resolvedCategory || null };
+  } catch (err) {
+    return { error: err.message || '收藏分类保存失败' };
+  }
+}
+
 export async function setFavoriteSong(userId, song, favorite) {
   const id = String(userId || '').trim();
   const clean = normalizeFavoriteSong(song);
@@ -368,33 +493,51 @@ function favoriteShareOwnerKey(userId) {
 }
 
 function normalizeFavoriteShareCode(code) {
-  return String(code || '').trim().toUpperCase();
+  return String(code || '').trim();
 }
 
 function createFavoriteShareCode() {
-  return randomBytes(8).toString('hex').slice(0, FAVORITE_SHARE_CODE_LENGTH).toUpperCase();
+  return randomBytes(FAVORITE_SHARE_TOKEN_BYTES).toString('base64url');
+}
+
+export function isFavoriteShareCode(code) {
+  return new RegExp(`^[A-Za-z0-9_-]{${FAVORITE_SHARE_TOKEN_LENGTH}}$`).test(code);
 }
 
 /**
- * 解析永久分享码引用。旧版分享码保存的是歌曲快照，由 previewFavoriteShare
- * 继续按旧格式读取，直到它自然过期；新版只保存分享者身份，读取时实时取收藏。
+ * 分享固定创建时的收藏快照，令牌到期后不可再读取；不再引用分享者的实时收藏。
  */
 export function parseFavoriteShareReference(raw) {
   if (!raw) return null;
   try {
     const value = JSON.parse(raw);
-    const userId = String(value?.userId || '').trim();
-    return value?.version === FAVORITE_SHARE_VERSION && userId ? { userId } : null;
+    const expiresAt = Number(value?.expiresAt) || 0;
+    const songs = Array.isArray(value?.songs) ? value.songs : null;
+    if (value?.version !== FAVORITE_SHARE_VERSION || !songs || !expiresAt) return null;
+    return { version: FAVORITE_SHARE_VERSION, songs, expiresAt };
   } catch {
     return null;
   }
 }
 
+async function invalidateFavoriteShareOwner(userId, code = '') {
+  const ownerKey = favoriteShareOwnerKey(userId);
+  const current = normalizeFavoriteShareCode(await redisClient.get(ownerKey));
+  if (!code || current === code) await redisClient.del(ownerKey);
+}
+
 async function getExistingFavoriteShareCode(userId) {
-  const code = normalizeFavoriteShareCode(await redisClient.get(favoriteShareOwnerKey(userId)));
-  if (!/^[A-Z0-9]{8}$/.test(code)) return null;
+  const ownerKey = favoriteShareOwnerKey(userId);
+  const code = normalizeFavoriteShareCode(await redisClient.get(ownerKey));
+  if (!isFavoriteShareCode(code)) {
+    if (code) await redisClient.del(ownerKey);
+    return null;
+  }
   const reference = parseFavoriteShareReference(await redisClient.get(favoriteShareKey(code)));
-  return reference?.userId === userId ? code : null;
+  if (reference && reference.expiresAt > Date.now()) return code;
+  await redisClient.del(favoriteShareKey(code));
+  await invalidateFavoriteShareOwner(userId, code);
+  return null;
 }
 
 export async function createFavoriteShare(userId) {
@@ -404,46 +547,61 @@ export async function createFavoriteShare(userId) {
 
   const existing = await getExistingFavoriteShareCode(id);
   if (existing) {
-    const favorites = await listFavoriteSongs(id);
-    return { code: existing, count: favorites.length };
+    const reference = parseFavoriteShareReference(await redisClient.get(favoriteShareKey(existing)));
+    return { code: existing, count: reference?.songs.length || 0, expiresAt: reference?.expiresAt || 0 };
   }
+
+  const songs = await listFavoriteSongs(id);
+  const favoriteShareTtlMs = getRuntimeConfig().favoriteShareTtlMs;
+  const expiresAt = Date.now() + favoriteShareTtlMs;
+  const reference = JSON.stringify({
+    version: FAVORITE_SHARE_VERSION,
+    songs,
+    createdAt: Date.now(),
+    expiresAt,
+  });
+  const ttl = Math.max(1, Math.ceil(favoriteShareTtlMs / 1000));
 
   for (let attempt = 0; attempt < 8; attempt += 1) {
     const code = createFavoriteShareCode();
-    const reference = JSON.stringify({ version: FAVORITE_SHARE_VERSION, userId: id });
-    const created = await redisClient.set(favoriteShareKey(code), reference, { NX: true });
+    const created = await redisClient.set(favoriteShareKey(code), reference, { NX: true, EX: ttl });
     if (created !== 'OK') continue;
 
-    const ownerSet = await redisClient.set(favoriteShareOwnerKey(id), code, { NX: true });
-    if (ownerSet === 'OK') {
-      const favorites = await listFavoriteSongs(id);
-      return { code, count: favorites.length };
-    }
+    const ownerSet = await redisClient.set(favoriteShareOwnerKey(id), code, { NX: true, EX: ttl });
+    if (ownerSet === 'OK') return { code, count: songs.length, expiresAt };
 
     // 另一个并发请求先完成了该用户的创建；删除本次未被引用的随机码。
     await redisClient.del(favoriteShareKey(code));
     const winner = await getExistingFavoriteShareCode(id);
     if (winner) {
-      const favorites = await listFavoriteSongs(id);
-      return { code: winner, count: favorites.length };
+      const winnerReference = parseFavoriteShareReference(await redisClient.get(favoriteShareKey(winner)));
+      return { code: winner, count: winnerReference?.songs.length || 0, expiresAt: winnerReference?.expiresAt || 0 };
     }
   }
   return { error: '分享码创建失败，请重试' };
 }
 
+export async function revokeFavoriteShare(userId) {
+  const id = String(userId || '').trim();
+  if (!id) return { error: '用户身份无效' };
+  if (!enabled || !redisClient) return { error: 'Redis 不可用，分享码无法撤销' };
+  const code = normalizeFavoriteShareCode(await redisClient.get(favoriteShareOwnerKey(id)));
+  if (!code) return { revoked: false };
+  await redisClient.del(favoriteShareOwnerKey(id));
+  if (isFavoriteShareCode(code)) await redisClient.del(favoriteShareKey(code));
+  return { revoked: true };
+}
+
 export async function previewFavoriteShare(code) {
   const normalized = normalizeFavoriteShareCode(code);
-  if (!/^[A-Z0-9]{8}$/.test(normalized) || !enabled || !redisClient) return { error: '分享码无效' };
-  const raw = await redisClient.get(favoriteShareKey(normalized));
-  const reference = parseFavoriteShareReference(raw);
-  if (reference) {
-    return { code: normalized, songs: await listFavoriteSongs(reference.userId) };
+  if (!isFavoriteShareCode(normalized) || !enabled || !redisClient) return { error: '分享码无效' };
+  const reference = parseFavoriteShareReference(await redisClient.get(favoriteShareKey(normalized)));
+  if (!reference) return { error: '分享码无效或已过期' };
+  if (reference.expiresAt <= Date.now()) {
+    await redisClient.del(favoriteShareKey(normalized));
+    return { error: '分享码已过期' };
   }
-
-  // 兼容此前的七天歌曲快照，避免已发出的旧链接立刻失效。
-  const songs = parseFavorites(raw);
-  if (!songs.length) return { error: '分享码无效或已过期' };
-  return { code: normalized, songs };
+  return { code: normalized, songs: reference.songs, expiresAt: reference.expiresAt };
 }
 
 export async function importFavoriteShare(userId, code, selectedIds) {

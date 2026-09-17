@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 const FILEHELPER_ORIGIN = 'https://szfilehelper.weixin.qq.com';
 
@@ -260,6 +260,17 @@ export function verifyWechatLoginProof(token) {
   } catch {
     return null;
   }
+}
+
+export async function claimWechatLoginProof(proof, store) {
+  if (!proof || !store) return null;
+  const nonceDigest = createHash('sha256').update(proof.nonce).digest('hex');
+  const claimed = await store.set(
+    `openmusic:account:wechat-proof:${nonceDigest}`,
+    '1',
+    { NX: true, EX: WECHAT_LOGIN_PROOF_TTL_SEC },
+  );
+  return claimed === 'OK' ? proof : null;
 }
 
 function appendWechatLoginProofCookie(res, uin, { secure = false } = {}) {

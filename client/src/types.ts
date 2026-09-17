@@ -443,5 +443,7 @@ export interface SearchResult extends Song {
 
 export interface FavoriteSong extends Song {
   favoritedAt?: number;
+  /** 用户为此收藏选择的分类；缺失时归入“未分类”。 */
+  category?: string;
 }
 
