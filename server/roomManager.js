@@ -45,7 +45,7 @@ import {
   reviewPermanentApplication,
   toPublicPermanentApplication,
 } from "./permanentApplication.js";
-import { buildUserRoundRobinOrder } from "./playbackOrder.js";
+import { buildUserRoundRobinOrder, selectNextUserRoundRobinSong } from "./playbackOrder.js";
 import { sanitizeChatSongCards } from "./chatSongCard.js";
 import { resolveAdminOwnerLastJoinedAt } from "./adminRoomUtils.js";
 
