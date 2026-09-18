@@ -1695,6 +1695,7 @@ app.get('/api/meting', async (req, res) => {
       {
         userId: identity.userId,
         userNickname: presence?.userNickname || '',
+        clientIp: getRequestIp(req),
         roomId: presence?.roomId || '',
         roomName: presence?.roomName || '',
       },
@@ -1819,6 +1820,7 @@ app.get('/api/media-proxy', async (req, res) => {
   const metingCtx = {
     userId: identity.userId,
     userNickname: presence?.userNickname || '',
+    clientIp: getRequestIp(req),
     roomId: presence?.roomId || '',
     roomName: presence?.roomName || '',
   };

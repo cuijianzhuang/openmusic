@@ -5005,6 +5005,7 @@ export async function skipSong(roomId, socketId, connectionId = null, options = 
       {
         userId: socketId,
         userNickname: String(user?.nickname || "").slice(0, 40),
+        clientIp: String(user?.clientIp || "").slice(0, 64),
         roomId: room.id,
         roomName: String(room.name || room.id).slice(0, 60),
       },

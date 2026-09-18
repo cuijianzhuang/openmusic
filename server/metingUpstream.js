@@ -77,6 +77,7 @@ function pushRecentError(upstream, message, query = {}) {
     server: String(query?.server || '').slice(0, 32),
     userId: String(ctx.userId || '').slice(0, 64),
     userNickname: String(ctx.userNickname || '').slice(0, 40),
+    clientIp: String(ctx.clientIp || '').slice(0, 64),
     roomId: String(ctx.roomId || '').slice(0, 32),
     roomName: String(ctx.roomName || '').slice(0, 60),
   };

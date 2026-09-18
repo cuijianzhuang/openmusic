@@ -514,6 +514,7 @@ export default function OverviewDashboard({
                         {err.userNickname || err.userId
                           ? `用户 ${err.userNickname || err.userId} · `
                           : ''}
+                        {err.clientIp ? `IP ${err.clientIp} · ` : ''}
                         {err.server || err.type
                           ? `[${[err.server, err.type, err.id].filter(Boolean).join(' / ')}] `
                           : ''}

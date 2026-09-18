@@ -6,6 +6,7 @@ export interface MetingUpstreamRecentError {
   server?: string;
   userId?: string;
   userNickname?: string;
+  clientIp?: string;
   roomId?: string;
   roomName?: string;
 }
