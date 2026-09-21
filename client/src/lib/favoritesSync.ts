@@ -34,6 +34,8 @@ export interface FavoriteSyncResult extends FavoriteSyncBatchResponse {
   complete: boolean;
 }
 
+type FavoriteCategoriesResponse = { success: boolean; categories?: string[]; error?: string };
+
 export function readFavoritesSyncState(): FavoritesSyncState {
   try {
     const value = JSON.parse(localStorage.getItem(STATE_KEY) || 'null') as Partial<FavoritesSyncState> | null;
@@ -99,6 +101,55 @@ export function mergeFavoriteSongs(base: FavoriteSong[], incoming: FavoriteSong[
     }
   }
   return result.slice(0, 5000);
+}
+
+export function buildFavoriteMigrationPlan(
+  serverFavorites: FavoriteSong[],
+  localFavorites: FavoriteSong[],
+): { favorites: FavoriteSong[]; missingLocalFavorites: FavoriteSong[] } {
+  const seen = new Set(serverFavorites.map((song) => `${song.source || 'netease'}:${song.id}`));
+  const missingLocalFavorites = localFavorites.filter((song) => {
+    const key = `${song.source || 'netease'}:${song.id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return {
+    favorites: [...serverFavorites, ...missingLocalFavorites],
+    missingLocalFavorites,
+  };
+}
+
+export async function migrateFavoriteCache(
+  serverFavorites: FavoriteSong[],
+  localFavorites: FavoriteSong[],
+  upload: (songs: FavoriteSong[]) => Promise<FavoriteSyncBatchResponse>,
+): Promise<{ favorites: FavoriteSong[]; migrated: boolean }> {
+  const plan = buildFavoriteMigrationPlan(serverFavorites, localFavorites);
+  if (plan.missingLocalFavorites.length === 0) return { favorites: plan.favorites, migrated: true };
+  const result = await syncFavoriteBatches(plan.missingLocalFavorites, upload);
+  return {
+    favorites: result.favorites?.length ? result.favorites : plan.favorites,
+    migrated: result.success && result.complete,
+  };
+}
+
+export async function migrateFavoriteCategories(
+  localCategories: string[],
+  listRemote: () => Promise<FavoriteCategoriesResponse>,
+  createRemote: (name: string) => Promise<FavoriteCategoriesResponse>,
+): Promise<{ categories: string[]; migrated: boolean }> {
+  const listed = await listRemote();
+  if (!listed.success) return { categories: localCategories, migrated: false };
+  let categories = listed.categories || [];
+  for (const value of localCategories) {
+    const name = value.trim();
+    if (!name || categories.some((item) => item.toLowerCase() === name.toLowerCase())) continue;
+    const created = await createRemote(name);
+    if (!created.success) return { categories, migrated: false };
+    categories = created.categories || [...categories, name];
+  }
+  return { categories, migrated: true };
 }
 
 export async function syncFavoriteBatches(

@@ -18,6 +18,7 @@ import {
   registerMetingRoomResolver,
 } from './metingUpstream.js';
 import { fetchCustomMusicApi, hasCustomMusicApi, getCustomMusicApiStatus } from './customMusicApi.js';
+import { createMetingResponseCache } from './metingCache.js';
 import {
   contributeMusicAccount,
   revokeMusicContribution,
@@ -82,7 +83,7 @@ import {
   sanitizeDeviceId,
 } from './deviceIdentity.js';
 import { resolveBoundClientNetwork } from './clientIpBinding.js';
-import { shouldIssueGuestHandoff, shouldRefreshRoomIdentity } from './sessionIdentity.js';
+import { shouldIssueGuestHandoff, shouldMigrateFavorites, shouldRefreshRoomIdentity } from './sessionIdentity.js';
 import {
   createRoom,
   getRoomPublic,
@@ -201,8 +202,9 @@ import { fetchNeteaseHotToplist } from './neteaseToplist.js';
 import { createNeteasePlaylistSearchHandler } from './neteasePlaylistSearch.js';
 import { getHotSongs } from './songHotRank.js';
 import { fetchMusicSuggestions } from './musicSuggestions.js';
-import { hasRedisEnvConfig, createFavoriteShare, revokeFavoriteShare, importFavoriteShare, importFavoriteSongs, importFavoriteCategories, listFavoriteSongs, listFavoriteCategories, createFavoriteCategory, previewFavoriteShare, setFavoriteSong, setFavoriteCategory, getRedisClient, addRoomToAccountIndex, listRoomIdsForAccount } from './roomStorage.js';
-import { filterFavoriteCategories } from './favoritesSync.js';
+import { hasRedisEnvConfig, createFavoriteShare, revokeFavoriteShare, importFavoriteShare, importFavoriteSongs, importFavoriteCategories, listFavoriteSongs, listFavoriteCategories, createFavoriteCategory, previewFavoriteShare, setFavoriteSong, setFavoriteCategory, getRedisClient, addRoomToAccountIndex, listRoomIdsForAccount, retainMigratedFavoriteSource } from './roomStorage.js';
+import { analyzeFavoritesMigration, filterFavoriteCategories } from './favoritesSync.js';
+import { sanitizeFavoriteSongInput } from './favoriteSongInput.js';
 import {
   createChatImageUploadToken,
   isQiniuConfigured,
@@ -275,6 +277,7 @@ import {
   loginOrRegisterExternalIdentity,
   bindExternalIdentity,
   ensureRoomUserId,
+  getRoomIdentityOwnerAccountId,
   unbindExternalIdentity,
   createAccountSession,
   resolveAccountSession,
@@ -1726,8 +1729,13 @@ app.get('/api/meting', async (req, res) => {
   }
 });
 
+const qishuiPlaybackSourceCache = createMetingResponseCache({
+  ttlMs: 10 * 60 * 1000,
+  maxEntries: 512,
+});
+
 /** 仅从 Meting 获取汽水 CDN 地址和本次音频密钥，解密始终在客户端完成。 */
-async function resolveQishuiPlaybackSource(rawUrl, signal) {
+async function resolveQishuiPlaybackSourceUncached(rawUrl, signal) {
   const sourceEndpoint = new URL(rawUrl);
   sourceEndpoint.searchParams.set('mode', 'source');
   const metadataResponse = await fetchMeting(sourceEndpoint.toString(), { signal }, 15_000);
@@ -1759,6 +1767,13 @@ async function resolveQishuiPlaybackSource(rawUrl, signal) {
   }
   if (!auth) throw new Error('汽水音频密钥缺失');
   return { sourceUrl, auth };
+}
+
+async function resolveQishuiPlaybackSource(rawUrl, signal) {
+  return qishuiPlaybackSourceCache.get(
+    String(rawUrl || '').trim(),
+    () => resolveQishuiPlaybackSourceUncached(rawUrl, signal),
+  );
 }
 
 /** 浏览器本地解密模式：只返回短时有效的汽水 CDN 地址和本次音频密钥。 */
@@ -2104,6 +2119,56 @@ async function syncAccountRoomIdentity(req, res, account) {
   if (!account?.id) return null;
   const currentIdentity = resolveIdentityFromRequest(req);
   const roomUserId = await ensureRoomUserId(account.id, currentIdentity?.userId || '');
+  const previousAccount = await resolveAccountFromRequest(req);
+  const sourceIdentityOwnerId = currentIdentity?.userId
+    ? await getRoomIdentityOwnerAccountId(currentIdentity.userId)
+    : null;
+  if (shouldMigrateFavorites(
+    currentIdentity,
+    roomUserId,
+    Boolean(previousAccount),
+    Boolean(sourceIdentityOwnerId),
+  )) {
+    const guestFavorites = await listFavoriteSongs(currentIdentity.userId);
+    const accountFavorites = await listFavoriteSongs(roomUserId);
+    const guestCategories = await listFavoriteCategories(currentIdentity.userId);
+    const accountCategories = await listFavoriteCategories(roomUserId);
+    const migration = analyzeFavoritesMigration({
+      accountFavorites,
+      guestFavorites,
+      accountCategories,
+      guestCategories,
+    });
+    if (migration.droppedFavorites > 0 || migration.droppedCategories > 0) {
+      incrementMetric('account_favorites_migration_total', { outcome: 'capacity_rejected' });
+      throw new AccountAuthError(
+        'FAVORITES_MIGRATION_CAPACITY',
+        `账户与游客收藏合并后超过容量上限，请先导出并减少当前游客收藏后重试（歌曲超出 ${migration.droppedFavorites || 0} 首，分类超出 ${migration.droppedCategories || 0} 个）`,
+        409,
+      );
+    }
+    if (guestCategories.length > 0) {
+      const migratedCategories = await importFavoriteCategories(roomUserId, guestCategories);
+      if (migratedCategories.error) {
+        throw new Error(`登录后收藏分类迁移失败: ${migratedCategories.error}`);
+      }
+    }
+    if (guestFavorites.length > 0) {
+      const categories = await listFavoriteCategories(roomUserId);
+      const migratedFavorites = await importFavoriteSongs(
+        roomUserId,
+        filterFavoriteCategories(guestFavorites, categories),
+        { preserveExistingOrder: true },
+      );
+      if (migratedFavorites.error || migratedFavorites.dropped > 0) {
+        throw new Error(`登录后收藏迁移失败: ${migratedFavorites.error || `容量不足，仍有 ${migratedFavorites.dropped} 首未迁移`}`);
+      }
+    }
+    if (guestFavorites.length > 0 || guestCategories.length > 0) {
+      await retainMigratedFavoriteSource(currentIdentity.userId);
+      incrementMetric('account_favorites_migration_total', { outcome: 'redis_to_redis' });
+    }
+  }
   const roomMigration = currentIdentity?.userId
     ? claimRoomsForAccountIdentity(currentIdentity.userId, roomUserId, account.id)
     : { claimedRoomIds: [], conflictedRoomIds: [] };
@@ -2114,7 +2179,12 @@ async function syncAccountRoomIdentity(req, res, account) {
   if (roomMigration.conflictedRoomIds.length > 0) {
     for (let index = 0; index < roomMigration.conflictedRoomIds.length; index += 1) incrementMetric('account_room_migration_total', { outcome: 'conflict' });
   }
-  if (shouldIssueGuestHandoff(currentIdentity, roomUserId)) {
+  if (shouldIssueGuestHandoff(
+    currentIdentity,
+    roomUserId,
+    Boolean(previousAccount),
+    Boolean(sourceIdentityOwnerId),
+  )) {
     setGuestHandoffCookie(res, currentIdentity.userId, roomUserId);
   }
   const cookieDeviceId = resolveDeviceIdFromCookieHeader(req.headers?.cookie || '');
@@ -3225,16 +3295,20 @@ app.post('/api/account/favorites/sync', async (req, res) => {
   if (!identity?.userId) return res.status(401).json({ error: '会话未就绪', code: 'SESSION_REQUIRED' });
   const cookies = parseCookieHeader(req.headers?.cookie || '');
   const handoff = verifyGuestHandoff(cookies[GUEST_HANDOFF_COOKIE], identity.userId);
-  const localSongs = Array.isArray(req.body?.songs) ? req.body.songs.slice(0, 1000) : [];
+  const rawLocalSongs = Array.isArray(req.body?.songs) ? req.body.songs.slice(0, 1000) : [];
   const localCategories = Array.isArray(req.body?.categories) ? req.body.categories.slice(0, 50) : [];
-  if (localSongs.length > 0 && !handoff) {
+  if (rawLocalSongs.length > 0 && !handoff) {
     return res.status(403).json({ error: '缺少有效的登录前游客同步凭证', code: 'FAVORITES_HANDOFF_REQUIRED' });
   }
-  // 游客收藏当前由客户端本地缓存承载；handoff 只用于证明该同步请求来自本次登录前会话，
-  // 不把任意 sourceUserId 当作 Redis 收藏读取目标，避免跨账户窃取收藏。
+  const localSongs = rawLocalSongs.map(sanitizeFavoriteSongInput).filter(Boolean);
+  const rejectedSongs = rawLocalSongs.length - localSongs.length;
+  // 这里只兼容旧版本遗留的浏览器本地收藏；新版本游客收藏已在登录阶段按已验证身份完成 Redis 迁移。
+  // handoff 仅证明本地补迁移来自本次登录前会话，不按客户端字段读取任意 Redis 身份。
   const categoryResult = await importFavoriteCategories(identity.userId, localCategories);
   if (categoryResult.error) return res.status(400).json({ error: categoryResult.error, code: 'FAVORITES_SYNC_FAILED' });
-  const result = await importFavoriteSongs(identity.userId, filterFavoriteCategories(localSongs, categoryResult.categories));
+  const result = localSongs.length > 0
+    ? await importFavoriteSongs(identity.userId, filterFavoriteCategories(localSongs, categoryResult.categories))
+    : { favorites: await listFavoriteSongs(identity.userId), imported: 0, dropped: 0 };
   if (result.error) return res.status(400).json({ error: result.error, code: 'FAVORITES_SYNC_FAILED' });
   return res.json({
     success: true,
@@ -3242,7 +3316,7 @@ app.post('/api/account/favorites/sync', async (req, res) => {
     identitySame: Boolean(handoff?.sourceUserId === identity.userId),
     favorites: result.favorites,
     imported: result.imported,
-    dropped: result.dropped,
+    dropped: (result.dropped || 0) + rejectedSongs,
     maxFavorites: result.maxFavorites,
     categories: categoryResult.categories,
   });
@@ -6029,9 +6103,9 @@ io.on('connection', (socket) => {
     const identity = resolveIdentityFromCookies(socket.handshake?.headers?.cookie || '');
     if (!identity?.userId) return callback?.({ success: false, error: '会话未就绪，请刷新页面后重试' });
     const { song, category } = socketPayload(payload);
-    const clean = sanitizeClientSong(song);
-    if (clean.error) return callback?.({ success: false, error: clean.error });
-    const result = await setFavoriteCategory(identity.userId, clean.song, category);
+    const clean = sanitizeFavoriteSongInput(song);
+    if (!clean) return callback?.({ success: false, error: '收藏歌曲数据无效' });
+    const result = await setFavoriteCategory(identity.userId, clean, category);
     callback?.(result.error ? { success: false, error: result.error } : { success: true, ...result });
   });
 
@@ -6045,13 +6119,13 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const clean = sanitizeClientSong(song);
-    if (clean.error) {
-      callback?.({ success: false, error: clean.error });
+    const clean = sanitizeFavoriteSongInput(song);
+    if (!clean) {
+      callback?.({ success: false, error: '收藏歌曲数据无效' });
       return;
     }
 
-    const result = await setFavoriteSong(identity.userId, clean.song, Boolean(favorite));
+    const result = await setFavoriteSong(identity.userId, clean, Boolean(favorite));
     if (result.error) {
       callback?.({ success: false, error: result.error });
       return;
@@ -6124,9 +6198,11 @@ io.on('connection', (socket) => {
 
     const cleanSongs = [];
     for (const song of songs) {
-      const clean = sanitizeClientSong(song);
-      if (!clean.error) cleanSongs.push(clean.song);
+      const clean = sanitizeFavoriteSongInput(song);
+      if (clean) cleanSongs.push(clean);
     }
+
+    if (cleanSongs.length === 0) return callback?.({ success: false, error: '收藏数据格式无效' });
 
     const result = await importFavoriteSongs(identity.userId, cleanSongs);
     if (result.error) {
@@ -6137,7 +6213,7 @@ io.on('connection', (socket) => {
       success: true,
       favorites: result.favorites,
       imported: result.imported,
-      dropped: result.dropped,
+      dropped: (result.dropped || 0) + (songs.length - cleanSongs.length),
       maxFavorites: result.maxFavorites,
       // 仅作为客户端展示状态；目标身份仍由当前已验证 Cookie 决定，绝不按该字段读取数据。
       identitySame: Boolean(sourceUserId && String(sourceUserId).trim() === identity.userId),
@@ -6160,6 +6236,7 @@ io.on('connection', (socket) => {
       return;
     }
     emitPlaybackOnly(roomId);
+    emitSystemChat(roomId, updated.systemMessage);
     callback?.({ success: true });
   });
 

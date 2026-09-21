@@ -323,6 +323,19 @@ export function createAccountAuthService({
     return normalizeAccountRecord(parseStoredJson(await store.get(accountKey(id))));
   }
 
+  async function getRoomIdentityOwnerAccountId(userId) {
+    const roomUserId = normalizeRoomUserId(userId);
+    if (!roomUserId) return null;
+    const store = ensureStore(getStore, isStoreReady);
+    const rawOwnerId = String(await store.get(roomIdentityKey(roomUserId)) || '').trim();
+    if (!rawOwnerId) return null;
+    const ownerId = normalizeAccountId(rawOwnerId);
+    if (!ownerId) {
+      throw new AccountAuthError('ROOM_IDENTITY_CONFLICT', '账户身份数据异常，请联系管理员', 503);
+    }
+    return ownerId;
+  }
+
   async function requestEmailRegistrationCode({ email: rawEmail } = {}) {
     const email = normalizeEmail(rawEmail);
     if (!email) throw new AccountAuthError('INVALID_EMAIL', '请输入有效的邮箱地址', 400);
@@ -708,6 +721,7 @@ export function createAccountAuthService({
 
   return {
     getAccountById,
+    getRoomIdentityOwnerAccountId,
     requestEmailRegistrationCode,
     registerWithEmail,
     loginWithEmail,
@@ -730,6 +744,7 @@ export const loginWithEmail = defaultService.loginWithEmail;
 export const loginOrRegisterExternalIdentity = defaultService.loginOrRegisterExternalIdentity;
 export const bindExternalIdentity = defaultService.bindExternalIdentity;
 export const ensureRoomUserId = defaultService.ensureRoomUserId;
+export const getRoomIdentityOwnerAccountId = defaultService.getRoomIdentityOwnerAccountId;
 export const unbindExternalIdentity = defaultService.unbindExternalIdentity;
 export const createAccountSession = defaultService.createSession;
 export const resolveAccountSession = defaultService.resolveSession;

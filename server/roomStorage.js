@@ -2,6 +2,8 @@ import { decryptRoomSecrets, encryptRoomSecrets } from './roomCredentialCrypto.j
 import { getRuntimeConfig } from './runtimeConfig.js';
 import { randomBytes } from 'node:crypto';
 import { createLogger, incrementMetric } from './logger.js';
+import { appendMissingFavoriteSongs } from './favoritesSync.js';
+import { expireMigratedFavoriteSource } from './favoriteRetention.js';
 
 const ROOM_IDS_KEY = 'openmusic:room_ids';
 const roomKey = (id) => `openmusic:room:${id}`;
@@ -392,6 +394,21 @@ export async function listFavoriteSongs(userId) {
   return readFavorites(id);
 }
 
+export async function retainMigratedFavoriteSource(userId) {
+  const id = String(userId || '').trim();
+  if (!id || !enabled || !redisClient) return false;
+  try {
+    return await expireMigratedFavoriteSource(redisClient, [
+      favoriteKey(id),
+      favoriteCategoriesKey(id),
+    ]);
+  } catch (error) {
+    incrementMetric('redis_error_total', { phase: 'favorite_migration_source_retention' });
+    log.error('favorite_migration_source_retention_failed', { userId: id, error });
+    return false;
+  }
+}
+
 export async function listFavoriteCategories(userId) {
   const id = String(userId || '').trim();
   if (!id || !enabled || !redisClient) return [];
@@ -635,7 +652,7 @@ export async function importFavoriteShare(userId, code, selectedIds) {
   return importFavoriteSongs(userId, songs);
 }
 
-export async function importFavoriteSongs(userId, songs) {
+export async function importFavoriteSongs(userId, songs, options = {}) {
   const id = String(userId || '').trim();
   if (!id) return { error: '用户身份无效' };
   if (!Array.isArray(songs)) return { error: '收藏数据格式无效' };
@@ -647,6 +664,9 @@ export async function importFavoriteSongs(userId, songs) {
     const mutation = await mutateFavoritesAtomically(id, (items) => {
       // 已有收藏优先保留：导入只填补剩余容量，不能静默挤掉用户旧收藏。
       const current = capFavorites(items);
+      if (options.preserveExistingOrder) {
+        return appendMissingFavoriteSongs(current, imported, MAX_FAVORITES);
+      }
       const seen = new Set(current.map(songFavoriteId));
       const candidates = [];
 

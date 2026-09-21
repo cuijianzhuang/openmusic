@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildFavoritesSyncResult, favoriteSongKey, filterFavoriteCategories, mergeFavoriteSnapshots } from './favoritesSync.js';
+import { analyzeFavoritesMigration, appendMissingFavoriteSongs, buildFavoritesSyncResult, favoriteSongKey, filterFavoriteCategories, mergeFavoriteSnapshots } from './favoritesSync.js';
 
 const song = (id, source = 'netease') => ({ id, source, name: id });
 
@@ -40,4 +40,36 @@ test('收藏歌曲只保留账户实际接收的分类', () => {
     filterFavoriteCategories(songs, ['已接收']).map((item) => [item.id, item.category || null]),
     [['1', null], ['2', '已接收'], ['3', null]],
   );
+});
+
+test('迁移前发现收藏容量不足，避免写入部分结果后才失败', () => {
+  const result = analyzeFavoritesMigration({
+    accountFavorites: [song('1'), song('2')],
+    guestFavorites: [song('2'), song('3'), song('4')],
+    maxFavorites: 3,
+  });
+
+  assert.deepEqual(result, { missingFavorites: 2, droppedFavorites: 1 });
+});
+
+test('迁移前发现分类容量不足', () => {
+  const result = analyzeFavoritesMigration({
+    accountCategories: ['已有'],
+    guestCategories: ['已有', '游客一', '游客二'],
+    maxCategories: 2,
+  });
+
+  assert.deepEqual(result, { missingCategories: 2, droppedCategories: 1 });
+});
+
+test('身份迁移追加缺失收藏并保持账户原顺序', () => {
+  const result = appendMissingFavoriteSongs(
+    [song('1'), song('2')],
+    [song('2'), song('3'), song('4')],
+    3,
+  );
+
+  assert.deepEqual(result.items.map(favoriteSongKey), ['netease:1', 'netease:2', 'netease:3']);
+  assert.equal(result.imported, 1);
+  assert.equal(result.dropped, 1);
 });

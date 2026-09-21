@@ -35,6 +35,8 @@ import { requireSessionBootstrap, resetSessionBootstrap } from '../lib/sessionBo
 import { mergeRoomState } from '../lib/mergeRoomState';
 import { debugLine, debugLog, resetDriftHistogram, setDebugSocketProvider } from '../lib/debugTools';
 import { bindReportTrackDurationSocket } from '../lib/reportTrackDuration';
+import { planAccountSocketRefresh } from '../lib/socketSessionRefresh';
+import { isAccountSessionRevisionEvent } from '../lib/accountSessionSignal';
 import {
   getClientNetworkInfo,
   type ClientNetworkInfo,
@@ -77,8 +79,22 @@ let reconnectAttempt = 0;
 /** 断线后短暂保留旧成员列表，避免服务重启时「全员消失再逐个回来」 */
 let usersStabilizeUntil = 0;
 const USERS_STABILIZE_MS = 18_000;
+let accountSessionStorageListenerBound = false;
+
+function bindAccountSessionStorageListener() {
+  if (accountSessionStorageListenerBound || typeof window === 'undefined') return;
+  accountSessionStorageListenerBound = true;
+  window.addEventListener('storage', (event) => {
+    if (!isAccountSessionRevisionEvent(event)) return;
+    void refreshSocketSession().finally(() => {
+      window.dispatchEvent(new Event('openmusic:account-session-changed'));
+    });
+  });
+}
 
 function getSocket(): Socket {
+
+  bindAccountSessionStorageListener();
 
   if (!socket) {
 
@@ -587,17 +603,21 @@ async function attemptRoomRejoin(trigger: string) {
 export async function refreshSocketSession(): Promise<void> {
   resetSessionBootstrap();
   const s = getSocket();
-  if (shouldMaintainRoomSession()) {
-    await attemptRoomRejoin('account_session_changed');
+  const plan = planAccountSocketRefresh({
+    socketActive: Boolean(s.connected || s.active),
+    maintainRoomSession: shouldMaintainRoomSession(),
+  });
+  try {
+    if (plan.reconnectSocket) {
+      await reconnectSocketSession(true);
+    } else {
+      await requireSessionBootstrap(true);
+    }
+  } catch {
+    // 账户登录本身已完成，Socket 可在下一次进入房间时重试。
     return;
   }
-  if (s.connected || s.active) {
-    try {
-      await reconnectSocketSession(true);
-    } catch {
-      // 账户登录本身已完成，Socket 可在下一次进入房间时重试。
-    }
-  }
+  if (plan.rejoinRoom) await attemptRoomRejoin('account_session_changed');
 }
 
 function handleSocketDisconnect(reason: string) {

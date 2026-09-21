@@ -3477,6 +3477,13 @@ function formatActorName(user) {
   );
 }
 
+export function buildPlaybackSystemMessage(user, action, song = null) {
+  const actor = formatActorName(user);
+  if (action === "pause") return `${actor} 暂停了播放`;
+  if (action === "skip") return `${actor} 切了 ${formatSongTitle(song)}`;
+  return "";
+}
+
 /** 聊天室顶部短暂系统提示（点歌/点赞等，不落盘、不进消息列表） */
 function appendSystemChatMessage(room, text) {
   if (!room) return null;
@@ -5033,7 +5040,7 @@ export async function skipSong(roomId, socketId, connectionId = null, options = 
     } else if (reason === "system") {
       systemMessage = appendSystemChatMessage(room, `系统已跳过 ${songTitle}`);
     } else {
-      systemMessage = appendSystemChatMessage(room, `${formatActorName(user)} 切了 ${songTitle}`);
+      systemMessage = appendSystemChatMessage(room, buildPlaybackSystemMessage(user, "skip", currentSong));
     }
   }
 
@@ -5319,7 +5326,12 @@ export function setPlaying(roomId, socketId, isPlaying, connectionId = null) {
   bumpPlaybackState(room);
 
   persistRoom(room);
-  return serializeRoom(room);
+  return {
+    room: serializeRoom(room),
+    systemMessage: !isPlaying
+      ? appendSystemChatMessage(room, buildPlaybackSystemMessage(room.users.get(socketId), "pause"))
+      : null,
+  };
 }
 
 export function seekTo(roomId, socketId, time, connectionId = null) {

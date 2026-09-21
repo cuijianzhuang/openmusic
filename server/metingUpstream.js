@@ -2,12 +2,25 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { fetchMeting, formatMetingFetchError } from './metingFetch.js';
 import { fetchCustomMusicApi } from './customMusicApi.js';
 import { getRuntimeConfig } from './runtimeConfig.js';
+import { createMetingResponseCache } from './metingCache.js';
 
 // METING_API_URL 支持英文逗号分隔多个上游；METING_API_AUTH 同样支持逗号分隔：
 // 与 URL 一一对应；只填一个则应用到所有上游。
 const FAIL_COOLDOWN_MS = 60_000;
 const UPSTREAM_ATTEMPTS = 2;
 const MAX_RECENT_ERRORS = 20;
+const METING_RESPONSE_CACHE_MAX = 2048;
+const METING_RESPONSE_CACHE = createMetingResponseCache({ maxEntries: METING_RESPONSE_CACHE_MAX });
+
+const METING_CACHE_TTLS = {
+  search: 30_000,
+  url: 10 * 60_000,
+  lrc: 10 * 60_000,
+  pic: 10 * 60_000,
+  song: 60_000,
+  playlist: 60_000,
+  search_playlist: 30_000,
+};
 
 /** HTTP/Socket 请求上下文：失败日志归因到用户与房间 */
 const metingRequestContext = new AsyncLocalStorage();
@@ -291,10 +304,54 @@ export const __test = {
   getRoomScopedAccount,
   roomNeedsScopedProxy,
   buildUpstreamRequest,
+  buildMetingCacheKey,
 };
 
 function buildUpstreamUrl(upstream, query) {
   return buildUpstreamRequest(upstream, query).url;
+}
+
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (!value || typeof value !== 'object') return JSON.stringify(value);
+  return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(',')}}`;
+}
+
+function buildMetingCacheKey(query, options) {
+  const context = getMetingRequestContext();
+  const quality = String(query?.quality || '').trim();
+  return `${upstreamSignature}\n${stableJson({
+    query,
+    // URL 缓存必须按音质隔离，避免低音质结果复用到高音质请求。
+    quality,
+    options: { method: options?.method || 'GET', redirect: options?.redirect || '' },
+    roomId: context.roomId || '',
+  })}`;
+}
+
+function createCachedMetingResponse(snapshot) {
+  const headers = {
+    'content-type': snapshot.contentType || '',
+    location: snapshot.location || '',
+  };
+  return {
+    ok: snapshot.status >= 200 && snapshot.status < 300,
+    status: snapshot.status,
+    headers: { get: (name) => headers[String(name).toLowerCase()] || null },
+    text: async () => snapshot.body,
+    json: async () => JSON.parse(snapshot.body),
+    clone: () => createCachedMetingResponse(snapshot),
+  };
+}
+
+async function snapshotMetingResponse(response) {
+  const body = await response.text();
+  return {
+    status: Number(response.status || 0),
+    body,
+    contentType: response.headers?.get?.('content-type') || '',
+    location: response.headers?.get?.('location') || '',
+  };
 }
 
 // 轮询起点每次前移；冷却中的上游排到最后兜底（全部故障时仍会尝试）；禁用的完全跳过
@@ -389,7 +446,7 @@ async function fetchCustomMusicApiFallback(query, timeoutMs) {
 }
 
 /** Meting 为默认上游；仅在其不可用、未命中或没有播放链时使用管理员自定义接口兜底。 */
-export async function fetchMetingApi(query, options = {}, timeoutMs = 10000) {
+async function fetchMetingApiUncached(query, options = {}, timeoutMs = 10000) {
   syncUpstreams();
   let metingUnavailableError = null;
   if (upstreams.length === 0) {
@@ -495,6 +552,23 @@ export async function fetchMetingApi(query, options = {}, timeoutMs = 10000) {
   if (customResponse) return customResponse;
   if (metingFallbackResponse) return metingFallbackResponse;
   throw lastError || metingUnavailableError || new Error('所有 Meting 上游均不可用');
+}
+
+/**
+ * 统一缓存所有公共 Meting API 请求，并合并相同请求的并发 Promise。
+ * 私有房间请求通过 roomId 纳入 key，避免不同房间共享私有账号结果。
+ */
+export async function fetchMetingApi(query, options = {}, timeoutMs = 10000) {
+  syncUpstreams();
+  const type = String(query?.type || '').trim().toLowerCase();
+  const ttlMs = METING_CACHE_TTLS[type] || 15_000;
+  const key = buildMetingCacheKey(query, options);
+  const snapshot = await METING_RESPONSE_CACHE.get(
+    key,
+    async () => snapshotMetingResponse(await fetchMetingApiUncached(query, options, timeoutMs)),
+    ttlMs,
+  );
+  return createCachedMetingResponse(snapshot);
 }
 
 // ---------- 主动健康探测 ----------

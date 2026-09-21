@@ -43,6 +43,7 @@ import {
   pollWechatLogin,
 } from '../lib/wechatFileHelperBridge';
 import { refreshSocketSession } from '../hooks/useSocket';
+import { announceAccountSessionChanged } from '../lib/accountSessionSignal';
 
 const GUEST_CHOICE_KEY = 'openmusic:account-entry-choice:v1';
 const EMPTY_PROVIDERS: AccountProviderStatus = { linuxdo: false, github: false, wechat: false };
@@ -225,7 +226,10 @@ export default function AccountAccess({
 
   useEffect(() => {
     const oauthResult = consumeAccountAuthReturn();
-    if (oauthResult) setToast(oauthResult);
+    if (oauthResult) {
+      setToast(oauthResult);
+      announceAccountSessionChanged();
+    }
     void refresh()
       .then((session) => {
         if (oauthResult) {
@@ -285,7 +289,7 @@ export default function AccountAccess({
         ? await registerAccountWithEmail(email, password, code)
         : await loginAccountWithEmail(email, password);
       await refreshSocketSession();
-      window.dispatchEvent(new Event('openmusic:account-session-changed'));
+      announceAccountSessionChanged();
       setAccount(next);
       setView('manage');
       setToast({ message: register ? '账户创建完成' : '欢迎回来', type: 'success' });
@@ -316,7 +320,7 @@ export default function AccountAccess({
 
   const finishWechat = useCallback((next: AccountProfile) => {
     void refreshSocketSession().finally(() => {
-      window.dispatchEvent(new Event('openmusic:account-session-changed'));
+      announceAccountSessionChanged();
     });
     setAccount(next);
     setView('manage');
@@ -342,7 +346,7 @@ export default function AccountAccess({
     try {
       await logoutAccount();
       await refreshSocketSession();
-      window.dispatchEvent(new Event('openmusic:account-session-changed'));
+      announceAccountSessionChanged();
       setAccount(null);
       setView('welcome');
       setToast({ message: '已退出账户，当前继续使用游客身份', type: 'success' });
