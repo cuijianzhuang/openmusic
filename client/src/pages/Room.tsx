@@ -62,6 +62,7 @@ import ConfirmModal from '../components/ConfirmModal';
 import FavoriteButton from '../components/FavoriteButton';
 import SongRowBadges from '../components/SongRowBadges';
 import PageSizeSelect from '../components/PageSizeSelect';
+import FavoriteCategorySelect from '../components/FavoriteCategorySelect';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useRoomSongKeySets } from '../hooks/useRoomSongKeySets';
 import { useSongHistoryStore } from '../stores/songHistoryStore';
@@ -3922,24 +3923,15 @@ export default function Room() {
                         <div className="min-w-0 flex-1 space-y-0.5">
                           <p className="truncate text-sm font-medium">{song.name}</p>
                           <p className="truncate text-xs text-netease-muted">{song.artist}{song.album ? ` · ${song.album}` : ''}</p>
-                          <label className="mt-1 flex max-w-[11rem] items-center gap-1">
-                            <span className="sr-only">收藏分类</span>
-                            <select
+                          <div className="mt-1">
+                            <FavoriteCategorySelect
                               value={String(song.category || '')}
-                              onChange={(event) => void handleChangeFavoriteCategory(song, event.target.value)}
+                              categories={favoriteCategories}
+                              songName={song.name}
+                              onChange={(category) => void handleChangeFavoriteCategory(song, category)}
                               disabled={updatingFavoriteCategoryId === key}
-                              className="w-full rounded-md border border-netease-border bg-netease-dark px-1.5 py-1 text-[11px] text-netease-muted focus:border-netease-red/50 focus:outline-none disabled:opacity-50"
-                              aria-label={`为 ${song.name} 选择收藏分类`}
-                            >
-                              <option value="">未分类</option>
-                              {song.category && !favoriteCategories.includes(song.category) && (
-                                <option value={song.category}>{song.category}</option>
-                              )}
-                              {favoriteCategories.map((category) => (
-                                <option key={category} value={category}>{category}</option>
-                              ))}
-                            </select>
-                          </label>
+                            />
+                          </div>
                         </div>
                         <SongRowBadges
                           song={song}

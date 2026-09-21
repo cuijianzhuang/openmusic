@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "typecheck": "tsc -b --pretty false",
-    "test": "npm run check:header-actions && npm run typecheck",
+    "test": "npm run check:header-actions && tsx --test src/lib/avatarImage.test.ts src/lib/favoritesSync.test.ts && npm run typecheck",
     "check:header-actions": "node scripts/check-header-action-style.mjs",
     "build": "vite build",
     "build:check": "npm run typecheck && npm run check:antd-boundary && npm run build",

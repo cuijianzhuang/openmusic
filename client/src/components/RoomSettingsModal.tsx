@@ -975,9 +975,22 @@ export default function RoomSettingsModal({
           )}
 
           {activeTab === 'room' && (
-            <div className="space-y-6">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="md:col-span-2 rounded-2xl border border-netease-red/20 bg-gradient-to-br from-netease-red/[0.12] via-white/[0.03] to-transparent p-4">
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5 rounded-xl bg-netease-red/15 p-2 text-netease-red">
+                    <Crown className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-white">房主控制台</p>
+                    <p className="mt-1 text-xs leading-relaxed text-netease-muted">
+                      管理播放体验、成员权限和房间生命周期。常用设置在上方，身份与解散等高影响操作已单独分区。
+                    </p>
+                  </div>
+                </div>
+              </div>
               {isOwner && (
-                <section>
+                <section className="rounded-2xl border border-white/10 bg-white/[0.025] p-4">
                   <div className="mb-2 flex items-center gap-2">
                     <span className="text-sm font-semibold text-white">播放倍速</span>
                   </div>
@@ -1011,7 +1024,7 @@ export default function RoomSettingsModal({
               )}
 
               {isOwner && (
-                <section>
+                <section className="rounded-2xl border border-white/10 bg-white/[0.025] p-4">
                   <Toggle
                     checked={adminSelfManageMemberTierEnabled}
                     disabled={adminSelfManageMemberTierSaving || !onSaveAdminSelfManageMemberTier}
@@ -1023,7 +1036,7 @@ export default function RoomSettingsModal({
               )}
 
               {isOwner && (
-                <section>
+                <section className="rounded-2xl border border-white/10 bg-white/[0.025] p-4">
                   <div className="mb-2 flex items-center gap-2">
                     <ShieldCheck className="h-4 w-4 text-sky-400" />
                     <h3 className="text-sm font-medium text-white">管理员人数</h3>
@@ -1053,9 +1066,7 @@ export default function RoomSettingsModal({
               )}
 
               {isOwner && (
-                <section>
-                  <div className="mb-2 flex items-center gap-2">
-                    <ShieldCheck className="h-4 w-4 text-emerald-400" />
+                <section className="md:col-span-2 rounded-2xl border border-white/10 bg-white/[0.025] p-4">                  <div className="mb-2 flex items-center gap-2">                    <ShieldCheck className="h-4 w-4 text-emerald-400" />
                     <h3 className="text-sm font-medium text-white">申请常驻</h3>
                   </div>
                   <p className="mb-3 text-xs text-netease-muted">
@@ -1117,7 +1128,7 @@ export default function RoomSettingsModal({
               )}
 
               {isOwner && (
-                <section>
+                <section className="md:col-span-2 rounded-2xl border border-white/10 bg-white/[0.025] p-4">
                   <div className="mb-2 flex items-center gap-2">
                     <Crown className="h-4 w-4 text-amber-400" />
                     <h3 className="text-sm font-medium text-white">转让房主</h3>
@@ -1170,7 +1181,7 @@ export default function RoomSettingsModal({
               )}
 
               {(wechatUinEnabled || linuxdoEnabled || githubEnabled) && (
-                <section className="space-y-3">
+                <section className="md:col-span-2 space-y-3 rounded-2xl border border-white/10 bg-white/[0.025] p-4">
                   <h3 className="text-sm font-medium text-white">身份绑定</h3>
                   {isOwner ? (
                     <>
@@ -1320,7 +1331,7 @@ export default function RoomSettingsModal({
               )}
 
               {isOwner && (
-                <section>
+                <section className="md:col-span-2 rounded-2xl border border-red-400/20 bg-red-400/[0.04] p-4">
                   <div className="mb-2 flex items-center gap-2">
                     <Trash2 className="h-4 w-4 text-red-400" />
                     <h3 className="text-sm font-medium text-white">解散房间</h3>

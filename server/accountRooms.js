@@ -107,9 +107,10 @@ export function createRedisAccountRoomIndex(getStore) {
 }
 
 /** 幂等的匿名房间认领判定；调用方必须先在服务端验证 creatorId/device proof。 */
-export function claimAccountRoom({ room, accountId, verifiedCreatorId, index }) {
+export function claimAccountRoom({ room, accountId, verifiedCreatorId, accountRoomUserId, index }) {
   const aid = normalizeAccountId(accountId);
   const creator = String(verifiedCreatorId || '').trim();
+  const accountCreator = String(accountRoomUserId || '').trim();
   if (!room || !aid || !index) return { ok: false, error: '参数无效', code: 'INVALID_INPUT' };
   if (room.ownerAccountId && room.ownerAccountId !== aid) {
     return { ok: false, error: '房间已被其他账户绑定', code: 'ROOM_ACCOUNT_CONFLICT' };
@@ -117,13 +118,29 @@ export function claimAccountRoom({ room, accountId, verifiedCreatorId, index }) 
   if (!creator || creator !== room.creatorId) {
     return { ok: false, error: '无权认领该房间', code: 'ROOM_CLAIM_FORBIDDEN' };
   }
-  if (room.ownerAccountId === aid) {
-    index.add(aid, room.id);
-    return { ok: true, changed: false };
+  let changed = false;
+  if (room.ownerAccountId !== aid) {
+    room.ownerAccountId = aid;
+    changed = true;
   }
-  room.ownerAccountId = aid;
+  if (accountCreator && room.creatorId !== accountCreator) {
+    room.creatorId = accountCreator;
+    changed = true;
+  }
   index.add(aid, room.id);
-  return { ok: true, changed: true };
+  return { ok: true, changed };
+}
+
+export function claimAccountRooms({ rooms, accountId, verifiedCreatorId, accountRoomUserId, index }) {
+  const claimedRoomIds = [];
+  const conflictedRoomIds = [];
+  for (const room of Array.isArray(rooms) ? rooms : []) {
+    if (room?.creatorId !== String(verifiedCreatorId || '').trim()) continue;
+    const result = claimAccountRoom({ room, accountId, verifiedCreatorId, accountRoomUserId, index });
+    if (result.ok && result.changed) claimedRoomIds.push(room.id);
+    else if (result.code === 'ROOM_ACCOUNT_CONFLICT') conflictedRoomIds.push(room.id);
+  }
+  return { claimedRoomIds, conflictedRoomIds };
 }
 
 export { normalizeAccountId, normalizeRoomId, roomSummary };

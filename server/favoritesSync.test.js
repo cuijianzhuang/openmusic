@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildFavoritesSyncResult, favoriteSongKey, mergeFavoriteSnapshots } from './favoritesSync.js';
+import { buildFavoritesSyncResult, favoriteSongKey, filterFavoriteCategories, mergeFavoriteSnapshots } from './favoritesSync.js';
 
 const song = (id, source = 'netease') => ({ id, source, name: id });
 
@@ -28,4 +28,16 @@ test('different identities report merged and remain idempotent', () => {
   assert.equal(first.imported, 1);
   assert.equal(second.imported, 0);
   assert.deepEqual(second.favorites, first.favorites);
+});
+
+test('收藏歌曲只保留账户实际接收的分类', () => {
+  const songs = [
+    song('1'),
+    { ...song('2'), category: '已接收' },
+    { ...song('3'), category: '被截断' },
+  ];
+  assert.deepEqual(
+    filterFavoriteCategories(songs, ['已接收']).map((item) => [item.id, item.category || null]),
+    [['1', null], ['2', '已接收'], ['3', null]],
+  );
 });

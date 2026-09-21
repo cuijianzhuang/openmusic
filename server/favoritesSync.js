@@ -6,6 +6,21 @@ export function favoriteSongKey(song) {
   return source && id ? `${source}:${id}` : '';
 }
 
+export function filterFavoriteCategories(songs, categories) {
+  const allowed = new Set(
+    (Array.isArray(categories) ? categories : [])
+      .map((category) => String(category || '').trim().toLowerCase())
+      .filter(Boolean),
+  );
+  return (Array.isArray(songs) ? songs : []).map((song) => {
+    if (!song || typeof song !== 'object') return song;
+    const category = String(song?.category || '').trim();
+    if (!category || allowed.has(category.toLowerCase())) return song;
+    const { category: _category, ...withoutCategory } = song;
+    return withoutCategory;
+  });
+}
+
 export function mergeFavoriteSnapshots(accountFavorites, guestFavorites) {
   const result = [];
   const seen = new Set();

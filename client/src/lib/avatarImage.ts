@@ -16,6 +16,13 @@ export function getSafeAvatarUrl(value: string | null | undefined): string {
   return isValidAvatarDataUrl(raw) ? raw : '';
 }
 
+export function resolveRoomAvatarUrl(
+  localAvatarUrl: string | null | undefined,
+  roomAvatarUrl: string | null | undefined,
+): string {
+  return getSafeAvatarUrl(localAvatarUrl) || getSafeAvatarUrl(roomAvatarUrl);
+}
+
 export function isSupportedAvatarFile(file: File): boolean {
   return file.type === 'image/jpeg' || file.type === 'image/png';
 }

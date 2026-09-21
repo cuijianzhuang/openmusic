@@ -328,6 +328,7 @@ function normalizeFavoriteSong(song) {
     duration: Number.isFinite(Number(song.duration)) ? Number(song.duration) : undefined,
     url: song.url ? String(song.url) : undefined,
     lrc: song.lrc ? String(song.lrc) : undefined,
+    ...(normalizeFavoriteCategoryName(song.category) ? { category: normalizeFavoriteCategoryName(song.category) } : {}),
     favoritedAt: Date.now(),
   };
 }
@@ -402,6 +403,26 @@ export async function listFavoriteCategories(userId) {
       : [];
   } catch {
     return [];
+  }
+}
+
+export async function importFavoriteCategories(userId, categories) {
+  const id = String(userId || '').trim();
+  if (!id || !Array.isArray(categories)) return { error: '收藏分类数据格式无效' };
+  if (!enabled || !redisClient) return { error: 'Redis 不可用，分类无法保存' };
+  const current = await listFavoriteCategories(id);
+  const next = [...current];
+  for (const value of categories) {
+    const name = normalizeFavoriteCategoryName(value);
+    if (!name || next.some((item) => item.toLowerCase() === name.toLowerCase())) continue;
+    if (next.length >= MAX_FAVORITE_CATEGORIES) break;
+    next.push(name);
+  }
+  try {
+    await redisClient.set(favoriteCategoriesKey(id), JSON.stringify(next));
+    return { categories: next };
+  } catch (error) {
+    return { error: error.message || '收藏分类保存失败' };
   }
 }
 

@@ -128,29 +128,40 @@ export function useFavorites() {
       const accountCached = readCache(cacheKey);
       if (accountCached.length) updateSharedFavorites(accountCached, cacheKey);
 
-      if (guestCached.length) updateSharedSyncState(markFavoritesSyncPending());
-      const result = await listFavorites();
-      if (!result.success) {
-        if (guestCached.length) updateSharedSyncState(markFavoritesSyncFailed(result.error || '收藏同步失败'));
-        return;
-      }
-
-      let next = result.favorites || [];
       if (guestCached.length) {
+        updateSharedSyncState(markFavoritesSyncPending());
         const attempt = markFavoritesSyncAttempt();
         updateSharedSyncState(attempt);
         try {
-          const imported = await syncAccountFavorites(guestCached);
+          const imported = await syncAccountFavorites(guestCached, readCategories(GUEST_CATEGORIES_KEY));
           if (!imported.success) throw new Error(imported.error || '收藏同步失败');
-          if (imported.favorites) next = imported.favorites;
-          removeCache(GUEST_CACHE_KEY);
-          const syncResult = imported.identitySame ? 'identity_same' : 'merged';
-          updateSharedSyncState(markFavoritesSyncResult(syncResult, attempt));
+          const next = imported.favorites || [];
+          if (imported.complete) {
+            removeCache(GUEST_CACHE_KEY);
+            try { localStorage.removeItem(GUEST_CATEGORIES_KEY); } catch { /* storage unavailable */ }
+            if (imported.categories) {
+              writeCategories(categoriesCacheKey(account.id), imported.categories);
+              setCategories(imported.categories);
+            }
+            const syncResult = imported.identitySame ? 'identity_same' : 'merged';
+            updateSharedSyncState(markFavoritesSyncResult(syncResult, attempt));
+          } else {
+            updateSharedSyncState(markFavoritesSyncFailed(
+              `账户收藏容量不足，${imported.dropped || 0} 首歌曲仍保留在本机`,
+              attempt,
+            ));
+          }
+          updateSharedFavorites(next, cacheKey);
         } catch (error) {
           updateSharedSyncState(markFavoritesSyncFailed(error, attempt));
           throw error;
         }
+        return;
       }
+
+      const result = await listFavorites();
+      if (!result.success) return;
+      const next = result.favorites || [];
       updateSharedFavorites(next, cacheKey);
     })().catch(() => undefined);
     return loadPromise;

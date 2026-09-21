@@ -17,6 +17,22 @@ export const INITIAL_FAVORITES_SYNC_STATE: FavoritesSyncState = {
 };
 
 const STATE_KEY = 'openmusic:favorites-sync:v1:guest';
+export const FAVORITES_SYNC_BATCH_SIZE = 1000;
+
+export interface FavoriteSyncBatchResponse {
+  success: boolean;
+  status?: 'identity_same' | 'merged';
+  identitySame?: boolean;
+  favorites?: FavoriteSong[];
+  imported?: number;
+  dropped?: number;
+  categories?: string[];
+  error?: string;
+}
+
+export interface FavoriteSyncResult extends FavoriteSyncBatchResponse {
+  complete: boolean;
+}
 
 export function readFavoritesSyncState(): FavoritesSyncState {
   try {
@@ -85,29 +101,34 @@ export function mergeFavoriteSongs(base: FavoriteSong[], incoming: FavoriteSong[
   return result.slice(0, 5000);
 }
 
-export async function syncAccountFavorites(songs: FavoriteSong[]): Promise<{
-  success: boolean;
-  status?: 'identity_same' | 'merged';
-  identitySame?: boolean;
-  favorites?: FavoriteSong[];
-  imported?: number;
-  dropped?: number;
-  error?: string;
-}> {
-  const response = await fetchWithTimeout('/api/account/favorites/sync', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ songs: songs.slice(0, 1000) }),
-  }, 10000);
-  const data = await response.json().catch(() => ({})) as {
-    success?: boolean;
-    status?: 'identity_same' | 'merged';
-    identitySame?: boolean;
-    favorites?: FavoriteSong[];
-    imported?: number;
-    dropped?: number;
-    error?: string;
-  };
-  if (!response.ok || !data.success) return { success: false, error: data.error || '收藏同步失败' };
-  return data as Awaited<ReturnType<typeof syncAccountFavorites>>;
+export async function syncFavoriteBatches(
+  songs: FavoriteSong[],
+  syncBatch: (batch: FavoriteSong[]) => Promise<FavoriteSyncBatchResponse>,
+): Promise<FavoriteSyncResult> {
+  let imported = 0;
+  let dropped = 0;
+  let last: FavoriteSyncBatchResponse = { success: true, favorites: [] };
+
+  for (let offset = 0; offset < songs.length; offset += FAVORITES_SYNC_BATCH_SIZE) {
+    const result = await syncBatch(songs.slice(offset, offset + FAVORITES_SYNC_BATCH_SIZE));
+    if (!result.success) return { ...result, complete: false, imported, dropped };
+    last = result;
+    imported += Math.max(0, Number(result.imported) || 0);
+    dropped += Math.max(0, Number(result.dropped) || 0);
+  }
+
+  return { ...last, success: true, complete: dropped === 0, imported, dropped };
+}
+
+export async function syncAccountFavorites(songs: FavoriteSong[], categories: string[] = []): Promise<FavoriteSyncResult> {
+  return syncFavoriteBatches(songs, async (batch) => {
+    const response = await fetchWithTimeout('/api/account/favorites/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ songs: batch, categories }),
+    }, 10000);
+    const data = await response.json().catch(() => ({})) as FavoriteSyncBatchResponse;
+    if (!response.ok || !data.success) return { success: false, error: data.error || '收藏同步失败' };
+    return data;
+  });
 }

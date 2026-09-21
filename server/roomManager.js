@@ -1,5 +1,6 @@
 import { customAlphabet } from "nanoid";
 import { scrypt, scryptSync, randomBytes, timingSafeEqual } from "crypto";
+import { claimAccountRooms } from "./accountRooms.js";
 import { fetchMetingFmSongs, normalizeFmMode, DEFAULT_FM_MODE, FM_MODE_OFF } from "./metingFm.js";
 import { importNeteasePlaylist, importQqPlaylist, importKugouPlaylist, importQishuiPlaylist } from "./playlistImport.js";
 import { getRedisClient, initRoomStorage, isRedisEnabled, loadAllRoomsFromStorage, queueSaveRoomToStorage, cancelQueuedRoomSave, deleteRoomFromStorage, saveRoomToStorage, listFavoriteSongs, addRoomToAccountIndex, removeRoomFromAccountIndex } from "./roomStorage.js";
@@ -581,6 +582,19 @@ async function verifyPassword(password, stored) {
   return timingSafeEqual(expected, actual);
 }
 
+export function canRecoverCreatorByDevice(room, clientId, deviceId, readOnly = false) {
+  const userId = sanitizeCreatorId(clientId);
+  const device = sanitizeCreatorId(deviceId);
+  return Boolean(
+    !readOnly
+    && userId
+    && device
+    && room?.creatorDeviceId === device
+    && room.creatorId !== userId
+    && !String(room.ownerAccountId || '').trim(),
+  );
+}
+
 export async function verifyRoomPassword(roomId, password, options = {}) {
   const room = rooms.get(roomId?.toUpperCase());
   if (!room) return { ok: false, error: "房间不存在" };
@@ -588,13 +602,7 @@ export async function verifyRoomPassword(roomId, password, options = {}) {
   const clientId = sanitizeCreatorId(options.clientId);
   const deviceId = sanitizeCreatorId(options.deviceId);
   // TV/只读进房会发临时 clientId，绝不能用设备绑定把永久房主改写给该临时身份。
-  if (
-    !options.readOnly
-    && clientId
-    && deviceId
-    && room.creatorDeviceId === deviceId
-    && room.creatorId !== clientId
-  ) {
+  if (canRecoverCreatorByDevice(room, clientId, deviceId, Boolean(options.readOnly))) {
     // 身份 Cookie 因重装/密钥轮换而变化时，以 HttpOnly 设备绑定恢复永久房主。
     room.creatorId = clientId;
     ensureAdminIds(room).delete(clientId);
@@ -6487,17 +6495,42 @@ export function persistRoomById(roomId) {
  * 由已完成账户鉴权的路由绑定持久房主账户。仅允许绑定当前 creatorId，
  * 避免把 ownerAccountId 误当成运行时 ownerId。
  */
-export function setRoomOwnerAccountId(roomId, creatorId, accountId) {
+export function setRoomOwnerAccountId(roomId, creatorId, accountId, accountRoomUserId = '') {
   const room = rooms.get(String(roomId || '').toUpperCase());
   const uid = sanitizeCreatorId(creatorId);
   const aid = String(accountId || '').trim().slice(0, 128);
+  const targetCreatorId = sanitizeCreatorId(accountRoomUserId);
   if (!room) return { error: '房间不存在' };
   if (!uid || room.creatorId !== uid) return { error: '当前身份不是持久房主' };
   if (!aid) return { error: '账户身份无效' };
   if (room.ownerAccountId && room.ownerAccountId !== aid) return { error: '房间已绑定其他账户' };
-  if (room.ownerAccountId === aid) return { ok: true, changed: false, room: serializeRoom(room) };
+  const changed = room.ownerAccountId !== aid || Boolean(targetCreatorId && room.creatorId !== targetCreatorId);
+  if (!changed) return { ok: true, changed: false, room: serializeRoom(room) };
   room.ownerAccountId = aid;
+  if (targetCreatorId) room.creatorId = targetCreatorId;
   persistRoom(room);
   invalidateRoomsListCache();
-  return { ok: true, changed: true, room: serializeRoom(room) };
+  return { ok: true, changed, room: serializeRoom(room) };
+}
+
+/** 将登录前已验证游客身份创建的房间归属迁移到当前账户稳定身份。 */
+export function claimRoomsForAccountIdentity(sourceUserId, accountRoomUserId, accountId) {
+  const source = sanitizeCreatorId(sourceUserId);
+  const target = sanitizeCreatorId(accountRoomUserId);
+  const account = String(accountId || '').trim().slice(0, 128);
+  if (!source || !target || !account) return { claimedRoomIds: [], conflictedRoomIds: [] };
+
+  const result = claimAccountRooms({
+    rooms: [...rooms.values()],
+    accountId: account,
+    verifiedCreatorId: source,
+    accountRoomUserId: target,
+    index: { add() { return true; } },
+  });
+  for (const roomId of result.claimedRoomIds) {
+    const room = rooms.get(roomId);
+    if (room) persistRoom(room);
+  }
+  if (result.claimedRoomIds.length > 0) invalidateRoomsListCache();
+  return result;
 }

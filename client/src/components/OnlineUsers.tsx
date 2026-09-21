@@ -3,7 +3,7 @@ import { Check, Clock, Crown, Image, MapPin, Pencil, Shield, Upload, UserMinus, 
 import { useRoomStore } from "../stores/roomStore";
 import Modal from "./Modal";
 import { useSocket } from "../hooks/useSocket";
-import { fileToAvatarDataUrl, getSafeAvatarUrl, isSupportedAvatarFile } from "../lib/avatarImage";
+import { fileToAvatarDataUrl, getSafeAvatarUrl, isSupportedAvatarFile, resolveRoomAvatarUrl } from "../lib/avatarImage";
 import { getDisplayInitial } from "../lib/displayInitial";
 import ChatImageLightbox from "./ChatImageLightbox";
 import { formatStayDuration } from "../lib/formatStayDuration";
@@ -59,7 +59,7 @@ export default function OnlineUsers({ users, creatorId, memberTiers = {}, onNoti
   const panelRef = useRef<HTMLDivElement>(null);
 
   const getUserAvatar = (userId: string) => {
-    if (userId === mySocketId) return getSafeAvatarUrl(avatar_url);
+    if (userId === mySocketId) return resolveRoomAvatarUrl(avatar_url, userAvatarUrls[userId]);
     return getSafeAvatarUrl(userAvatarUrls[userId]);
   };
 

@@ -20,7 +20,7 @@ import {
 import { parseQQFaceTokens, QFaceLoadPriority } from '../lib/qface';
 import { importUserStickerFromChatImage } from '../lib/userStickerStore';
 import { getDisplayInitial } from '../lib/displayInitial';
-import { getSafeAvatarUrl } from '../lib/avatarImage';
+import { resolveRoomAvatarUrl } from '../lib/avatarImage';
 import { useRoomStore } from '../stores/roomStore';
 import { getChatImageDisplayUrl } from '../api/chatImage';
 import type { ChatCardActions } from './chatCardActions';
@@ -323,9 +323,10 @@ function ChatMessageRow({
     }
   }, [isAiBot, msg.nickname, msg.userId, onMentionUser, user]);
   const showAvatars = Boolean(room.chatShowAvatars);
-  const avatarUrl = isMe
-    ? getSafeAvatarUrl(myAvatarUrl || room.userAvatarUrls?.[msg.userId])
-    : getSafeAvatarUrl(room.userAvatarUrls?.[msg.userId]);
+  const avatarUrl = resolveRoomAvatarUrl(
+    isMe ? myAvatarUrl : undefined,
+    room.userAvatarUrls?.[msg.userId],
+  );
   const isStickerImage = isChatStickerMessage(msg.imageUrl, msg.imageKey, msg.asSticker);
   const isPureStickerHidden = pureMode && isStickerImage && !pureImageRevealed;
   const isPhotoOnly = Boolean(

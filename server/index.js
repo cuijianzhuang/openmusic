@@ -82,7 +82,7 @@ import {
   sanitizeDeviceId,
 } from './deviceIdentity.js';
 import { resolveBoundClientNetwork } from './clientIpBinding.js';
-import { shouldRefreshRoomIdentity } from './sessionIdentity.js';
+import { shouldIssueGuestHandoff, shouldRefreshRoomIdentity } from './sessionIdentity.js';
 import {
   createRoom,
   getRoomPublic,
@@ -182,6 +182,7 @@ import {
   prepareRoomBroadcast,
   roomUpdateForViewer,
   setRoomOwnerAccountId,
+  claimRoomsForAccountIdentity,
   prepareRoomPresence,
   roomPresenceForViewer,
   findUserRoomPresence,
@@ -200,7 +201,8 @@ import { fetchNeteaseHotToplist } from './neteaseToplist.js';
 import { createNeteasePlaylistSearchHandler } from './neteasePlaylistSearch.js';
 import { getHotSongs } from './songHotRank.js';
 import { fetchMusicSuggestions } from './musicSuggestions.js';
-import { hasRedisEnvConfig, createFavoriteShare, revokeFavoriteShare, importFavoriteShare, importFavoriteSongs, listFavoriteSongs, listFavoriteCategories, createFavoriteCategory, previewFavoriteShare, setFavoriteSong, setFavoriteCategory, getRedisClient, addRoomToAccountIndex, listRoomIdsForAccount } from './roomStorage.js';
+import { hasRedisEnvConfig, createFavoriteShare, revokeFavoriteShare, importFavoriteShare, importFavoriteSongs, importFavoriteCategories, listFavoriteSongs, listFavoriteCategories, createFavoriteCategory, previewFavoriteShare, setFavoriteSong, setFavoriteCategory, getRedisClient, addRoomToAccountIndex, listRoomIdsForAccount } from './roomStorage.js';
+import { filterFavoriteCategories } from './favoritesSync.js';
 import {
   createChatImageUploadToken,
   isQiniuConfigured,
@@ -2101,9 +2103,18 @@ async function resolveAccountFromRequest(req) {
 async function syncAccountRoomIdentity(req, res, account) {
   if (!account?.id) return null;
   const currentIdentity = resolveIdentityFromRequest(req);
-  const hadStableRoomIdentity = Boolean(account.roomUserId);
   const roomUserId = await ensureRoomUserId(account.id, currentIdentity?.userId || '');
-  if (currentIdentity?.userId && (!hadStableRoomIdentity || currentIdentity.userId !== roomUserId)) {
+  const roomMigration = currentIdentity?.userId
+    ? claimRoomsForAccountIdentity(currentIdentity.userId, roomUserId, account.id)
+    : { claimedRoomIds: [], conflictedRoomIds: [] };
+  if (roomMigration.claimedRoomIds.length > 0) {
+    await Promise.all(roomMigration.claimedRoomIds.map((roomId) => addRoomToAccountIndex(account.id, roomId)));
+    for (let index = 0; index < roomMigration.claimedRoomIds.length; index += 1) incrementMetric('account_room_migration_total', { outcome: 'claimed' });
+  }
+  if (roomMigration.conflictedRoomIds.length > 0) {
+    for (let index = 0; index < roomMigration.conflictedRoomIds.length; index += 1) incrementMetric('account_room_migration_total', { outcome: 'conflict' });
+  }
+  if (shouldIssueGuestHandoff(currentIdentity, roomUserId)) {
     setGuestHandoffCookie(res, currentIdentity.userId, roomUserId);
   }
   const cookieDeviceId = resolveDeviceIdFromCookieHeader(req.headers?.cookie || '');
@@ -3186,6 +3197,8 @@ app.get('/api/account/rooms', async (req, res) => {
 app.post('/api/account/rooms/:id/claim', async (req, res) => {
   const account = await requireAccountSession(req, res);
   if (!account) return;
+  const accountRoomUserId = await syncAccountRoomIdentity(req, res, account);
+  if (!accountRoomUserId) return res.status(401).json({ error: '账户身份未就绪', code: 'SESSION_REQUIRED' });
   const room = getRoomInternal(req.params.id);
   const identity = resolveIdentityFromRequest(req);
   const deviceId = resolveDeviceIdFromCookieHeader(req.headers?.cookie || '');
@@ -3196,7 +3209,7 @@ app.post('/api/account/rooms/:id/claim', async (req, res) => {
   if (!hasCreatorProof) {
     return res.status(403).json({ error: '当前身份不具备房主认领凭证', code: 'ROOM_CLAIM_FORBIDDEN' });
   }
-  const result = setRoomOwnerAccountId(room.id, room.creatorId, account.id);
+  const result = setRoomOwnerAccountId(room.id, room.creatorId, account.id, accountRoomUserId);
   if (result.error) {
     const status = result.error === '房间已绑定其他账户' ? 409 : 403;
     return res.status(status).json({ error: result.error, code: status === 409 ? 'ROOM_ACCOUNT_CONFLICT' : 'ROOM_CLAIM_FORBIDDEN' });
@@ -3213,12 +3226,15 @@ app.post('/api/account/favorites/sync', async (req, res) => {
   const cookies = parseCookieHeader(req.headers?.cookie || '');
   const handoff = verifyGuestHandoff(cookies[GUEST_HANDOFF_COOKIE], identity.userId);
   const localSongs = Array.isArray(req.body?.songs) ? req.body.songs.slice(0, 1000) : [];
+  const localCategories = Array.isArray(req.body?.categories) ? req.body.categories.slice(0, 50) : [];
   if (localSongs.length > 0 && !handoff) {
     return res.status(403).json({ error: '缺少有效的登录前游客同步凭证', code: 'FAVORITES_HANDOFF_REQUIRED' });
   }
   // 游客收藏当前由客户端本地缓存承载；handoff 只用于证明该同步请求来自本次登录前会话，
   // 不把任意 sourceUserId 当作 Redis 收藏读取目标，避免跨账户窃取收藏。
-  const result = await importFavoriteSongs(identity.userId, localSongs);
+  const categoryResult = await importFavoriteCategories(identity.userId, localCategories);
+  if (categoryResult.error) return res.status(400).json({ error: categoryResult.error, code: 'FAVORITES_SYNC_FAILED' });
+  const result = await importFavoriteSongs(identity.userId, filterFavoriteCategories(localSongs, categoryResult.categories));
   if (result.error) return res.status(400).json({ error: result.error, code: 'FAVORITES_SYNC_FAILED' });
   return res.json({
     success: true,
@@ -3228,6 +3244,7 @@ app.post('/api/account/favorites/sync', async (req, res) => {
     imported: result.imported,
     dropped: result.dropped,
     maxFavorites: result.maxFavorites,
+    categories: categoryResult.categories,
   });
 });
 
@@ -5479,7 +5496,7 @@ io.on('connection', (socket) => {
     callback?.({ success: true, updated: Boolean(result.updated) });
   });
 
-  socket.on('skip_song', async ({ reason } = {}, callback) => {
+  socket.on('skip_song', async ({ reason, queueId } = {}, callback) => {
     if (rejectReadOnly(socket, callback)) return;
     if (rejectRateLimited(socket, limitSocketAction, 'skip_song', callback)) return;
 
@@ -5489,7 +5506,7 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const result = await skipSong(roomId, getSocketUserId(socket), socket.id, { reason });
+    const result = await skipSong(roomId, getSocketUserId(socket), socket.id, { reason, queueId });
     if (result.error) {
       callback?.({ success: false, error: result.error });
       return;
@@ -5820,7 +5837,9 @@ io.on('connection', (socket) => {
               || (requested ? '已提交切歌申请，等待房主或管理员处理' : '已处理切歌请求');
             const posted = postBotChatMessage(roomId, { text });
             if (posted.message) io.to(roomId).emit('chat_message', posted.message);
-            if (!result?.error) emitRoomAndPlayback(roomId, result.room);
+            if (!result?.error) {
+              emitRoomAndPlayback(roomId, result.room);
+            }
           })();
           return;
         }
