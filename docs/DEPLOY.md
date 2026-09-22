@@ -31,6 +31,8 @@ Meting 管理后台仅绑定服务器的 `127.0.0.1:${METING_PORT:-3000}`，路�
 > 从旧版全量 Compose 升级时，先按示例补齐根目录 `.env`，否则新版会安全失败而不启动。已有 `ROOM_CREDENTIAL_ENCRYPTION_KEY` 必须原样沿用；Meting 已有数据不会因再次声明初始化变量而被重置。
 
 > 不需要内置 Meting？下载 `docker-compose.yml` 代替。
+> 需要统一不同平台的音量基准？再下载 `docker-compose.loudness.yml`，并与全量版一起启动：
+> `docker compose --env-file .env -f docker-compose.full.yml -f docker-compose.loudness.yml pull loudness && docker compose --env-file .env -f docker-compose.full.yml -f docker-compose.loudness.yml up -d`
 > 更新：`docker compose --env-file .env -f docker-compose.full.yml pull && docker compose --env-file .env -f docker-compose.full.yml up -d`
 > 宝塔用户：见 [宝塔部署指南](../deploy/DEPLOY-BAOTA.md)，可在 Docker 管理器里直接粘贴 compose。
 
@@ -56,6 +58,7 @@ npm start   # http://0.0.0.0:4000
 |------|:----:|------|
 | **Redis** | 必需 | 房间、收藏、管理凭据、公告、封禁均只存 Redis |
 | **[Meting-API](https://github.com/qq01-hub/Meting-API)** | 必填 | 网易 / QQ 搜索播放、歌词、封面、歌单导入；提供 Docker 镜像 |
+| **Meting-API 响度辅助服务** | 可选 | 统一不同平台的 `gain` / `peak` 响度基准；不部署时仍可播放，但平台间音量可能不一致 |
 | 七牛 OSS | 可选 | 聊天发图。管理后台填写 |
 
 ---
@@ -99,6 +102,7 @@ Meting / 房间凭证密钥等由向导或管理后台配置。使用汽水音�
 - Docker 环境下向导自动预填 Redis / Meting，完成后自动重启
 - 全量版的 Compose 变量来自仓库根目录 `.env`，应用运行配置仍写入 `./data/.env`，两者用途不同
 - 自定义端口：`OPENMUSIC_PORT=8080 docker compose --env-file .env -f docker-compose.full.yml up -d`
+- 响度增强版：`docker compose --env-file .env -f docker-compose.full.yml -f docker-compose.loudness.yml pull loudness && docker compose --env-file .env -f docker-compose.full.yml -f docker-compose.loudness.yml up -d`；响度服务使用 GHCR `latest` 镜像并仅加入 Docker 内网
 - 更新：`git pull && docker compose --env-file .env -f docker-compose.full.yml up -d --build`
 
 ---

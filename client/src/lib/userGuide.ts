@@ -124,7 +124,7 @@ export const GUIDE_STEPS: GuideStep[] = [
     id: 'home-lobby',
     scope: 'home',
     title: '大厅房间',
-    body: '房间卡片：点卡片即可加入活跃房间',
+    body: '首页音乐开场：移动光标与声波互动，点击或轻触画面进入大厅，也可按 Enter 或空格进入，无需滚动\n房间卡片：点卡片即可加入活跃房间',
     side: 'top',
   },
   {

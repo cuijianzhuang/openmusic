@@ -3,6 +3,7 @@ import { RefreshCw } from 'lucide-react';
 
 interface Props {
   children: ReactNode;
+  onError?: () => void;
 }
 
 interface State {
@@ -23,6 +24,7 @@ export default class AppErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error('渲染异常，已被顶层错误边界拦截：', error, info.componentStack);
+    this.props.onError?.();
   }
 
   render() {

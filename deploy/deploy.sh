@@ -3,6 +3,7 @@
 # 用法：
 #   bash deploy/deploy.sh docker        # Docker 部署（自带 Redis，推荐）
 #   bash deploy/deploy.sh docker-full   # Docker 全量部署（自带 Redis + Meting）
+#   bash deploy/deploy.sh docker-loudness # Docker 全量部署 + 响度辅助服务
 #   bash deploy/deploy.sh source        # 源码部署（PM2 常驻进程）
 #   bash deploy/deploy.sh update        # 更新已有部署（自动识别方式，或加参数指定）
 #   bash deploy/deploy.sh update docker|docker-full|source
@@ -115,6 +116,11 @@ detect_deploy_mode() {
   local compose_cmd
   compose_cmd="$(resolve_compose_cmd)"
 
+  if [ -n "$compose_cmd" ] && [ -f docker-compose.full.yml ] && [ -f docker-compose.loudness.yml ] \
+      && [ -n "$($compose_cmd -f docker-compose.full.yml -f docker-compose.loudness.yml ps -q loudness 2>/dev/null)" ]; then
+    echo "docker-loudness"
+    return
+  fi
   if [ -n "$compose_cmd" ] && [ -f docker-compose.full.yml ] \
       && [ -n "$($compose_cmd -f docker-compose.full.yml ps -q meting 2>/dev/null)" ]; then
     echo "docker-full"
@@ -147,6 +153,16 @@ update_docker_full() {
   info "重新构建并启动容器（含 Meting）..."
   $compose_cmd -f docker-compose.full.yml up -d --build
   ok "更新完成（Docker 全量版）"
+}
+
+update_docker_loudness() {
+  local compose_cmd
+  compose_cmd="$(check_docker)"
+  update_git_pull
+  info "重新构建并启动容器（含 Meting + 响度辅助服务）..."
+  $compose_cmd -f docker-compose.full.yml -f docker-compose.loudness.yml pull loudness
+  $compose_cmd -f docker-compose.full.yml -f docker-compose.loudness.yml up -d --build
+  ok "更新完成（Docker 响度增强版）"
 }
 
 update_source() {
@@ -187,12 +203,14 @@ deploy_update() {
     echo "请选择要更新的部署方式："
     echo "  1) Docker 部署"
     echo "  2) Docker 全量部署（含 Meting）"
-    echo "  3) 源码部署（PM2）"
-    read -r -p "输入 1、2 或 3: " choice
+    echo "  3) Docker 全量部署 + 响度辅助服务"
+    echo "  4) 源码部署（PM2）"
+    read -r -p "输入 1、2、3 或 4: " choice
     case "$choice" in
       1) mode="docker" ;;
       2) mode="docker-full" ;;
-      3) mode="source" ;;
+      3) mode="docker-loudness" ;;
+      4) mode="source" ;;
       *) err "无效选择"; exit 1 ;;
     esac
   else
@@ -202,12 +220,40 @@ deploy_update() {
   case "$mode" in
     docker)      update_docker ;;
     docker-full) update_docker_full ;;
+    docker-loudness) update_docker_loudness ;;
     source)      update_source ;;
     *)
-      err "未知部署方式：$mode（可选 docker / docker-full / source）"
+      err "未知部署方式：$mode（可选 docker / docker-full / docker-loudness / source）"
       exit 1
       ;;
   esac
+}
+
+# ---------- Docker 全量版 + 响度辅助服务 ----------
+
+deploy_docker_loudness() {
+  local compose_cmd
+  compose_cmd="$(check_docker)"
+  info "使用命令：$compose_cmd -f docker-compose.full.yml -f docker-compose.loudness.yml"
+  prepare_data_dir
+
+  info "启动容器（redis + meting + loudness）..."
+  $compose_cmd -f docker-compose.full.yml -f docker-compose.loudness.yml pull loudness
+  $compose_cmd -f docker-compose.full.yml -f docker-compose.loudness.yml up -d --build
+
+  ok "部署完成（全量版，含 Meting + 响度辅助服务）"
+  local port="${OPENMUSIC_PORT:-4000}"
+  cat <<EOF
+
+下一步：
+  1. 浏览器打开 http://<服务器IP>:${port}/setup 完成首次部署向导
+     - Redis、Meting 和响度服务已自动配置，只需填站点域名
+  2. 向导完成后服务会自动重启，刷新页面即可
+  3. 响度服务仅加入 Docker 内网，不直接暴露端口；Meting 会通过它统一各平台音量基准
+  4. 常用命令：
+     $compose_cmd -f docker-compose.full.yml -f docker-compose.loudness.yml logs -f loudness
+     $compose_cmd -f docker-compose.full.yml -f docker-compose.loudness.yml down
+EOF
 }
 
 prepare_data_dir() {
@@ -358,14 +404,16 @@ main() {
     echo "请选择部署方式："
     echo "  1) Docker 部署（推荐，自带 Redis）"
     echo "  2) Docker 全量部署（自带 Redis + Meting，最省心）"
-    echo "  3) 源码部署（PM2，需自行提供 Redis）"
-    echo "  4) 更新已有部署"
-    read -r -p "输入 1、2、3 或 4: " choice
+    echo "  3) Docker 全量部署 + 响度辅助服务"
+    echo "  4) 源码部署（PM2，需自行提供 Redis）"
+    echo "  5) 更新已有部署"
+    read -r -p "输入 1、2、3、4 或 5: " choice
     case "$choice" in
       1) mode="docker" ;;
       2) mode="docker-full" ;;
-      3) mode="source" ;;
-      4) deploy_update ""; return ;;
+      3) mode="docker-loudness" ;;
+      4) mode="source" ;;
+      5) deploy_update ""; return ;;
       *) err "无效选择"; exit 1 ;;
     esac
   fi
@@ -373,9 +421,10 @@ main() {
   case "$mode" in
     docker)      deploy_docker ;;
     docker-full) deploy_docker_full ;;
+    docker-loudness) deploy_docker_loudness ;;
     source)      deploy_source ;;
     *)
-      err "未知部署方式：$mode（可选 docker / docker-full / source / update）"
+      err "未知部署方式：$mode（可选 docker / docker-full / docker-loudness / source / update）"
       exit 1
       ;;
   esac

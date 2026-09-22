@@ -34,16 +34,16 @@ function StaticGlow() {
 }
 
 /** 首页背景：React Bits Aurora。 */
-export default function HomeAuroraBackdrop() {
+export default function HomeAuroraBackdrop({ paused = false }: { paused?: boolean }) {
   const [enabled, setEnabled] = useState(false);
 
   useEffect(() => {
-    setEnabled(canUseAurora());
-  }, []);
+    if (!paused) setEnabled(canUseAurora());
+  }, [paused]);
 
   return (
     <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
-      {enabled ? (
+      {enabled && !paused ? (
         <Suspense fallback={<StaticGlow />}>
           <div className="absolute inset-0 opacity-[0.68]">
             <Aurora colorStops={BRAND_STOPS} amplitude={1.05} blend={0.62} speed={0.55} />

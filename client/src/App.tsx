@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import { Routes, Route, useLocation } from 'react-router-dom';
 import AppUpdateGate from './components/AppUpdateGate';
 import AppErrorBoundary from './components/AppErrorBoundary';
@@ -7,7 +7,9 @@ import PermanentDecisionGate from './components/PermanentDecisionGate';
 import NotFoundPage from './components/NotFoundPage';
 import { rememberAdminEntryPath } from './lib/adminEntryShortcut';
 import { lazyWithRetry } from './lib/lazyWithRetry';
-import { nextLoadingQuote, useLoadingQuote } from './lib/loadingQuote';
+import { nextLoadingQuote } from './lib/loadingQuote';
+import StartupSplash from './components/StartupSplash';
+import MusicLoading from './components/MusicLoading';
 
 const Home = lazyWithRetry(() => import('./pages/Home'), 'Home');
 const Room = lazyWithRetry(() => import('./pages/Room'), 'Room');
@@ -16,18 +18,10 @@ const Admin = lazyWithRetry(() => import('./pages/Admin'), 'Admin');
 const Setup = lazyWithRetry(() => import('./pages/Setup'), 'Setup');
 
 function RouteFallback() {
-  const loadingQuote = useLoadingQuote();
   useEffect(() => {
     nextLoadingQuote();
   }, []);
-  return (
-    <div className="flex h-full min-h-[50vh] items-center justify-center bg-netease-dark text-netease-muted">
-      <div className="flex flex-col items-center gap-3 text-center text-sm">
-        <span className="h-4 w-4 animate-spin rounded-full border-2 border-netease-muted/30 border-t-netease-red" />
-        {loadingQuote}
-      </div>
-    </div>
-  );
+  return <MusicLoading />;
 }
 
 function NotFound() {
@@ -93,10 +87,29 @@ function AdminGate() {
 export default function App() {
   const location = useLocation();
   const [setupRequired, setSetupRequired] = useState<boolean | null>(null);
+  const [startupEntered, setStartupEntered] = useState(() => location.pathname !== '/');
+  const [startupSettled, setStartupSettled] = useState(false);
+  const [homeReady, setHomeReady] = useState(false);
+  const handleHomeReady = useCallback(() => setHomeReady(true), []);
+  const handleStartupEnter = useCallback(() => setStartupEntered(true), []);
+  const showStartup = !startupEntered && location.pathname === '/' && setupRequired !== true;
+
+  useEffect(() => {
+    if (location.pathname !== '/' || setupRequired === true) setStartupEntered(true);
+  }, [location.pathname, setupRequired]);
+
+  useEffect(() => {
+    if (!startupEntered) return;
+    // Keep automatic overlays from covering the title handoff.
+    const timer = window.setTimeout(() => setStartupSettled(true), 900);
+    return () => window.clearTimeout(timer);
+  }, [startupEntered]);
 
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/setup/status', { credentials: 'same-origin', cache: 'no-store' })
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 10000);
+    fetch('/api/setup/status', { credentials: 'same-origin', cache: 'no-store', signal: controller.signal })
       .then((response) => response.json())
       .then((data) => {
         if (!cancelled) setSetupRequired(Boolean(data.setupRequired));
@@ -104,33 +117,37 @@ export default function App() {
       .catch(() => {
         // 兼容尚未升级 setup API 的服务端，不阻断正常页面。
         if (!cancelled) setSetupRequired(false);
-      });
+      })
+      .finally(() => window.clearTimeout(timer));
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
+      controller.abort();
     };
   }, []);
 
-  if (setupRequired === null) return <RouteFallback />;
-
   return (
-    <div className="h-full">
-      {!setupRequired && <AppUpdateGate />}
-      {!setupRequired && <ErrorReportSolutionGate />}
-      {!setupRequired && <PermanentDecisionGate />}
-      <AppErrorBoundary key={location.pathname}>
-        <Suspense fallback={<RouteFallback />}>
-          {setupRequired ? (
-            <Setup />
-          ) : (
-            <Routes>
-              <Route path="/" element={<Home />} />
-              <Route path="/room/:roomId" element={<Room />} />
-              <Route path="/tv/:roomId" element={<TvDisplay />} />
-              <Route path="*" element={<AdminGate />} />
-            </Routes>
-          )}
-        </Suspense>
-      </AppErrorBoundary>
-    </div>
+    <>
+      {showStartup && <StartupSplash ready={homeReady} onEnter={handleStartupEnter} />}
+      <div className="h-full">
+        {setupRequired === false && startupSettled && <AppUpdateGate />}
+        {setupRequired === false && <ErrorReportSolutionGate />}
+        {setupRequired === false && <PermanentDecisionGate />}
+        <AppErrorBoundary key={location.pathname} onError={handleStartupEnter}>
+          <Suspense fallback={<RouteFallback />}>
+            {setupRequired === null ? <RouteFallback /> : setupRequired ? (
+              <Setup />
+            ) : (
+              <Routes>
+                <Route path="/" element={<Home entryReady={startupSettled} entranceActive={showStartup} onReady={handleHomeReady} />} />
+                <Route path="/room/:roomId" element={<Room />} />
+                <Route path="/tv/:roomId" element={<TvDisplay />} />
+                <Route path="*" element={<AdminGate />} />
+              </Routes>
+            )}
+          </Suspense>
+        </AppErrorBoundary>
+      </div>
+    </>
   );
 }

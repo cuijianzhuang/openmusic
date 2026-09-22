@@ -385,7 +385,8 @@ function DonationModal({ open, onClose, donations }: { open: boolean; onClose: (
   );
 }
 
-export default function Home() {
+export default function Home({ entryReady = true, entranceActive = false, onReady }: { entryReady?: boolean; entranceActive?: boolean; onReady?: () => void }) {
+  useEffect(() => { onReady?.(); }, [onReady]);
   const sharedMembershipEnabled = useSiteFeaturesStore((state) => state.sharedMembershipEnabled);
   const musicSourcesEnabled = useSiteFeaturesStore((state) => state.musicSourcesEnabled);
   const contributionPlatforms = useMemo<MusicAccountPlatform[]>(
@@ -670,10 +671,10 @@ export default function Home() {
   return (
     <div className="h-full flex flex-col relative overflow-hidden bg-[#050505] text-white font-sans selection:bg-netease-red/30">
       {/* React Bits Aurora 背景（弱设备 / 移动端自动降级） */}
-      <HomeAuroraBackdrop />
+      <HomeAuroraBackdrop paused={entranceActive} />
 
       {/* 悬浮顶栏 */}
-      <header className="home-hero-stage home-hero-stage--header relative z-20 pt-6 px-4 sm:px-6 max-w-7xl mx-auto w-full">
+      <header data-home-reveal className="home-hero-stage home-hero-stage--header relative z-20 pt-6 px-4 sm:px-6 max-w-7xl mx-auto w-full">
         <div className="bg-white/[0.03] border border-white/10 backdrop-blur-xl rounded-full px-5 py-3 flex items-center justify-between shadow-2xl">
           <div className="flex items-center gap-3">
             <BrandMark className="h-10 w-10 drop-shadow-[0_8px_20px_rgba(255,77,85,.18)]" />
@@ -694,7 +695,7 @@ export default function Home() {
             </span>
             <div data-home-primary-actions className="flex items-center gap-1.5 sm:gap-2">
               <AccountAccess
-                allowAutoPrompt={!siteAnnouncementOpen}
+                allowAutoPrompt={entryReady && !siteAnnouncementOpen}
                 onOpenChange={setAccountPanelOpen}
               />
               <MyRoomsAccess />
@@ -775,7 +776,7 @@ export default function Home() {
           {/* 精简居中版 Hero Section */}
           <section className="mb-16 flex flex-col items-center text-center max-w-3xl mx-auto">
             {/* 状态徽章 */}
-            <div className="home-hero-stage home-hero-stage--badge mb-6 inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/[0.04] border border-white/10 backdrop-blur-md text-xs sm:text-[13px] font-medium">
+            <div data-home-reveal className="home-hero-stage home-hero-stage--badge mb-6 inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/[0.04] border border-white/10 backdrop-blur-md text-xs sm:text-[13px] font-medium">
               <span className="relative flex h-2 w-2">
                 <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-ping" />
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
@@ -788,13 +789,18 @@ export default function Home() {
               />
             </div>
 
-            <h1 className="home-hero-stage home-hero-stage--title relative text-4xl sm:text-5xl lg:text-[68px] font-black tracking-tight leading-[1.1] mb-5">
-              <BlurText
-                text={siteSeo.heroHeadline}
-                delay={40}
-                startDelay={60}
-                charClassName="hero-char"
-              />
+            <h1
+              data-home-hero-title
+              className="home-hero-stage home-hero-stage--title relative text-4xl sm:text-5xl lg:text-[68px] font-black tracking-tight leading-[1.1] mb-5"
+            >
+              <span data-home-hero-line className="inline-block">
+                <BlurText
+                  text={siteSeo.heroHeadline}
+                  delay={40}
+                  startDelay={60}
+                  charClassName="hero-char"
+                />
+              </span>
               {' '}
               <br className="sm:hidden" />
               <span className="relative inline-block sm:ml-4 align-baseline home-hero-gradient-enter">
@@ -817,12 +823,13 @@ export default function Home() {
                   animationSpeed={8}
                   direction="diagonal"
                 >
-                  {siteSeo.heroSubline}
+                  <span data-home-hero-line>{siteSeo.heroSubline}</span>
                 </GradientText>
               </span>
             </h1>
 
             <p
+              data-home-reveal
               ref={heroCopyRef}
               onMouseMove={handleHeroCopyMove}
               className="home-hero-stage home-hero-stage--copy hero-copy text-[15px] sm:text-lg mb-10 max-w-xl leading-relaxed"
@@ -833,7 +840,7 @@ export default function Home() {
             </p>
 
             {/* 居中控制台 — Spotlight + BorderGlow（与房间卡片同款跟手高亮） */}
-            <div className="home-hero-stage home-hero-stage--bar w-full">
+            <div data-home-reveal className="home-hero-stage home-hero-stage--bar w-full">
               <BorderGlow
                 className="w-full rounded-[28px] sm:rounded-full"
                 color="#ff4d55"
@@ -1223,7 +1230,7 @@ export default function Home() {
       <DonationModal open={donationOpen} onClose={() => setDonationOpen(false)} donations={donations} />
 
       <SiteAnnouncementPopup
-        open={siteAnnouncementOpen}
+        open={entryReady && siteAnnouncementOpen}
         title={siteAnnouncement?.title}
         text={siteAnnouncement?.text || ''}
         onClose={handleCloseSiteAnnouncement}
@@ -1237,7 +1244,7 @@ export default function Home() {
         />
       )}
 
-      <UserGuideTour scope="home" paused={siteAnnouncementOpen || accountPanelOpen || showCreate || showJoin} delayMs={1000} />
+      <UserGuideTour scope="home" paused={!entryReady || siteAnnouncementOpen || accountPanelOpen || showCreate || showJoin} delayMs={1000} />
     </div>
   );
 }

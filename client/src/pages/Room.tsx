@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import { lazyWithRetry } from '../lib/lazyWithRetry';
-import { nextLoadingQuote, useLoadingQuote } from '../lib/loadingQuote';
+import { nextLoadingQuote } from '../lib/loadingQuote';
+import MusicLoading from '../components/MusicLoading';
 import { mergeFavoriteImportStats } from '../lib/favoriteImport';
 
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
@@ -240,8 +241,6 @@ type SearchDetailOrigin = 'radio' | 'recommend-playlist';
 
 
 export default function Room() {
-
-  const loadingQuote = useLoadingQuote();
 
   useEffect(() => {
     nextLoadingQuote();
@@ -2327,13 +2326,7 @@ export default function Room() {
 
     return (
 
-      <div className="min-h-full flex items-center justify-center px-6">
-        <div className="flex max-w-md flex-col items-center text-center">
-          <Loader2 className="mb-5 h-7 w-7 animate-spin text-netease-red" />
-          <p className="text-sm font-medium leading-6 text-white/80">{loadingQuote}</p>
-        </div>
-
-      </div>
+      <MusicLoading label="正在连接房间" />
 
     );
 

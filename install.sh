@@ -3,6 +3,7 @@ set -euo pipefail
 
 DEPLOY_DIR="$(pwd)"
 COMPOSE_FILE="docker-compose.full.yml"
+LOUDNESS_COMPOSE_FILE="docker-compose.loudness.yml"
 ENV_FILE=".env"
 
 cd "$DEPLOY_DIR"
@@ -12,6 +13,15 @@ echo "========================================"
 echo "  OpenMusic 一键部署"
 echo "========================================"
 echo ""
+
+read -r -p "是否部署 Meting-API 响度辅助服务（统一不同平台音量基准）？[y/N] " enable_loudness
+COMPOSE_FILES=(-f "$COMPOSE_FILE")
+if [[ "$enable_loudness" =~ ^[Yy]$ ]]; then
+    echo "已选择响度辅助服务，将额外拉取 GHCR 镜像。"
+    COMPOSE_FILES+=(-f "$LOUDNESS_COMPOSE_FILE")
+else
+    echo "未启用响度辅助服务；各平台音量可能存在差异。"
+fi
 
 if ! command -v docker &> /dev/null; then
     echo "错误: 未检测到 Docker"
@@ -42,6 +52,9 @@ tmp_compose="$(mktemp "${COMPOSE_FILE}.tmp.XXXXXX")"
 trap 'rm -f "$tmp_compose"' EXIT
 curl -fsSL -o "$tmp_compose" https://raw.githubusercontent.com/qq01-hub/openmusic/main/docker-compose.full.yml
 mv "$tmp_compose" "$COMPOSE_FILE"
+if [[ "$enable_loudness" =~ ^[Yy]$ ]]; then
+    curl -fsSL -o "$LOUDNESS_COMPOSE_FILE" https://raw.githubusercontent.com/qq01-hub/openmusic/main/docker-compose.loudness.yml
+fi
 
 echo ""
 echo "正在生成配置..."
@@ -81,7 +94,7 @@ mkdir -p data/downloads data/meting
 
 echo ""
 echo "正在启动 OpenMusic..."
-if docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d; then
+if docker compose --env-file "$ENV_FILE" "${COMPOSE_FILES[@]}" pull && docker compose --env-file "$ENV_FILE" "${COMPOSE_FILES[@]}" up -d; then
     echo ""
     echo "========================================"
     echo "  部署成功！"
@@ -95,14 +108,14 @@ if docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d; then
     echo "提示: 首次访问会进入部署向导。"
     echo ""
     echo "常用命令:"
-    echo "  查看日志: docker compose --env-file $ENV_FILE -f $COMPOSE_FILE logs -f"
-    echo "  停止: docker compose --env-file $ENV_FILE -f $COMPOSE_FILE down"
-    echo "  重启: docker compose --env-file $ENV_FILE -f $COMPOSE_FILE restart"
-    echo "  更新: docker compose --env-file $ENV_FILE -f $COMPOSE_FILE pull && docker compose --env-file $ENV_FILE -f $COMPOSE_FILE up -d"
+    echo "  查看日志: docker compose --env-file $ENV_FILE ${COMPOSE_FILES[*]} logs -f"
+    echo "  停止: docker compose --env-file $ENV_FILE ${COMPOSE_FILES[*]} down"
+    echo "  重启: docker compose --env-file $ENV_FILE ${COMPOSE_FILES[*]} restart"
+    echo "  更新: docker compose --env-file $ENV_FILE ${COMPOSE_FILES[*]} pull && docker compose --env-file $ENV_FILE ${COMPOSE_FILES[*]} up -d"
     echo ""
 else
     echo "部署失败，请查看服务状态和日志" >&2
-    docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps || true
-    docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" logs --tail=200 || true
+    docker compose --env-file "$ENV_FILE" "${COMPOSE_FILES[@]}" ps || true
+    docker compose --env-file "$ENV_FILE" "${COMPOSE_FILES[@]}" logs --tail=200 || true
     exit 1
 fi
