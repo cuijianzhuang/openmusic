@@ -6,6 +6,10 @@ type Particle = { x: number; y: number; z: number; phase: number; size: number; 
 const TAU = Math.PI * 2;
 const COLORS = ['#ff4d55', '#ff858d', '#f6b6c7', '#f472b6', '#c084fc', '#fff1ec'];
 
+export function shouldRenderStartupParticle(index: number, note: boolean, stride: number) {
+  return note || index % stride === 0;
+}
+
 /** A dimensional vinyl sculpture: the record and waveform come from BrandMark. */
 export function startParticleField(canvas: HTMLCanvasElement, pointer: Pointer, field: Field) {
   const ctx = canvas.getContext('2d', { alpha: true });
@@ -114,8 +118,9 @@ export function startParticleField(canvas: HTMLCanvasElement, pointer: Pointer, 
       ctx.strokeStyle = band === 2 ? '#f472b628' : '#ff4d5515'; ctx.lineWidth = .7; ctx.stroke();
     }
 
-    for (let i = 0; i < particles.length; i += stride) {
+    for (let i = 0; i < particles.length; i++) {
       const p = particles[i];
+      if (!shouldRenderStartupParticle(i, p.note, stride)) continue;
       const pulse = 1 + Math.sin(t * 1.3 + p.phase) * .013;
       const projected = project(p.x * pulse, p.y * pulse, p.z);
       const gather = (1 - form) * radius;

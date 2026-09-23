@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import { lazyWithRetry } from '../lib/lazyWithRetry';
-import { nextLoadingQuote } from '../lib/loadingQuote';
 import MusicLoading from '../components/MusicLoading';
 import { mergeFavoriteImportStats } from '../lib/favoriteImport';
 
@@ -144,6 +143,28 @@ const MiniPlayer = lazyWithRetry(() => import('../components/MiniPlayer'), 'Mini
 const RoomQualityModal = lazyWithRetry(() => import('../components/RoomQualityModal'), 'RoomQualityModal');
 const RoomAnnouncementPopup = lazyWithRetry(() => import('../components/RoomAnnouncementPopup'), 'RoomAnnouncementPopup');
 
+let roomShellPreload: Promise<void> | null = null;
+
+export function preloadRoomShell() {
+  if (!roomShellPreload) {
+    roomShellPreload = Promise.all([
+      import('../components/ChatPanel'),
+      import('../components/HotSongPanel'),
+      import('../components/MiniPlayer'),
+      import('../components/OnlineUsers'),
+      import('../components/PureModeChatDock'),
+      import('../components/QueuePanel'),
+      import('../components/RoomAmbientBackground'),
+      import('../components/RoomAnnouncementPopup'),
+      import('../components/RoomQualityModal'),
+    ]).then(() => undefined).catch((error) => {
+      roomShellPreload = null;
+      throw error;
+    });
+  }
+  return roomShellPreload;
+}
+
 function ensureGalaxyAudioOutputLazy() {
   void import('../components/galaxy/lib/galaxyAudio').then((m) => m.ensureGalaxyAudioOutput());
 }
@@ -241,9 +262,8 @@ type SearchDetailOrigin = 'radio' | 'recommend-playlist';
 
 
 export default function Room() {
-
   useEffect(() => {
-    nextLoadingQuote();
+    void preloadRoomShell().catch(() => undefined);
   }, []);
 
   const { roomId } = useParams<{ roomId: string }>();
@@ -2541,8 +2561,8 @@ export default function Room() {
           ))}
         </div>
         {playlistSearchLoading && (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <Loader2 className="h-6 w-6 animate-spin text-netease-muted" />
+          <div className="absolute inset-0 flex items-center justify-center bg-netease-bg/80 backdrop-blur-sm">
+            <MusicLoading label="正在搜索歌单" compact />
           </div>
         )}
       </div>
@@ -2789,11 +2809,7 @@ export default function Room() {
 
 
   return (
-    <Suspense fallback={(
-      <div className="min-h-full flex items-center justify-center">
-        <Loader2 className="w-8 h-8 text-netease-red animate-spin" />
-      </div>
-    )}>
+    <Suspense fallback={<MusicLoading label="正在连接房间" />}>
     <div
       className={`room-ambient-root relative isolate flex h-full flex-col overflow-hidden ${
         ambientBackgroundRetained ? 'room-ambient-root--transparent' : ''
@@ -3377,10 +3393,7 @@ export default function Room() {
                     </div>
 
                     {roomSwitcherLoading && roomSwitcherItems.length === 0 ? (
-                      <div className="flex items-center gap-2 px-4 py-5 text-xs text-white/45">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        正在加载房间…
-                      </div>
+                      <MusicLoading label="正在加载房间" compact />
                     ) : roomSwitcherError ? (
                       <div className="flex items-center gap-3 px-4 py-5 text-xs text-white/50">
                         <span className="min-w-0 flex-1">{roomSwitcherError}</span>
@@ -3717,10 +3730,7 @@ export default function Room() {
               </div>
               <div className="min-h-0 flex-1 overflow-y-auto p-3">
                 {songHistoryLoading ? (
-                  <div className="py-16 text-center text-sm text-netease-muted">
-                    <Loader2 className="mx-auto mb-2 h-8 w-8 animate-spin opacity-40" />
-                    加载播放历史…
-                  </div>
+                  <MusicLoading label="正在加载播放历史" compact />
                 ) : !songHistoryItems.length ? (
                   <div className="py-16 text-center text-sm text-netease-muted">
                     <History className="mx-auto mb-2 h-8 w-8 opacity-40" />
@@ -3880,7 +3890,7 @@ export default function Room() {
             </div>
             <div ref={favoritesScrollRef} className="min-h-0 flex-1 overflow-y-auto p-3">
               {favoritesLoading ? (
-                <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-netease-red" /></div>
+                <MusicLoading label="正在加载收藏歌曲" compact />
               ) : filteredFavorites.length === 0 ? (
                 <div className="py-16 text-center text-sm text-netease-muted">
                   <Heart className="mx-auto mb-2 h-8 w-8 opacity-40" />

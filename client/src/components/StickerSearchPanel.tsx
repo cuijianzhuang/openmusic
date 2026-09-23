@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight, Loader2, Search } from 'lucide-react';
 import { fetchStickerSearchEnabled, searchStickers } from '../api/stickerSearch';
 import Tooltip from './Tooltip';
+import MusicLoading from './MusicLoading';
 
 const GRID_ROWS = 3;
 const STICKER_MAX_HEIGHT = '3.5rem';
@@ -188,7 +189,7 @@ export default function StickerSearchPanel({ disabled = false, onPick, onBack }:
         {(loading && images.length === 0) || (!loading && images.length === 0 && !error) ? (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
             {loading ? (
-              <Loader2 className="h-5 w-5 animate-spin text-netease-muted" />
+              <MusicLoading label="正在搜索表情" compact />
             ) : (
               <p className="text-center text-xs text-netease-muted">输入关键词开始搜索</p>
             )}

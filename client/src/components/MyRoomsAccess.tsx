@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
-import { DoorOpen, Loader2, RefreshCw, X } from 'lucide-react';
+import { DoorOpen, RefreshCw, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { listAccountRooms } from '../api/accountRooms';
 import type { AccountRoomSummary } from '../types';
 import { fetchAccountSession } from '../lib/accountAuth';
 import { headerPillCls } from '../lib/homeHeaderActions';
 import Modal from './Modal';
+import MusicLoading from './MusicLoading';
 
 export default function MyRoomsAccess() {
   const navigate = useNavigate();
@@ -58,7 +59,7 @@ export default function MyRoomsAccess() {
             <button type="button" onClick={() => setOpen(false)} className="rounded-full p-2 text-white/50 hover:bg-white/10 hover:text-white" aria-label="关闭"><X className="h-5 w-5" /></button>
           </div>
           <div className="mt-4 space-y-2">
-            {loading ? <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-white/60" /></div> : null}
+            {loading ? <MusicLoading label="正在加载我的房间" compact /> : null}
             {!loading && error ? (
               <div className="rounded-2xl border border-red-400/20 bg-red-400/10 p-4 text-sm text-red-100">
                 <p>{error}</p>

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, Loader2, X } from 'lucide-react';
 import Modal from './Modal';
+import MusicLoading from './MusicLoading';
 import {
   getStickerBlobUrl,
   subscribeUserStickers,
@@ -316,7 +317,7 @@ export default function WechatFileHelperCollector({ open, onClose }: Props) {
                 className="h-full w-full object-contain"
               />
             ) : (
-              <Loader2 className="h-10 w-10 animate-spin text-gray-400" />
+              <MusicLoading label="正在准备微信二维码" compact className="bg-transparent" />
             )}
           </div>
           <p className="mt-4 text-sm text-white">{status}</p>

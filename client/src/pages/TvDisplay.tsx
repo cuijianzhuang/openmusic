@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { Loader2, Music2, Maximize } from 'lucide-react';
+import { Music2, Maximize } from 'lucide-react';
 import { useRoomStore } from '../stores/roomStore';
 import { useAudioStore } from '../stores/audioStore';
 import { useSocket } from '../hooks/useSocket';
@@ -16,6 +16,7 @@ import TvCoverBackground from '../components/tv/TvCoverBackground';
 import TvProgressFooter from '../components/tv/TvProgressFooter';
 import AudioEngine from '../components/AudioEngine';
 import Tooltip from '../components/Tooltip';
+import MusicLoading from '../components/MusicLoading';
 import { usePageSeo } from '../lib/seo';
 import { ensureTvChromeInit } from '../lib/roomChromeInit';
 import {
@@ -167,12 +168,7 @@ export default function TvDisplay() {
       </div>
     );
   } else if (!room) {
-    content = (
-      <div className="h-full flex flex-col items-center justify-center bg-[#080808] gap-3">
-        <Loader2 className="w-8 h-8 text-netease-red animate-spin" />
-        <p className="text-white/40 text-sm">正在连接...</p>
-      </div>
-    );
+    content = <MusicLoading label="正在连接房间" className="bg-[#080808]" />;
   } else if (!current) {
     content = (
       <div className="h-full w-full overflow-hidden bg-[#080808] select-none">

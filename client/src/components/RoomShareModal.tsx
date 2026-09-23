@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
 import { createPortal } from 'react-dom';
-import { Check, Copy, Loader2, X } from 'lucide-react';
+import { Check, Copy, X } from 'lucide-react';
 import { copyToClipboard } from '../lib/copyToClipboard';
+import MusicLoading from './MusicLoading';
 
 interface Props {
   open: boolean;
@@ -49,7 +50,7 @@ export default function RoomShareModal({ open, shareUrl, shareText, onClose, onC
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-0.5">
           <div className="mx-auto flex h-44 w-44 items-center justify-center rounded-2xl bg-white p-2 sm:h-52 sm:w-52">
-            {qrImage ? <img src={qrImage} alt="房间二维码" className="h-full w-full" /> : qrError ? <p className="px-4 text-center text-xs text-red-500">{qrError}</p> : <Loader2 className="h-7 w-7 animate-spin text-netease-muted" />}
+            {qrImage ? <img src={qrImage} alt="房间二维码" className="h-full w-full" /> : qrError ? <p className="px-4 text-center text-xs text-red-500">{qrError}</p> : <MusicLoading label="正在生成房间二维码" compact className="bg-transparent" />}
           </div>
           <p className="mt-3 text-center text-xs text-netease-muted">使用微信或相机扫描二维码进入房间</p>
           <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3 sm:mt-5">

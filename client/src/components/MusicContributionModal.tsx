@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CheckCircle2, Crown, Gem, HeartHandshake, KeyRound, Loader2, QrCode, X } from 'lucide-react';
+import { CheckCircle2, Crown, Gem, HeartHandshake, KeyRound, QrCode, X } from 'lucide-react';
 import {
   checkContributionQr,
   bindContributionAccount,
@@ -17,6 +17,7 @@ import {
   type MusicAccountQrSession,
 } from '../lib/musicAccountQr';
 import Tooltip from './Tooltip';
+import MusicLoading from './MusicLoading';
 
 interface Props {
   open: boolean;
@@ -382,7 +383,7 @@ export default function MusicContributionModal({ open, onClose, defaultProvider 
             </div>
           ) : (
             <>
-              {qrDisplay ? <img src={qrDisplay} alt="登录二维码" className="mx-auto h-48 w-48 rounded-xl bg-white p-2" /> : <div className="mx-auto flex h-48 w-48 items-center justify-center rounded-xl bg-white/5"><Loader2 className="h-7 w-7 animate-spin text-white/50" /></div>}
+              {qrDisplay ? <img src={qrDisplay} alt="登录二维码" className="mx-auto h-48 w-48 rounded-xl bg-white p-2" /> : <div className="mx-auto flex h-48 w-48 items-center justify-center rounded-xl bg-white/5"><MusicLoading label="正在准备登录二维码" compact className="bg-transparent" /></div>}
               <p className="mt-3 text-sm font-medium text-white/90">{PLATFORM_META[platform].instruction}</p>
               <p className="mt-1 text-xs text-white/45">{statusText || '等待扫码…'}</p>
               {error && <p className="mt-3 text-xs leading-relaxed text-rose-300">{error}</p>}

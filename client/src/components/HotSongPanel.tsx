@@ -11,6 +11,7 @@ import {
 import SongCover from './SongCover';
 import TruncateTip from './TruncateTip';
 import Tooltip from './Tooltip';
+import MusicLoading from './MusicLoading';
 
 interface Props {
   addingId: string | null;
@@ -318,12 +319,9 @@ export default memo(function HotSongPanel({
 
     if (view.loading && view.songs.length === 0) {
       return compact ? (
-        <p className="py-3 text-center text-xs text-netease-muted">加载中...</p>
+        <MusicLoading label="正在加载热榜" compact />
       ) : (
-        <div className="flex flex-col items-center justify-center py-12 text-netease-muted">
-          <Loader2 className="mb-2 h-5 w-5 animate-spin" />
-          <p className="text-xs">加载热榜...</p>
-        </div>
+        <MusicLoading label="正在加载热榜" compact />
       );
     }
     if (view.error && view.songs.length === 0) {

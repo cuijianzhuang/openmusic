@@ -15,6 +15,7 @@ import {
   X,
 } from 'lucide-react';
 import Modal from './Modal';
+import MusicLoading from './MusicLoading';
 import Toast from './Toast';
 import {
   completeWechatAccount,
@@ -168,7 +169,7 @@ function WechatAccountScan({
         ) : error ? (
           <MessageCircle className="h-12 w-12 text-black/20" />
         ) : (
-          <Loader2 className="h-9 w-9 animate-spin text-black/35" />
+          <MusicLoading label="正在准备微信二维码" compact className="bg-transparent" />
         )}
       </div>
       <p className="mt-5 text-[15px] font-semibold text-white">{status}</p>

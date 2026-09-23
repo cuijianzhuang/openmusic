@@ -7,7 +7,6 @@ import PermanentDecisionGate from './components/PermanentDecisionGate';
 import NotFoundPage from './components/NotFoundPage';
 import { rememberAdminEntryPath } from './lib/adminEntryShortcut';
 import { lazyWithRetry } from './lib/lazyWithRetry';
-import { nextLoadingQuote } from './lib/loadingQuote';
 import StartupSplash from './components/StartupSplash';
 import MusicLoading from './components/MusicLoading';
 
@@ -18,10 +17,11 @@ const Admin = lazyWithRetry(() => import('./pages/Admin'), 'Admin');
 const Setup = lazyWithRetry(() => import('./pages/Setup'), 'Setup');
 
 function RouteFallback() {
-  useEffect(() => {
-    nextLoadingQuote();
-  }, []);
-  return <MusicLoading />;
+  const location = useLocation();
+  const label = location.pathname.startsWith('/room/') || location.pathname.startsWith('/tv/')
+    ? '正在连接房间'
+    : '正在连接音乐空间';
+  return <MusicLoading label={label} />;
 }
 
 function NotFound() {

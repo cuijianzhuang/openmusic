@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { CheckCircle2, Loader2, X } from 'lucide-react';
+import { CheckCircle2, X } from 'lucide-react';
 import Modal from './Modal';
+import MusicLoading from './MusicLoading';
 import {
   bindWechatUin,
   recoverWechatUin,
@@ -146,7 +147,7 @@ export default function WechatUinBindModal({ open, mode, roomId, onClose, onComp
       ) : (
         <div className="flex flex-col items-center">
           <div className="flex h-[280px] w-[280px] items-center justify-center rounded-xl bg-white p-3">
-            {qrUrl ? <img src={qrUrl} alt="微信登录二维码" className="h-full w-full object-contain" /> : error ? <p className="px-6 text-center text-xs text-red-500">二维码加载失败</p> : <Loader2 className="h-10 w-10 animate-spin text-gray-400" />}
+            {qrUrl ? <img src={qrUrl} alt="微信登录二维码" className="h-full w-full object-contain" /> : error ? <p className="px-6 text-center text-xs text-red-500">二维码加载失败</p> : <MusicLoading label="正在准备微信二维码" compact className="bg-transparent" />}
           </div>
           <p className="mt-4 text-sm text-white">{status}</p>
           {error && <p className="mt-2 text-xs text-red-300">{error}</p>}

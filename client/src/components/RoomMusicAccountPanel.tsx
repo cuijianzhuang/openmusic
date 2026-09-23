@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, QrCode, Trash2 } from 'lucide-react';
+import MusicLoading from './MusicLoading';
 import type { RoomMusicAccount, RoomMusicAccounts } from '../types';
 import {
   normalizeQrImage,
@@ -129,7 +130,7 @@ function QrBlock({
         />
       ) : (
         <div className="mx-auto flex h-40 w-40 items-center justify-center rounded-lg bg-white/5">
-          <Loader2 className="h-6 w-6 animate-spin text-white/50" />
+          <MusicLoading label="正在准备音乐账户二维码" compact className="bg-transparent" />
         </div>
       )}
       <p className="mt-2.5 text-xs font-medium text-white/90">{instruction}</p>

@@ -9,6 +9,14 @@
 .om-music-loading__label { margin: 14px 0 0; font-size: 13px; font-weight: 500; letter-spacing: .06em; }
 .om-music-loading__quote { margin: 10px 0 0; font-size: 12px; line-height: 1.9; color: var(--om-text-secondary); text-wrap: pretty; }
 .om-music-loading__brand { margin-top: 32px; color: var(--om-text-muted); font-size: 9px; letter-spacing: .2em; }
+.om-music-loading--compact { min-height: 160px; height: auto; padding: 20px 16px; background: radial-gradient(ellipse 150px 105px at 50% 45%, rgb(var(--om-accent-rgb) / .05), transparent); }
+.om-music-loading--compact .om-music-loading__record { width: 58px; height: 58px; }
+.om-music-loading--compact .om-music-loading__mark { width: 29px; height: 29px; }
+.om-music-loading--compact .om-music-loading__wave { height: 15px; gap: 3px; margin-top: 13px; }
+.om-music-loading--compact .om-music-loading__wave i { width: 2px; height: 12px; }
+.om-music-loading--compact .om-music-loading__wave i:nth-child(2n) { height: 8px; }
+.om-music-loading--compact .om-music-loading__label { margin-top: 9px; font-size: 12px; }
+.om-music-loading--compact .om-music-loading__quote, .om-music-loading--compact .om-music-loading__brand { display: none; }
 @keyframes om-loading-wave { from { transform: scaleY(.3); } to { transform: scaleY(1); } }
 @keyframes om-loading-orbit { to { transform: rotate(360deg); } }
 @keyframes om-loading-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }

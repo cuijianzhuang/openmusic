@@ -44,6 +44,7 @@ import { fetchDonations, type DonationEntry } from '../lib/donations';
 import { headerIconCls, headerPillCls } from '../lib/homeHeaderActions';
 import AccountAccess from '../components/AccountAccess';
 import MyRoomsAccess from '../components/MyRoomsAccess';
+import MusicLoading from '../components/MusicLoading';
 
 /** 大厅只用接口带回的 CDN 直链，不走 meting type=pic 再查 */
 function lobbyDirectCoverUrl(pic?: string): string | null {
@@ -387,6 +388,11 @@ function DonationModal({ open, onClose, donations }: { open: boolean; onClose: (
 
 export default function Home({ entryReady = true, entranceActive = false, onReady }: { entryReady?: boolean; entranceActive?: boolean; onReady?: () => void }) {
   useEffect(() => { onReady?.(); }, [onReady]);
+  useEffect(() => {
+    void import('./Room')
+      .then(({ preloadRoomShell }) => preloadRoomShell())
+      .catch(() => undefined);
+  }, []);
   const sharedMembershipEnabled = useSiteFeaturesStore((state) => state.sharedMembershipEnabled);
   const musicSourcesEnabled = useSiteFeaturesStore((state) => state.musicSourcesEnabled);
   const contributionPlatforms = useMemo<MusicAccountPlatform[]>(
@@ -1007,9 +1013,8 @@ export default function Home({ entryReady = true, entranceActive = false, onRead
           </div>
 
           {roomsLoading && rooms.length === 0 ? (
-            <div data-guide="home-lobby" className="flex flex-col items-center justify-center py-32 text-white/40">
-              <Loader2 className="w-10 h-10 animate-spin mb-4 text-netease-red" />
-              <p className="text-base font-medium">寻找房间中...</p>
+            <div data-guide="home-lobby">
+              <MusicLoading label="正在寻找房间" />
             </div>
           ) : error && rooms.length === 0 ? (
             <div data-guide="home-lobby" className="flex flex-col items-center justify-center py-24 px-4 text-center bg-red-500/[0.04] border border-red-500/15 rounded-[32px]">
