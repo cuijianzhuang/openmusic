@@ -3222,6 +3222,28 @@ export function setRoomPlayMode(roomId, actorId, mode, connectionId = null) {
   return { room: serializeRoom(room) };
 }
 
+function releaseFavoriteShuffle(room, userId) {
+  if (room.playMode !== "favorite-shuffle" || room.favoriteShuffleUserId !== userId) return false;
+  room.playMode = DEFAULT_PLAY_MODE;
+  room.favoriteShuffleUserId = null;
+  clearNextRandom(room);
+  if (!room.playlistRoaming || room.playlistRoaming.enabled === false) room.randomPlayedKeys.clear();
+  room.randomLoading = !room.current && room.queue.length === 0
+    && (room.playlistRoaming?.enabled || (room.neteaseFmMode || DEFAULT_FM_MODE) !== FM_MODE_OFF);
+  return true;
+}
+
+function resumeAfterFavoriteShuffleLeave(room) {
+  notifyRoomStructureChanged(room.id);
+  if (room.current || room.users.size === 0) return;
+  if (room.queue.length === 0 && (room.neteaseFmMode || DEFAULT_FM_MODE) === FM_MODE_OFF && !room.playlistRoaming?.enabled) return;
+  void ensurePlayback(room.id).then((nextRoom) => {
+    if (nextRoom) notifyRoomStructureChanged(room.id);
+  }).catch((error) => {
+    console.error('Ensure playback after favorite shuffle selector left failed:', error?.message || error);
+  });
+}
+
 export function setRoomMemberTier(roomId, actorId, targetUserId, payload = {}, connectionId = null) {
   const room = rooms.get(roomId);
   if (!room) return { error: "房间不存在" };
@@ -3958,6 +3980,7 @@ export async function kickUser(roomId, actorId, targetUserId, connectionId = nul
   }
 
   room.users.delete(targetId);
+  const favoriteShuffleEnded = releaseFavoriteShuffle(room, targetId);
   removeUserFromAdmins(room, targetId);
 
   if (room.users.size === 0) {
@@ -3990,6 +4013,7 @@ export async function kickUser(roomId, actorId, targetUserId, connectionId = nul
 
   persistRoom(room);
   invalidateRoomsListCache();
+  if (favoriteShuffleEnded) resumeAfterFavoriteShuffleLeave(room);
   return {
     room: serializeRoom(room),
     kickedUserId: targetId,
@@ -4179,6 +4203,7 @@ export function removeUser(roomId, userId, connectionId = null) {
   if (!user) return { unchanged: true };
 
   room.users.delete(userId);
+  const favoriteShuffleEnded = releaseFavoriteShuffle(room, userId);
   // 管理员身份在主动离房时保留，重进后恢复；仅踢人时清除（见 kickUser）
 
   if (room.users.size === 0) {
@@ -4207,6 +4232,7 @@ export function removeUser(roomId, userId, connectionId = null) {
 
   persistRoom(room);
   invalidateRoomsListCache();
+  if (favoriteShuffleEnded) resumeAfterFavoriteShuffleLeave(room);
   return { userRemoved: true, room: serializeRoom(room) };
 }
 
@@ -4615,7 +4641,7 @@ async function fetchRandomForRoom(room) {
     if (!song) return null;
     return { ...song, requestedBy: "指定歌单", requestedById: "" };
   }
-  if (!room.playlistRoaming && normalizePlayMode(room.playMode) === "favorite-shuffle") {
+  if ((!room.playlistRoaming || room.playlistRoaming.enabled === false) && normalizePlayMode(room.playMode) === "favorite-shuffle") {
     if (!room.favoriteShuffleUserId) return null;
     const favorites = await listFavoriteSongs(room.favoriteShuffleUserId);
     const song = selectRandomFavoriteSong(favorites, room.current, room.randomPlayedKeys);
@@ -4659,10 +4685,11 @@ async function ensureNextRandom(room) {
   }
   if (room.nextRandom || room.nextRandomPromise) return;
 
-  room.nextRandomPromise = (async () => {
+  const task = (async () => {
     try {
       for (let i = 0; i < MAX_RANDOM_PREFETCH_ATTEMPTS && room.queue.length === 0; i++) {
         const song = await fetchRandomForRoom(room);
+        if (room.nextRandomPromise !== task) return;
         if (!song) break;
 
         const key = songIdentity(song.source, song.id);
@@ -4676,11 +4703,12 @@ async function ensureNextRandom(room) {
       persistRoom(room);
       notifyRoomPrefetchReady(room);
     } finally {
-      room.nextRandomPromise = null;
+      if (room.nextRandomPromise === task) room.nextRandomPromise = null;
     }
   })();
 
-  await room.nextRandomPromise;
+  room.nextRandomPromise = task;
+  await task;
 }
 
 async function withPlaybackLock(room, task) {
@@ -4849,21 +4877,32 @@ async function playNextUnlocked(room, options = {}) {
   recycleFinishedSongToQueue(room, finishedSong || room.current);
 
   // 收藏随机明确以收藏列表作为下一首来源；已有点歌队列保留，退出该模式后继续消费。
-  if (!room.playlistRoaming && normalizePlayMode(room.playMode) === "favorite-shuffle") {
+  if (room.playMode === "favorite-shuffle" && !room.users.has(room.favoriteShuffleUserId)) {
+    releaseFavoriteShuffle(room, room.favoriteShuffleUserId);
+  }
+  let favoriteShuffle = (!room.playlistRoaming || room.playlistRoaming.enabled === false) && normalizePlayMode(room.playMode) === "favorite-shuffle";
+  if (favoriteShuffle) {
+    const chooserId = room.favoriteShuffleUserId;
     if (room.nextRandomPromise) await room.nextRandomPromise;
-    let favorite = room.nextRandom;
+    let favorite = room.playMode === "favorite-shuffle" && room.favoriteShuffleUserId === chooserId
+      ? room.nextRandom : null;
     room.nextRandom = null;
-    if (!favorite) {
+    if (!favorite && room.playMode === "favorite-shuffle" && room.users.has(room.favoriteShuffleUserId)) {
       room.randomLoading = true;
       bumpPlaybackState(room);
+      const fetchingFor = room.favoriteShuffleUserId;
       favorite = await fetchRandomForRoom(room);
+      if (room.playMode !== "favorite-shuffle" || room.favoriteShuffleUserId !== fetchingFor || !room.users.has(fetchingFor)) {
+        favorite = null;
+      }
     }
     if (favorite) {
       setCurrentSong(room, buildPendingRandomItem(favorite, "收藏随机") || favorite);
       void ensureNextRandom(room);
       return;
     }
-    // 收藏为空/读取失败时不丢弃房间队列，退回普通队列播放。
+    favoriteShuffle = room.playMode === "favorite-shuffle" && room.users.has(room.favoriteShuffleUserId);
+    // 收藏为空时不丢弃房间队列，退回普通队列播放。
   }
 
   if (room.queue.length > 0) {
@@ -4880,7 +4919,7 @@ async function playNextUnlocked(room, options = {}) {
   let random = room.nextRandom;
   room.nextRandom = null;
 
-  const shouldFetchRandom = !random && (allowFetchRandom || room.queue.length === 0);
+  const shouldFetchRandom = !favoriteShuffle && !random && (allowFetchRandom || room.queue.length === 0);
   if (shouldFetchRandom) {
     room.randomLoading = true;
     bumpPlaybackState(room);
@@ -4933,7 +4972,7 @@ async function playNextUnlocked(room, options = {}) {
   room.currentTime = 0;
   room.startedAt = null;
   // 漫游关闭时干净停机，不进入"漫游加载中"重试
-  room.randomLoading = Boolean(room.playlistRoaming && room.playlistRoaming.enabled !== false) || (room.neteaseFmMode || DEFAULT_FM_MODE) !== FM_MODE_OFF;
+  room.randomLoading = !favoriteShuffle && (Boolean(room.playlistRoaming && room.playlistRoaming.enabled !== false) || (room.neteaseFmMode || DEFAULT_FM_MODE) !== FM_MODE_OFF);
   clearSharedPlaybackMedia(room);
   bumpPlaybackState(room);
   invalidateRoomsListCache();

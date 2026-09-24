@@ -3,6 +3,7 @@ import { create } from 'zustand';
 interface SiteFeaturesStore {
   /** 管理端是否开放全站共享会员入口 */
   sharedMembershipEnabled: boolean;
+  qqGroupUrl: string;
   /** 管理端是否开放 SVIP 音质选项 */
   svipQualityEnabled: Record<'netease' | 'tencent' | 'kugou' | 'qishui', boolean>;
   /** 各平台实际可用的高级会员能力，不能用全局开关代替。 */
@@ -18,6 +19,7 @@ interface SiteFeaturesStore {
 
 export interface PlatformCapabilities {
   sharedMembershipEnabled?: boolean;
+  qqGroupUrl?: string;
   svipQualityEnabled?: boolean | Partial<Record<'netease' | 'tencent' | 'kugou' | 'qishui', boolean>>;
   neteaseSvip?: boolean;
   tencentSvip?: boolean;
@@ -28,6 +30,7 @@ export interface PlatformCapabilities {
 
 export const useSiteFeaturesStore = create<SiteFeaturesStore>((set) => ({
   sharedMembershipEnabled: true,
+  qqGroupUrl: '',
   svipQualityEnabled: { netease: false, tencent: false, kugou: false, qishui: false },
   neteaseSvip: false,
   tencentSvip: false,
@@ -43,6 +46,7 @@ export const useSiteFeaturesStore = create<SiteFeaturesStore>((set) => ({
     sharedMembershipEnabled: features.sharedMembershipEnabled === undefined
       ? state.sharedMembershipEnabled
       : Boolean(features.sharedMembershipEnabled),
+    qqGroupUrl: features.qqGroupUrl === undefined ? state.qqGroupUrl : features.qqGroupUrl,
     svipQualityEnabled: features.svipQualityEnabled === undefined
       ? state.svipQualityEnabled
       : typeof features.svipQualityEnabled === 'object'

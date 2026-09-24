@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, memo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Users, ArrowRight, Lock, ListMusic,
+  Users, UsersRound, ArrowRight, Lock, ListMusic,
   Loader2, RefreshCw, Plus, X, Disc3, Sparkles, Github, History, HeartHandshake, Heart,
   Play, Activity, Search, ShieldCheck, Crown, Download, Shuffle
 } from 'lucide-react';
@@ -387,6 +387,7 @@ function DonationModal({ open, onClose, donations }: { open: boolean; onClose: (
 }
 
 export default function Home({ entryReady = true, entranceActive = false, onReady }: { entryReady?: boolean; entranceActive?: boolean; onReady?: () => void }) {
+  const [titleHandoff] = useState(entranceActive);
   useEffect(() => { onReady?.(); }, [onReady]);
   useEffect(() => {
     void import('./Room')
@@ -394,6 +395,7 @@ export default function Home({ entryReady = true, entranceActive = false, onRead
       .catch(() => undefined);
   }, []);
   const sharedMembershipEnabled = useSiteFeaturesStore((state) => state.sharedMembershipEnabled);
+  const qqGroupUrl = useSiteFeaturesStore((state) => state.qqGroupUrl);
   const musicSourcesEnabled = useSiteFeaturesStore((state) => state.musicSourcesEnabled);
   const contributionPlatforms = useMemo<MusicAccountPlatform[]>(
     () => (['netease', 'tencent', 'kugou', 'qishui'] as MusicAccountPlatform[])
@@ -675,16 +677,16 @@ export default function Home({ entryReady = true, entranceActive = false, onRead
     'home-modal-input w-full rounded-2xl px-5 py-3.5 text-white text-[15px] caret-white placeholder:text-white/30 outline-none border border-white/10 bg-[#1a1a1a] focus:border-netease-red/60 transition-[border-color] duration-200';
 
   return (
-    <div className="h-full flex flex-col relative overflow-hidden bg-[#050505] text-white font-sans selection:bg-netease-red/30">
+    <div className={`h-full flex flex-col relative overflow-hidden bg-[#050505] text-white font-sans selection:bg-netease-red/30${titleHandoff ? ' home-hero-handoff' : ''}`}>
       {/* React Bits Aurora 背景（弱设备 / 移动端自动降级） */}
       <HomeAuroraBackdrop paused={entranceActive} />
 
       {/* 悬浮顶栏 */}
       <header data-home-reveal className="home-hero-stage home-hero-stage--header relative z-20 pt-6 px-4 sm:px-6 max-w-7xl mx-auto w-full">
-        <div className="bg-white/[0.03] border border-white/10 backdrop-blur-xl rounded-full px-5 py-3 flex items-center justify-between shadow-2xl">
+        <div className={`bg-white/[0.03] border border-white/10 backdrop-blur-xl rounded-full px-5 py-3 flex items-center justify-between shadow-2xl ${qqGroupUrl ? 'max-[359px]:flex-wrap max-[359px]:gap-y-2' : ''}`}>
           <div className="flex items-center gap-3">
             <BrandMark className="h-10 w-10 drop-shadow-[0_8px_20px_rgba(255,77,85,.18)]" />
-            <span className="brand-wordmark text-xl font-extrabold tracking-tight select-none" aria-label="OpenMusic">
+            <span className={`brand-wordmark text-xl font-extrabold tracking-tight select-none ${qqGroupUrl ? 'max-sm:!hidden' : ''}`} aria-label="OpenMusic">
               {BRAND_LETTERS.map((letter, index) => (
                 <span
                   key={index}
@@ -708,7 +710,7 @@ export default function Home({ entryReady = true, entranceActive = false, onRead
             </div>
           </div>
 
-          <div className="flex items-center gap-2 sm:gap-2.5">
+          <div className={`flex items-center gap-2 sm:gap-2.5 ${qqGroupUrl ? 'max-[359px]:ml-auto' : ''}`}>
             <div className="flex items-center gap-1.5 sm:gap-2">
               <Tooltip content="支持 OpenMusic">
                 <button type="button" onClick={() => setDonationOpen(true)} className={`hidden sm:inline-flex ${headerPillCls}`} aria-label="支持 OpenMusic">
@@ -741,6 +743,13 @@ export default function Home({ entryReady = true, entranceActive = false, onRead
                   <Download className="home-header-icon__download h-5 w-5" />
                 </button>
               </Tooltip>
+              {qqGroupUrl && (
+                <Tooltip content="加入 QQ 群">
+                  <a href={qqGroupUrl} target="_blank" rel="noopener noreferrer" className={`inline-flex ${headerIconCls}`} aria-label="加入 QQ 群">
+                    <UsersRound className="h-5 w-5" />
+                  </a>
+                </Tooltip>
+              )}
               {adminEntryPath && (
                 <Tooltip content="管理后台（仅本机可见）">
                   <a href={adminEntryPath} className={`hidden sm:inline-flex ${headerIconCls}`} aria-label="管理后台">

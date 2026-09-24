@@ -2326,6 +2326,7 @@ function sendBootstrapResponse(res, userId, iat, token, deviceId = null) {
     features: {
       svipQualityEnabled: runtime.svipQualityEnabled,
       sharedMembershipEnabled: Boolean(runtime.sharedMembershipEnabled),
+      qqGroupUrl: runtime.qqGroupUrl,
       musicSourcesEnabled: runtime.musicSourcesEnabled,
     },
   };

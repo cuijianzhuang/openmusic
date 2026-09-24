@@ -110,6 +110,7 @@ export interface RuntimeConfig {
   svipQualityEnabled: Record<MusicApiPlatform, boolean>;
   /** 是否开放全站共享会员入口 */
   sharedMembershipEnabled: boolean;
+  qqGroupUrl: string;
   metingApiUrl: string;
   metingApiAuth: string;
   metingSources: {

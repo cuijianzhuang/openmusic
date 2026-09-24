@@ -350,11 +350,11 @@ export default function UserGuideTour({ scope, paused = false, delayMs = 700 }: 
       <div
         ref={popoverRef}
         style={tipPlacement.style}
-        className="pointer-events-auto z-[321] max-w-[min(380px,calc(100vw-24px))] animate-fade-in overflow-hidden rounded-2xl border border-white/12 bg-[#16161c]/96 shadow-2xl shadow-black/50 backdrop-blur-xl"
+        className="pointer-events-auto z-[321] flex max-h-[calc(100dvh-24px)] max-w-[min(380px,calc(100vw-24px))] animate-fade-in flex-col overflow-hidden rounded-2xl border border-white/12 bg-[#16161c]/96 shadow-2xl shadow-black/50 backdrop-blur-xl"
         onClick={stopBubble}
         onMouseDown={stopBubble}
       >
-        <div className="border-b border-white/8 bg-white/[0.025] px-4 pb-3 pt-4 sm:px-5 sm:pt-5">
+        <div className="shrink-0 border-b border-white/8 bg-white/[0.025] px-4 pb-3 pt-4 sm:px-5 sm:pt-5">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-2 text-xs font-medium text-netease-red/90 sm:text-[13px]">
               <Sparkles className="h-3.5 w-3.5 shrink-0" aria-hidden />
@@ -375,7 +375,7 @@ export default function UserGuideTour({ scope, paused = false, delayMs = 700 }: 
             ))}
           </div>
         </div>
-        <div className="px-4 pb-4 pt-3.5 sm:px-5 sm:pb-5">
+        <div className="flex min-h-0 flex-col px-4 pb-4 pt-3.5 sm:px-5 sm:pb-5">
           <div className="mb-3 flex items-start justify-between gap-3">
             <div className="min-w-0">
               <h3 className="text-base font-semibold text-white sm:text-lg">{step.title}</h3>
@@ -383,18 +383,18 @@ export default function UserGuideTour({ scope, paused = false, delayMs = 700 }: 
             <button
               type="button"
               onClick={skipAll}
-              className="shrink-0 rounded-lg px-2.5 py-1.5 text-xs text-white/50 transition-colors hover:bg-white/10 hover:text-white sm:text-[13px]"
+              className="min-h-11 shrink-0 rounded-lg px-2.5 py-1.5 text-xs text-white/70 transition-colors hover:bg-white/10 hover:text-white sm:text-[13px]"
             >
               跳过指引
             </button>
           </div>
-          <ol className="space-y-2 text-sm leading-relaxed sm:text-[15px] sm:leading-6">
+          <ul className="min-h-0 space-y-2.5 overflow-y-auto pr-1 text-base leading-6 sm:text-[15px]">
             {step.body.split('\n').filter(Boolean).map((line, lineIndex) => {
               const sep = line.indexOf('：');
               if (sep <= 0) {
                 return (
-                  <li key={line} className="flex gap-2.5 text-white/72">
-                    <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-netease-red/80" />
+                  <li key={line} className="flex gap-2.5 text-white/80">
+                    <span className="mt-2.5 h-1.5 w-1.5 shrink-0 rounded-full bg-netease-red" />
                     <span>{line}</span>
                   </li>
                 );
@@ -402,28 +402,26 @@ export default function UserGuideTour({ scope, paused = false, delayMs = 700 }: 
               const name = line.slice(0, sep);
               const desc = line.slice(sep + 1);
               return (
-                <li key={line} className="flex gap-2.5 text-white/72">
-                  <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-netease-red/25 bg-netease-red/10 text-[11px] font-semibold text-netease-red/95">
-                    {lineIndex + 1}
-                  </span>
+                <li key={lineIndex} className="flex gap-2.5 text-white/80">
+                  <span className="mt-2.5 h-1.5 w-1.5 shrink-0 rounded-full bg-netease-red" />
                   <span>
-                    <span className="font-medium text-white/90">{name}</span>
-                    <span className="text-white/35">：</span>
+                    <span className="font-semibold text-white">{name}</span>
+                    <span className="text-white/60">：</span>
                     <span>{desc}</span>
                   </span>
                 </li>
               );
             })}
-          </ol>
-          <div className="mt-4 flex items-center justify-between gap-3">
-            <p className="flex items-center gap-1.5 text-xs text-white/35 sm:text-[13px]">
+          </ul>
+          <div className="mt-4 flex shrink-0 items-center justify-between gap-3">
+            <p className="flex items-center gap-1.5 text-xs text-white/60 sm:text-[13px]">
               <Check className="h-3.5 w-3.5" aria-hidden />
-              按节奏认识这里
+              高亮区域是操作入口
             </p>
             <button
               type="button"
               onClick={advance}
-              className="inline-flex items-center gap-1.5 rounded-full bg-netease-red px-4 py-2 text-sm font-medium text-white shadow-lg shadow-netease-red/25 transition-colors hover:bg-netease-red/90"
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-full bg-netease-red px-4 py-2 text-sm font-medium text-white shadow-lg shadow-netease-red/25 transition-colors hover:bg-netease-red/90"
             >
               {isLast ? '完成' : '下一步'}
               {!isLast && <ArrowRight className="h-3.5 w-3.5" aria-hidden />}

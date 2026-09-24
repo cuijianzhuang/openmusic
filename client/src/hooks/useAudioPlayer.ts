@@ -13,7 +13,7 @@ import {
   resolveTrackDurationSeconds,
 } from '../hooks/useTrackDuration';
 import { reportTrackDurationToServer } from '../lib/reportTrackDuration';
-import { applyTrackLoudness } from '../lib/audioElement';
+import { applyTrackLoudness, getSharedAudioOutputSource, hasSharedAudioOutput, replaceSharedAudioElement, resumeSharedAudioOutput } from '../lib/audioElement';
 import type { QueueItem } from '../types';
 import { getAudioController } from '../lib/audioController';
 import {
@@ -59,8 +59,9 @@ import {
   getTrackCrossSourceFrom,
 } from '../lib/songPreloadCache';
 import { resolveQishuiLocalPlaybackUrl } from '../lib/qishuiLocalPlayback';
-import { refreshSignedApiUrl, stripApiSignParams } from '../lib/signedApiUrl';
-import { isProxiedMediaUrl, toProxiedMediaUrl } from '../lib/mediaProxyUrl';
+import { refreshSignedApiUrl, signApiUrl, stripApiSignParams } from '../lib/signedApiUrl';
+import { isProxiedMediaUrl, isSameOriginMediaUrl, shouldProxyInsecurePlaybackUrl, toProxiedMediaUrl, unwrapProxiedMediaUrl } from '../lib/mediaProxyUrl';
+import { shouldProxySongPlaybackUrl } from '../lib/roomVisualPreset';
 import {
   classifyMediaPlaybackError,
   isSourceUnavailableMessage,
@@ -387,6 +388,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
       if (!audio.paused) audio.pause();
       return 'played' as PlayResult;
     }
+    resumeSharedAudioOutput();
     const result = await tryPlayWithAutoplayFallback(audio, tvMode);
     return assessPlaybackResult(audio, result);
   }, [tvMode]);
@@ -1016,6 +1018,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
     }
 
     if (fromUserGesture) {
+      resumeSharedAudioOutput();
       markAudioSessionUnlocked();
       setNeedsAudioUnlock(false);
       tryFlushPendingSnapshot();
@@ -1214,6 +1217,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
                 url: playbackUrl,
                 crossSource: true,
                 crossSourceFrom: getCachedUrlCrossSourceFrom(current) || getTrackCrossSourceFrom(current),
+                loudness: undefined,
               };
             } else if (localResult.status !== 'ok') {
               throw new Error('汽水解密失败，请刷新重试');
@@ -1272,13 +1276,32 @@ export function useAudioPlayer(options: UseAudioPlayerOptions = {}) {
 
         if (gen !== loadGeneration.current) return;
 
+        const needsOutputGain = Number(loudness?.gain) > 0;
+        const releaseOutputGain = hasSharedAudioOutput() && !needsOutputGain && !shouldProxySongPlaybackUrl();
+        const useOutputGain = needsOutputGain || (hasSharedAudioOutput() && !releaseOutputGain);
+        if (releaseOutputGain && isProxiedMediaUrl(playbackUrl)) {
+          const directUrl = unwrapProxiedMediaUrl(playbackUrl);
+          if (/^https?:\/\//i.test(directUrl) && !shouldProxyInsecurePlaybackUrl(directUrl)) {
+            playbackUrl = directUrl;
+          }
+        }
+        if (useOutputGain && !isSameOriginMediaUrl(playbackUrl)) {
+          playbackUrl = await signApiUrl(toProxiedMediaUrl(playbackUrl));
+          if (gen !== loadGeneration.current) return;
+        }
+
         await controller.exec(async () => {
           if (gen !== loadGeneration.current) return;
-          const audio = controller.audio;
           const liveNow = useRoomStore.getState().room?.current;
           if (!liveNow || liveNow.queueId !== current.queueId) return;
           // 换源前保持 suppress：禁止对旧 src seek 0，否则后台竞态 play 会闪播旧曲开头
           suppressAutoResumeRef.current = true;
+          if (releaseOutputGain) {
+            replaceSharedAudioElement();
+            initAudio();
+          }
+          const audio = controller.audio;
+          if (useOutputGain) getSharedAudioOutputSource();
           applyTrackLoudness(loudness);
           audio.pause();
           clearAudioQueueBinding(audio);

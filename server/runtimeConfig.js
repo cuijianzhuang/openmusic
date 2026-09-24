@@ -112,6 +112,7 @@ function envDefaults() {
     svipQualityEnabled: (() => { const enabled = envText('SVIP_QUALITY_ENABLED') === '1' || envText('SVIP_QUALITY_ENABLED').toLowerCase() === 'true'; return { netease: enabled, tencent: enabled, kugou: enabled, qishui: enabled }; })(),
     /** 是否开放全站共享会员入口 */
     sharedMembershipEnabled: true,
+    qqGroupUrl: '',
     metingApiUrl: envText('METING_API_URL'),
     metingApiAuth: envText('METING_API_AUTH'),
     musicApis: [],
@@ -285,6 +286,19 @@ function trimTrailingSlash(value) {
   return String(value || '').trim().replace(/\/+$/, '');
 }
 
+export function normalizeQqGroupUrl(value) {
+  const raw = String(value || '').trim();
+  if (!raw || raw.length > 1000 || /[\r\n]/.test(raw)) return '';
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'https:' || url.username || url.password || url.port) return '';
+    if (url.hostname !== 'qq.com' && !url.hostname.endsWith('.qq.com')) return '';
+    return url.href;
+  } catch {
+    return '';
+  }
+}
+
 function normalize(config) {
   const roomEmptyTtlMs = Number(config.roomEmptyTtlMs);
   const roomRestartGraceMs = Number(config.roomRestartGraceMs);
@@ -360,6 +374,7 @@ function normalize(config) {
       && config.sharedMembershipEnabled !== 0
       && String(config.sharedMembershipEnabled || '').trim().toLowerCase() !== 'false'
       && String(config.sharedMembershipEnabled || '').trim() !== '0',
+    qqGroupUrl: normalizeQqGroupUrl(config.qqGroupUrl),
     metingApiUrl: String(config.metingApiUrl || '').trim(),
     metingApiAuth: String(config.metingApiAuth || '').trim(),
     musicApis,
@@ -577,6 +592,9 @@ export function getRuntimeConfigForAdmin() {
 }
 
 export function setRuntimeConfig(raw = {}) {
+  if (Object.hasOwn(raw, 'qqGroupUrl') && String(raw.qqGroupUrl || '').trim() && !normalizeQqGroupUrl(raw.qqGroupUrl)) {
+    return { success: false, error: 'QQ群链接必须是 qq.com 域名下的 HTTPS 地址（最多 1000 字符）' };
+  }
   const current = getRuntimeConfig();
   const next = { ...current };
   const clearSecrets = new Set(Array.isArray(raw.clearSecrets) ? raw.clearSecrets : []);

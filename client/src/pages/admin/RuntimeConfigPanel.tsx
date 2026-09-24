@@ -43,6 +43,7 @@ type RuntimeTextField = Exclude<
   | 'smtpSecure'
   | 'svipQualityEnabled'
   | 'sharedMembershipEnabled'
+  | 'qqGroupUrl'
   | 'aiEnabled'
   | 'aiApiProtocol'
   | 'aiMaxRequestsPerMinute'
@@ -1512,6 +1513,19 @@ export default function RuntimeConfigPanel({
     </>
   );
 
+  const qqGroupSection = (
+    <SettingsSection title="QQ 群入口" description="填写后首页右上角显示企鹅图标；留空则不显示。仅支持 qq.com 域名下的 HTTPS 群邀请链接。">
+      <Input
+        aria-label="QQ 群邀请链接"
+        type="url"
+        value={draft.qqGroupUrl}
+        maxLength={1000}
+        placeholder="https://qm.qq.com/q/..."
+        onChange={(e) => setDraft({ ...draft, qqGroupUrl: e.target.value })}
+      />
+    </SettingsSection>
+  );
+
   const seoSection = (
     <SettingsSection
       title="搜索引擎优化"
@@ -1643,8 +1657,8 @@ export default function RuntimeConfigPanel({
       : []),
     {
       key: 'seo',
-      label: 'SEO 收录',
-      children: seoSection,
+      label: '站点展示',
+      children: <>{qqGroupSection}<Divider style={{ margin: 0 }} />{seoSection}</>,
     },
     {
       key: 'music',

@@ -318,6 +318,20 @@ body {
   animation: home-hero-gradient-in 0.7s cubic-bezier(0.22, 1, 0.36, 1) 0.22s forwards;
 }
 
+/* 启动页负责标题交接；首页标题不叠加逐字和渐变入场。 */
+.home-hero-handoff .rb-blur-char {
+  transition: none;
+  opacity: 1;
+  filter: none;
+  transform: none;
+}
+
+.home-hero-handoff .home-hero-gradient-enter {
+  animation: none;
+  opacity: 1;
+  transform: none;
+}
+
 @keyframes home-hero-gradient-in {
   to {
     opacity: 1;

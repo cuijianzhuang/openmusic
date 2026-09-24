@@ -63,25 +63,6 @@ export interface SongRequestSettings {
   queueMaxLength: number;
 }
 
-function songRequestEqual(a: SongRequestSettings, b: SongRequestSettings) {
-  return a.enabled === b.enabled
-    && a.memberJumpEnabled === b.memberJumpEnabled
-    && a.memberSeekEnabled === b.memberSeekEnabled
-    && a.memberPauseEnabled === b.memberPauseEnabled
-    && a.systemMediaPlayBound === b.systemMediaPlayBound
-    && a.systemMediaSkipBound === b.systemMediaSkipBound
-    && a.dislikeSkipMode === b.dislikeSkipMode
-    && a.dislikeSkipThreshold === b.dislikeSkipThreshold
-    && a.dislikeSkipPercent === b.dislikeSkipPercent
-    && a.clearSongsOnLeaveEnabled === b.clearSongsOnLeaveEnabled
-    && a.clearSongsOnLeaveDelayMinutes === b.clearSongsOnLeaveDelayMinutes
-    && a.deferOfflineRequesterSongs === b.deferOfflineRequesterSongs
-    && a.minStayMinutes === b.minStayMinutes
-    && a.maxPerUser === b.maxPerUser
-    && a.cooldownSec === b.cooldownSec
-    && a.queueMaxLength === b.queueMaxLength;
-}
-
 interface Props {
   open: boolean;
   isOwner: boolean;
@@ -225,6 +206,7 @@ function NumberStepper({
   disabled,
   suffix,
   onChange,
+  commitOnBlur = false,
 }: {
   id?: string;
   value: number;
@@ -233,16 +215,30 @@ function NumberStepper({
   disabled?: boolean;
   suffix?: string;
   onChange: (next: number) => void;
+  commitOnBlur?: boolean;
 }) {
-  const setValue = (next: number) => onChange(clampInt(next, min, max));
+  const [inputValue, setInputValue] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!disabled) setInputValue(null);
+  }, [disabled]);
+
+  const setValue = (next: number) => {
+    const clamped = clampInt(next, min, max);
+    if (commitOnBlur) setInputValue(clamped === value ? null : String(clamped));
+    if (clamped !== value) onChange(clamped);
+  };
+
+  const currentValue = inputValue === null ? value : clampInt(Number(inputValue || min), min, max);
 
   return (
     <div className="mt-2 flex items-center gap-2">
       <div className="inline-flex items-stretch overflow-hidden rounded-lg border border-netease-border/60 bg-netease-dark">
         <button
           type="button"
-          disabled={disabled || value <= min}
-          onClick={() => setValue(value - 1)}
+          disabled={disabled || currentValue <= min}
+          onPointerDown={(event) => { if (commitOnBlur) event.preventDefault(); }}
+          onClick={() => setValue(currentValue - 1)}
           className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-netease-muted transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
           aria-label="减少"
         >
@@ -253,22 +249,33 @@ function NumberStepper({
           type="text"
           inputMode="numeric"
           pattern="[0-9]*"
-          value={value}
+          value={commitOnBlur ? inputValue ?? value : value}
           disabled={disabled}
           onChange={(e) => {
             const digits = e.target.value.replace(/\D/g, '');
+            if (commitOnBlur) {
+              setInputValue(digits);
+              return;
+            }
             if (!digits) {
               setValue(min);
               return;
             }
             setValue(Number(digits));
           }}
+          onBlur={commitOnBlur ? () => {
+            if (inputValue !== null) setValue(Number(inputValue || min));
+          } : undefined}
+          onKeyDown={commitOnBlur ? (event) => {
+            if (event.key === 'Enter') event.currentTarget.blur();
+          } : undefined}
           className="h-8 w-14 flex-shrink-0 border-x border-netease-border/60 bg-transparent text-center text-sm tabular-nums text-white outline-none disabled:opacity-50 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
         />
         <button
           type="button"
-          disabled={disabled || value >= max}
-          onClick={() => setValue(value + 1)}
+          disabled={disabled || currentValue >= max}
+          onPointerDown={(event) => { if (commitOnBlur) event.preventDefault(); }}
+          onClick={() => setValue(currentValue + 1)}
           className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-netease-muted transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
           aria-label="增加"
         >
@@ -369,7 +376,6 @@ export default function RoomSettingsModal({
   const [draftJoinNoticeCooldownMinutes, setDraftJoinNoticeCooldownMinutes] = useState(joinNoticeCooldownMinutes);
   const [draftRoomAiEnabled, setDraftRoomAiEnabled] = useState(roomAiEnabled);
   const [draftRoomAiBotName, setDraftRoomAiBotName] = useState(roomAiBotName);
-  const [draftSongRequest, setDraftSongRequest] = useState(songRequest);
   const [draftForbiddenWord, setDraftForbiddenWord] = useState('');
   const [showDefaultForbiddenWords, setShowDefaultForbiddenWords] = useState(false);
   const [transferTargetId, setTransferTargetId] = useState<string | null>(null);
@@ -400,7 +406,6 @@ export default function RoomSettingsModal({
   const [githubUnbinding, setGithubUnbinding] = useState(false);
   const wasOpenRef = useRef(false);
   const appliedAnnouncementRef = useRef({ enabled: announcementEnabled, text: announcementText });
-  const appliedSongRequestRef = useRef(songRequest);
 
   const transferCandidates = useMemo(
     () => users.filter((user) => !user.readOnly && user.id !== myUserId),
@@ -458,11 +463,9 @@ export default function RoomSettingsModal({
     setDraftJoinNoticeCooldownMinutes(joinNoticeCooldownMinutes);
     setDraftRoomAiEnabled(roomAiEnabled);
     setDraftRoomAiBotName(roomAiBotName);
-    setDraftSongRequest(songRequest);
     setDraftForbiddenWord('');
     setShowDefaultForbiddenWords(false);
     appliedAnnouncementRef.current = { enabled: announcementEnabled, text: announcementText };
-    appliedSongRequestRef.current = songRequest;
     setTransferTargetId(null);
     setConfirmTransfer(false);
     setConfirmDestroy(false);
@@ -487,7 +490,6 @@ export default function RoomSettingsModal({
     joinNoticeCooldownMinutes,
     roomAiEnabled,
     roomAiBotName,
-    songRequest,
     isOwner,
     canModerate,
     identityWechatUinEnabled,
@@ -572,18 +574,6 @@ export default function RoomSettingsModal({
     appliedAnnouncementRef.current = { enabled: announcementEnabled, text: announcementText };
   }, [open, announcementEnabled, announcementText]);
 
-  useEffect(() => {
-    if (!open) return;
-    const applied = appliedSongRequestRef.current;
-    if (songRequestEqual(applied, songRequest)) return;
-
-    setDraftSongRequest((prev) => {
-      if (!songRequestEqual(prev, applied)) return prev; // 用户有未保存修改
-      return songRequest;
-    });
-    appliedSongRequestRef.current = songRequest;
-  }, [open, songRequest]);
-
   // 权限变化导致当前 tab 不可用时，落到第一个可用 tab
   useEffect(() => {
     if (!open || tabs.length === 0) return;
@@ -620,21 +610,10 @@ export default function RoomSettingsModal({
     || draftJoinNoticeCooldownMinutes !== joinNoticeCooldownMinutes;
   const roomAiDirty = draftRoomAiEnabled !== roomAiEnabled
     || draftRoomAiBotName.trim() !== roomAiBotName.trim();
-  const songRequestDirty = draftSongRequest.enabled !== songRequest.enabled
-    || draftSongRequest.memberJumpEnabled !== songRequest.memberJumpEnabled
-    || draftSongRequest.memberSeekEnabled !== songRequest.memberSeekEnabled
-    || draftSongRequest.memberPauseEnabled !== songRequest.memberPauseEnabled
-    || draftSongRequest.systemMediaPlayBound !== songRequest.systemMediaPlayBound
-    || draftSongRequest.systemMediaSkipBound !== songRequest.systemMediaSkipBound
-    || draftSongRequest.dislikeSkipMode !== songRequest.dislikeSkipMode
-    || draftSongRequest.dislikeSkipThreshold !== songRequest.dislikeSkipThreshold
-    || draftSongRequest.dislikeSkipPercent !== songRequest.dislikeSkipPercent
-    || draftSongRequest.clearSongsOnLeaveEnabled !== songRequest.clearSongsOnLeaveEnabled
-    || draftSongRequest.clearSongsOnLeaveDelayMinutes !== songRequest.clearSongsOnLeaveDelayMinutes
-    || draftSongRequest.minStayMinutes !== songRequest.minStayMinutes
-    || draftSongRequest.maxPerUser !== songRequest.maxPerUser
-    || draftSongRequest.cooldownSec !== songRequest.cooldownSec
-    || draftSongRequest.queueMaxLength !== songRequest.queueMaxLength;
+  const saveSongRequest = <Key extends keyof SongRequestSettings>(key: Key, value: SongRequestSettings[Key]) => {
+    if (songRequestSaving || songRequest[key] === value) return;
+    onSaveSongRequest({ ...songRequest, [key]: value });
+  };
 
   const formatCooldownLabel = (sec: number) => {
     if (sec <= 0) return '不限制';
@@ -1642,50 +1621,53 @@ export default function RoomSettingsModal({
           {activeTab === 'songRequest' && canModerate && (
             <section>
               <div className="space-y-3">
+                <p role="status" className="text-xs text-netease-muted">
+                  {songRequestSaving ? '正在保存点歌设置…' : '修改后自动保存；数字输入框在失焦或按回车后保存。'}
+                </p>
                 <Toggle
-                  checked={draftSongRequest.enabled}
+                  checked={songRequest.enabled}
                   disabled={songRequestSaving}
-                  onChange={(enabled) => setDraftSongRequest((prev) => ({ ...prev, enabled }))}
+                  onChange={(enabled) => saveSongRequest('enabled', enabled)}
                   label="允许成员点歌"
                   description="关闭后仅房主与管理员可点歌"
                 />
 
                 <Toggle
-                  checked={draftSongRequest.memberJumpEnabled}
+                  checked={songRequest.memberJumpEnabled}
                   disabled={songRequestSaving}
-                  onChange={(memberJumpEnabled) => setDraftSongRequest((prev) => ({ ...prev, memberJumpEnabled }))}
+                  onChange={(memberJumpEnabled) => saveSongRequest('memberJumpEnabled', memberJumpEnabled)}
                   label="允许成员插队"
                   description="开启后成员可对自己的点歌插队；房主与管理员始终可插队"
                 />
 
                 <Toggle
-                  checked={draftSongRequest.memberSeekEnabled}
+                  checked={songRequest.memberSeekEnabled}
                   disabled={songRequestSaving}
-                  onChange={(memberSeekEnabled) => setDraftSongRequest((prev) => ({ ...prev, memberSeekEnabled }))}
+                  onChange={(memberSeekEnabled) => saveSongRequest('memberSeekEnabled', memberSeekEnabled)}
                   label="允许成员拖动进度条"
                   description="默认关闭；开启后成员可调节播放进度；房主与管理员始终可操作"
                 />
 
                 <Toggle
-                  checked={draftSongRequest.memberPauseEnabled}
+                  checked={songRequest.memberPauseEnabled}
                   disabled={songRequestSaving}
-                  onChange={(memberPauseEnabled) => setDraftSongRequest((prev) => ({ ...prev, memberPauseEnabled }))}
+                  onChange={(memberPauseEnabled) => saveSongRequest('memberPauseEnabled', memberPauseEnabled)}
                   label="允许成员暂停/播放"
                   description="默认关闭；开启后成员可暂停或继续播放；房主与管理员始终可操作"
                 />
 
                 <Toggle
-                  checked={draftSongRequest.systemMediaPlayBound}
+                  checked={songRequest.systemMediaPlayBound}
                   disabled={songRequestSaving}
-                  onChange={(systemMediaPlayBound) => setDraftSongRequest((prev) => ({ ...prev, systemMediaPlayBound }))}
+                  onChange={(systemMediaPlayBound) => saveSongRequest('systemMediaPlayBound', systemMediaPlayBound)}
                   label="系统播放键绑定"
                   description="绑定耳机键 / 锁屏 / 通知栏的播放暂停；关闭可防止摘耳机误触暂停房间"
                 />
 
                 <Toggle
-                  checked={draftSongRequest.systemMediaSkipBound}
+                  checked={songRequest.systemMediaSkipBound}
                   disabled={songRequestSaving}
-                  onChange={(systemMediaSkipBound) => setDraftSongRequest((prev) => ({ ...prev, systemMediaSkipBound }))}
+                  onChange={(systemMediaSkipBound) => saveSongRequest('systemMediaSkipBound', systemMediaSkipBound)}
                   label="系统切歌键绑定"
                   description="绑定耳机键 / 锁屏 / 通知栏的下一首切歌；关闭可防止误触切歌"
                 />
@@ -1701,9 +1683,9 @@ export default function RoomSettingsModal({
                     <button
                       type="button"
                       disabled={songRequestSaving}
-                      onClick={() => setDraftSongRequest((prev) => ({ ...prev, dislikeSkipMode: 'count' }))}
+                      onClick={() => saveSongRequest('dislikeSkipMode', 'count')}
                       className={`rounded-lg px-2.5 py-1.5 text-xs transition-colors disabled:opacity-50 ${
-                        draftSongRequest.dislikeSkipMode === 'count'
+                        songRequest.dislikeSkipMode === 'count'
                           ? 'bg-netease-red/20 text-white'
                           : 'bg-white/5 text-netease-muted hover:bg-white/10 hover:text-white'
                       }`}
@@ -1713,9 +1695,9 @@ export default function RoomSettingsModal({
                     <button
                       type="button"
                       disabled={songRequestSaving}
-                      onClick={() => setDraftSongRequest((prev) => ({ ...prev, dislikeSkipMode: 'percent' }))}
+                      onClick={() => saveSongRequest('dislikeSkipMode', 'percent')}
                       className={`rounded-lg px-2.5 py-1.5 text-xs transition-colors disabled:opacity-50 ${
-                        draftSongRequest.dislikeSkipMode === 'percent'
+                        songRequest.dislikeSkipMode === 'percent'
                           ? 'bg-netease-red/20 text-white'
                           : 'bg-white/5 text-netease-muted hover:bg-white/10 hover:text-white'
                       }`}
@@ -1723,38 +1705,40 @@ export default function RoomSettingsModal({
                       在线比例
                     </button>
                   </div>
-                  {draftSongRequest.dislikeSkipMode === 'count' ? (
+                  {songRequest.dislikeSkipMode === 'count' ? (
                     <NumberStepper
                       id="settings-dislike-threshold"
-                      value={draftSongRequest.dislikeSkipThreshold}
+                      value={songRequest.dislikeSkipThreshold}
                       min={1}
                       max={DISLIKE_SKIP_THRESHOLD_MAX}
                       disabled={songRequestSaving}
+                      commitOnBlur
                       suffix="人"
-                      onChange={(dislikeSkipThreshold) => setDraftSongRequest((prev) => ({ ...prev, dislikeSkipThreshold }))}
+                      onChange={(dislikeSkipThreshold) => saveSongRequest('dislikeSkipThreshold', dislikeSkipThreshold)}
                     />
                   ) : (
                     <NumberStepper
                       id="settings-dislike-percent"
-                      value={draftSongRequest.dislikeSkipPercent}
+                      value={songRequest.dislikeSkipPercent}
                       min={1}
                       max={100}
                       disabled={songRequestSaving}
+                      commitOnBlur
                       suffix="%"
-                      onChange={(dislikeSkipPercent) => setDraftSongRequest((prev) => ({ ...prev, dislikeSkipPercent }))}
+                      onChange={(dislikeSkipPercent) => saveSongRequest('dislikeSkipPercent', dislikeSkipPercent)}
                     />
                   )}
                 </div>
 
                 <Toggle
-                  checked={draftSongRequest.clearSongsOnLeaveEnabled}
+                  checked={songRequest.clearSongsOnLeaveEnabled}
                   disabled={songRequestSaving}
-                  onChange={(clearSongsOnLeaveEnabled) => setDraftSongRequest((prev) => ({ ...prev, clearSongsOnLeaveEnabled }))}
+                  onChange={(clearSongsOnLeaveEnabled) => saveSongRequest('clearSongsOnLeaveEnabled', clearSongsOnLeaveEnabled)}
                   label="退出后清除已点歌曲"
                   description="成员离房后，在等待时间到期仍未回来则清除其待播点歌"
                 />
 
-                {draftSongRequest.clearSongsOnLeaveEnabled && (
+                {songRequest.clearSongsOnLeaveEnabled && (
                   <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5">
                     <label htmlFor="settings-clear-on-leave-delay" className="text-sm font-medium text-white">
                       退出清除等待时间
@@ -1764,23 +1748,21 @@ export default function RoomSettingsModal({
                     </p>
                     <NumberStepper
                       id="settings-clear-on-leave-delay"
-                      value={draftSongRequest.clearSongsOnLeaveDelayMinutes}
+                      value={songRequest.clearSongsOnLeaveDelayMinutes}
                       min={0}
                       max={CLEAR_ON_LEAVE_DELAY_MINUTES_MAX}
                       disabled={songRequestSaving}
+                      commitOnBlur
                       suffix="分钟"
-                      onChange={(clearSongsOnLeaveDelayMinutes) => setDraftSongRequest((prev) => ({
-                        ...prev,
-                        clearSongsOnLeaveDelayMinutes,
-                      }))}
+                      onChange={(clearSongsOnLeaveDelayMinutes) => saveSongRequest('clearSongsOnLeaveDelayMinutes', clearSongsOnLeaveDelayMinutes)}
                     />
                   </div>
                 )}
 
                 <Toggle
-                  checked={draftSongRequest.deferOfflineRequesterSongs}
+                  checked={songRequest.deferOfflineRequesterSongs}
                   disabled={songRequestSaving}
-                  onChange={(deferOfflineRequesterSongs) => setDraftSongRequest((prev) => ({ ...prev, deferOfflineRequesterSongs }))}
+                  onChange={(deferOfflineRequesterSongs) => saveSongRequest('deferOfflineRequesterSongs', deferOfflineRequesterSongs)}
                   label="离房成员歌曲置后"
                   description="仅用户轮播生效；关闭后离房成员仍按原始点歌人轮次播放"
                 />
@@ -1794,12 +1776,13 @@ export default function RoomSettingsModal({
                   </p>
                   <NumberStepper
                     id="settings-min-stay"
-                    value={draftSongRequest.minStayMinutes}
+                    value={songRequest.minStayMinutes}
                     min={0}
                     max={MIN_STAY_MINUTES_MAX}
                     disabled={songRequestSaving}
+                    commitOnBlur
                     suffix="分钟"
-                    onChange={(minStayMinutes) => setDraftSongRequest((prev) => ({ ...prev, minStayMinutes }))}
+                    onChange={(minStayMinutes) => saveSongRequest('minStayMinutes', minStayMinutes)}
                   />
                 </div>
 
@@ -1812,12 +1795,13 @@ export default function RoomSettingsModal({
                   </p>
                   <NumberStepper
                     id="settings-max-per-user"
-                    value={draftSongRequest.maxPerUser}
+                    value={songRequest.maxPerUser}
                     min={0}
                     max={MAX_PER_USER_MAX}
                     disabled={songRequestSaving}
+                    commitOnBlur
                     suffix="首"
-                    onChange={(maxPerUser) => setDraftSongRequest((prev) => ({ ...prev, maxPerUser }))}
+                    onChange={(maxPerUser) => saveSongRequest('maxPerUser', maxPerUser)}
                   />
                 </div>
 
@@ -1834,9 +1818,9 @@ export default function RoomSettingsModal({
                         key={sec}
                         type="button"
                         disabled={songRequestSaving}
-                        onClick={() => setDraftSongRequest((prev) => ({ ...prev, cooldownSec: sec }))}
+                        onClick={() => saveSongRequest('cooldownSec', sec)}
                         className={`rounded-lg px-2.5 py-1.5 text-xs transition-colors disabled:opacity-50 ${
-                          draftSongRequest.cooldownSec === sec
+                          songRequest.cooldownSec === sec
                             ? 'bg-netease-red/20 text-white'
                             : 'bg-white/5 text-netease-muted hover:bg-white/10 hover:text-white'
                         }`}
@@ -1860,9 +1844,9 @@ export default function RoomSettingsModal({
                         key={limit}
                         type="button"
                         disabled={songRequestSaving}
-                        onClick={() => setDraftSongRequest((prev) => ({ ...prev, queueMaxLength: limit }))}
+                        onClick={() => saveSongRequest('queueMaxLength', limit)}
                         className={`rounded-lg px-2.5 py-1.5 text-xs transition-colors disabled:opacity-50 ${
-                          draftSongRequest.queueMaxLength === limit
+                          songRequest.queueMaxLength === limit
                             ? 'bg-netease-red/20 text-white'
                             : 'bg-white/5 text-netease-muted hover:bg-white/10 hover:text-white'
                         }`}
@@ -1908,19 +1892,6 @@ export default function RoomSettingsModal({
                     <p className="mt-2 text-xs text-netease-muted/80">暂无禁播歌曲</p>
                   )}
                 </div>
-
-                {songRequestDirty && (
-                  <div className="flex justify-end">
-                    <button
-                      type="button"
-                      disabled={songRequestSaving}
-                      onClick={() => onSaveSongRequest(draftSongRequest)}
-                      className="rounded-xl bg-netease-red px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-netease-red/90 disabled:opacity-50"
-                    >
-                      {songRequestSaving ? '保存中…' : '保存点歌规则'}
-                    </button>
-                  </div>
-                )}
               </div>
             </section>
           )}
