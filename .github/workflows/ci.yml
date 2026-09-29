@@ -115,6 +115,6 @@ jobs:
         run: |
           bash -n install.sh deploy/deploy.sh
           for compose_file in docker-compose.yml docker-compose.full.yml; do
-            docker compose -f "$compose_file" config --format json |
-              python3 -c 'import json,sys; targets={"/app/server/.env","/app/server/runtimeConfig.json","/app/server/adminConfig.json","/app/server/setup.lock"}; volumes=json.load(sys.stdin)["services"]["openmusic"]["volumes"]; mounts=[v for v in volumes if v.get("target") in targets]; assert len(mounts)==4 and all(v.get("type")=="bind" and v.get("bind",{}).get("create_host_path") is False for v in mounts), f"unsafe config mounts: {mounts}"'
+            docker compose -f "$compose_file" config --quiet
+            python3 -c 'from pathlib import Path; import re,sys; text=Path(sys.argv[1]).read_text(encoding="utf-8"); names=[".env","runtimeConfig.json","adminConfig.json","setup.lock"]; invalid=[name for name in names if not re.search(rf"- type: bind\s+source: \./data/{re.escape(name)}\s+target: /app/server/{re.escape(name)}\s+bind:\s+create_host_path: false", text)]; assert not invalid, f"unsafe config file binds in {sys.argv[1]}: {invalid}"' "$compose_file"
           done
