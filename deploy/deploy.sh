@@ -258,9 +258,16 @@ EOF
 
 prepare_data_dir() {
   mkdir -p data/downloads
+  CONFIG_FILES_REPAIRED=0
   for config_file in data/.env data/runtimeConfig.json data/adminConfig.json data/setup.lock; do
+    if [ -d "$config_file" ]; then
+      backup_path="${config_file}.directory-backup-$(date +%Y%m%d%H%M%S)-$$"
+      mv -- "$config_file" "$backup_path"
+      CONFIG_FILES_REPAIRED=1
+      warn "已将异常目录移至 $backup_path 并保留备份"
+    fi
     if [ -e "$config_file" ] && [ ! -f "$config_file" ]; then
-      err "$config_file 必须是普通文件；请先备份并修正该路径，再重新部署"
+      err "$config_file 不是普通文件，无法安全自动修复"
       exit 1
     fi
   done
@@ -283,7 +290,11 @@ deploy_docker() {
   prepare_data_dir
 
   info "启动容器（redis + openmusic）..."
-  $compose_cmd up -d --build
+  if [ "$CONFIG_FILES_REPAIRED" -eq 1 ]; then
+    $compose_cmd up -d --build --force-recreate openmusic
+  else
+    $compose_cmd up -d --build
+  fi
 
   ok "部署完成"
   local port="${OPENMUSIC_PORT:-4000}"
@@ -309,7 +320,11 @@ deploy_docker_full() {
   prepare_data_dir
 
   info "启动容器（redis + meting + openmusic）..."
-  $compose_cmd -f docker-compose.full.yml up -d --build
+  if [ "$CONFIG_FILES_REPAIRED" -eq 1 ]; then
+    $compose_cmd -f docker-compose.full.yml up -d --build --force-recreate openmusic
+  else
+    $compose_cmd -f docker-compose.full.yml up -d --build
+  fi
 
   ok "部署完成（全量版，含 Meting）"
   local port="${OPENMUSIC_PORT:-4000}"

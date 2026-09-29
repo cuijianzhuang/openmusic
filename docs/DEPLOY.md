@@ -16,9 +16,16 @@ cp .env.full.example .env
 
 # 准备持久化目录
 mkdir -p data/downloads data/meting
+config_files_repaired=0
 for config_file in data/.env data/runtimeConfig.json data/adminConfig.json data/setup.lock; do
+  if [ -d "$config_file" ]; then
+    backup_path="${config_file}.directory-backup-$(date +%Y%m%d%H%M%S)-$$"
+    mv -- "$config_file" "$backup_path"
+    config_files_repaired=1
+    echo "已将异常目录移至 $backup_path 并保留备份。"
+  fi
   if [ -e "$config_file" ] && [ ! -f "$config_file" ]; then
-    echo "错误: $config_file 必须是普通文件，请先备份并修正该路径。" >&2
+    echo "错误: $config_file 不是普通文件，无法安全自动修复。" >&2
     exit 1
   fi
 done
@@ -27,7 +34,11 @@ printf '{}\n' > data/runtimeConfig.json
 printf '{}\n' > data/adminConfig.json
 
 # 启动（全量版：Redis + Meting + OpenMusic）
-docker compose --env-file .env -f docker-compose.full.yml up -d
+if [ "$config_files_repaired" -eq 1 ]; then
+  docker compose --env-file .env -f docker-compose.full.yml up -d --force-recreate openmusic
+else
+  docker compose --env-file .env -f docker-compose.full.yml up -d
+fi
 ```
 
 打开 `http://<IP>:4000`，Redis / Meting 已自动填好，只需填站点域名。完成后自动重启。

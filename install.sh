@@ -87,9 +87,16 @@ fi
 
 echo "正在创建数据目录..."
 mkdir -p data/downloads data/meting
+config_files_repaired=0
 for config_file in data/.env data/setup.lock data/runtimeConfig.json data/adminConfig.json; do
+    if [ -d "$config_file" ]; then
+        backup_path="${config_file}.directory-backup-$(date +%Y%m%d%H%M%S)-$$"
+        mv -- "$config_file" "$backup_path"
+        config_files_repaired=1
+        echo "已将异常目录移至 $backup_path 并保留备份。"
+    fi
     if [ -e "$config_file" ] && [ ! -f "$config_file" ]; then
-        echo "错误: $config_file 必须是文件，当前路径不是普通文件。请先备份并修正后重试。" >&2
+        echo "错误: $config_file 不是普通文件，无法安全自动修复。" >&2
         exit 1
     fi
 done
@@ -100,7 +107,11 @@ done
 
 echo ""
 echo "正在启动 OpenMusic..."
-if docker compose --env-file "$ENV_FILE" "${COMPOSE_FILES[@]}" pull && docker compose --env-file "$ENV_FILE" "${COMPOSE_FILES[@]}" up -d; then
+compose_up_args=(-d)
+if [ "$config_files_repaired" -eq 1 ]; then
+    compose_up_args+=(--force-recreate openmusic)
+fi
+if docker compose --env-file "$ENV_FILE" "${COMPOSE_FILES[@]}" pull && docker compose --env-file "$ENV_FILE" "${COMPOSE_FILES[@]}" up "${compose_up_args[@]}"; then
     echo ""
     echo "========================================"
     echo "  部署成功！"

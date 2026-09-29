@@ -84,9 +84,16 @@ volumes:
 # 创建目录并准备持久化文件
 mkdir -p /www/openmusic/data/downloads /www/openmusic/data/meting
 cd /www/openmusic
+config_files_repaired=0
 for config_file in data/.env data/runtimeConfig.json data/adminConfig.json data/setup.lock; do
+  if [ -d "$config_file" ]; then
+    backup_path="${config_file}.directory-backup-$(date +%Y%m%d%H%M%S)-$$"
+    mv -- "$config_file" "$backup_path"
+    config_files_repaired=1
+    echo "已将异常目录移至 $backup_path 并保留备份。"
+  fi
   if [ -e "$config_file" ] && [ ! -f "$config_file" ]; then
-    echo "错误: $config_file 必须是普通文件，请先备份并修正该路径。" >&2
+    echo "错误: $config_file 不是普通文件，无法安全自动修复。" >&2
     exit 1
   fi
 done
@@ -95,7 +102,11 @@ printf '{}\n' > data/runtimeConfig.json
 printf '{}\n' > data/adminConfig.json
 
 # 把上面的 yaml 保存为 docker-compose.yml，然后：
-docker compose up -d
+if [ "$config_files_repaired" -eq 1 ]; then
+  docker compose up -d --force-recreate openmusic
+else
+  docker compose up -d
+fi
 ```
 
 然后：

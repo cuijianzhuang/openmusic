@@ -116,9 +116,5 @@ jobs:
           bash -n install.sh deploy/deploy.sh
           for compose_file in docker-compose.yml docker-compose.full.yml; do
             docker compose -f "$compose_file" config --format json |
-              jq -e '
-                .services.openmusic.volumes
-                | map(select(.target == "/app/server/.env" or .target == "/app/server/runtimeConfig.json" or .target == "/app/server/adminConfig.json" or .target == "/app/server/setup.lock")) as $mounts
-                | ($mounts | length == 4) and all($mounts[]; .type == "bind" and .bind.create_host_path == false)
-              ' > /dev/null
+              python3 -c 'import json,sys; targets={"/app/server/.env","/app/server/runtimeConfig.json","/app/server/adminConfig.json","/app/server/setup.lock"}; volumes=json.load(sys.stdin)["services"]["openmusic"]["volumes"]; mounts=[v for v in volumes if v.get("target") in targets]; assert len(mounts)==4 and all(v.get("type")=="bind" and v.get("bind",{}).get("create_host_path") is False for v in mounts), f"unsafe config mounts: {mounts}"'
           done
