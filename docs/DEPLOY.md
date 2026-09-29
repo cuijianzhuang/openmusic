@@ -16,9 +16,15 @@ cp .env.full.example .env
 
 # 准备持久化目录
 mkdir -p data/downloads data/meting
+for config_file in data/.env data/runtimeConfig.json data/adminConfig.json data/setup.lock; do
+  if [ -e "$config_file" ] && [ ! -f "$config_file" ]; then
+    echo "错误: $config_file 必须是普通文件，请先备份并修正该路径。" >&2
+    exit 1
+  fi
+done
 touch data/.env data/setup.lock
-echo '{}' > data/runtimeConfig.json
-echo '{}' > data/adminConfig.json
+printf '{}\n' > data/runtimeConfig.json
+printf '{}\n' > data/adminConfig.json
 
 # 启动（全量版：Redis + Meting + OpenMusic）
 docker compose --env-file .env -f docker-compose.full.yml up -d

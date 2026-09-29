@@ -26,10 +26,26 @@ services:
       DOCKER_REDIS_URL: redis://redis:6379/0
     volumes:
       # 首次部署向导与管理后台写入的配置需要持久化，否则容器重建后清空
-      - ./data/.env:/app/server/.env
-      - ./data/runtimeConfig.json:/app/server/runtimeConfig.json
-      - ./data/adminConfig.json:/app/server/adminConfig.json
-      - ./data/setup.lock:/app/server/setup.lock
+      - type: bind
+        source: ./data/.env
+        target: /app/server/.env
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./data/runtimeConfig.json
+        target: /app/server/runtimeConfig.json
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./data/adminConfig.json
+        target: /app/server/adminConfig.json
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./data/setup.lock
+        target: /app/server/setup.lock
+        bind:
+          create_host_path: false
       - ./data/downloads:/app/server/downloads
     depends_on:
       redis:

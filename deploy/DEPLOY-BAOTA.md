@@ -47,10 +47,26 @@ services:
       DOCKER_METING_URL: ${METING_API_URL:-https://meting.example.com}
       ROOM_CREDENTIAL_ENCRYPTION_KEY: ${ROOM_CREDENTIAL_ENCRYPTION_KEY:-}
     volumes:
-      - ./data/.env:/app/server/.env
-      - ./data/runtimeConfig.json:/app/server/runtimeConfig.json
-      - ./data/adminConfig.json:/app/server/adminConfig.json
-      - ./data/setup.lock:/app/server/setup.lock
+      - type: bind
+        source: ./data/.env
+        target: /app/server/.env
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./data/runtimeConfig.json
+        target: /app/server/runtimeConfig.json
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./data/adminConfig.json
+        target: /app/server/adminConfig.json
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./data/setup.lock
+        target: /app/server/setup.lock
+        bind:
+          create_host_path: false
       - ./data/downloads:/app/server/downloads
     depends_on:
       redis:
@@ -68,9 +84,15 @@ volumes:
 # 创建目录并准备持久化文件
 mkdir -p /www/openmusic/data/downloads /www/openmusic/data/meting
 cd /www/openmusic
-touch data/.env data/runtimeConfig.json data/adminConfig.json data/setup.lock
-echo '{}' > data/runtimeConfig.json
-echo '{}' > data/adminConfig.json
+for config_file in data/.env data/runtimeConfig.json data/adminConfig.json data/setup.lock; do
+  if [ -e "$config_file" ] && [ ! -f "$config_file" ]; then
+    echo "错误: $config_file 必须是普通文件，请先备份并修正该路径。" >&2
+    exit 1
+  fi
+done
+touch data/.env data/setup.lock
+printf '{}\n' > data/runtimeConfig.json
+printf '{}\n' > data/adminConfig.json
 
 # 把上面的 yaml 保存为 docker-compose.yml，然后：
 docker compose up -d

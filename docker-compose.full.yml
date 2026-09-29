@@ -50,10 +50,26 @@ services:
       DOCKER_METING_URL: http://meting:3000
       ROOM_CREDENTIAL_ENCRYPTION_KEY: ${ROOM_CREDENTIAL_ENCRYPTION_KEY:?请在 .env 中设置 ROOM_CREDENTIAL_ENCRYPTION_KEY}
     volumes:
-      - ./data/.env:/app/server/.env
-      - ./data/runtimeConfig.json:/app/server/runtimeConfig.json
-      - ./data/adminConfig.json:/app/server/adminConfig.json
-      - ./data/setup.lock:/app/server/setup.lock
+      - type: bind
+        source: ./data/.env
+        target: /app/server/.env
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./data/runtimeConfig.json
+        target: /app/server/runtimeConfig.json
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./data/adminConfig.json
+        target: /app/server/adminConfig.json
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./data/setup.lock
+        target: /app/server/setup.lock
+        bind:
+          create_host_path: false
       - ./data/downloads:/app/server/downloads
     depends_on:
       redis:

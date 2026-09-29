@@ -87,10 +87,16 @@ fi
 
 echo "正在创建数据目录..."
 mkdir -p data/downloads data/meting
-[ -e data/.env ] || touch data/.env
-[ -e data/setup.lock ] || touch data/setup.lock
-[ -e data/runtimeConfig.json ] || printf '{}\n' > data/runtimeConfig.json
-[ -e data/adminConfig.json ] || printf '{}\n' > data/adminConfig.json
+for config_file in data/.env data/setup.lock data/runtimeConfig.json data/adminConfig.json; do
+    if [ -e "$config_file" ] && [ ! -f "$config_file" ]; then
+        echo "错误: $config_file 必须是文件，当前路径不是普通文件。请先备份并修正后重试。" >&2
+        exit 1
+    fi
+done
+[ -f data/.env ] || touch data/.env
+[ -f data/setup.lock ] || touch data/setup.lock
+[ -f data/runtimeConfig.json ] || printf '{}\n' > data/runtimeConfig.json
+[ -f data/adminConfig.json ] || printf '{}\n' > data/adminConfig.json
 
 echo ""
 echo "正在启动 OpenMusic..."

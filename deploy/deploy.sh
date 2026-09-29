@@ -258,6 +258,12 @@ EOF
 
 prepare_data_dir() {
   mkdir -p data/downloads
+  for config_file in data/.env data/runtimeConfig.json data/adminConfig.json data/setup.lock; do
+    if [ -e "$config_file" ] && [ ! -f "$config_file" ]; then
+      err "$config_file 必须是普通文件；请先备份并修正该路径，再重新部署"
+      exit 1
+    fi
+  done
   [ -f data/.env ] || : > data/.env
   [ -f data/runtimeConfig.json ] || echo '{}' > data/runtimeConfig.json
   [ -f data/adminConfig.json ] || echo '{}' > data/adminConfig.json

@@ -111,7 +111,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Validate Compose files
+      - name: Validate Compose files and file bind mounts
         run: |
-          docker compose -f docker-compose.yml config --quiet
-          docker compose -f docker-compose.full.yml config --quiet
+          bash -n install.sh deploy/deploy.sh
+          for compose_file in docker-compose.yml docker-compose.full.yml; do
+            docker compose -f "$compose_file" config --format json |
+              jq -e '
+                .services.openmusic.volumes
+                | map(select(.target == "/app/server/.env" or .target == "/app/server/runtimeConfig.json" or .target == "/app/server/adminConfig.json" or .target == "/app/server/setup.lock")) as $mounts
+                | ($mounts | length == 4) and all($mounts[]; .type == "bind" and .bind.create_host_path == false)
+              ' > /dev/null
+          done
